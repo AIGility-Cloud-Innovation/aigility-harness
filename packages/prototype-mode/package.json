@@ -1,0 +1,26 @@
+{
+  "name": "prototype-mode",
+  "version": "0.1.0",
+  "description": "原型模式示例：内存版 KernelAdapter + 五层插件组装",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aigility-arch/core": "workspace:*",
+    "@aigility-arch/layer-infrastructure": "workspace:*",
+    "@aigility-arch/layer-cognitive": "workspace:*",
+    "@aigility-arch/layer-perception": "workspace:*",
+    "@aigility-arch/layer-orchestration": "workspace:*",
+    "@aigility-arch/layer-action": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0",
+    "tsx": "^4.19.0",
+    "@types/node": "^20.14.0"
+  }
+}
