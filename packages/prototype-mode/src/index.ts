@@ -37,6 +37,8 @@ import type {
 import type {
   TaskPlanningRequest,
   TaskPlanningResponse,
+  CodexAgentRequest,
+  CodexAgentResponse,
 } from "@aigility-arch/layer-orchestration";
 import type {
   ProtocolAdapterRequest,
@@ -248,8 +250,40 @@ async function main(): Promise<void> {
     }
   }
 
-  // 8. 关闭
-  console.log("\n8. 关闭...");
+  // 8. 编码代理演示：orchestration -> Codex CLI（外部编码代理内化为编排能力）
+  console.log("\n8. 编码代理演示：@orchestration/codex-agent（驱动 Codex CLI）");
+  const ctx5 = kernel.createContext("session-005", LayerId.Orchestration);
+
+  const codexRef: CapabilityRef = {
+    id: "@orchestration/codex-agent",
+    versionRange: "^1.0.0",
+  };
+  const codexRes = await kernel.registry.resolve<CodexAgentRequest, CodexAgentResponse>(codexRef);
+  if (!codexRes.ok) {
+    console.error("   resolve codex-agent 失败:", codexRes.error);
+  } else {
+    const codexReq: CodexAgentRequest = {
+      prompt: "Reply with exactly: ARCH_OK",
+      cwd: process.cwd(),
+      sandboxMode: "read-only",
+      timeoutMs: 60_000,
+    };
+    log("request", `prompt = ${codexReq.prompt}`);
+    const codexExec = await codexRes.value.execute(codexReq, ctx5);
+    if (!codexExec.ok) {
+      console.error("   codex-agent 执行失败:", codexExec.error);
+    } else {
+      log("response", `threadId = ${codexExec.value.threadId}`);
+      log("response", `text = ${codexExec.value.text}`);
+      log(
+        "response",
+        `items = ${codexExec.value.items.length}, hadMetadataFallback = ${codexExec.value.hadMetadataFallback}`,
+      );
+    }
+  }
+
+  // 9. 关闭
+  console.log("\n9. 关闭...");
   const sd = await shutdown(kernel, scheduler);
   if (!sd.ok) {
     console.error("   关闭失败:", sd.error);
