@@ -19,6 +19,7 @@ import type {
   Consumer,
   SeamContext,
   Result,
+  CapabilityRef,
 } from "@aigility-arch/core";
 
 import { InMemoryKernelAdapter } from "./in-memory-kernel.js";
@@ -37,6 +38,14 @@ import type {
   TaskPlanningRequest,
   TaskPlanningResponse,
 } from "@aigility-arch/layer-orchestration";
+import type {
+  ProtocolAdapterRequest,
+  ProtocolAdapterResponse,
+} from "@aigility-arch/layer-infrastructure";
+import type {
+  TextToSpeechRequest,
+  TextToSpeechResponse,
+} from "@aigility-arch/layer-action";
 
 function log(tag: string, msg: string): void {
   // eslint-disable-next-line no-console
@@ -107,18 +116,14 @@ async function main(): Promise<void> {
       callCtx.emit({
         type: "capability.invoke",
         layer: LayerId.Orchestration,
-        payload: { capability: "@cognitive/llm-inference", prompt: request.prompt },
+        payload: { capability: "@cognitive/llm-inference", model: request.model },
         traceId: callCtx.traceId,
       });
-      const resolveResult = await kernel.registry.resolve<LlmInferenceRequest, LlmInferenceResponse>(
+      // 走 Seam 跨能力调用（不 import 对方 Provider、不直连 48724）
+      const execResult = await callCtx.call<LlmInferenceRequest, LlmInferenceResponse>(
         this.ref,
+        request,
       );
-      if (!resolveResult.ok) {
-        return err(resolveResult.error);
-      }
-      const provider = resolveResult.value;
-      log("seam", `解析到 Provider: ${provider.name}`);
-      const execResult = await provider.execute(request, callCtx);
       if (!execResult.ok) {
         return err(execResult.error);
       }
@@ -133,9 +138,12 @@ async function main(): Promise<void> {
   };
 
   const llmRequest: LlmInferenceRequest = {
-    prompt: "请规划一个三步任务",
-    systemPrompt: "你是任务规划助手",
-    maxTokens: 128,
+    model: "qwen-turbo",
+    messages: [
+      { role: "system", content: "你是任务规划助手" },
+      { role: "user", content: "请规划一个三步任务" },
+    ],
+    max_tokens: 128,
   };
   log("request", JSON.stringify(llmRequest));
 
@@ -146,7 +154,10 @@ async function main(): Promise<void> {
   }
   console.log("   跨层调用结果:");
   log("response", `text = ${llmResult.value.text}`);
-  log("response", `model = ${llmResult.value.model}, tokens = ${llmResult.value.tokens}`);
+  log(
+    "response",
+    `model = ${llmResult.value.model}, usage = ${JSON.stringify(llmResult.value.usage)}`,
+  );
 
   // 5. 顺带演示 action -> orchestration 跨层调用
   console.log("\n5. 跨层调用演示：action -> orchestration");
@@ -171,8 +182,74 @@ async function main(): Promise<void> {
     console.error("   调用失败:", planResult.error);
   }
 
-  // 6. 关闭
-  console.log("\n6. 关闭...");
+  // 6. 协议适配演示：infrastructure（api-router）→ cognitive（LiteLLM）
+  console.log("\n6. 协议适配演示：Anthropic Messages → 内部标准 → LiteLLM");
+  const ctx3 = kernel.createContext("session-003", LayerId.Infrastructure);
+
+  // 模拟 Claude Code（Anthropic Messages 协议）打进来的请求
+  const anthropicReq: ProtocolAdapterRequest = {
+    protocol: "anthropic-messages",
+    headers: { "user-agent": "claude-cli/2.x", "x-app": "claude-code" },
+    body: {
+      model: "qwen-turbo",
+      system: "你是简洁的中文助手",
+      messages: [{ role: "user", content: "用一句话介绍你自己" }],
+      max_tokens: 64,
+    },
+  };
+
+  const adapterRef: CapabilityRef = {
+    id: "@infrastructure/protocol-adapter",
+    versionRange: "^1.0.0",
+  };
+  const adapterRes = await kernel.registry.resolve<ProtocolAdapterRequest, ProtocolAdapterResponse>(adapterRef);
+  if (!adapterRes.ok) {
+    console.error("   resolve protocol-adapter 失败:", adapterRes.error);
+  } else {
+    const execRes = await adapterRes.value.execute(anthropicReq, ctx3);
+    if (!execRes.ok) {
+      console.error("   协议适配调用失败:", execRes.error);
+    } else if (execRes.value.protocol === "anthropic-messages") {
+      const resp = execRes.value.response;
+      for (const block of resp.content) {
+        if (block.type === "text") log("anthropic", `text: ${block.text}`);
+        else log("anthropic", `tool_use: ${block.name}(${JSON.stringify(block.input)})`);
+      }
+      log("anthropic", `stop_reason = ${resp.stop_reason}, usage = ${JSON.stringify(resp.usage)}`);
+    }
+  }
+
+  // 7. 内化样板演示：action 层 TTS（Open-LLM-VTuber 内化的第一个能力）
+  console.log("\n7. 内化样板演示：@action/text-to-speech（源自 Open-LLM-VTuber）");
+  const ctx4 = kernel.createContext("session-004", LayerId.Orchestration);
+
+  const ttsRef: CapabilityRef = {
+    id: "@action/text-to-speech",
+    versionRange: "^1.0.0",
+  };
+  const ttsRes = await kernel.registry.resolve<TextToSpeechRequest, TextToSpeechResponse>(ttsRef);
+  if (!ttsRes.ok) {
+    console.error("   resolve text-to-speech 失败:", ttsRes.error);
+  } else {
+    const ttsReq: TextToSpeechRequest = {
+      text: "你好，这是内化进框架的文本转语音能力",
+      voice: "zh-CN-XiaoxiaoNeural",
+    };
+    log("request", JSON.stringify(ttsReq));
+    const ttsExec = await ttsRes.value.execute(ttsReq, ctx4);
+    if (!ttsExec.ok) {
+      console.error("   TTS 合成失败:", ttsExec.error);
+    } else {
+      log("response", `audioFilePath = ${ttsExec.value.audioFilePath}`);
+      log("response", `voice = ${ttsExec.value.voice}`);
+      if (ttsExec.value.metadataFilePath) {
+        log("response", `metadataFilePath = ${ttsExec.value.metadataFilePath}`);
+      }
+    }
+  }
+
+  // 8. 关闭
+  console.log("\n8. 关闭...");
   const sd = await shutdown(kernel, scheduler);
   if (!sd.ok) {
     console.error("   关闭失败:", sd.error);
