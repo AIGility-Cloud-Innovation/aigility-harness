@@ -3,12 +3,9 @@ packages:
 
 allowBuilds:
   esbuild: true
-  ffi-napi: set this to true or false
-  msedge-tts: set this to true or false
-  onnxruntime-node: set this to true or false
-  protobufjs: set this to true or false
-  ref-napi: set this to true or false
-  sharp: set this to true or false
-
-onlyBuiltDependencies:
-  - esbuild
+  msedge-tts: false
+  protobufjs: false
+  sharp: false
+  onnxruntime-node: false   # 启用 whisper-tiny 时改 true
+  ffi-napi: false           # 启用 vosk 时改 true
+  ref-napi: false
