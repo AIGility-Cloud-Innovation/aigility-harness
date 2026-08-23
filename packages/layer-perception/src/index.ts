@@ -21,6 +21,23 @@ import type {
   HealthStatus,
 } from "@aigility-arch/core";
 
+export {
+  speechToTextService,
+  voskSttProvider,
+  whisperSttProvider,
+  VOSK_MODEL_PATH,
+  WHISPER_MODEL_ID,
+} from "./speech-to-text.js";
+export type {
+  SpeechToTextRequest,
+  SpeechToTextResponse,
+} from "./speech-to-text.js";
+import {
+  speechToTextService,
+  voskSttProvider,
+  whisperSttProvider,
+} from "./speech-to-text.js";
+
 // ── 服务定义 ─────────────────────────────────────────────────────
 
 export interface TextInputRequest {
@@ -77,11 +94,11 @@ const textInputProvider: Provider<TextInputRequest, TextInputResponse> = {
 // ── 插件 Manifest 与 LayerPlugin ─────────────────────────────────
 
 export const manifest: PluginManifest = {
-  name: "@perception/text-input",
+  name: "@perception/multimodal-input",
   layer: LayerId.Perception,
-  description: "感知交互层：文本输入归一化",
-  version: "0.1.0",
-  provides: [textInputService],
+  description: "感知交互层：文本输入归一化 + 语音转文本（ASR）",
+  version: "0.2.0",
+  provides: [textInputService, speechToTextService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
 };
@@ -99,7 +116,7 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [textInputProvider];
+    return [textInputProvider, voskSttProvider, whisperSttProvider];
   },
   getState(): PluginState {
     return pluginState;
