@@ -21,6 +21,15 @@ import type {
   HealthStatus,
   CapabilityRef,
 } from "@aigility-arch/core";
+import {
+  textToSpeechService,
+  textToSpeechProvider,
+  type TextToSpeechRequest,
+  type TextToSpeechResponse,
+} from "./text-to-speech.js";
+
+export { textToSpeechService, textToSpeechProvider };
+export type { TextToSpeechRequest, TextToSpeechResponse };
 
 // ── 服务定义 ─────────────────────────────────────────────────────
 
@@ -87,9 +96,9 @@ const toolExecutionProvider: Provider<
 export const manifest: PluginManifest = {
   name: "@action/tool-execution",
   layer: LayerId.Action,
-  description: "行动执行层：工具执行占位，消费编排层规划",
-  version: "0.1.0",
-  provides: [toolExecutionService],
+  description: "行动执行层：工具执行占位 + 文本转语音，消费编排层规划",
+  version: "0.2.0",
+  provides: [toolExecutionService, textToSpeechService],
   consumes: [taskPlanningRef],
   preferredCarrier: CarrierKind.Subprocess,
   dependsOn: ["@orchestration/task-planning"],
@@ -108,7 +117,7 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [toolExecutionProvider];
+    return [toolExecutionProvider, textToSpeechProvider];
   },
   getState(): PluginState {
     return pluginState;
