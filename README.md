@@ -4,6 +4,15 @@
 >
 > *A five-layer, fully-pluggable AI Agent harness: kernel-agnostic, contract-driven, hot-swappable.*
 
+### 仓库镜像
+
+| 平台 | 地址 |
+|------|------|
+| **GitHub**（全球主镜像） | https://github.com/AIGility-Cloud-Innovation/aigility-harness |
+| **Gitea**（国内主镜像） | https://git.aigility.cloud/TiMEM-AI/aigility-harness |
+
+双仓库同步维护，提交以 Gitea 为权威信源，GitHub fast-forward 同步。
+
 ---
 
 ## 一、定位：这是一套 Harness，不是某个 Agent
