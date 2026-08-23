@@ -1,16 +1,17 @@
 /**
  * @aigility-arch/layer-cognitive — 认知决策核心层
  *
- * 提供 LLM 推理占位能力（@cognitive/llm-inference）。
- * 原型模式下返回确定性占位回复，不调用真实模型。
+ * 提供 LLM 推理能力 @cognitive/llm-inference。
+ * 内部标准：OpenAI Chat 格式（{model, messages, max_tokens, temperature}）。
+ *
+ * 两个 Provider 并存，Seam 支持热切换：
+ *  - cognitive-llm-inference-stub   原型占位（确定性 echo）
+ *  - cognitive-llm-inference-litellm 真实推理（fetch 127.0.0.1:48724）
+ *
+ * 按注册顺序，resolve 取第一个；生产环境可配置优先选择 litellm。
  */
 
-import {
-  LayerId,
-  CarrierKind,
-  PluginState,
-  ok,
-} from "@aigility-arch/core";
+import { LayerId, CarrierKind, PluginState, ok, err } from "@aigility-arch/core";
 import type {
   ServiceDefinition,
   Provider,
@@ -21,22 +22,48 @@ import type {
   HealthStatus,
 } from "@aigility-arch/core";
 
-// ── 服务定义 ─────────────────────────────────────────────────────
+// ── 内部标准格式：OpenAI Chat ─────────────────────────────────────
+
+export interface ToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+}
+
+export interface ChatMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | null;
+  tool_calls?: ToolCall[];
+  tool_call_id?: string;
+}
 
 export interface LlmInferenceRequest {
-  prompt: string;
-  /** 可选的系统提示 */
-  systemPrompt?: string;
-  /** 最大生成 token 数 */
-  maxTokens?: number;
+  model: string;
+  messages: ChatMessage[];
+  max_tokens?: number;
+  temperature?: number;
+  top_p?: number;
+  stop?: string[];
+  stream?: boolean;
+  tools?: Array<Record<string, unknown>>;
+  tool_choice?: unknown;
 }
 
 export interface LlmInferenceResponse {
+  /** choices[0].message.content 便捷访问（可能为空串） */
   text: string;
-  /** 实际生成的 token 数（占位） */
-  tokens: number;
+  /** 完整 assistant 消息（含 tool_calls，供协议适配层翻译回原协议） */
+  message: {
+    role: "assistant";
+    content: string | null;
+    tool_calls?: ToolCall[];
+  };
   model: string;
+  finish_reason?: string;
+  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
 }
+
+// ── 服务定义 ─────────────────────────────────────────────────────
 
 export const llmInferenceService: ServiceDefinition<
   LlmInferenceRequest,
@@ -45,43 +72,148 @@ export const llmInferenceService: ServiceDefinition<
   id: "@cognitive/llm-inference",
   version: "1.0.0",
   layer: LayerId.Cognitive,
-  description: "LLM 推理能力（原型占位，返回确定性回复）",
+  description:
+    "LLM 推理能力（OpenAI Chat 内部标准），两个 Provider：stub + litellm",
 };
 
-// ── Provider 实现 ────────────────────────────────────────────────
+// ── Provider A：原型占位 ─────────────────────────────────────────
 
-const llmInferenceProvider: Provider<LlmInferenceRequest, LlmInferenceResponse> =
-  {
-    service: llmInferenceService,
-    name: "cognitive-llm-inference-stub",
-    state: PluginState.Active,
-    async execute(
-      request: LlmInferenceRequest,
-      _ctx: SeamContext,
-    ): Promise<Result<LlmInferenceResponse>> {
-      const text = `[stub-llm] echo: ${request.prompt}`;
-      return ok({
-        text,
-        tokens: text.length,
-        model: "stub-llm@0.1.0",
+const stubProvider: Provider<LlmInferenceRequest, LlmInferenceResponse> = {
+  service: llmInferenceService,
+  name: "cognitive-llm-inference-stub",
+  state: PluginState.Active,
+  async execute(
+    request: LlmInferenceRequest,
+    _ctx: SeamContext,
+  ): Promise<Result<LlmInferenceResponse>> {
+    const lastMsg = request.messages[request.messages.length - 1];
+    const text = `[stub-llm] model=${request.model} echo: ${lastMsg?.content ?? "(empty)"}`;
+    return ok({
+      text,
+      message: { role: "assistant", content: text },
+      model: "stub-llm@0.1.0",
+      finish_reason: "stop",
+      usage: { prompt_tokens: 0, completion_tokens: text.length, total_tokens: text.length },
+    });
+  },
+  async health(): Promise<HealthStatus> {
+    return {
+      healthy: true,
+      detail: "stub llm inference ready",
+      checkedAt: new Date().toISOString(),
+    };
+  },
+};
+
+// ── Provider B：LiteLLM 真实推理 ─────────────────────────────────
+
+const LITELLM_URL = "http://127.0.0.1:48724";
+const LITELLM_KEY = "sk-1234";
+
+const litellmProvider: Provider<LlmInferenceRequest, LlmInferenceResponse> = {
+  service: llmInferenceService,
+  name: "cognitive-llm-inference-litellm",
+  state: PluginState.Active,
+  async execute(
+    request: LlmInferenceRequest,
+    ctx: SeamContext,
+  ): Promise<Result<LlmInferenceResponse>> {
+    const payload: Record<string, unknown> = {
+      model: request.model,
+      messages: request.messages,
+    };
+    for (const k of [
+      "max_tokens",
+      "temperature",
+      "top_p",
+      "stop",
+      "stream",
+      "tools",
+      "tool_choice",
+    ] as const) {
+      if (request[k] !== undefined) payload[k] = request[k] as unknown;
+    }
+    const body = JSON.stringify(payload);
+
+    ctx.emit({
+      type: "litellm.request",
+      layer: LayerId.Cognitive,
+      payload: { model: request.model, msgCount: request.messages.length },
+      traceId: ctx.traceId,
+    });
+
+    let resp: Response;
+    try {
+      resp = await fetch(`${LITELLM_URL}/v1/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LITELLM_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body,
+        signal: AbortSignal.timeout(120_000),
       });
-    },
-    async health(): Promise<HealthStatus> {
+    } catch (e) {
+      return err(`LiteLLM fetch failed: ${String(e)}`);
+    }
+
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "(body unreadable)");
+      return err(`LiteLLM HTTP ${resp.status}: ${errText}`);
+    }
+
+    const raw = (await resp.json()) as {
+      choices?: Array<{
+        message?: { content?: string | null; tool_calls?: ToolCall[] };
+        finish_reason?: string;
+      }>;
+      model?: string;
+      usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+    };
+    const choice = raw.choices?.[0];
+    if (!choice?.message) {
+      return err(`LiteLLM: no choices[0].message in response`);
+    }
+
+    return ok({
+      text: choice.message.content ?? "",
+      message: {
+        role: "assistant" as const,
+        content: choice.message.content ?? null,
+        tool_calls: choice.message.tool_calls,
+      },
+      model: raw.model ?? request.model,
+      finish_reason: choice.finish_reason,
+      usage: raw.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    });
+  },
+  async health(): Promise<HealthStatus> {
+    try {
+      const resp = await fetch(`${LITELLM_URL}/health/liveliness`, {
+        signal: AbortSignal.timeout(5_000),
+      });
       return {
-        healthy: true,
-        detail: "stub llm inference ready",
+        healthy: resp.ok,
+        detail: resp.ok ? "LiteLLM is alive" : `LiteLLM status ${resp.status}`,
         checkedAt: new Date().toISOString(),
       };
-    },
-  };
+    } catch (e) {
+      return {
+        healthy: false,
+        detail: `LiteLLM unreachable: ${String(e)}`,
+        checkedAt: new Date().toISOString(),
+      };
+    }
+  },
+};
 
 // ── 插件 Manifest 与 LayerPlugin ─────────────────────────────────
 
 export const manifest: PluginManifest = {
   name: "@cognitive/llm-inference",
   layer: LayerId.Cognitive,
-  description: "认知核心层：LLM 推理占位",
-  version: "0.1.0",
+  description: "认知核心层：LLM 推理（stub + litellm）",
+  version: "0.2.0",
   provides: [llmInferenceService],
   consumes: [],
   preferredCarrier: CarrierKind.Thread,
@@ -100,7 +232,7 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [llmInferenceProvider];
+    return [litellmProvider, stubProvider]; // litellm 先注册 = resolve 优先选它
   },
   getState(): PluginState {
     return pluginState;
