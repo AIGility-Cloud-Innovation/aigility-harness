@@ -21,6 +21,26 @@ import type {
   HealthStatus,
   CapabilityRef,
 } from "@aigility-arch/core";
+import {
+  codexAgentService,
+  codexAgentProvider,
+  type CodexAgentRequest,
+  type CodexAgentResponse,
+  type CodexAgentItem,
+  type CodexAgentTurnUsage,
+  type CodexApprovalPolicy,
+  type CodexSandboxMode,
+} from "./codex-agent.js";
+
+export { codexAgentService, codexAgentProvider };
+export type {
+  CodexAgentRequest,
+  CodexAgentResponse,
+  CodexAgentItem,
+  CodexAgentTurnUsage,
+  CodexApprovalPolicy,
+  CodexSandboxMode,
+};
 
 // ── 服务定义 ─────────────────────────────────────────────────────
 
@@ -92,9 +112,9 @@ const taskPlanningProvider: Provider<
 export const manifest: PluginManifest = {
   name: "@orchestration/task-planning",
   layer: LayerId.Orchestration,
-  description: "编排规划层：任务规划占位，消费认知层 LLM",
-  version: "0.1.0",
-  provides: [taskPlanningService],
+  description: "编排规划层：任务规划占位 + Codex 编码代理，消费认知层 LLM",
+  version: "0.2.0",
+  provides: [taskPlanningService, codexAgentService],
   consumes: [llmInferenceRef],
   preferredCarrier: CarrierKind.Thread,
   dependsOn: ["@cognitive/llm-inference"],
@@ -113,7 +133,7 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [taskPlanningProvider];
+    return [taskPlanningProvider, codexAgentProvider];
   },
   getState(): PluginState {
     return pluginState;
