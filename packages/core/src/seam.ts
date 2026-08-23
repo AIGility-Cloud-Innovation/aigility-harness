@@ -118,6 +118,14 @@ export interface SeamContext {
   getState<T>(key: string): T | undefined;
   /** Write a value to session-scoped key-value store */
   setState<T>(key: string, value: T): void;
+
+  /**
+   * Invoke another capability by reference.  The seam resolves the
+   * currently-bound provider (version negotiation + failover), then executes
+   * it with a child context that shares this session/trace so one logical
+   * request stays one trace across layers.
+   */
+  call<TReq, TRes>(ref: CapabilityRef, request: TReq): Promise<Result<TRes>>;
 }
 
 // ── Seam Registry ────────────────────────────────────────────────

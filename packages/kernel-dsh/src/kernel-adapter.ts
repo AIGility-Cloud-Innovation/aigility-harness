@@ -86,6 +86,7 @@ export class DshKernelAdapter implements KernelAdapter {
       traceId,
       this.effectStore,
       this.events,
+      this.registry,
     );
   }
 

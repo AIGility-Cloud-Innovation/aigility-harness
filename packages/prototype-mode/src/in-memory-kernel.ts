@@ -34,6 +34,7 @@ import type {
   Effect,
   Result,
   HealthStatus,
+  CapabilityRef,
 } from "@aigility-arch/core";
 import type { LayerPlugin } from "@aigility-arch/core";
 
@@ -290,6 +291,17 @@ export class InMemoryKernelAdapter implements KernelAdapter {
       },
       setState: <T>(key: string, value: T): void => {
         state.set(key, value);
+      },
+      call: async <TReq, TRes>(
+        ref: CapabilityRef,
+        request: TReq,
+      ): Promise<Result<TRes>> => {
+        const resolved = await this.registry.resolve<TReq, TRes>(ref);
+        if (!resolved.ok) return err(resolved.error);
+        const provider = resolved.value;
+        // 子上下文共用 session 状态 + trace，使一次逻辑请求跨层保持同一 trace
+        const child = this.createContext(sessionId, provider.service.layer);
+        return provider.execute(request, child);
       },
     };
   }

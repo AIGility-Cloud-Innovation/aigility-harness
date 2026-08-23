@@ -312,6 +312,7 @@ describe("DshCarrierManager", () => {
     emit: () => {},
     getState: () => undefined,
     setState: () => {},
+    call: async () => err("no provider in test stub"),
   });
 
   it("launches a Thread plugin", async () => {
