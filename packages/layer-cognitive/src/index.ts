@@ -6,7 +6,7 @@
  *
  * 两个 Provider 并存，Seam 支持热切换：
  *  - cognitive-llm-inference-stub   原型占位（确定性 echo）
- *  - cognitive-llm-inference-litellm 真实推理（fetch 127.0.0.1:48724）
+ *  - cognitive-llm-inference-litellm 真实推理（fetch LiteLLM，URL/key 由 env 或 config 注入）
  *
  * 按注册顺序，resolve 取第一个；生产环境可配置优先选择 litellm。
  */
@@ -21,6 +21,9 @@ import type {
   Result,
   HealthStatus,
 } from "@aigility-arch/core";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // ── 内部标准格式：OpenAI Chat ─────────────────────────────────────
 
@@ -106,9 +109,45 @@ const stubProvider: Provider<LlmInferenceRequest, LlmInferenceResponse> = {
 };
 
 // ── Provider B：LiteLLM 真实推理 ─────────────────────────────────
+//
+// LiteLLM 连接信息读取优先级（Provider 不硬编码端口/key）：
+//   1. 环境变量 LITELLM_URL / LITELLM_KEY（部署时覆盖）
+//   2. 仓库根 config/default.json 的 litellm 字段（本地开发直改）
+//   3. 内置默认值（原型兜底，本地 127.0.0.1:48724 + sk-1234）
 
-const LITELLM_URL = "http://127.0.0.1:48724";
-const LITELLM_KEY = "sk-1234";
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+const DEFAULT_LITELLM_URL = "http://127.0.0.1:48724";
+const DEFAULT_LITELLM_KEY = "sk-1234";
+
+interface LiteLLMFileConfig {
+  url?: string;
+  key?: string;
+}
+
+function readFileConfig(): LiteLLMFileConfig {
+  // src/tsx 运行时：packages/layer-cognitive/src → ../../../config/default.json
+  // 编译后 dist 运行时：packages/layer-cognitive/dist → ../../config/default.json
+  const candidates = [
+    resolve(__dirname, "../../../config/default.json"),
+    resolve(__dirname, "../../config/default.json"),
+  ];
+  for (const p of candidates) {
+    try {
+      const parsed = JSON.parse(readFileSync(p, "utf8")) as {
+        litellm?: LiteLLMFileConfig;
+      };
+      return parsed.litellm ?? {};
+    } catch {
+      // 文件不存在或 JSON 非法 → 试下一个候选
+    }
+  }
+  return {};
+}
+
+const fileCfg = readFileConfig();
+const LITELLM_URL = process.env.LITELLM_URL ?? fileCfg.url ?? DEFAULT_LITELLM_URL;
+const LITELLM_KEY = process.env.LITELLM_KEY ?? fileCfg.key ?? DEFAULT_LITELLM_KEY;
 
 const litellmProvider: Provider<LlmInferenceRequest, LlmInferenceResponse> = {
   service: llmInferenceService,
