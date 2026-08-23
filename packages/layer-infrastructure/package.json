@@ -11,7 +11,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aigility-arch/core": "workspace:*"
+    "@aigility-arch/core": "workspace:*",
+    "@aigility-arch/layer-cognitive": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.5.0",

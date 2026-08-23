@@ -20,6 +20,11 @@ import type {
   Result,
   HealthStatus,
 } from "@aigility-arch/core";
+import {
+  protocolAdapterService,
+  createProtocolAdapterProvider,
+  llmInferenceRef,
+} from "./protocol-adapter.js";
 
 // ── 服务定义 ─────────────────────────────────────────────────────
 
@@ -106,10 +111,10 @@ const configProvider: Provider<ConfigRequest, ConfigResponse> = {
 export const manifest: PluginManifest = {
   name: "@infrastructure/logging-config",
   layer: LayerId.Infrastructure,
-  description: "底座基础层：控制台日志 + 内存配置",
-  version: "0.1.0",
-  provides: [loggingService, configService],
-  consumes: [],
+  description: "底座基础层：控制台日志 + 内存配置 + 协议适配",
+  version: "0.2.0",
+  provides: [loggingService, configService, protocolAdapterService],
+  consumes: [llmInferenceRef],
   preferredCarrier: CarrierKind.Thread,
 };
 
@@ -126,9 +131,21 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [loggingProvider, configProvider];
+    return [loggingProvider, configProvider, createProtocolAdapterProvider()];
   },
   getState(): PluginState {
     return pluginState;
   },
 };
+
+// 重新导出协议适配能力与类型
+export {
+  protocolAdapterService,
+  createProtocolAdapterProvider,
+  llmInferenceRef,
+} from "./protocol-adapter.js";
+export type {
+  ProtocolKind,
+  ProtocolAdapterRequest,
+  ProtocolAdapterResponse,
+} from "./protocol-adapter.js";
