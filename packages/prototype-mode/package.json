@@ -10,12 +10,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aigility-arch/core": "workspace:*",
-    "@aigility-arch/layer-infrastructure": "workspace:*",
-    "@aigility-arch/layer-cognitive": "workspace:*",
-    "@aigility-arch/layer-perception": "workspace:*",
-    "@aigility-arch/layer-orchestration": "workspace:*",
-    "@aigility-arch/layer-action": "workspace:*"
+    "@aigility-harness/core": "workspace:*",
+    "@aigility-harness/layer-infrastructure": "workspace:*",
+    "@aigility-harness/layer-cognitive": "workspace:*",
+    "@aigility-harness/layer-perception": "workspace:*",
+    "@aigility-harness/layer-orchestration": "workspace:*",
+    "@aigility-harness/layer-action": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.5.0",

@@ -1,5 +1,5 @@
 /**
- * @aigility-arch/layer-orchestration — 编排规划层
+ * @aigility-harness/layer-orchestration — 编排规划层
  *
  * 提供任务规划占位能力（@orchestration/task-planning）。
  * 声明消费认知层的 @cognitive/llm-inference，用于基于 LLM 输出规划步骤。
@@ -10,7 +10,7 @@ import {
   CarrierKind,
   PluginState,
   ok,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 import type {
   ServiceDefinition,
   Provider,
@@ -20,7 +20,7 @@ import type {
   Result,
   HealthStatus,
   CapabilityRef,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 import {
   codexAgentService,
   codexAgentProvider,

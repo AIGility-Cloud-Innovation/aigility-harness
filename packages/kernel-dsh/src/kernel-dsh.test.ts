@@ -7,7 +7,7 @@ import {
   RunMode,
   ok,
   err,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 import type {
   KernelConfig,
   LayerPlugin,
@@ -16,7 +16,7 @@ import type {
   ServiceDefinition,
   SeamContext,
   SeamRegistry,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 import {
   DshKernelAdapter,
   CordisSeamRegistry,

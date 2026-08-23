@@ -20,14 +20,14 @@ import type {
   CapabilityId,
   CapabilityRef,
   Result,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 import type {
   Provider,
   SeamRegistry,
   SeamRegistryEvent,
   ServiceDefinition,
-} from "@aigility-arch/core";
-import { err, ok } from "@aigility-arch/core";
+} from "@aigility-harness/core";
+import { err, ok } from "@aigility-harness/core";
 import { satisfies } from "./semver.js";
 
 interface ProviderEntry {

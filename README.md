@@ -1,204 +1,231 @@
-# aigility-arch
+# aigility-harness
 
-> 五层可插拔 AI Agent 架构 —— 一套与具体工具、模型、运行时无关的**插件契约体系**。
+> **五层可插拔智能 Agent 全域架构** —— 一套可承载任何 LLM / 工具 / Agent / 内核的「Harness」工程范式。
 >
-> *Five-layer pluggable agent architecture: a kernel-agnostic, capability-contract system.*
+> *A five-layer, fully-pluggable AI Agent harness: kernel-agnostic, contract-driven, hot-swappable.*
 
 ---
 
-## 这是什么 / 这不是什么
+## 一、定位：这是一套 Harness，不是某个 Agent
 
-**这不是**「又一个接 Codex、接 LiteLLM、接 deepseek 的 Agent Demo」。
+`aigility-harness` 是一套**可以插上任何东西**的智能体运行底座。现在框架上挂着的 Codex、LiteLLM、deepseek-v4-pro 等**都只是验证案例**——它们可以被同契约的任意实现一键替换，框架本身不依赖其中任何一个。
 
-**这是**一套**契约镜像（contract mirror）**：把「推理」「协议翻译」「编排」「工具执行」「感知输入」这些能力抽象成**稳定的、带版本号的接口契约**，任何实现只要符合契约，就能插进去、换掉、并存热切换。
+一句话总结本架构：
 
-当前仓库里挂着的 Codex、LiteLLM、TTS、api-router 协议适配，**全部只是演示案例**——用来证明「这份契约能承载真实实现」。它们不是框架的一部分，随时可拆、可换、可同能力多实现并存。
+> **契约是主体，插件是过客。接口永久不变，实现任意替换。**
 
-> 一句话：**契约是主体，插件是过客。**
+核心能力矩阵（四大组合创新 —— 业界没有开源框架完整提供）：
 
----
-
-## 核心思想
-
-### 1. 一切能力都是「契约」+「实现」
-
-框架把世界分成三重角色，彼此**只靠能力 ID 通信，绝不互相 import 实现**：
-
-| 角色 | 是什么 | 类比 |
-|---|---|---|
-| `ServiceDefinition` | 一个能力的**契约**：ID + 版本 + 请求/响应 Schema | 插座的标准规格 |
-| `Provider` | 契约的一种**具体实现**：`execute()` + `health()` | 一款具体的电器 |
-| `Consumer` | 契约的**使用方**：声明「我需要 @xx/yy」 | 插头 |
-
-```ts
-// 契约（服务定义，发布后不可变，破坏性变更需升大版本或换 ID）
-const llmInference: ServiceDefinition<LlmReq, LlmRes> = {
-  id: "@cognitive/llm-inference",
-  version: "1.0.0",
-  layer: LayerId.Cognitive,
-  description: "LLM 推理能力",
-  requestSchema:  { /* JSON Schema */ },
-  responseSchema: { /* JSON Schema */ },
-};
-
-// 实现（Provider，可无限多个，运行时绑定/替换）
-const myProvider: Provider<LlmReq, LlmRes> = {
-  service: llmInference,
-  name: "cognitive-llm-inference-my-impl",
-  state: PluginState.Active,
-  async execute(req, ctx) { /* 干活 */ },
-  async health() { /* 探活 */ },
-};
-```
-
-### 2. 多 Provider 可替换（热切换）
-
-同一个能力 ID 下可以注册**任意多个 Provider**，`SeamRegistry` 负责绑定与切换：
-
-- 换后端（LiteLLM → vLLM → 自建网关）——**Consumer 零改动**；
-- 降级（真实 LLM 挂了 → 自动切 stub）——调度器按 `health()` 重绑；
-- 灰度（stub 与真实实现并存）——按策略选 Provider。
-
-### 3. 跨能力调用走 Seam，不 import 对方
-
-Provider 之间**不 import、不知道对方实现、不知道端口**，只认能力 ID：
-
-```ts
-// 消费方在 execute() 里跨层调用，而不是 import 另一个 Provider
-async execute(req, ctx) {
-  const plan = await ctx.call<TaskPlanningReq, TaskPlanningRes>(
-    { id: "@orchestration/task-planning", versionRange: "^1.0.0" },
-    { goal: req.prompt },
-  );
-  // ... 再据此驱动外部执行器
-}
-```
-
-`ctx.call()` 由 Seam 内部完成「resolve → 版本协商 → 健康检查 → 失败转移」，并**透传同一个 `traceId`**，一条逻辑请求全链路可追踪。
-
-### 4. 内核无关（Kernel-Agnostic）
-
-五层 + Seam 永不 import 具体内核。它们只依赖 `KernelAdapter` 接口。要换运行时内核：
-
-- **prototype-mode**：进程内 `InMemoryKernelAdapter`（Thread 载体，秒级 demo）；
-- **kernel-dsh**：基于 Cordis 的 `DshKernelAdapter`（生产内核宿主，35 测试通过）；
-- 未来换别的内核：**实现 `KernelAdapter` 接口即可，层代码一行不动**。
+| # | 创新点 | 说明 |
+|---|--------|------|
+| 1 | **五层业务域严格分层** | 认知 / 感知 / 编排 / 执行 / 底座，固定分层、单向依赖、永不交叉 |
+| 2 | **四种运行载体统一抽象** | 子线程 / 附属子进程 / 本机守护进程 / 独立端口网络服务，可逐层动态切换 |
+| 3 | **原型 ↔ 生产双形态** | 同一套代码，原型单体 ↔ 生产分布式，上层业务零改动 |
+| 4 | **Seam 契约自动热替换** | 基于 Capability Seam 能力接缝，健康探测 + 负载/显存/故障指标驱动运行时无感切换 |
 
 ---
 
-## 五层架构
+## 二、创意思路（白皮书核心）
 
-| 层 | `LayerId` | 角色 | 示例能力 |
-|---|---|---|---|
-| 认知 | `cognitive` | 大脑 · 推理决策 | `@cognitive/llm-inference` |
-| 感知 | `perception` | 感官 · 人机输入 | `@perception/text-input`（未来语音/图像） |
-| 编排 | `orchestration` | 小脑 · 规划路由 | `@orchestration/task-planning`、`@orchestration/codex-agent` |
-| 行动 | `action` | 手脚 · 工具执行 | `@action/text-to-speech`、`@action/tool-executor` |
-| 底座 | `infrastructure` | 地基 · 系统兼容 | `@infrastructure/config`、`logging`、`protocol-adapter` |
+### 2.1 设计目标
 
-**运行载体（Carrier）**——插件跑在哪，由 manifest 声明、可按运行模式覆盖：
+构建一套**完全解耦、分层自治、契约驱动、运行时可自动替换**的新一代 AI Agent 系统：
 
-| Carrier | 适合 | 典型载体对象 |
-|---|---|---|
-| `thread` | 进程内纯计算 | 协议翻译、日志、config |
-| `subprocess` | 需隔离的附属进程 | 文本归一化 |
-| `daemon` | 本机守护进程 | 感知/行动层生产态 |
-| `network-service` | 独立端口服务 | LiteLLM、HTTP ingress |
+1. 业务能力按五层领域严格分层，层与层零耦合。
+2. 每层能力不绑定具体实现，统一基于 **Capability Seam 能力接缝**做 Consumer / Provider 契约解耦。
+3. 所有模块支持四种运行载体动态切换：子线程、附属子进程、本机守护进程、独立端口网络服务。
+4. 支持原型环境 ↔ 生产环境无缝切换，上层业务代码零改动。
+5. 支持智能自动热替换：基于负载、显存、故障、资源占用自动切换底层实现。
+6. 继承 DSH-Cordis 原生能力：插件生命周期、依赖注入、副作用可逆、事件溯源、上下文隔离。
 
-**运行模式（RunMode）**：`Prototype`（全进程内）与 `Production`（分布式 + 健康调度）。
+### 2.2 为什么叫 Harness
 
----
+业界标准 **Agent Harness 四层**（Model / Harness 调度循环 / Tools / Environment）与本架构的映射关系：
 
-## 接入指南：什么都能插
+| 标准 Harness 层 | 本架构对应 |
+|-----------------|-----------|
+| Model 模型层 | 认知决策层（大脑） |
+| Harness 调度循环层 | 编排规划层（小脑） |
+| Tools 工具执行层 | 行动执行工具层（手脚） |
+| Environment 运行环境层 | 多模态感知交互层（感官）+ 底座兼容基础层（地基） |
 
-框架的接入面只有五个，任何东西都能落到其中一类。以下均以「演示案例」形式给出最小可复制的形状。
+**结论：本五层架构是标准 Harness 范式的工程落地增强版** —— 任务调度循环（Harness）本就是编排规划层的职责，而本架构把 Model / Tools / Environment 全部升级为可插拔契约。
 
-### A. 接入一个新的 LLM Gateway
+### 2.3 工程范式的独特性
 
-实现一个 `Provider<LlmInferenceRequest, LlmInferenceResponse>`，内部 `fetch` 你的网关端点，注册到认知层即可。当前 `cognitive-llm-inference-litellm` 就是这样的**一个案例**——它不硬编码 URL/Key，按 `env → config/default.json → 内置默认` 三级读取，换网关只改配置。
+分层思想、Seam 契约解耦、进程隔离都各有业界参考，本架构的**独一无二的组合点**是：
 
-### B. 接入一个新的编码 Agent / 外部执行器
-
-把外部 agent（Codex CLI、Claude Code、OpenCode……）包装成一个 `Provider`：`execute()` 里 spawn 该运行时、说它的 wire 协议（JSONL / JSON-RPC / MCP / HTTP）。当前 `@orchestration/codex-agent` 即为案例——先 `ctx.call` 认知层做规划，再驱动 Codex CLI。
-
-> 判断口径：**进程内插件树**（如 DSH/Cordis）→ 走内核挂载；**跨进程 RPC 服务**（如 codex app-server）→ 包成 Provider 说它自己的协议。两者都能桥接。
-
-### C. 接入一个新的工具 / 动作
-
-实现 `Provider<ToolReq, ToolRes>`，注册到行动层。`@action/text-to-speech`（源自 Open-LLM-VTuber 内化）即案例——把「一个独立项目的某个能力」抽成符合契约的 Provider。
-
-### D. 接入一种新协议
-
-实现 `Provider<ProtocolAdapterRequest, ProtocolAdapterResponse>`，做「外部协议 ↔ 内部标准」的翻译。当前 `@infrastructure/protocol-adapter` 内化了 api-router 的 Anthropic / OpenAI Responses / OpenAI Chat 三个方向，即案例。
-
-### E. 换一个运行时内核
-
-实现 `KernelAdapter` 接口（`registry` / `carriers` / `events` / `effects` / `createContext`），bootstrap 时注册。层代码零改动。
+1. **五层业务域 + 四种进程载体 + 原型/生产双形态 + 自动热替换** 完整闭环落地。
+2. 业界没有任何开源框架提供：**分层智能自动降级、跨载体统一抽象、进程内 / 跨进程 / 分布式统一契约**。
+3. DSH 只提供进程内插件模型，本架构补齐**分布式、多进程、智能调度、自动切换**全部缺失环节。
 
 ---
 
-## 示例插件画廊（Reference Gallery）
+## 三、五层标准化业务域
 
-> 这些是「契约能否承载真实实现」的**验证案例**，不是框架边界。每个都能被同契约的另一个 Provider 替换。
+所有 AI 能力严格划分为五层，**固定分层、永不交叉、单向依赖**：
 
-| 能力 ID | 当前 Provider | 载体 | 说明 |
-|---|---|---|---|
-| `@cognitive/llm-inference` | `stub` + `litellm` | Thread / NetworkService | 推理：确定性 echo 占位 + LiteLLM 真实推理并存 |
-| `@infrastructure/protocol-adapter` | `anthropic` / `responses` / `openai` | Thread | api-router 协议翻译内化（纯函数） |
-| `@orchestration/task-planning` | `basic` | Thread | 任务规划（走认知层推理） |
-| `@orchestration/codex-agent` | `codex` | Subprocess | 驱动 Codex CLI，前置框架内规划 |
-| `@action/text-to-speech` | `edge-tts` | Subprocess | Open-LLM-VTuber TTS 能力内化样板 |
-| `@perception/text-input` | `basic` | Subprocess | 文本输入归一化 |
-| `@infrastructure/config` / `logging` | `memory` / `console` | Thread | 底座基础服务 |
+| 层 | 名称 | 定位 | 典型模块 | 载体策略（原型 → 生产） |
+|----|------|------|---------|--------------------------|
+| L1 | **认知决策核心层**（大脑） | 智能体自我、推理、决策、身份中枢 | LLM 模型适配器、多模型算力路由、人格系统、记忆引擎、会话/身份上下文 | DSH 进程内插件 → 算力路由 + 记忆抽离为独立网络服务 |
+| L2 | **多模态感知交互层**（感官） | 输入接收、输出渲染、外部用户触达网关 | ASR / TTS、音视频编解码、数字人渲染、IM 网关、Web 对话界面 | 附属子进程 → 本机独立守护进程（声卡/显卡独占）→ 网络服务集群 |
+| L3 | **编排规划层**（小脑） | 任务调度、思考循环、多智能体协作 | Agent 主思考循环（ReAct/PlanExecute）、任务规划/复盘、SubAgent 调度、定时/长任务 | DSH 插件线程 → 复杂子 Agent 拆独立 Worker 进程/服务 |
+| L4 | **行动执行工具层**（手脚） | 产生真实外部副作用 | 代码沙箱、文档/文件操作、系统资源管控、IoT/机器人控制 | 附属子进程 → 独立守护进程/远程隔离服务 |
+| L5 | **底座兼容基础层**（地基） | 通信、契约、安全、观测基础设施 | 全局消息总线、统一消息契约、MCP/A2A 协议桥接、鉴权/限流/熔断、全链路追踪、自动切换控制器 | 全部独立网络服务，不属于 DSH 进程 |
 
----
+### 各层运行特征
 
-## 目录结构
-
-```
-packages/
-├── core/                 # 内核无关的契约抽象（LayerId/Carrier/Seam/KernelAdapter/bootstrap）
-├── kernel-dsh/           # DSH/Cordis 内核适配器（生产宿主）
-├── kernel-inmemory/      # 进程内内存内核（part of prototype-mode）
-├── layer-cognitive/      # 认知层：llm-inference（stub + litellm）
-├── layer-perception/     # 感知层：text-input
-├── layer-orchestration/  # 编排层：task-planning、codex-agent
-├── layer-action/         # 行动层：text-to-speech、tool-executor
-├── layer-infrastructure/ # 底座层：config、logging、protocol-adapter
-└── prototype-mode/       # 原型 demo：组装五层、跑跨层全链路
-config/default.json       # 外置连接配置（litellm url/key 等）
-docs/                     # 设计文档
-```
+- **L1 认知层**：Always-On 核心常驻，强状态、强一致性、不可随意重启。
+- **L2 感知层**：延迟敏感、硬件绑定、极易崩溃，纯信号转换、无核心决策。
+- **L3 编排层**：流程驱动、状态机复杂、多分支多迭代，不直接操作硬件。
+- **L4 执行层**：高风险、高权限、崩溃影响外部环境，必须强隔离、强沙箱、强故障域。
+- **L5 底座层**：全局唯一、所有模块依赖、完全与业务解耦。
 
 ---
 
-## 快速开始
+## 四、四种运行载体统一抽象
+
+所有能力模块仅存在四种部署形态，**所有层级均可动态切换**：
+
+| 载体 | 描述 | 优点 | 缺点 | 适用 |
+|------|------|------|------|------|
+| **Thread** 子线程 | 同进程插件 | 最快、零通信损耗 | 插件崩溃会宕掉主进程 | 纯逻辑、无不稳定依赖、无硬件调用（认知层轻量逻辑、编排层逻辑） |
+| **Subprocess** 附属子进程 | 父进程托管，生命周期跟随主进程 | 崩溃隔离、启动销毁灵活 | 有 IPC 开销 | 短时任务、原型工具、临时执行 |
+| **Daemon** 本机守护进程 | 完全独立生命周期，主进程崩溃不影响 | 独占硬件资源（声卡/显卡/串口） | 状态同步需桥接 | 生产音视频、硬件、机器人强制使用 |
+| **NetworkService** 独立端口网络服务 | 跨机器、可集群、可扩容 | 分布式、多实例共享 | 网络依赖 | 算力、记忆、网关、RAG、IM |
+
+---
+
+## 五、DSH-Cordis 内核：底层运行支撑
+
+本架构 = **业务五层 + DSH 内核四层** 完美叠加：
+
+| 内核层 | 职责 |
+|--------|------|
+| **Plugin Layer** 插件层 | 所有业务能力的代码载体 |
+| **Capability Seam Layer** 能力接缝层（架构灵魂） | `ServiceDefinition` 统一接口契约 / `Provider` 能力实现方 / `Consumer` 能力调用方；接口永久不变，实现任意替换 |
+| **Runtime Core Layer** 运行时内核 | 全局上下文 `ctx`、插件 DI、生命周期管理、副作用可逆回退、会话/日志/事件溯源 |
+| **Transport Layer** 传输层 | DSH 原生仅进程内事件总线；无网络、无跨进程 |
+
+**关键叠加关系**：业务五层是**业务领域分层**，DSH 四层是**运行时技术栈分层**；所有业务能力全部通过 Seam 注册，从而实现可替换。
+
+### DSH 已具备（无需自研）vs 本架构补齐
+
+**DSH 自带**：插件生命周期/热插拔、Capability Seam 契约解耦、副作用自动回退、依赖注入自动加载、Profile 环境区分、事件溯源/会话日志、进程内高可靠事件总线。
+
+**本架构必须自研补齐**（DSH 完全不具备）：
+
+1. **跨进程/跨机器通信桥接层**（最大核心缺口）—— Seam ↔ NATS 双向协议转换插件、多语言异构服务适配
+2. **四种进程载体统一抽象管理层** —— 守护进程托管、保活、重启、状态上报、生命周期统一调度
+3. **智能自动热替换调度系统** —— 全 Provider 健康探测、负载/显存/故障指标采集、自动解绑/绑定、运行时无感切换
+4. **跨进程副作用回收机制** —— 原生 `ctx.effect` 仅管进程内，需扩展远端资源释放、硬件复位、连接销毁
+5. **全链路分布式追踪** —— 跨进程 traceId 透传、全局统一观测
+6. **状态迁移系统** —— 记忆、会话、人格跨实现迁移
+7. **完整生产底座** —— 鉴权、安全、限流、熔断、协议桥接
+
+> **核心结论：DSH 是完美的「进程内智能体内核」，本架构补齐所有「分布式、多进程、智能运维、生产级能力」。**
+
+---
+
+## 六、原型模式 ↔ 生产模式（双形态）
+
+| | 原型模式（极速开发） | 生产模式（企业级高可用） |
+|---|----------------------|--------------------------|
+| 认知层 | DSH 进程内插件、内存级 Provider | 重负载能力抽离网络服务 |
+| 感知层 | 附属子进程 | 全部改本机守护进程 |
+| 编排层 | DSH 插件线程 | 复杂工作流拆 Worker 集群 |
+| 执行层 | 附属子进程 | 硬件/沙箱独立进程强隔离 |
+| 底座层 | 进程内事件总线 | 全局 NATS 总线统一通信 |
+
+**核心优势：同一套代码、两套运行形态、零业务改动。**
+
+---
+
+## 七、快速开始
+
+### 环境要求
+
+- **Node.js ≥ 20**
+- **pnpm ≥ 9**
+
+### 安装
 
 ```bash
-# 依赖：Node >= 20，pnpm >= 9
 pnpm install
-
-# 运行原型 demo（组装五层、演示跨层调用、协议适配、codex 代理、TTS 全链路）
-pnpm --filter prototype-mode start
-
-# 类型检查（全仓）
-pnpm -r run typecheck
-
-# 测试
-pnpm -r run test
 ```
 
-demo 里第 8 步会真实穿越框架：`orchestration → ctx.call(cognitive) → litellmProvider → 远程 LLM`，而非 stub echo。
+> 工作区启用 `allowBuilds` 白名单：esbuild 允许构建；msedge-tts / protobufjs / sharp / onnxruntime-node / ffi-napi / ref-napi 默认关闭挨，按需开启（启用 whisper 改 `onnxruntime-node: true`，启用 vosk 改 `ffi-napi: true`）。
+
+### 构建 / 类型检查 / 测试
+
+```bash
+pnpm run build        # 全部包构建
+pnpm run typecheck    # tsc --noEmit 全量类型检查
+pnpm run test         # vitest 全量测试（含 kernel-dsh 35 例 + codex-agent 7 例）
+```
+
+### 运行原型演示
+
+```bash
+pnpm example:prototype
+```
+
+原型模式：五层能力全部以 DSH 进程内插件运行，内存级 Provider，无需任何外部服务。演示流程：感知（文本输入）→ 认知（litellm/内存推理）→ 编排（任务规划 + codex-agent）→ 执行（TTS）→ 底座（配置/日志/协议适配）。
+
+### 现有验证案例（均为可替换示例）
+
+| 能力 | 当前实现 | 可替换为 |
+|------|---------|---------|
+| LLM 推理 | `litellmProvider`（真实调用 LiteLLM，deepseek-v4-pro） | 任意 OpenAI 兼容网关（vLLM/Ollama/本地 stub） |
+| 编码 Agent | `codex-agent`（codex CLI → localhost:4000） | 任意符合契约的 Agent Provider |
+| 协议适配 | `protocol-adapter`（api-router 协议翻译） | 任意协议桥接实现 |
+| TTS | `text-to-speech` | 任意 TTS 引擎 |
 
 ---
 
-## 设计文档
+## 八、落地实施路线
 
-- `docs/plugin-integration-design.md` —— api-router + LiteLLM + DSH 的插件化落地设计（v0.2）
-- `docs/` 后续补充各 Provider 的接入协议细节
+| 阶段 | 目标 | 内容 |
+|------|------|------|
+| **阶段 1**（✅ 已完成） | 原型闭环 | 五层能力 DSH 插件化，验证完整业务逻辑；kernel-dsh 35 测例 + codex-agent 规划闭环通过 |
+| **阶段 2** | 桥接层开发 | Seam ↔ NATS 双向桥接，打通跨进程通信 |
+| **阶段 3** | 进程载体封装 | 守护进程管理、多载体统一抽象 |
+| **阶段 4** | 智能调度与自动替换 | 健康探测、指标采集、自动切换控制器 |
+| **阶段 5** | 生产加固 | 安全、鉴权、全链路追踪、状态迁移、熔断降级 |
 
 ---
 
-## License
+## 九、目录结构
 
-MIT
+```
+aigility-harness/
+├── packages/
+│   ├── core/                      # 核心契约：LayerId / CarrierKind / ServiceDefinition / Seam -->
+│   │                              #   Provider / Consumer / LayerPlugin / KernelAdapter
+│   ├── kernel-dsh/                # DSH-Cordis 内核适配器（Seam Registry / Effect Manager / Carrier Manager）
+│   ├── layer-cognitive/           # L1 认知决策层（LLM 推理：stub + litellm）
+│   ├── layer-perception/          # L2 多模态感知层（文本输入）
+│   ├── layer-orchestration/       # L3 编排规划层（任务规划 + codex-agent）
+│   ├── layer-action/              # L4 行动执行层（TTS）
+│   ├── layer-infrastructure/      # L5 底座基础层（config/logging/protocol-adapter）
+│   └── prototype-mode/            # 原型演示入口（InMemoryKernel → 五层插件装配）
+└── docs/
+    └── plugin-integration-design.md   # 五层插件接入设计文档 v0.2
+```
+
+---
+
+## 十、终极架构总结
+
+1. **五层业务域**：认知、感知、编排、执行、底座 —— 单向依赖，永不交叉
+2. **四层运行内核**：DSH-Cordis 原生支撑（插件 / Seam / 运行时 / 传输）
+3. **四种运行载体**：线程 / 子进程 / 守护进程 / 网络服务 —— 逐层可切换
+4. **核心机制**：Capability Seam 契约热替换 —— 接口不变，实现任意替换
+5. **形态双模式**：原型单体 / 生产分布式 —— 同一套代码零改动切换
+6. **最大亮点**：智能自动动态换层、换实现、换载体
+
+> 现阶段以 DSH 兼容适配为首要目标；未来若出现与 DSH 相似的产品，可通过统一 `KernelAdapter` 契约**一键替换迁移**到其他内核，业务层代码零改动。
+
+---
+
+License: MIT · 技术栈：TypeScript 5.5 + pnpm workspace + vitest · Node ≥ 20

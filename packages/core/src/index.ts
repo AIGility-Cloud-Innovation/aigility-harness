@@ -1,5 +1,5 @@
 /**
- * @aigility-arch/core — public entry point.
+ * @aigility-harness/core — public entry point.
  *
  * Exports the kernel-agnostic abstractions that every layer, adapter,
  * and the bootstrap system depend on.

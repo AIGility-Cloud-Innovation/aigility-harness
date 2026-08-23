@@ -22,14 +22,14 @@ import type {
   LayerId,
   Result,
   RunMode,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 import type {
   KernelAdapter,
   KernelConfig,
   KernelInfo,
-} from "@aigility-arch/core";
-import type { SeamContext, SeamRegistry } from "@aigility-arch/core";
-import { err, ok } from "@aigility-arch/core";
+} from "@aigility-harness/core";
+import type { SeamContext, SeamRegistry } from "@aigility-harness/core";
+import { err, ok } from "@aigility-harness/core";
 import { CordisSeamRegistry } from "./seam-registry.js";
 import { CordisEventBus } from "./event-bus.js";
 import { EffectStore } from "./effect-store.js";

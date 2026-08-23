@@ -21,14 +21,14 @@
  */
 
 import { spawn } from "node:child_process";
-import { LayerId, PluginState, ok, err } from "@aigility-arch/core";
+import { LayerId, PluginState, ok, err } from "@aigility-harness/core";
 import type {
   ServiceDefinition,
   Provider,
   SeamContext,
   Result,
   HealthStatus,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 
 // ── 认知层 LLM 契约镜像 ─────────────────────────────────────────
 // 通过 Seam 字符串引用 `@cognitive/llm-inference` 解耦，

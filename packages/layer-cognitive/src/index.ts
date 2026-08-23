@@ -1,5 +1,5 @@
 /**
- * @aigility-arch/layer-cognitive — 认知决策核心层
+ * @aigility-harness/layer-cognitive — 认知决策核心层
  *
  * 提供 LLM 推理能力 @cognitive/llm-inference。
  * 内部标准：OpenAI Chat 格式（{model, messages, max_tokens, temperature}）。
@@ -11,7 +11,7 @@
  * 按注册顺序，resolve 取第一个；生产环境可配置优先选择 litellm。
  */
 
-import { LayerId, CarrierKind, PluginState, ok, err } from "@aigility-arch/core";
+import { LayerId, CarrierKind, PluginState, ok, err } from "@aigility-harness/core";
 import type {
   ServiceDefinition,
   Provider,
@@ -20,7 +20,7 @@ import type {
   PluginManifest,
   Result,
   HealthStatus,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

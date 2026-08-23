@@ -6,10 +6,10 @@
  * and callerLayer without exposing any kernel-specific globals.
  */
 
-import type { LayerId, SystemEvent, SeamRegistry, CapabilityRef, Result } from "@aigility-arch/core";
-import { err } from "@aigility-arch/core";
-import type { SeamContext } from "@aigility-arch/core";
-import type { EventBus } from "@aigility-arch/core";
+import type { LayerId, SystemEvent, SeamRegistry, CapabilityRef, Result } from "@aigility-harness/core";
+import { err } from "@aigility-harness/core";
+import type { SeamContext } from "@aigility-harness/core";
+import type { EventBus } from "@aigility-harness/core";
 import type { EffectStore } from "./effect-store.js";
 
 export class DshSeamContext implements SeamContext {

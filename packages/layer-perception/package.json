@@ -1,5 +1,5 @@
 {
-  "name": "@aigility-arch/layer-perception",
+  "name": "@aigility-harness/layer-perception",
   "version": "0.2.0",
   "description": "多模态感知交互层插件：文本输入 + 语音转文本（ASR）",
   "type": "module",
@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aigility-arch/core": "workspace:*"
+    "@aigility-harness/core": "workspace:*"
   },
   "optionalDependencies": {
     "vosk": "^0.3.39",

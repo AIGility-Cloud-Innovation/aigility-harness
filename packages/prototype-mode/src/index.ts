@@ -13,41 +13,41 @@ import {
   bootstrap,
   shutdown,
   InProcessScheduler,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 import type {
   KernelConfig,
   Consumer,
   SeamContext,
   Result,
   CapabilityRef,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 
 import { InMemoryKernelAdapter } from "./in-memory-kernel.js";
 
-import { plugin as infrastructurePlugin } from "@aigility-arch/layer-infrastructure";
-import { plugin as cognitivePlugin } from "@aigility-arch/layer-cognitive";
-import { plugin as perceptionPlugin } from "@aigility-arch/layer-perception";
-import { plugin as orchestrationPlugin } from "@aigility-arch/layer-orchestration";
-import { plugin as actionPlugin } from "@aigility-arch/layer-action";
+import { plugin as infrastructurePlugin } from "@aigility-harness/layer-infrastructure";
+import { plugin as cognitivePlugin } from "@aigility-harness/layer-cognitive";
+import { plugin as perceptionPlugin } from "@aigility-harness/layer-perception";
+import { plugin as orchestrationPlugin } from "@aigility-harness/layer-orchestration";
+import { plugin as actionPlugin } from "@aigility-harness/layer-action";
 
 import type {
   LlmInferenceRequest,
   LlmInferenceResponse,
-} from "@aigility-arch/layer-cognitive";
+} from "@aigility-harness/layer-cognitive";
 import type {
   TaskPlanningRequest,
   TaskPlanningResponse,
   CodexAgentRequest,
   CodexAgentResponse,
-} from "@aigility-arch/layer-orchestration";
+} from "@aigility-harness/layer-orchestration";
 import type {
   ProtocolAdapterRequest,
   ProtocolAdapterResponse,
-} from "@aigility-arch/layer-infrastructure";
+} from "@aigility-harness/layer-infrastructure";
 import type {
   TextToSpeechRequest,
   TextToSpeechResponse,
-} from "@aigility-arch/layer-action";
+} from "@aigility-harness/layer-action";
 
 function log(tag: string, msg: string): void {
   // eslint-disable-next-line no-console

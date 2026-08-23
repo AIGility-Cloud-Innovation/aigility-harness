@@ -1,5 +1,5 @@
 /**
- * @aigility-arch/layer-infrastructure — Protocol Adapter Provider
+ * @aigility-harness/layer-infrastructure — Protocol Adapter Provider
  *
  * 能力：@infrastructure/protocol-adapter
  * 职责：机器对机器的协议翻译 / 入口归一化。无论外部用哪种协议打进来
@@ -14,7 +14,7 @@
  * 保留了工具调用（tool_use / function_call）的双向翻译。
  */
 
-import { LayerId, CarrierKind, PluginState, ok, err } from "@aigility-arch/core";
+import { LayerId, CarrierKind, PluginState, ok, err } from "@aigility-harness/core";
 import type {
   ServiceDefinition,
   Provider,
@@ -22,12 +22,12 @@ import type {
   CapabilityRef,
   Result,
   HealthStatus,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 import type {
   LlmInferenceRequest,
   LlmInferenceResponse,
   ChatMessage,
-} from "@aigility-arch/layer-cognitive";
+} from "@aigility-harness/layer-cognitive";
 
 // ── 内部标准引用（声明消费认知层能力）────────────────────────────
 

@@ -1,5 +1,5 @@
 {
-  "name": "@aigility-arch/layer-infrastructure",
+  "name": "@aigility-harness/layer-infrastructure",
   "version": "0.1.0",
   "description": "底座兼容基础层插件：日志 + 配置",
   "type": "module",
@@ -11,8 +11,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aigility-arch/core": "workspace:*",
-    "@aigility-arch/layer-cognitive": "workspace:*"
+    "@aigility-harness/core": "workspace:*",
+    "@aigility-harness/layer-cognitive": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.5.0",

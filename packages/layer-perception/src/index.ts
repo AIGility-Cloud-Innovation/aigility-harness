@@ -1,5 +1,5 @@
 /**
- * @aigility-arch/layer-perception — 多模态感知交互层
+ * @aigility-harness/layer-perception — 多模态感知交互层
  *
  * 提供文本输入能力（@perception/text-input）。
  * 原型模式下对输入文本做归一化（trim + 元数据）。
@@ -10,7 +10,7 @@ import {
   CarrierKind,
   PluginState,
   ok,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 import type {
   ServiceDefinition,
   Provider,
@@ -19,7 +19,7 @@ import type {
   PluginManifest,
   Result,
   HealthStatus,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 
 export {
   speechToTextService,

@@ -1,5 +1,5 @@
 {
-  "name": "@aigility-arch/layer-orchestration",
+  "name": "@aigility-harness/layer-orchestration",
   "version": "0.1.0",
   "description": "编排规划层插件：任务规划占位",
   "type": "module",
@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aigility-arch/core": "workspace:*"
+    "@aigility-harness/core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.5.0",

@@ -35,7 +35,7 @@ importers:
 
   packages/kernel-dsh:
     dependencies:
-      '@aigility-arch/core':
+      '@aigility-harness/core':
         specifier: workspace:*
         version: link:../core
       '@cordisjs/core':
@@ -54,7 +54,7 @@ importers:
 
   packages/layer-action:
     dependencies:
-      '@aigility-arch/core':
+      '@aigility-harness/core':
         specifier: workspace:*
         version: link:../core
       msedge-tts:
@@ -73,7 +73,7 @@ importers:
 
   packages/layer-cognitive:
     dependencies:
-      '@aigility-arch/core':
+      '@aigility-harness/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -89,10 +89,10 @@ importers:
 
   packages/layer-infrastructure:
     dependencies:
-      '@aigility-arch/core':
+      '@aigility-harness/core':
         specifier: workspace:*
         version: link:../core
-      '@aigility-arch/layer-cognitive':
+      '@aigility-harness/layer-cognitive':
         specifier: workspace:*
         version: link:../layer-cognitive
     devDependencies:
@@ -108,7 +108,7 @@ importers:
 
   packages/layer-orchestration:
     dependencies:
-      '@aigility-arch/core':
+      '@aigility-harness/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -124,7 +124,7 @@ importers:
 
   packages/layer-perception:
     dependencies:
-      '@aigility-arch/core':
+      '@aigility-harness/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -147,22 +147,22 @@ importers:
 
   packages/prototype-mode:
     dependencies:
-      '@aigility-arch/core':
+      '@aigility-harness/core':
         specifier: workspace:*
         version: link:../core
-      '@aigility-arch/layer-action':
+      '@aigility-harness/layer-action':
         specifier: workspace:*
         version: link:../layer-action
-      '@aigility-arch/layer-cognitive':
+      '@aigility-harness/layer-cognitive':
         specifier: workspace:*
         version: link:../layer-cognitive
-      '@aigility-arch/layer-infrastructure':
+      '@aigility-harness/layer-infrastructure':
         specifier: workspace:*
         version: link:../layer-infrastructure
-      '@aigility-arch/layer-orchestration':
+      '@aigility-harness/layer-orchestration':
         specifier: workspace:*
         version: link:../layer-orchestration
-      '@aigility-arch/layer-perception':
+      '@aigility-harness/layer-perception':
         specifier: workspace:*
         version: link:../layer-perception
     devDependencies:

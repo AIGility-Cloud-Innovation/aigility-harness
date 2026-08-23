@@ -1,5 +1,5 @@
 {
-  "name": "@aigility-arch/kernel-dsh",
+  "name": "@aigility-harness/kernel-dsh",
   "version": "0.1.0",
   "description": "DSH (Dynamic Substrate Host) kernel adapter — KernelAdapter contract over Cordis runtime",
   "type": "module",
@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aigility-arch/core": "workspace:*",
+    "@aigility-harness/core": "workspace:*",
     "@cordisjs/core": "4.0.0-beta.5"
   },
   "devDependencies": {

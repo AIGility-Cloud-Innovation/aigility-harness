@@ -1,5 +1,5 @@
 /**
- * @aigility-arch/layer-infrastructure — 底座兼容基础层
+ * @aigility-harness/layer-infrastructure — 底座兼容基础层
  *
  * 提供日志（@infrastructure/logging）与配置（@infrastructure/config）
  * 两个能力。原型模式下以内存 Provider 形式运行于 Thread 载体。
@@ -10,7 +10,7 @@ import {
   CarrierKind,
   PluginState,
   ok,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 import type {
   ServiceDefinition,
   Provider,
@@ -19,7 +19,7 @@ import type {
   PluginManifest,
   Result,
   HealthStatus,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 import {
   protocolAdapterService,
   createProtocolAdapterProvider,

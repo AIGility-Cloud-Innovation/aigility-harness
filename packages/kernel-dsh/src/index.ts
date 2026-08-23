@@ -1,7 +1,7 @@
 /**
- * @aigility-arch/kernel-dsh — DSH (Dynamic Substrate Host) kernel adapter.
+ * @aigility-harness/kernel-dsh — DSH (Dynamic Substrate Host) kernel adapter.
  *
- * Implements the `KernelAdapter` contract from `@aigility-arch/core` over a
+ * Implements the `KernelAdapter` contract from `@aigility-harness/core` over a
  * Cordis 4.0 runtime. This is the concrete bridge between the five-layer
  * architecture and the Cordis kernel — the only place that imports Cordis.
  */

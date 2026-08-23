@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { LayerId } from "@aigility-arch/core";
-import type { SeamContext } from "@aigility-arch/core";
+import { LayerId } from "@aigility-harness/core";
+import type { SeamContext } from "@aigility-harness/core";
 import {
   codexAgentService,
   codexAgentProvider,

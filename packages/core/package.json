@@ -1,5 +1,5 @@
 {
-  "name": "@aigility-arch/core",
+  "name": "@aigility-harness/core",
   "version": "0.1.0",
   "description": "Core abstractions: five-layer interfaces, KernelAdapter contract, Capability Seam",
   "type": "module",

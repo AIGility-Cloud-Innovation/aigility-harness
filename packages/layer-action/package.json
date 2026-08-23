@@ -1,5 +1,5 @@
 {
-  "name": "@aigility-arch/layer-action",
+  "name": "@aigility-harness/layer-action",
   "version": "0.1.0",
   "description": "行动执行工具层插件：工具执行占位",
   "type": "module",
@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aigility-arch/core": "workspace:*",
+    "@aigility-harness/core": "workspace:*",
     "msedge-tts": "^2.0.7"
   },
   "devDependencies": {

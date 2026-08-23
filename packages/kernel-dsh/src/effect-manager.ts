@@ -13,9 +13,9 @@
  * `addEffect` calls and adapter-level rollback share one id space.
  */
 
-import type { Result } from "@aigility-arch/core";
-import type { EffectManager } from "@aigility-arch/core";
-import { err, ok } from "@aigility-arch/core";
+import type { Result } from "@aigility-harness/core";
+import type { EffectManager } from "@aigility-harness/core";
+import { err, ok } from "@aigility-harness/core";
 import type { EffectStore } from "./effect-store.js";
 
 export class InMemoryEffectManager implements EffectManager {

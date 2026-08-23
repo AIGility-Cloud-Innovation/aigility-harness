@@ -16,7 +16,7 @@ import {
   PluginState,
   ok,
   err,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 import type {
   KernelAdapter,
   KernelConfig,
@@ -35,8 +35,8 @@ import type {
   Result,
   HealthStatus,
   CapabilityRef,
-} from "@aigility-arch/core";
-import type { LayerPlugin } from "@aigility-arch/core";
+} from "@aigility-harness/core";
+import type { LayerPlugin } from "@aigility-harness/core";
 
 // ── 内存 SeamRegistry ────────────────────────────────────────────
 

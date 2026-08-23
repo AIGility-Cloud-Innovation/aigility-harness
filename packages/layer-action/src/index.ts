@@ -1,5 +1,5 @@
 /**
- * @aigility-arch/layer-action — 行动执行工具层
+ * @aigility-harness/layer-action — 行动执行工具层
  *
  * 提供工具执行占位能力（@action/tool-execution）。
  * 声明消费编排层的 @orchestration/task-planning。
@@ -10,7 +10,7 @@ import {
   CarrierKind,
   PluginState,
   ok,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 import type {
   ServiceDefinition,
   Provider,
@@ -20,7 +20,7 @@ import type {
   Result,
   HealthStatus,
   CapabilityRef,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 import {
   textToSpeechService,
   textToSpeechProvider,

@@ -16,8 +16,8 @@
  */
 
 import type { Context } from "@cordisjs/core";
-import type { LayerId, SystemEvent } from "@aigility-arch/core";
-import type { EventBus } from "@aigility-arch/core";
+import type { LayerId, SystemEvent } from "@aigility-harness/core";
+import type { EventBus } from "@aigility-harness/core";
 
 /**
  * Cordis types `ctx.on`/`ctx.emit` against `keyof Events<Context>` (the

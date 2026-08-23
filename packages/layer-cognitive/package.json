@@ -1,5 +1,5 @@
 {
-  "name": "@aigility-arch/layer-cognitive",
+  "name": "@aigility-harness/layer-cognitive",
   "version": "0.1.0",
   "description": "认知决策核心层插件：LLM 推理占位",
   "type": "module",
@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aigility-arch/core": "workspace:*"
+    "@aigility-harness/core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.5.0",

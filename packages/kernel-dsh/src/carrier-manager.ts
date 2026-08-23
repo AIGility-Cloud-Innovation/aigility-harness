@@ -20,19 +20,19 @@
 import {
   CarrierKind,
   PluginState,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 import type {
   HealthStatus,
   Result,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 import type {
   CarrierManager,
   PluginHandle,
   LayerPlugin,
   SeamContext,
   LayerId,
-} from "@aigility-arch/core";
-import { err, ok } from "@aigility-arch/core";
+} from "@aigility-harness/core";
+import { err, ok } from "@aigility-harness/core";
 
 interface TrackedPlugin {
   handle: PluginHandle;

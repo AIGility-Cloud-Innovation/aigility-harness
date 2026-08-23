@@ -1,5 +1,5 @@
 /**
- * @aigility-arch/layer-perception — 语音转文本能力（@perception/speech-to-text）
+ * @aigility-harness/layer-perception — 语音转文本能力（@perception/speech-to-text）
  *
  * 契约：输入 PCM 16-bit 单声道音频 Buffer + 采样率，输出识别文本。
  * 音频是「外部信号摄入系统」的过程，故归属 Perception 层（感官层）。
@@ -13,14 +13,14 @@
  * 类型层不 import 引擎包——用本地最小接口描述，typecheck 零引擎依赖。
  */
 
-import { LayerId, PluginState, ok, err } from "@aigility-arch/core";
+import { LayerId, PluginState, ok, err } from "@aigility-harness/core";
 import type {
   ServiceDefinition,
   Provider,
   SeamContext,
   Result,
   HealthStatus,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 
 // ── 契约类型 ─────────────────────────────────────────────────────
 

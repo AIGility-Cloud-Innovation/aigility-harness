@@ -6,7 +6,7 @@
 
 ## 1. 概述
 
-把本地已有的 `api-router`（协议适配代理）、`LiteLLM`（AI 网关）、`DSH`（Cordis 运行时内核）三层服务，映射到 aigility-arch 五层架构的插件体系。
+把本地已有的 `api-router`（协议适配代理）、`LiteLLM`（AI 网关）、`DSH`（Cordis 运行时内核）三层服务，映射到 aigility-harness 五层架构的插件体系。
 
 - **DSH**：已是内核宿主（`KernelAdapter`），无需改动。
 - **LiteLLM**：认知层 `@cognitive/llm-inference` 的真实推理 Provider。
@@ -31,7 +31,7 @@
       │
       ▼
   ┌────────────────────────────────────────────┐
-  │  aigility-arch 内核（KernelAdapter）        │
+  │  aigility-harness 内核（KernelAdapter）        │
   │                                            │
   │  ┌── Infrastructure（底座 / 系统地基）      │
   │  │   ├ logging (已有)                       │

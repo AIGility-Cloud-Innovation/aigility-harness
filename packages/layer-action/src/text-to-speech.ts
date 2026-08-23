@@ -1,5 +1,5 @@
 /**
- * @aigility-arch/layer-action — 文本转语音能力
+ * @aigility-harness/layer-action — 文本转语音能力
  *
  * @action/text-to-speech — 薄适配 msedge-tts（Microsoft Edge Read Aloud API）。
  *
@@ -9,14 +9,14 @@
  */
 
 import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
-import { LayerId, PluginState, ok, err } from "@aigility-arch/core";
+import { LayerId, PluginState, ok, err } from "@aigility-harness/core";
 import type {
   ServiceDefinition,
   Provider,
   SeamContext,
   Result,
   HealthStatus,
-} from "@aigility-arch/core";
+} from "@aigility-harness/core";
 import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
