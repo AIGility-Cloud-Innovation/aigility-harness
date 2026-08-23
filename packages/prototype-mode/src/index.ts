@@ -279,6 +279,10 @@ async function main(): Promise<void> {
         "response",
         `items = ${codexExec.value.items.length}, hadMetadataFallback = ${codexExec.value.hadMetadataFallback}`,
       );
+      log(
+        "response",
+        `plan（框架认知层规划） = ${codexExec.value.plan ?? "(无，可能 skipPlanning)"}`,
+      );
     }
   }
 

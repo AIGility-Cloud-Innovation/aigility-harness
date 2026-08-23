@@ -30,6 +30,29 @@ import type {
   HealthStatus,
 } from "@aigility-arch/core";
 
+// ── 认知层 LLM 契约镜像 ─────────────────────────────────────────
+// 通过 Seam 字符串引用 `@cognitive/llm-inference` 解耦，
+// 不直接 import layer-cognitive（遵循 Provider 间禁止直接 import 原则）。
+// 结构仅反映 codex-agent 规划阶段所需的子集，与 layer-cognitive 契约保持一致。
+
+interface LlmChatMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | null;
+}
+
+interface LlmInferenceRequest {
+  model: string;
+  messages: LlmChatMessage[];
+  max_tokens?: number;
+  temperature?: number;
+}
+
+interface LlmInferenceResponse {
+  /** choices[0].message.content 便捷访问 */
+  text: string;
+  model: string;
+}
+
 // ── 类型定义 ─────────────────────────────────────────────────────
 
 export type CodexApprovalPolicy =
@@ -69,6 +92,15 @@ export interface CodexAgentRequest {
    * 传入则会返回 err 并提示边界。
    */
   threadId?: string;
+  /**
+   * 跳过框架内任务规划步骤（默认 false）。
+   * 为 false 时，execute 会先经 `@cognitive/llm-inference` 让认知层
+   * litellmProvider 产出一份执行计划，证明推理链路穿过本框架 Seam 层；
+   * 为 true 则直接 spawn codex，不经过认知层。
+   */
+  skipPlanning?: boolean;
+  /** 规划阶段使用的模型名（默认 `deepseek-v4-pro`，经 LiteLLM 路由） */
+  planningModel?: string;
 }
 
 /** 单次 agent turn 的用量统计 */
@@ -108,6 +140,8 @@ export interface CodexAgentResponse {
   usage?: CodexAgentTurnUsage;
   /** 模型不在 Codex 内置元数据表（走回退，性能可能下降） */
   hadMetadataFallback: boolean;
+  /** 框架认知层产出的执行计划（skipPlanning=true 时为 undefined） */
+  plan?: string;
 }
 
 // ── 服务定义 ─────────────────────────────────────────────────────
@@ -248,6 +282,44 @@ const codexAgentProviderImpl: Provider<
     const bin = codexBin();
     const args = buildArgs(request);
 
+    // ── 框架内闭环：先经认知层 litellmProvider 规划 ──
+    // 证明 codex-agent 的推理链路穿过本框架 Seam 层（而非 codex 私自直连 config.toml）。
+    let plan: string | undefined;
+    if (!request.skipPlanning) {
+      const planningModel = request.planningModel ?? "deepseek-v4-pro";
+      const planRes = await ctx.call<LlmInferenceRequest, LlmInferenceResponse>(
+        { id: "@cognitive/llm-inference", versionRange: "^1.0.0" },
+        {
+          model: planningModel,
+          messages: [
+            {
+              role: "system",
+              content:
+                "你是一个编码任务规划器。用一句话（≤80字）概述执行计划，不要写代码。",
+            },
+            { role: "user", content: prompt },
+          ],
+          max_tokens: 200,
+          temperature: 0.2,
+        },
+      );
+
+      if (!planRes.ok) {
+        // 认知层不可用属于依赖未满足（dependsOn 语义）
+        return err(
+          `codex-agent: planning via @cognitive/llm-inference failed: ${planRes.error}`,
+        );
+      }
+
+      plan = planRes.value.text?.trim();
+      ctx.emit({
+        type: "codex-agent.planning",
+        layer: LayerId.Orchestration,
+        payload: { model: planningModel, plan },
+        traceId: ctx.traceId,
+      });
+    }
+
     ctx.emit({
       type: "codex-agent.spawn",
       layer: LayerId.Orchestration,
@@ -351,6 +423,7 @@ const codexAgentProviderImpl: Provider<
             items: state.items,
             usage: state.usage,
             hadMetadataFallback: state.hadMetadataFallback,
+            plan,
           })
         );
       });

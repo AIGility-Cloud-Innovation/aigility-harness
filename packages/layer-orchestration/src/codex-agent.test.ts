@@ -7,8 +7,12 @@ import {
   codexAgentProvider,
 } from "./codex-agent.js";
 
-/** 最小 SeamContext 测试替身 */
-function mockContext(): SeamContext {
+/** 最小 SeamContext 测试替身；默认 planning（@cognitive/llm-inference）返回成功 */
+function mockContext(callImpl?: SeamContext["call"]): SeamContext {
+  const defaultCall = (async () => ({
+    ok: true as const,
+    value: { text: "mock plan", model: "deepseek-v4-pro" },
+  })) as unknown as SeamContext["call"];
   return {
     sessionId: "it-session",
     traceId: "it-trace",
@@ -17,7 +21,7 @@ function mockContext(): SeamContext {
     emit: () => {},
     getState: () => undefined,
     setState: () => {},
-    call: async () => ({ ok: false, error: "not wired in test" }),
+    call: callImpl ?? defaultCall,
   };
 }
 
@@ -59,6 +63,19 @@ describe("execute 边界校验", () => {
     );
     expect(r.ok).toBe(false);
   });
+
+  it("planning 失败时 execute 返回 err（不 spawn codex）", async () => {
+    const call = (async () => ({
+      ok: false as const,
+      error: "LiteLLM unreachable",
+    })) as unknown as SeamContext["call"];
+    const r = await codexAgentProvider.execute(
+      { prompt: "hello", cwd: process.cwd(), sandboxMode: "read-only" },
+      mockContext(call),
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain("planning");
+  });
 });
 
 describe("health 探针", () => {
@@ -94,6 +111,8 @@ describe("集成验证（真实驱动 Codex CLI）", () => {
         expect(r.value.threadId).toBeTruthy();
         expect(r.value.text.length).toBeGreaterThan(0);
         expect(r.value.text).toContain(marker);
+        // planning 经 mock 认知层成功，plan 字段应被填充
+        expect(r.value.plan).toBe("mock plan");
       }
     },
   );
