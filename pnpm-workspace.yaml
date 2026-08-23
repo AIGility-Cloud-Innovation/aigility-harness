@@ -3,6 +3,12 @@ packages:
 
 allowBuilds:
   esbuild: true
+  ffi-napi: set this to true or false
+  msedge-tts: set this to true or false
+  onnxruntime-node: set this to true or false
+  protobufjs: set this to true or false
+  ref-napi: set this to true or false
+  sharp: set this to true or false
 
 onlyBuiltDependencies:
   - esbuild
