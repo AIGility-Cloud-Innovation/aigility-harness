@@ -38,6 +38,15 @@ import {
   whisperSttProvider,
 } from "./speech-to-text.js";
 
+// 角色形象插件
+export {
+  chatAgentService,
+  chatAgentProvider,
+  ChatAgentRequest,
+  ChatAgentResponse,
+} from "./chat-agent.js";
+import { chatAgentService, chatAgentProvider } from "./chat-agent.js";
+
 // ── 服务定义 ─────────────────────────────────────────────────────
 
 export interface TextInputRequest {
@@ -116,7 +125,7 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [textInputProvider, voskSttProvider, whisperSttProvider];
+    return [textInputProvider, voskSttProvider, whisperSttProvider, chatAgentProvider];
   },
   getState(): PluginState {
     return pluginState;

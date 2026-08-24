@@ -131,7 +131,7 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [loggingProvider, configProvider, createProtocolAdapterProvider()];
+    return [loggingProvider, configProvider, createProtocolAdapterProvider(), httpIngressProvider];
   },
   getState(): PluginState {
     return pluginState;
@@ -149,3 +149,13 @@ export type {
   ProtocolAdapterRequest,
   ProtocolAdapterResponse,
 } from "./protocol-adapter.js";
+
+// HTTP 入口服务
+export {
+  httpIngressService,
+  httpIngressProvider,
+  stopHttpServer,
+  HttpIngressRequest,
+  HttpIngressResponse,
+} from "./http-ingress.js";
+import { httpIngressProvider, httpIngressService } from "./http-ingress.js";
