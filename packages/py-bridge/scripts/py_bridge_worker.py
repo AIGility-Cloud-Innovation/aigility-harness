@@ -83,11 +83,12 @@ def resolve_object(path: str, init_args: Optional[dict] = None) -> Any:
 
     try:
         mod = importlib.import_module(module_path)
-    except ImportError:
+    except ImportError as e:
         # 可能是更深的模块路径, 逐步回退
         # e.g. 'aigility.rag.service.RAGService' → module='aigility.rag.service'
         # 但 'aigility.rag.RAGService.search' → module='aigility.rag', attr='RAGService', method='search'
         obj: Any = None
+        last_err = e
         for i in range(len(module_path.split('.')) - 1, 0, -1):
             try:
                 mod = importlib.import_module('.'.join(module_path.split('.')[:i]))
@@ -96,18 +97,20 @@ def resolve_object(path: str, init_args: Optional[dict] = None) -> Any:
                 for r in rest:
                     obj = getattr(obj, r)
                 break
-            except (ImportError, AttributeError):
+            except (ImportError, AttributeError) as e2:
+                last_err = e2
                 obj = None
                 continue
         if obj is None:
-            raise ImportError(f"Cannot resolve path: {path}")
-        if init_args and isinstance(obj, type):
+            raise ImportError(f"Cannot resolve path: {path} (last error: {last_err})")
+        if init_args is not None and isinstance(obj, type):
             return obj(**init_args)
         return obj
 
     obj = getattr(mod, attr_name)
 
-    if init_args and isinstance(obj, type):
+    # 如果是类且提供了 init_args (即使是空 {}), 就实例化
+    if init_args is not None and isinstance(obj, type):
         return obj(**init_args)
 
     return obj
