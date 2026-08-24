@@ -29,6 +29,14 @@ import { plugin as cognitivePlugin } from "@aigility-harness/layer-cognitive";
 import { plugin as perceptionPlugin } from "@aigility-harness/layer-perception";
 import { plugin as orchestrationPlugin } from "@aigility-harness/layer-orchestration";
 import { plugin as actionPlugin } from "@aigility-harness/layer-action";
+import {
+  createPyBridgePlugin,
+  loadPyPluginsConfig,
+} from "@aigility-harness/py-bridge";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 import type {
   LlmInferenceRequest,
@@ -286,8 +294,25 @@ async function main(): Promise<void> {
     }
   }
 
-  // 9. 关闭
-  console.log("\n9. 关闭...");
+  // 9. py-bridge 演示：声明式接入 Python 插件
+  console.log("\n9. py-bridge 演示：声明式配置接入 Python 插件");
+  const pyPluginsPath = resolve(__dirname, "../../../config/py-plugins.json");
+  const pyConfigs = loadPyPluginsConfig(pyPluginsPath);
+  if (pyConfigs.length === 0) {
+    log("py-bridge", "config/py-plugins.json 不存在或无插件, 跳过");
+  } else {
+    const pyBridgePlugin = createPyBridgePlugin(pyConfigs);
+    log("py-bridge", `配置加载: ${pyConfigs.length} 个插件, ${pyBridgePlugin.manifest.provides.length} 个能力`);
+    for (const svc of pyBridgePlugin.manifest.provides) {
+      log("py-bridge", `  ${svc.id} (layer=${svc.layer}) → ${svc.description}`);
+    }
+    // 注意: 实际接入需要在 bootstrap plugins 数组中加入 pyBridgePlugin
+    // 这里仅展示配置解析结果, 不实际 spawn Python (避免无 Python 环境时 demo 报错)
+    log("py-bridge", "接入方式: 加入 bootstrap plugins 数组即可, Python 侧零改动");
+  }
+
+  // 10. 关闭
+  console.log("\n10. 关闭...");
   const sd = await shutdown(kernel, scheduler);
   if (!sd.ok) {
     console.error("   关闭失败:", sd.error);

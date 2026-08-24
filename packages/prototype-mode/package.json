@@ -15,7 +15,8 @@
     "@aigility-harness/layer-cognitive": "workspace:*",
     "@aigility-harness/layer-perception": "workspace:*",
     "@aigility-harness/layer-orchestration": "workspace:*",
-    "@aigility-harness/layer-action": "workspace:*"
+    "@aigility-harness/layer-action": "workspace:*",
+    "@aigility-harness/py-bridge": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.5.0",

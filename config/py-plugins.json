@@ -1,0 +1,77 @@
+{
+  "$schema": "Python 插件声明式配置 — py-bridge 读此文件自动生成 Seam Provider",
+  "plugins": [
+    {
+      "name": "aigility-rag",
+      "pythonModule": "aigility.rag",
+      "pythonExecutable": "python3",
+      "capabilities": [
+        {
+          "id": "@cognitive/rag-retrieval",
+          "layer": "cognitive",
+          "function": "aigility.rag.RAGService",
+          "method": "search",
+          "init": {
+            "embedding": {
+              "provider": "dashscope",
+              "api_key": "${DASHSCOPE_API_KEY}"
+            },
+            "vector_store": {
+              "provider": "chroma",
+              "persist_path": "./data/vector_db"
+            }
+          },
+          "requestMapping": {
+            "query": "query",
+            "topK": "top_k"
+          },
+          "responseMapping": {
+            "documents": "results"
+          }
+        }
+      ]
+    },
+    {
+      "name": "aigility-memory",
+      "pythonModule": "aigility.memory",
+      "pythonExecutable": "python3",
+      "capabilities": [
+        {
+          "id": "@cognitive/memory",
+          "layer": "cognitive",
+          "function": "aigility.memory.MemoryService",
+          "method": "search",
+          "init": {
+            "api_key": "${TIMEM_API_KEY}"
+          },
+          "requestMapping": {
+            "query": "query",
+            "userId": "user_id",
+            "characterId": "character_id"
+          }
+        }
+      ]
+    },
+    {
+      "name": "aigility-chatflow",
+      "pythonModule": "aigility.chatflow",
+      "pythonExecutable": "python3",
+      "capabilities": [
+        {
+          "id": "@orchestration/chat-flow",
+          "layer": "orchestration",
+          "function": "aigility.chatflow.ChatFlow",
+          "method": "invoke",
+          "init": {
+            "llm_provider": "openai",
+            "llm_api_key": "${OPENAI_API_KEY}"
+          },
+          "requestMapping": {
+            "messages": "messages",
+            "query": "query"
+          }
+        }
+      ]
+    }
+  ]
+}
