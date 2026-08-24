@@ -2,74 +2,70 @@
   "$schema": "Python 插件声明式配置 — py-bridge 读此文件自动生成 Seam Provider",
   "plugins": [
     {
+      "name": "aigility-workflow",
+      "comment": "编排工具: YAML → LangGraph StateGraph",
+      "pythonExecutable": "/home/johnny/AI/aigility/.venv/bin/python",
+      "pythonPath": "/home/johnny/AI/aigility/.venv/lib/python3.11/site-packages:/home/johnny/AI/aigility",
+      "workDir": "/home/johnny/AI/aigility",
+      "capabilities": [
+        {
+          "id": "@orchestration/workflow-engine",
+          "layer": "orchestration",
+          "function": "aigility.workflow.WorkflowEngine",
+          "method": "invoke",
+          "init": {
+            "name": "workflow",
+            "config_path": null,
+            "state_schema": null
+          }
+        }
+      ]
+    },
+    {
       "name": "aigility-rag",
-      "pythonModule": "aigility.rag",
-      "pythonExecutable": "python3",
+      "comment": "底层能力: RAG 检索",
+      "pythonExecutable": "/home/johnny/AI/aigility/.venv/bin/python",
+      "pythonPath": "/home/johnny/AI/aigility/.venv/lib/python3.11/site-packages:/home/johnny/AI/aigility",
+      "workDir": "/home/johnny/AI/aigility",
       "capabilities": [
         {
           "id": "@cognitive/rag-retrieval",
           "layer": "cognitive",
           "function": "aigility.rag.RAGService",
           "method": "search",
-          "init": {
-            "embedding": {
-              "provider": "dashscope",
-              "api_key": "${DASHSCOPE_API_KEY}"
-            },
-            "vector_store": {
-              "provider": "chroma",
-              "persist_path": "./data/vector_db"
-            }
-          },
-          "requestMapping": {
-            "query": "query",
-            "topK": "top_k"
-          },
-          "responseMapping": {
-            "documents": "results"
-          }
+          "init": {}
         }
       ]
     },
     {
       "name": "aigility-memory",
-      "pythonModule": "aigility.memory",
-      "pythonExecutable": "python3",
+      "comment": "底层能力: 长期记忆",
+      "pythonExecutable": "/home/johnny/AI/aigility/.venv/bin/python",
+      "pythonPath": "/home/johnny/AI/aigility/.venv/lib/python3.11/site-packages:/home/johnny/AI/aigility",
+      "workDir": "/home/johnny/AI/aigility",
       "capabilities": [
         {
           "id": "@cognitive/memory",
           "layer": "cognitive",
-          "function": "aigility.memory.MemoryService",
+          "function": "aigility.memory.Memory",
           "method": "search",
-          "init": {
-            "api_key": "${TIMEM_API_KEY}"
-          },
-          "requestMapping": {
-            "query": "query",
-            "userId": "user_id",
-            "characterId": "character_id"
-          }
+          "init": {}
         }
       ]
     },
     {
       "name": "aigility-chatflow",
-      "pythonModule": "aigility.chatflow",
-      "pythonExecutable": "python3",
+      "comment": "编排工具: ChatFlow (LangGraph 状态机)",
+      "pythonExecutable": "/home/johnny/AI/aigility/.venv/bin/python",
+      "pythonPath": "/home/johnny/AI/aigility/.venv/lib/python3.11/site-packages:/home/johnny/AI/aigility",
+      "workDir": "/home/johnny/AI/aigility",
       "capabilities": [
         {
           "id": "@orchestration/chat-flow",
           "layer": "orchestration",
           "function": "aigility.chatflow.ChatFlow",
           "method": "invoke",
-          "init": {
-            "llm_provider": "openai",
-            "llm_api_key": "${OPENAI_API_KEY}"
-          },
-          "requestMapping": {
-            "messages": "messages",
-            "query": "query"
-          }
+          "init": {}
         }
       ]
     }
