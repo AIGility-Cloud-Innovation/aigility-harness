@@ -5,7 +5,6 @@
       "name": "aigility-workflow",
       "comment": "编排工具: YAML → LangGraph StateGraph",
       "pythonExecutable": "/home/johnny/AI/aigility/.venv/bin/python",
-      "pythonPath": "/home/johnny/AI/aigility/.venv/lib/python3.11/site-packages:/home/johnny/AI/aigility",
       "workDir": "/home/johnny/AI/aigility",
       "capabilities": [
         {
@@ -14,34 +13,19 @@
           "function": "aigility.workflow.WorkflowEngine",
           "method": "invoke",
           "init": {
-            "name": "workflow",
-            "config_path": null,
-            "state_schema": null
+            "name": "chat-workflow",
+            "config_path": "/home/johnny/AI/aigility/tests/workflow_test_config.yaml",
+            "state_schema": "tests.workflow_state.TestState",
+            "node_module": "tests.workflow_nodes",
+            "condition_module": "tests.workflow_nodes"
           }
         }
       ]
     },
     {
-      "name": "aigility-rag",
-      "comment": "底层能力: RAG 检索",
-      "pythonExecutable": "/home/johnny/AI/aigility/.venv/bin/python",
-      "pythonPath": "/home/johnny/AI/aigility/.venv/lib/python3.11/site-packages:/home/johnny/AI/aigility",
-      "workDir": "/home/johnny/AI/aigility",
-      "capabilities": [
-        {
-          "id": "@cognitive/rag-retrieval",
-          "layer": "cognitive",
-          "function": "aigility.rag.RAGService",
-          "method": "search",
-          "init": {}
-        }
-      ]
-    },
-    {
       "name": "aigility-memory",
-      "comment": "底层能力: 长期记忆",
+      "comment": "长期记忆",
       "pythonExecutable": "/home/johnny/AI/aigility/.venv/bin/python",
-      "pythonPath": "/home/johnny/AI/aigility/.venv/lib/python3.11/site-packages:/home/johnny/AI/aigility",
       "workDir": "/home/johnny/AI/aigility",
       "capabilities": [
         {
@@ -49,22 +33,6 @@
           "layer": "cognitive",
           "function": "aigility.memory.Memory",
           "method": "search",
-          "init": {}
-        }
-      ]
-    },
-    {
-      "name": "aigility-chatflow",
-      "comment": "编排工具: ChatFlow (LangGraph 状态机)",
-      "pythonExecutable": "/home/johnny/AI/aigility/.venv/bin/python",
-      "pythonPath": "/home/johnny/AI/aigility/.venv/lib/python3.11/site-packages:/home/johnny/AI/aigility",
-      "workDir": "/home/johnny/AI/aigility",
-      "capabilities": [
-        {
-          "id": "@orchestration/chat-flow",
-          "layer": "orchestration",
-          "function": "aigility.chatflow.ChatFlow",
-          "method": "invoke",
           "init": {}
         }
       ]
