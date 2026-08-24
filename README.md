@@ -189,14 +189,79 @@ pnpm example:prototype
 | 编码 Agent | `codex-agent`（codex CLI → localhost:4000） | 任意符合契约的 Agent Provider |
 | 协议适配 | `protocol-adapter`（api-router 协议翻译） | 任意协议桥接实现 |
 | TTS | `text-to-speech` | 任意 TTS 引擎 |
+| **Python 能力桥接** | `py-bridge`（JSON-RPC over stdio → aigility ADK） | 任意 Python 包，声明式配置接入 |
+| **工作流编排** | `aigility.workflow.WorkflowEngine`（YAML → LangGraph） | 任意编排引擎，通过 Seam 契约替换 |
+| **RAG 检索** | `aigility.rag.RAGService`（通过 py-bridge） | 任意 RAG 实现 |
+| **长期记忆** | `aigility.memory.Memory`（通过 py-bridge） | 任意记忆服务 |
 
 ---
 
-## 八、落地实施路线
+## 八、py-bridge：跨语言插件桥接
+
+### 8.1 已兼容的插件类别
+
+harness 通过 py-bridge 支持三类插件，覆盖从底层能力到编排工具的全栈：
+
+| 插件类别 | 接入方式 | 语言 | 示例 | 状态 |
+|---------|---------|------|------|------|
+| **TS 原生插件** | LayerPlugin 直接注册 | TypeScript | litellmProvider, codex-agent, TTS, protocol-adapter | ✅ 阶段 1 |
+| **Python 能力插件** | py-bridge 声明式配置 (py-plugins.json) | Python | aigility.rag, aigility.memory | ✅ 阶段 1.5 |
+| **Python 编排工具插件** | py-bridge + YAML 配置 | Python | aigility.workflow.WorkflowEngine | ✅ 阶段 1.5 |
+
+### 8.2 py-bridge 设计
+
+```
+harness (TS)                          Python (子进程)
+  │                                     │
+  ├── py-plugins.json (声明式配置)      │
+  │   "function": "aigility.rag.RAGService"  │
+  │   "method": "search"               │
+  │                                     │
+  ├── PyWorker (TS)                    py_bridge_worker.py
+  │   spawn python subprocess ←──────→ JSON-RPC over stdio
+  │   请求队列 + Promise 映射           动态 import + 实例缓存
+  │   callBatch() 批量调用              ThreadPoolExecutor (同步函数)
+  │                                     │
+  └── Seam Provider (自动生成)         │
+      ctx.call("@cognitive/rag", req) → │
+```
+
+**核心特性：**
+- **零端口** — JSON-RPC over stdin/stdout，父进程托管生命周期
+- **Python 侧零改动** — 只写 JSON 配置，不改 Python 仓库
+- **单进程多实例** — 一个 worker 服务多个 capability
+- **实例缓存** — initialize 一次，后续 call 零 import 开销
+- **批量调用** — callBatch() 一次往返多个调用
+- **Seam 契约 1:1 映射** — 未来切换 Python 框架时 Python 代码零改动
+
+### 8.3 已验证的 aigility 能力
+
+| Seam 能力 ID | 层 | aigility 模块 | 方法 | 端到端测试 |
+|-------------|-----|-------------|------|-----------|
+| `@orchestration/workflow-engine` | L3 | `aigility.workflow.WorkflowEngine` | `invoke` | ✅ YAML → LangGraph → 条件分支 |
+| `@cognitive/memory` | L1 | `aigility.memory.Memory` | `search` | ✅ 异步方法正确处理 |
+| `@cognitive/rag-retrieval` | L1 | `aigility.rag.RAGService` | `search` | ⚠️ 需 dashscope 包 |
+| `@orchestration/chat-flow` | L3 | `aigility.chatflow.ChatFlow` | `invoke` | ✅ 初始化成功 |
+
+### 8.4 编排工具 + 编排实例分离
+
+```
+编排工具 (插件)     = aigility.workflow.WorkflowEngine (LangGraph 引擎)
+编排实例 (配置)     = workflow_config.yaml (声明节点和边)
+底层能力 (插件)     = RAG / Memory / FAQ / LLM (被编排工具调用)
+```
+
+编排工具不知道业务逻辑，业务逻辑不知道 RAG/Memory 的实现。编排实例 (YAML) 把两者接线。
+编排实例中可混用三种节点：`function_node` (本地函数)、`llm_node` (LLM 推理)、`capability_node` (Seam 能力调用)。
+
+---
+
+## 九、落地实施路线
 
 | 阶段 | 目标 | 内容 |
 |------|------|------|
 | **阶段 1**（✅ 已完成） | 原型闭环 | 五层能力 DSH 插件化，验证完整业务逻辑；kernel-dsh 35 测例 + codex-agent 规划闭环通过 |
+| **阶段 1.5**（✅ 已完成） | 跨语言桥接 | py-bridge 通用 Python 对接器，aigility ADK 端到端验证通过 |
 | **阶段 2** | 桥接层开发 | Seam ↔ NATS 双向桥接，打通跨进程通信 |
 | **阶段 3** | 进程载体封装 | 守护进程管理、多载体统一抽象 |
 | **阶段 4** | 智能调度与自动替换 | 健康探测、指标采集、自动切换控制器 |
@@ -204,12 +269,12 @@ pnpm example:prototype
 
 ---
 
-## 九、目录结构
+## 十、目录结构
 
 ```
 aigility-harness/
 ├── packages/
-│   ├── core/                      # 核心契约：LayerId / CarrierKind / ServiceDefinition / Seam -->
+│   ├── core/                      # 核心契约：LayerId / CarrierKind / ServiceDefinition / Seam
 │   │                              #   Provider / Consumer / LayerPlugin / KernelAdapter
 │   ├── kernel-dsh/                # DSH-Cordis 内核适配器（Seam Registry / Effect Manager / Carrier Manager）
 │   ├── layer-cognitive/           # L1 认知决策层（LLM 推理：stub + litellm）
@@ -217,14 +282,28 @@ aigility-harness/
 │   ├── layer-orchestration/       # L3 编排规划层（任务规划 + codex-agent）
 │   ├── layer-action/              # L4 行动执行层（TTS）
 │   ├── layer-infrastructure/      # L5 底座基础层（config/logging/protocol-adapter）
+│   ├── py-bridge/                 # 跨语言桥接器（JSON-RPC over stdio → Python）
+│   │   ├── src/
+│   │   │   ├── types.ts           # 声明式配置 + 通信协议类型
+│   │   │   ├── py-worker.ts       # 子进程管理 + 请求队列 + 批量调用
+│   │   │   ├── py-bridge.ts       # Provider 工厂：配置 → Seam Provider
+│   │   │   ├── config-loader.ts   # 配置加载 + 环境变量替换
+│   │   │   └── py-bridge.test.ts  # 端到端测试（7 例）
+│   │   └── scripts/
+│   │       └── py_bridge_worker.py  # 通用 Python worker
 │   └── prototype-mode/            # 原型演示入口（InMemoryKernel → 五层插件装配）
+├── config/
+│   └── py-plugins.json            # Python 插件声明式配置（aigility 能力映射）
+├── tests/
+│   ├── e2e-aigility.py            # aigility Memory/RAG 端到端测试
+│   └── e2e-workflow.py            # aigility WorkflowEngine 端到端测试
 └── docs/
     └── plugin-integration-design.md   # 五层插件接入设计文档 v0.2
 ```
 
 ---
 
-## 十、终极架构总结
+## 十一、终极架构总结
 
 1. **五层业务域**：认知、感知、编排、执行、底座 —— 单向依赖，永不交叉
 2. **四层运行内核**：DSH-Cordis 原生支撑（插件 / Seam / 运行时 / 传输）
