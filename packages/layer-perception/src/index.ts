@@ -49,6 +49,17 @@ export type {
 } from "./chat-agent.js";
 import { chatAgentService, chatAgentProvider } from "./chat-agent.js";
 
+// 就业数据顾问角色形象 (CareerEdu)
+export {
+  advisoryChatService,
+  advisoryChatProvider,
+} from "./advisory-chat.js";
+export type {
+  AdvisoryChatRequest,
+  AdvisoryChatResponse,
+} from "./advisory-chat.js";
+import { advisoryChatService, advisoryChatProvider } from "./advisory-chat.js";
+
 // ── 服务定义 ─────────────────────────────────────────────────────
 
 export interface TextInputRequest {
@@ -109,7 +120,7 @@ export const manifest: PluginManifest = {
   layer: LayerId.Perception,
   description: "感知交互层：文本输入归一化 + 语音转文本（ASR）",
   version: "0.2.0",
-  provides: [textInputService, speechToTextService],
+  provides: [textInputService, speechToTextService, advisoryChatService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
 };
@@ -127,7 +138,13 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [textInputProvider, voskSttProvider, whisperSttProvider, chatAgentProvider];
+    return [
+      textInputProvider,
+      voskSttProvider,
+      whisperSttProvider,
+      chatAgentProvider,
+      advisoryChatProvider,
+    ];
   },
   getState(): PluginState {
     return pluginState;
