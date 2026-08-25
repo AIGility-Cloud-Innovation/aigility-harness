@@ -33,6 +33,7 @@ import {
   createPyBridgePlugin,
   loadPyPluginsConfig,
 } from "@aigility-harness/py-bridge";
+import { httpIngressService, stopHttpServer } from "@aigility-harness/layer-infrastructure";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -51,6 +52,8 @@ import type {
 import type {
   ProtocolAdapterRequest,
   ProtocolAdapterResponse,
+  HttpIngressRequest,
+  HttpIngressResponse,
 } from "@aigility-harness/layer-infrastructure";
 import type {
   TextToSpeechRequest,
@@ -323,6 +326,59 @@ async function main(): Promise<void> {
       log("response", `agent = ${chatExec.value.agent_name}`);
       log("response", `response = ${chatExec.value.response}`);
       log("response", `session = ${chatExec.value.session_id}, trace = ${chatExec.value.trace_id}`);
+    }
+  }
+
+  // 9b. HTTP 入口演示：唯一入口双链路路由
+  console.log("\n9b. HTTP 唯一入口演示：/v1/chat/completions → 协议适配 → LLM, /api/chat → 角色形象");
+  const ctx7 = kernel.createContext("session-007", LayerId.Infrastructure);
+  const ingressRef: CapabilityRef = {
+    id: "@infrastructure/http-ingress",
+    versionRange: "^1.0.0",
+  };
+  const ingressRes = await kernel.registry.resolve<HttpIngressRequest, HttpIngressResponse>(ingressRef);
+  if (!ingressRes.ok) {
+    console.error("   resolve http-ingress 失败:", ingressRes.error);
+  } else {
+    const ingressReq: HttpIngressRequest = {
+      port: 3399,
+      devPaths: ["/v1/chat/completions", "/v1/messages"],
+      agentPaths: ["/api/chat"],
+    };
+    log("request", JSON.stringify(ingressReq));
+    const ingressExec = await ingressRes.value.execute(ingressReq, ctx7);
+    if (!ingressExec.ok) {
+      console.error("   http-ingress 启动失败:", ingressExec.error);
+    } else {
+      log("response", `started = ${ingressExec.value.started}, routes = ${JSON.stringify(ingressExec.value.routes)}`);
+
+      // 双链路真实 HTTP 请求
+      try {
+        // 链路 A：开发者协议 (/v1/chat/completions → protocol-adapter → LLM)
+        const devRes = await fetch("http://127.0.0.1:3399/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "user-agent": "claude-cli/2.x" },
+          body: JSON.stringify({
+            model: "qwen-turbo",
+            messages: [{ role: "user", content: "用一句话介绍你自己" }],
+            max_tokens: 32,
+          }),
+        });
+        const devBody = await devRes.json() as Record<string, unknown>;
+        log("dev", `HTTP ${devRes.status}: ${JSON.stringify(devBody).slice(0, 200)}`);
+
+        // 链路 B：角色形象 (/api/chat → chat-agent → workflow-engine)
+        const agentRes = await fetch("http://127.0.0.1:3399/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_input: "帮我查一下今天的订单", merchant_id: "M001", customer_id: "C001" }),
+        });
+        const agentBody = await agentRes.json() as Record<string, unknown>;
+        log("agent", `HTTP ${agentRes.status}: ${JSON.stringify(agentBody).slice(0, 200)}`);
+      } finally {
+        await stopHttpServer();
+        log("http-ingress", "server stopped");
+      }
     }
   }
 
