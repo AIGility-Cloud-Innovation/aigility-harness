@@ -155,6 +155,8 @@ export {
   httpIngressService,
   httpIngressProvider,
   stopHttpServer,
+} from "./http-ingress.js";
+export type {
   HttpIngressRequest,
   HttpIngressResponse,
 } from "./http-ingress.js";

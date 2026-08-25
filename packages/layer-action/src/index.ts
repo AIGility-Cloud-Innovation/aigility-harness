@@ -2,7 +2,7 @@
  * @aigility-harness/layer-action — 行动执行工具层
  *
  * 提供工具执行占位能力（@action/tool-execution）。
- * 声明消费编排层的 @orchestration/task-planning。
+ * 行动层是链路末端，执行编排层交付的具体操作，不反向消费编排能力。
  */
 
 import {
@@ -19,7 +19,6 @@ import type {
   PluginManifest,
   Result,
   HealthStatus,
-  CapabilityRef,
 } from "@aigility-harness/core";
 import {
   textToSpeechService,
@@ -56,12 +55,6 @@ export const toolExecutionService: ServiceDefinition<
   description: "工具执行能力（原型占位，返回参数回显）",
 };
 
-// 行动层消费编排层的任务规划能力
-export const taskPlanningRef: CapabilityRef = {
-  id: "@orchestration/task-planning",
-  versionRange: "^1.0.0",
-};
-
 // ── Provider 实现 ────────────────────────────────────────────────
 
 const toolExecutionProvider: Provider<
@@ -96,12 +89,11 @@ const toolExecutionProvider: Provider<
 export const manifest: PluginManifest = {
   name: "@action/tool-execution",
   layer: LayerId.Action,
-  description: "行动执行层：工具执行占位 + 文本转语音，消费编排层规划",
+  description: "行动执行层：工具执行占位 + 文本转语音",
   version: "0.2.0",
   provides: [toolExecutionService, textToSpeechService],
-  consumes: [taskPlanningRef],
+  consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
-  dependsOn: ["@orchestration/task-planning"],
 };
 
 let pluginState: PluginState = PluginState.Registered;

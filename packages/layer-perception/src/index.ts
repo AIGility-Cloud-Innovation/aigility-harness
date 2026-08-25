@@ -42,6 +42,8 @@ import {
 export {
   chatAgentService,
   chatAgentProvider,
+} from "./chat-agent.js";
+export type {
   ChatAgentRequest,
   ChatAgentResponse,
 } from "./chat-agent.js";

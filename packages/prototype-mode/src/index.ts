@@ -56,6 +56,10 @@ import type {
   TextToSpeechRequest,
   TextToSpeechResponse,
 } from "@aigility-harness/layer-action";
+import type {
+  ChatAgentRequest,
+  ChatAgentResponse,
+} from "@aigility-harness/layer-perception";
 
 function log(tag: string, msg: string): void {
   // eslint-disable-next-line no-console
@@ -291,6 +295,34 @@ async function main(): Promise<void> {
         "response",
         `plan（框架认知层规划） = ${codexExec.value.plan ?? "(无，可能 skipPlanning)"}`,
       );
+    }
+  }
+
+  // 9a. 角色形象演示：perception -> orchestration（chat-agent → workflow-engine）
+  console.log("\n9a. 角色形象演示：@perception/chat-agent（L2）→ @orchestration/workflow-engine（L3）");
+  const ctx6 = kernel.createContext("session-006", LayerId.Perception);
+
+  const chatAgentRef: CapabilityRef = {
+    id: "@perception/chat-agent",
+    versionRange: "^1.0.0",
+  };
+  const chatRes = await kernel.registry.resolve<ChatAgentRequest, ChatAgentResponse>(chatAgentRef);
+  if (!chatRes.ok) {
+    console.error("   resolve chat-agent 失败:", chatRes.error);
+  } else {
+    const chatReq: ChatAgentRequest = {
+      user_input: "帮我查一下今天的订单",
+      merchant_id: "M001",
+      customer_id: "C001",
+    };
+    log("request", JSON.stringify(chatReq));
+    const chatExec = await chatRes.value.execute(chatReq, ctx6);
+    if (!chatExec.ok) {
+      console.error("   chat-agent 执行失败:", chatExec.error);
+    } else {
+      log("response", `agent = ${chatExec.value.agent_name}`);
+      log("response", `response = ${chatExec.value.response}`);
+      log("response", `session = ${chatExec.value.session_id}, trace = ${chatExec.value.trace_id}`);
     }
   }
 
