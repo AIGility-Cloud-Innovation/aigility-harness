@@ -197,6 +197,20 @@ pnpm --filter @aigility-harness/example-openai-gateway start
 
 agent 路径→角色映射可配置（`agentRoutes`），未命中路径回退 `perceptionId`。
 
+### 特色案例：企业微信 → Codex
+
+企业微信「智能机器人」原生接入——在企微群里 @机器人，即可驱动 codex 真实干活：
+
+```bash
+# 1. 企微后台创建「智能机器人」拿到 botId+secret
+export WECOM_BOT_ID=xxx WECOM_BOT_SECRET=xxx
+# 2. 启动特色案例装配
+pnpm --filter wecom-coder start
+# 3. 企微 @机器人: 「帮我写个冒泡排序」 → codex 干活 → 群里回结果
+```
+
+链路：企微 WebSocket 长连接（`@wecom/aibot-node-sdk`）→ `@infrastructure/wecom-ingress` → `@persona/coder` → `@orchestration/codex-agent` → Codex（经框架认知层供能）。支持流式"思考中…"占位与 Markdown 回复。
+
 ### 现有验证案例（均为可替换示例）
 
 | 能力 | 当前实现 | 可替换为 |
@@ -208,6 +222,7 @@ agent 路径→角色映射可配置（`agentRoutes`），未命中路径回退 
 | **角色对话** | `sales-chat`（销售客服角色, 由 chat-agent 正名而来） | 任意 L2 角色（特性打包为 persona 插件） |
 | **开箱引导安装** | `plugin-helper` 角色 → `plugin-install` 工作流（扫描 py-plugins.json + packages → 契约匹配 → 接入指引） | 任意安装/引导工作流 |
 | **最小 Web UI** | http-ingress `GET /` / `/ui`（单文件 HTML, 双角色页签, 零依赖） | 任意前端 |
+| **企业微信入口（特色案例）** | `wecom-ingress`（aibot-node-sdk WebSocket 长连接 → 角色路由 → replyStream）+ `examples/wecom-coder`（企微 @机器人 → coder → codex） | 任意 IM 通道（钉钉/飞书/微信，同构接入） |
 | TTS | `text-to-speech` | 任意 TTS 引擎 |
 | **Python 能力桥接** | `py-bridge`（JSON-RPC over stdio → aigility ADK） | 任意 Python 包，声明式配置接入 |
 | **工作流编排** | `aigility.workflow.WorkflowEngine`（YAML → LangGraph） | 任意编排引擎，通过 Seam 契约替换 |
