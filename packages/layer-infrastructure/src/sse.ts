@@ -115,3 +115,138 @@ export function encodeChatCompletionStream(opts: {
   frames.push(SSE_DONE);
   return frames;
 }
+
+// ── OpenAI Responses 协议 SSE (responses 事件流) ─────────────────
+//
+// codex (wire_api="responses") 走 /v1/responses 时期望的事件序列:
+//   response.created → response.output_item.added → response.output_text.delta
+//   → response.output_item.done → response.completed
+// 规范要点: 每个事件 data 必须带 "type" 字段(与 event 名一致),
+//   codex 按 data.type 路由事件, 缺 type 的事件会被丢弃。
+// 事件均不带 "data: " 前缀, 是带 event: 字段的 SSE（OpenAI Responses 规范）。
+
+/** 编码一条带 event 名的 Responses SSE 帧: `event: <name>\ndata: <json>\n\n` */
+export function encodeResponsesEvent(
+  event: string,
+  data: Record<string, unknown>,
+): string {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+/** 构造 response 基础对象（各事件共用） */
+function responseBase(opts: {
+  responseId: string;
+  model: string;
+  created: number;
+  status?: "in_progress" | "completed";
+}): Record<string, unknown> {
+  return {
+    id: opts.responseId,
+    object: "response",
+    created_at: opts.created,
+    model: opts.model,
+    status: opts.status ?? "in_progress",
+  };
+}
+
+/** 把一条 ResponsesResponse 编码为 Responses SSE 帧数组（含终结帧）. */
+export function encodeResponsesStream(opts: {
+  responseId: string;
+  model: string;
+  created?: number;
+  content: string;
+  outputTextId?: string;
+  usage?: { input_tokens: number; output_tokens: number; total_tokens: number };
+}): string[] {
+  const {
+    responseId,
+    model,
+    created = Math.floor(Date.now() / 1000),
+    content,
+    outputTextId = `msg_${Math.random().toString(36).slice(2, 12)}`,
+    usage,
+  } = opts;
+
+  const frames: string[] = [];
+
+  // 1. response.created — 会话创建 (data 带 type, response 包裹整体)
+  frames.push(
+    encodeResponsesEvent("response.created", {
+      type: "response.created",
+      response: responseBase({ responseId, model, created }),
+    }),
+  );
+
+  // 2. response.output_item.added — 声明输出消息
+  frames.push(
+    encodeResponsesEvent("response.output_item.added", {
+      type: "response.output_item.added",
+      output_index: 0,
+      item: {
+        id: outputTextId,
+        type: "message",
+        role: "assistant",
+        status: "in_progress",
+        content: [],
+      },
+    }),
+  );
+
+  // 3. response.output_text.delta — 内容增量 (单块发出)
+  frames.push(
+    encodeResponsesEvent("response.output_text.delta", {
+      type: "response.output_text.delta",
+      output_index: 0,
+      content_index: 0,
+      delta: content,
+    }),
+  );
+
+  // 4. response.output_item.done — 消息完成
+  frames.push(
+    encodeResponsesEvent("response.output_item.done", {
+      type: "response.output_item.done",
+      output_index: 0,
+      item: {
+        id: outputTextId,
+        type: "message",
+        role: "assistant",
+        status: "completed",
+        content: [{ type: "output_text", text: content }],
+      },
+    }),
+  );
+
+  // 5. response.completed — 结束 (带 usage, response 包裹整体)
+  const completedResponse: Record<string, unknown> = {
+    ...responseBase({ responseId, model, created, status: "completed" }),
+    ...(usage
+      ? {
+          usage: {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            total_tokens: usage.total_tokens,
+          },
+        }
+      : {}),
+    output: [
+      {
+        id: outputTextId,
+        type: "message",
+        role: "assistant",
+        status: "completed",
+        content: [{ type: "output_text", text: content }],
+      },
+    ],
+  };
+  frames.push(
+    encodeResponsesEvent("response.completed", {
+      type: "response.completed",
+      response: completedResponse,
+    }),
+  );
+
+  // 6. 流结束标记
+  frames.push(SSE_DONE);
+  return frames;
+}

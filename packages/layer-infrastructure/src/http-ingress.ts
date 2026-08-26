@@ -34,6 +34,7 @@ import { randomUUID } from "node:crypto";
 import {
   writeSseHeaders,
   encodeChatCompletionStream,
+  encodeResponsesStream,
   encodeSseFrame,
   SSE_DONE,
 } from "./sse.js";
@@ -219,7 +220,10 @@ const httpIngressProvider: Provider<HttpIngressRequest, HttpIngressResponse> = {
           //      fetch 流式解析后升级。若上游本身支持流式可再透传。
           // 注2: 若上游已返回流式帧（透传模式）, 此处整块编码逻辑同样适用——
           //      只会多一层包装, 客户端依旧可解析。
-          const wantStream = payload["stream"] === true;
+          // 注3: openai-responses 默认流式（codex 强制 wire_api="responses",
+          //      请求不携带 stream 字段但按 SSE 事件流消费）。
+          const wantStream =
+            protocol === "openai-responses" || payload["stream"] === true;
           if (wantStream && typeof payload["stream"] === "boolean") {
             // 剥掉 stream, 发非流式请求, 避免 litellm 返回 SSE 而 provider 无法解析
             delete (payload as Record<string, unknown>)["stream"];
@@ -245,6 +249,39 @@ const httpIngressProvider: Provider<HttpIngressRequest, HttpIngressResponse> = {
               return;
             }
             const value = callResult.value as unknown as ChatLikeShape;
+
+            // openai-responses: 按 Responses 事件流编码 (codex 协议)
+            if (protocol === "openai-responses" && value && value.protocol === "openai-responses") {
+              const r = value.response as {
+                id?: string;
+                created_at?: number;
+                model?: string;
+                output?: Array<{
+                  content?: Array<{ type?: string; text?: string }>;
+                }>;
+                usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
+              };
+              const content =
+                r.output?.[0]?.content?.map((c) => c.text ?? "").join("") ?? "";
+              const model = r.model ?? String(payload["model"] ?? "unknown");
+              const frames = encodeResponsesStream({
+                responseId: r.id ?? `resp_${randomUUID().replace(/-/g, "").slice(0, 24)}`,
+                model,
+                created: r.created_at,
+                content,
+                usage: r.usage
+                  ? {
+                      input_tokens: r.usage.input_tokens ?? 0,
+                      output_tokens: r.usage.output_tokens ?? 0,
+                      total_tokens: r.usage.total_tokens ?? 0,
+                    }
+                  : undefined,
+              });
+              for (const f of frames) res.write(f);
+              res.end();
+              return;
+            }
+
             // 内部标准响应 / 或协议适配后的响应，统一取 OpenAI Chat 形态
             const chatRes =
               value && value.protocol === "openai-chat" && value.response

@@ -8,6 +8,8 @@ import {
   SSE_DONE,
   buildChatChunk,
   encodeChatCompletionStream,
+  encodeResponsesStream,
+  encodeResponsesEvent,
   SSE_CONTENT_TYPE,
 } from "./sse.js";
 
@@ -104,5 +106,45 @@ describe("encodeChatCompletionStream", () => {
     expect(frames).toHaveLength(4);
     const contentFrame = JSON.parse(frames[1].slice("data: ".length).trim());
     expect(contentFrame.choices[0].delta.content).toBe("");
+  });
+});
+// ── OpenAI Responses SSE ─────────────────────────────────────────
+
+describe("encodeResponsesStream", () => {
+  it("生成标准事件序列: created → added → delta → done → completed", () => {
+    const frames = encodeResponsesStream({
+      responseId: "resp_test123",
+      model: "qwen-turbo",
+      created: 1000,
+      content: "你好",
+      outputTextId: "msg_abc",
+    });
+    const events = frames
+      .slice(0, -1) // 排除 [DONE] 收尾帧
+      .map((f) => f.split("\n")[0].replace("event: ", ""));
+    expect(events).toEqual([
+      "response.created",
+      "response.output_item.added",
+      "response.output_text.delta",
+      "response.output_item.done",
+      "response.completed",
+    ]);
+    // 最后是 [DONE] 收尾
+    expect(frames[frames.length - 1]).toBe("data: [DONE]\n\n");
+  });
+
+  it("completed 帧携带 usage 与完整 output", () => {
+    const frames = encodeResponsesStream({
+      responseId: "resp_1",
+      model: "m",
+      created: 1,
+      content: "hi",
+      usage: { input_tokens: 3, output_tokens: 5, total_tokens: 8 },
+    });
+    const completed = JSON.parse(frames[4].split("\n")[1].slice("data: ".length).trim());
+    expect(completed.type).toBe("response.completed");
+    expect(completed.response.status).toBe("completed");
+    expect(completed.response.usage.total_tokens).toBe(8);
+    expect(completed.response.output[0].content[0].text).toBe("hi");
   });
 });
