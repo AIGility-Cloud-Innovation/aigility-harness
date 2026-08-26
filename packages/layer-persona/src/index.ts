@@ -71,6 +71,17 @@ export type {
 } from "./plugin-helper.js";
 import { pluginHelperService, pluginHelperProvider } from "./plugin-helper.js";
 
+// 编码助手角色形象 (实现无关, 委托 L3 编码 Agent)
+export {
+  coderService,
+  coderProvider,
+} from "./coder.js";
+export type {
+  CoderRequest,
+  CoderResponse,
+} from "./coder.js";
+import { coderService, coderProvider } from "./coder.js";
+
 // ── 服务定义 ─────────────────────────────────────────────────────
 
 export interface TextInputRequest {
@@ -129,9 +140,9 @@ const textInputProvider: Provider<TextInputRequest, TextInputResponse> = {
 export const manifest: PluginManifest = {
   name: "@persona/character",
   layer: LayerId.Persona,
-  description: "角色人格层：感知（文本/语音）+ 角色形象（sales-chat/plugin-helper/advisory-chat）",
+  description: "角色人格层：感知（文本/语音）+ 角色形象（sales-chat/plugin-helper/coder/advisory-chat）",
   version: "0.2.0",
-  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, advisoryChatService],
+  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, coderService, advisoryChatService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
 };
@@ -155,6 +166,7 @@ export const plugin: LayerPlugin = {
       whisperSttProvider,
       salesChatProvider,
       pluginHelperProvider,
+      coderProvider,
       advisoryChatProvider,
     ];
   },

@@ -78,7 +78,7 @@ async function main(): Promise<void> {
   const start = await ingress.value.execute(
     {
       port: PORT,
-      devPaths: ["/v1/chat/completions", "/v1/messages"],
+      devPaths: ["/v1/chat/completions", "/v1/messages", "/v1/responses"],
       agentPaths: ["/api/chat"],
     },
     ctx,

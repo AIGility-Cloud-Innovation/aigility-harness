@@ -93,6 +93,12 @@ export const pluginHelperRef: CapabilityRef = {
   versionRange: "^1.0.0",
 };
 
+/** 消费编码助手角色能力（编码对话链路） */
+export const coderRef: CapabilityRef = {
+  id: "@persona/coder",
+  versionRange: "^1.0.0",
+};
+
 // ── 协议判定 ─────────────────────────────────────────────────────
 
 export type HttpRouteKind = "dev" | "agent" | "unknown";
@@ -134,11 +140,12 @@ const DEFAULT_DEV_PATHS = [
   "/v1/messages",
   "/v1/responses",
 ];
-const DEFAULT_AGENT_PATHS = ["/api/chat", "/api/plugin-helper"];
-/** 默认 agent 路径 → 角色映射（开箱即用：销售客服 + 插件安装助手两条链路） */
+const DEFAULT_AGENT_PATHS = ["/api/chat", "/api/plugin-helper", "/api/coder"];
+/** 默认 agent 路径 → 角色映射（开箱即用：销售客服 + 插件安装助手 + 编码助手） */
 const DEFAULT_AGENT_ROUTES: Record<string, string> = {
   "/api/chat": "@persona/sales-chat",
   "/api/plugin-helper": "@persona/plugin-helper",
+  "/api/coder": "@persona/coder",
 };
 
 // ── Provider 实现 ────────────────────────────────────────────────
@@ -328,7 +335,7 @@ export const manifest: PluginManifest = {
   description: "底座层：HTTP 唯一入口（路由到协议适配 / 角色形象）",
   version: "1.1.0",
   provides: [httpIngressService],
-  consumes: [protocolAdapterRef, salesChatRef, pluginHelperRef],
+  consumes: [protocolAdapterRef, salesChatRef, pluginHelperRef, coderRef],
   preferredCarrier: CarrierKind.Thread,
 };
 

@@ -243,6 +243,23 @@ describe("http-ingress agent 路径 → 角色路由", () => {
     expect(calls[0].id).toBe("@persona/plugin-helper");
   });
 
+  it("/api/coder 默认路由到 @persona/coder（编码助手）", async () => {
+    const calls: { id: string }[] = [];
+    const bind = await httpIngressProvider.execute(
+      { port: 18334 },
+      mockRouteCtx(calls),
+    );
+    expect(bind.ok).toBe(true);
+
+    await fetch("http://127.0.0.1:18334/api/coder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_input: "帮我写个排序算法" }),
+    });
+    expect(calls.length).toBe(1);
+    expect(calls[0].id).toBe("@persona/coder");
+  });
+
   it("自定义 agentRoutes 覆盖默认映射, 未命中路径走 perceptionId 兜底", async () => {
     const calls: { id: string }[] = [];
     const bind = await httpIngressProvider.execute(
