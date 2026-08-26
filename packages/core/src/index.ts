@@ -35,6 +35,19 @@ export type {
   PluginHandle,
 } from "./kernel-adapter.js";
 
+// ── BusBridge (跨进程消息总线契约, 阶段 2) ────────────────────────
+export {
+  BUS_PROTOCOL,
+  BUS_KINDS,
+  eventTopic,
+  createBusBridge,
+} from "./bus-bridge.js";
+export type {
+  BusEnvelope,
+  BusBridge,
+  BusKind,
+} from "./bus-bridge.js";
+
 // ── Capability Seam ───────────────────────────────────────────────
 export type {
   ServiceDefinition,

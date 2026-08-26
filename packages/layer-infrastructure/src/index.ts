@@ -172,3 +172,6 @@ export {
   buildChatChunk,
   encodeChatCompletionStream,
 } from "./sse.js";
+
+// 跨进程事件桥（阶段 2: 消息总线可更换）
+export { RemoteEventBus, bridgeEventBus, demoEvent, isRemote } from "./remote-event-bus.js";

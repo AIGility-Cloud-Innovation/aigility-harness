@@ -283,7 +283,7 @@ harness (TS)                          Python (子进程)
 | **阶段 1**（✅ 已完成） | 原型闭环 | 五层能力 DSH 插件化，验证完整业务逻辑；kernel-dsh 35 测例 + codex-agent 规划闭环通过 |
 | **阶段 1.5**（✅ 已完成） | 跨语言桥接 | py-bridge 通用 Python 对接器，aigility ADK 端到端验证通过 |
 | **阶段 1.75**（✅ 已完成） | 开箱可用 | sales-chat/plugin-helper 角色 + plugin-install 引导工作流 + 最小 Web UI（`GET /` `/ui`）+ agent 路径→角色路由 |
-| **阶段 2**（⏳ 未实现） | 桥接层开发 | Seam ↔ 跨进程消息总线双向桥接，打通跨进程通信（当前仅接口占位 `natsUrl?`，无实现；候选总线 NATS/Redis/RabbitMQ，按部署环境选定） |
+| **阶段 2**（🔶 部分完成） | 桥接层开发 | BusBridge 契约 + BusEnvelope 信封 + RemoteEventBus 跨进程事件桥 + memory 总线 mock（8 单测）；真实总线（NATS/Redis/RabbitMQ 候选）接入 createBusBridge 后置 |
 | **阶段 3**（⏳ 未实现） | 进程载体封装 | 守护进程管理、多载体统一抽象 |
 | **阶段 4**（⏳ 未实现） | 智能调度与自动替换 | 健康探测、指标采集、自动切换控制器 |
 | **阶段 5**（⏳ 未实现） | 生产加固 | 安全、鉴权、全链路追踪、状态迁移、熔断降级 |
