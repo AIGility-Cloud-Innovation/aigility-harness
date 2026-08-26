@@ -42,6 +42,16 @@ export type {
   CodexSandboxMode,
 };
 
+import {
+  pluginInstallService,
+  pluginInstallProvider,
+} from "./plugin-install.js";
+export { pluginInstallService, pluginInstallProvider };
+export type {
+  PluginInstallRequest,
+  PluginInstallResponse,
+} from "./plugin-install.js";
+
 // ── 服务定义 ─────────────────────────────────────────────────────
 
 export interface TaskPlanningRequest {
@@ -169,9 +179,9 @@ const taskPlanningProvider: Provider<
 export const manifest: PluginManifest = {
   name: "@orchestration/task-planning",
   layer: LayerId.Orchestration,
-  description: "编排规划层：任务规划占位 + 工作流引擎占位 + Codex 编码代理，消费认知层 LLM",
+  description: "编排规划层：任务规划占位 + 工作流引擎占位 + 插件安装工作流 + Codex 编码代理，消费认知层 LLM",
   version: "0.2.0",
-  provides: [taskPlanningService, workflowEngineService, codexAgentService],
+  provides: [taskPlanningService, workflowEngineService, pluginInstallService, codexAgentService],
   consumes: [llmInferenceRef],
   preferredCarrier: CarrierKind.Thread,
   dependsOn: ["@cognitive/llm-inference"],
@@ -190,7 +200,7 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [taskPlanningProvider, workflowEngineProvider, codexAgentProvider];
+    return [taskPlanningProvider, workflowEngineProvider, pluginInstallProvider, codexAgentProvider];
   },
   getState(): PluginState {
     return pluginState;
