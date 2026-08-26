@@ -265,3 +265,43 @@ describe("http-ingress agent 路径 → 角色路由", () => {
     expect(calls[1].id).toBe("@persona/sales-chat");
   });
 });
+
+// ── 最小 Web UI ───────────────────────────────────────────────────
+
+describe("http-ingress 最小 Web UI", () => {
+  it("GET / 返回 HTML 且包含两个角色端点", async () => {
+    const bind = await httpIngressProvider.execute(
+      { port: 18341 },
+      mockRouteCtx([]),
+    );
+    expect(bind.ok).toBe(true);
+
+    const resp = await fetch("http://127.0.0.1:18341/");
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get("content-type")).toContain("text/html");
+    const html = await resp.text();
+    expect(html).toContain("aigility-harness");
+    expect(html).toContain("/api/chat");
+    expect(html).toContain("/api/plugin-helper");
+  });
+
+  it("GET /ui 同样返回 UI (且 GET 不破坏 POST 链路)", async () => {
+    const bind = await httpIngressProvider.execute(
+      { port: 18342 },
+      mockRouteCtx([]),
+    );
+    expect(bind.ok).toBe(true);
+
+    const uiResp = await fetch("http://127.0.0.1:18342/ui");
+    expect(uiResp.status).toBe(200);
+    expect((await uiResp.text())).toContain("插件安装助手");
+
+    // POST 链路不受影响: 未知路径仍 404
+    const postResp = await fetch("http://127.0.0.1:18342/api/nonexistent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_input: "x" }),
+    });
+    expect(postResp.status).toBe(404);
+  });
+});

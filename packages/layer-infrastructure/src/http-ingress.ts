@@ -37,6 +37,7 @@ import {
   encodeSseFrame,
   SSE_DONE,
 } from "./sse.js";
+import { UI_HTML } from "./ui.js";
 
 // ── 服务定义 ─────────────────────────────────────────────────────
 
@@ -166,9 +167,18 @@ const httpIngressProvider: Provider<HttpIngressRequest, HttpIngressResponse> = {
     }
 
     server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+      const path = (req.url ?? "").split("?")[0];
+
+      // 最小 Web UI: GET / 与 GET /ui 返回内嵌单文件页面
+      if (req.method === "GET" && (path === "/" || path === "/ui")) {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(UI_HTML);
+        return;
+      }
+
       if (req.method !== "POST") {
         res.writeHead(405, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Method not allowed" }));
+        res.end(JSON.stringify({ error: "Method not allowed", hint: "GET / 或 /ui 打开浏览器界面" }));
         return;
       }
 

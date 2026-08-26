@@ -32,6 +32,12 @@ importers:
       '@aigility-harness/layer-infrastructure':
         specifier: workspace:*
         version: link:../../packages/layer-infrastructure
+      '@aigility-harness/layer-orchestration':
+        specifier: workspace:*
+        version: link:../../packages/layer-orchestration
+      '@aigility-harness/layer-persona':
+        specifier: workspace:*
+        version: link:../../packages/layer-persona
       prototype-mode:
         specifier: workspace:*
         version: link:../../packages/prototype-mode
