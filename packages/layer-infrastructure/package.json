@@ -12,12 +12,14 @@
   },
   "dependencies": {
     "@aigility-harness/core": "workspace:*",
-    "@aigility-harness/layer-cognitive": "workspace:*"
+    "@aigility-harness/layer-cognitive": "workspace:*",
+    "pg": "^8.23.0"
   },
   "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/pg": "^8.23.1",
     "typescript": "^5.5.0",
-    "vitest": "^2.0.0",
-    "@types/node": "^20.14.0"
+    "vitest": "^2.0.0"
   },
   "exports": {
     ".": {
