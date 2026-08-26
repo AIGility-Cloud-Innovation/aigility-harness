@@ -4,6 +4,17 @@
   "description": "原型模式示例：内存版 KernelAdapter + 五层插件组装",
   "type": "module",
   "private": true,
+  "main": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./in-memory-kernel": {
+      "types": "./src/in-memory-kernel.ts",
+      "default": "./src/in-memory-kernel.ts"
+    }
+  },
   "scripts": {
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",

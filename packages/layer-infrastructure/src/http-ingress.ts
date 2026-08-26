@@ -30,6 +30,13 @@ import type {
   CapabilityRef,
 } from "@aigility-harness/core";
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
+import { randomUUID } from "node:crypto";
+import {
+  writeSseHeaders,
+  encodeChatCompletionStream,
+  encodeSseFrame,
+  SSE_DONE,
+} from "./sse.js";
 
 // ── 服务定义 ─────────────────────────────────────────────────────
 
@@ -80,6 +87,22 @@ export const chatAgentRef: CapabilityRef = {
 // ── 协议判定 ─────────────────────────────────────────────────────
 
 export type HttpRouteKind = "dev" | "agent" | "unknown";
+
+interface ChatLikeShape {
+  protocol?: string;
+  response?: {
+    text?: string;
+    message?: { content?: string | null };
+    finish_reason?: string;
+    usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+    model?: string;
+  };
+  text?: string;
+  message?: { content?: string | null };
+  finish_reason?: string;
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  model?: string;
+}
 
 /**
  * 根据 URL 路径判定走哪条链路。
@@ -158,7 +181,20 @@ const httpIngressProvider: Provider<HttpIngressRequest, HttpIngressResponse> = {
               ? "openai-responses"
               : "openai-chat";
 
-          const result = await ctx.call(
+          // 流式请求（OpenAI 兼容: body.stream === true）→ SSE 帧输出
+          // 注1: 上游走非流式整块返回（剥掉 stream 标志, litellm provider 现为
+          //      resp.json() 整块解析），http-ingress 再编码为 SSE 帧流，
+          //      客户端协议兼容；token 级真流式待 litellm provider 支持
+          //      fetch 流式解析后升级。若上游本身支持流式可再透传。
+          // 注2: 若上游已返回流式帧（透传模式）, 此处整块编码逻辑同样适用——
+          //      只会多一层包装, 客户端依旧可解析。
+          const wantStream = payload["stream"] === true;
+          if (wantStream && typeof payload["stream"] === "boolean") {
+            // 剥掉 stream, 发非流式请求, 避免 litellm 返回 SSE 而 provider 无法解析
+            delete (payload as Record<string, unknown>)["stream"];
+          }
+
+          const callResult = await ctx.call(
             protocolAdapterRef,
             {
               protocol,
@@ -169,8 +205,40 @@ const httpIngressProvider: Provider<HttpIngressRequest, HttpIngressResponse> = {
             },
           );
 
+          if (wantStream) {
+            writeSseHeaders(res);
+            if (!callResult.ok) {
+              res.write(encodeSseFrame({ error: callResult.error }));
+              res.write(SSE_DONE);
+              res.end();
+              return;
+            }
+            const value = callResult.value as unknown as ChatLikeShape;
+            // 内部标准响应 / 或协议适配后的响应，统一取 OpenAI Chat 形态
+            const chatRes =
+              value && value.protocol === "openai-chat" && value.response
+                ? value.response
+                : (value as ChatLikeShape);
+            const text = chatRes.text ?? chatRes.message?.content ?? "";
+            const model = chatRes.model ?? String(payload["model"] ?? "unknown");
+            const frames = encodeChatCompletionStream({
+              id: `chatcmpl-${randomUUID().replace(/-/g, "").slice(0, 24)}`,
+              model,
+              content: String(text),
+              finishReason: chatRes.finish_reason ?? "stop",
+              usage: chatRes.usage ?? {
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+              },
+            });
+            for (const f of frames) res.write(f);
+            res.end();
+            return;
+          }
+
           res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify(result.ok ? result.value : { error: result.error }));
+          res.end(JSON.stringify(callResult.ok ? callResult.value : { error: callResult.error }));
           return;
         }
 

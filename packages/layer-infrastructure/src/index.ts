@@ -161,3 +161,14 @@ export type {
   HttpIngressResponse,
 } from "./http-ingress.js";
 import { httpIngressProvider, httpIngressService } from "./http-ingress.js";
+
+// SSE 帧编码原子模块（http-ingress 流式输出复用；Hono 等备件换装时同款 import）
+export {
+  SSE_CONTENT_TYPE,
+  SSE_DONE,
+  encodeSseFrame,
+  encodeSseComment,
+  writeSseHeaders,
+  buildChatChunk,
+  encodeChatCompletionStream,
+} from "./sse.js";

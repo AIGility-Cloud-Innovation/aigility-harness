@@ -285,7 +285,7 @@ export const anthropicAdapterProvider: Provider<
 | 7 | （可选）保留 proxy.py + feature flag 支持回退 | 不删旧代码 |
 
 **不做的（本期）**：
-- 不把 streaming（SSE）逻辑嵌入 Provider（Phase 1-2 只做非流式），流式是后续扩展
+- 不把 streaming（SSE）逻辑嵌入 Provider —— ✅ 已按此原则落地：SSE 是**传输模式**，做成 `layer-infrastructure/src/sse.ts` 纯函数原子模块（`encodeSseFrame` / `encodeChatCompletionStream`），由 http-ingress 在请求体 `stream:true` 时调用，不进任何 Provider 内部
 - 不修改 api-router 的 Python 代码（只移植纯函数逻辑到 TS，原服务保留可回退）
 
 ### 6.5 载体选择：Thread
@@ -298,18 +298,25 @@ export const anthropicAdapterProvider: Provider<
 
 `detect_caller()` 的 User-Agent 解析逻辑移入 Provider 内部。识别的 `caller` 通过 `ctx.setState("caller", caller)` 写入会话状态，后续 LiteLLM Provider 用 `ctx.getState("caller")` 获取，注入 LiteLLM 的 `user` 字段做用量追踪。
 
-## 7. HTTP Ingress（Phase 4）
+## 7. HTTP Ingress（已落地 ✅）
 
-当前框架没有 HTTP 入口（prototype demo 全进程内调用）。api-router 的 4000 端口退役需要一个替身。
+当前为 `packages/layer-infrastructure/src/http-ingress.ts`（node:http 实现），提供唯一 HTTP 入口，按路径路由两条链路：
 
-**方案**：新增 `@infrastructure/http-ingress` 能力，Provider 用 `NetworkService` 载体监听一个端口（如 4000）。收到 HTTP 请求后：
+- **dev 链路**：`/v1/chat/completions`、`/v1/messages`、`/v1/responses` → `@infrastructure/protocol-adapter`
+- **agent 链路**：`/api/chat` → `@persona/chat-agent`
+
+**方案**：http-ingress 收到 HTTP 请求后：
 
 1. 解析 method + path + body + headers
 2. 调 `@infrastructure/protocol-adapter` 做协议翻译
 3. 拿翻译后的 OpenAI Chat body → 调 `@cognitive/llm-inference` (LiteLLM)
 4. LLM 响应反翻译后返回调用者
 
-**注意区分**：`@infrastructure/protocol-adapter`（翻译逻辑，Thread）与 `@infrastructure/http-ingress`（HTTP 监听，NetworkService）是**两个独立能力**。api-router 原服务 = 二者之和，改造后拆成两块。Phase 2 先落协议翻译，Phase 4 再落 HTTP 监听，届时 api-router systemd service 正式退役。
+**流式（SSE）**：请求体 `stream:true` 时，http-ingress 走 SSE 分支——先剥掉 stream 标志向上游发**非流式**请求（litellm provider 现为整块 `resp.json()` 解析），拿到整块响应后用 `sse.ts`（`encodeChatCompletionStream`）编码为 OpenAI 兼容的 `chat.completion.chunk` 帧流，`data: [DONE]` 收尾。客户端（OpenAI SDK / curl -N）协议兼容。token 级真流式（litellm provider 内 fetch 流式解析 + 逐 chunk 转发）为后续增强项。
+
+**注意区分**：`@infrastructure/protocol-adapter`（翻译逻辑，Thread）与 `@infrastructure/http-ingress`（HTTP 监听）是**两个独立能力**。api-router 原服务 = 二者之和，改造后拆成两块。
+
+**SSE 为什么不做成插件**：SSE 是传输模式，没有独立"被 execute 什么"的语义，必须挂在某个 socket/response 上才有意义。单独成插件会造出内核无法驱动的空洞能力。因此做成 `sse.ts` 原子模块（纯函数），http-ingress 现在用；将来 Hono 等备件传输换装时 import 同一个 helper——一个实现，多处传输复用。
 
 ## 8. 日志与可观测性
 

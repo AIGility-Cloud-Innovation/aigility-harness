@@ -1,0 +1,25 @@
+{
+  "name": "@aigility-harness/example-openai-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "组合示例：用 http-ingress + protocol-adapter + llm-inference 装配出 OpenAI 兼容网关（不重复实现任何能力）",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@aigility-harness/core": "workspace:*",
+    "@aigility-harness/layer-infrastructure": "workspace:*",
+    "@aigility-harness/layer-cognitive": "workspace:*",
+    "prototype-mode": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.23.12",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}
