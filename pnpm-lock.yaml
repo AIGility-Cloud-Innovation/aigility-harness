@@ -21,6 +21,28 @@ importers:
         specifier: ^2.0.0
         version: 2.0.0(@types/node@20.19.43)
 
+  examples/dsh-timem-demo:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: ^4.0.1
+        version: 4.0.1
+      '@timem/dsh-plugin-timem':
+        specifier: git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git
+        version: git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git#393fe2de925ddcabbbd5210ca1a725c75fd39a82(@deepseek-ai/cordis@4.0.1)
+    devDependencies:
+      '@types/node':
+        specifier: ^20.14.0
+        version: 20.19.43
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.12
+      typescript:
+        specifier: ^5.5.0
+        version: 5.5.2
+      vitest:
+        specifier: ^2.0.0
+        version: 2.0.0(@types/node@20.19.43)
+
   examples/openai-gateway-composition:
     dependencies:
       '@aigility-harness/core':
@@ -930,6 +952,12 @@ packages:
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+
+  '@timem/dsh-plugin-timem@git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git#393fe2de925ddcabbbd5210ca1a725c75fd39a82':
+    resolution: {commit: 393fe2de925ddcabbbd5210ca1a725c75fd39a82, repo: https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git, type: git}
+    version: 0.1.0
+    peerDependencies:
+      '@deepseek-ai/cordis': ^4.0.1
 
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
@@ -2036,6 +2064,10 @@ snapshots:
   '@sinclair/typebox@0.27.12': {}
 
   '@standard-schema/spec@1.1.0': {}
+
+  '@timem/dsh-plugin-timem@git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git#393fe2de925ddcabbbd5210ca1a725c75fd39a82(@deepseek-ai/cordis@4.0.1)':
+    dependencies:
+      '@deepseek-ai/cordis': 4.0.1
 
   '@types/estree@1.0.9': {}
 

@@ -13,6 +13,53 @@
 
 双仓库同步维护，提交以 Gitea 为权威信源，GitHub fast-forward 同步。
 
+### 总体架构
+
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         aigility-harness 五层架构                        │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ┌─────────────────────────────────────────────────────────────────┐   │
+│   │  L1 认知决策层 (layer-cognitive)    LLM 推理 / 记忆检索           │   │
+│   │      @cognitive/llm-inference  @cognitive/memory                 │   │
+│   └────────────────────────────┬────────────────────────────────────┘   │
+│                                │ Seam 契约 (ctx.call)                   │
+│   ┌────────────────────────────┴────────────────────────────────────┐   │
+│   │  L2 角色人格层 (layer-persona)    角色形象 / 输入输出归一          │   │
+│   │      sales-chat  plugin-helper  coder  advisory-chat             │   │
+│   └────────────────────────────┬────────────────────────────────────┘   │
+│                                │                                       │
+│   ┌────────────────────────────┴────────────────────────────────────┐   │
+│   │  L3 编排规划层 (layer-orchestration)  任务规划 / 工作流引擎       │   │
+│   │      @orchestration/workflow-engine  codex-agent                 │   │
+│   └────────────────────────────┬────────────────────────────────────┘   │
+│                                │                                       │
+│   ┌────────────────────────────┴────────────────────────────────────┐   │
+│   │  L4 行动执行层 (layer-action)    工具执行 / TTS / 多渠道输出      │   │
+│   │      @action/text-to-speech                                     │   │
+│   └────────────────────────────┬────────────────────────────────────┘   │
+│                                │                                       │
+│   ┌────────────────────────────┴────────────────────────────────────┐   │
+│   │  L5 底座基础层 (layer-infrastructure)                           │   │
+│   │      http-ingress  protocol-adapter  wecom-ingress              │   │
+│   │      bridge(跨语言桥: py-bridge → aigility)  PgBusBridge         │   │
+│   └─────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+│   ┌─────────────────────────────────────────────────────────────────┐   │
+│   │  内核: kernel-dsh (DSH-Cordis)                                  │   │
+│   │      KernelAdapter / Seam Registry / Event Bus / Carrier         │   │
+│   │      可加载 cordis 插件 (如 dsh-plugin-timem → 记忆/规则)        │   │
+│   └─────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+外部接入:
+  LLM (LiteLLM/华为云/DeepSeek) ←→ L1   ·   TiMEM Engine ←→ bridge/timem插件
+  HTTP/企业微信/IM ←→ L5 入口           ·   Python 生态 ←→ py-bridge
+```
+
+
 ---
 
 ## 一、定位：这是一套 Harness，不是某个 Agent
@@ -374,3 +421,31 @@ aigility-harness/
 ---
 
 License: MIT · 技术栈：TypeScript 5.5 + pnpm workspace + vitest · Node ≥ 20
+
+## 十二、dsh-plugin-timem 演示（TiMEM 记忆/规则接入）
+
+[`examples/dsh-timem-demo`](examples/dsh-timem-demo) 演示 TiMEM 能力插件插入 DeepSeek Harness 运行时：
+
+```bash
+# 方式 1: mock 模式 (无 TIMEM key 也跑通)
+cd examples/dsh-timem-demo
+TIMEM_DEMO_MOCK=1 pnpm start
+
+# 方式 2: 真实 TiMEM Engine
+TIMEM_API_KEY=xxx TIMEM_BASE_URL=http://127.0.0.1:8001 pnpm start
+```
+
+```ts
+import { Context } from "@deepseek-ai/cordis";
+import { timemPlugin } from "@timem/dsh-plugin-timem";
+
+const root = new Context();                       // DSH runtime
+await root.plugin(timemPlugin, { apiKey, baseUrl });  // 插件插入
+await root.timem.search({ user_id: 123, query: "偏好" });   // 记忆
+await root.timem.recallRules({ scene: "简历评估" });        // 规则
+```
+
+插件本体: [`dsh-plugin-timem`](https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem)
+（cordis 插件库, 协议对齐 timem-sdk-python: X-API-Key + /api/v1/*)
+
+---
