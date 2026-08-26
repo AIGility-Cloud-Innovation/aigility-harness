@@ -14,7 +14,7 @@ import os
 
 AIGILITY_PYTHON = "/home/johnny/AI/aigility/.venv/bin/python"
 AIGILITY_DIR = "/home/johnny/AI/aigility"
-WORKER_SCRIPT = "/home/johnny/AI/aigility-harness/packages/py-bridge/scripts/py_bridge_worker.py"
+WORKER_SCRIPT = "/home/johnny/AI/aigility-harness/packages/layer-infrastructure/bridge/scripts/py_bridge_worker.py"
 VENV_SITE = "/home/johnny/AI/aigility/.venv/lib/python3.11/site-packages"
 TEST_YAML = "/home/johnny/AI/aigility/tests/workflow_test_config.yaml"
 

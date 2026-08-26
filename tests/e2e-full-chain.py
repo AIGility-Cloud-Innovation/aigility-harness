@@ -19,7 +19,7 @@ import time
 import urllib.request
 
 AIGILITY_PYTHON = "/home/johnny/AI/aigility/.venv/bin/python"
-WORKER_SCRIPT = "/home/johnny/AI/aigility-harness/packages/py-bridge/scripts/py_bridge_worker.py"
+WORKER_SCRIPT = "/home/johnny/AI/aigility-harness/packages/layer-infrastructure/bridge/scripts/py_bridge_worker.py"
 AIGILITY_DIR = "/home/johnny/AI/aigility"
 VENV_SITE = f"{AIGILITY_DIR}/.venv/lib/python3.11/site-packages"
 

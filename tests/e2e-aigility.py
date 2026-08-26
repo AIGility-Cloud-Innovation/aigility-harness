@@ -9,7 +9,7 @@ import time
 # aigility venv python
 AIGILITY_PYTHON = "/home/johnny/AI/aigility/.venv/bin/python"
 AIGILITY_DIR = "/home/johnny/AI/aigility"
-WORKER_SCRIPT = "/home/johnny/AI/aigility-harness/packages/py-bridge/scripts/py_bridge_worker.py"
+WORKER_SCRIPT = "/home/johnny/AI/aigility-harness/packages/layer-infrastructure/bridge/scripts/py_bridge_worker.py"
 
 def send(proc, req):
     """Send JSON-RPC request and read response."""
