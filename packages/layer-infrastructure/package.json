@@ -13,6 +13,7 @@
   "dependencies": {
     "@aigility-harness/core": "workspace:*",
     "@aigility-harness/layer-cognitive": "workspace:*",
+    "@wecom/aibot-node-sdk": "^1.0.7",
     "pg": "^8.23.0"
   },
   "devDependencies": {

@@ -1,0 +1,21 @@
+{
+  "name": "wecom-coder",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@aigility-harness/core": "workspace:*",
+    "@aigility-harness/layer-infrastructure": "workspace:*",
+    "@aigility-harness/layer-cognitive": "workspace:*",
+    "@aigility-harness/layer-persona": "workspace:*",
+    "@aigility-harness/layer-orchestration": "workspace:*",
+    "prototype-mode": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -177,3 +177,15 @@ export {
 export { RemoteEventBus, bridgeEventBus, demoEvent, isRemote } from "./remote-event-bus.js";
 export { createPgBusBridge, channelName, setupSql } from "./pg-bus-bridge.js";
 export type { PgBusBridgeOptions } from "./pg-bus-bridge.js";
+
+// 企业微信智能机器人入口（特色案例: 企微 @机器人 → coder → codex）
+export {
+  wecomIngressService,
+  wecomIngressProvider,
+  wecomCoderRef,
+  manifest as wecomManifest,
+} from "./wecom-ingress.js";
+export type {
+  WeComIngressRequest,
+  WeComIngressResponse,
+} from "./wecom-ingress.js";
