@@ -181,6 +181,22 @@ pnpm example:prototype
 
 原型模式：五层能力全部以 DSH 进程内插件运行，内存级 Provider，无需任何外部服务。演示流程：感知（文本输入）→ 认知（litellm/内存推理）→ 编排（任务规划 + codex-agent）→ 执行（TTS）→ 底座（配置/日志/协议适配）。
 
+### 开箱即用（最小 Web UI）
+
+```bash
+pnpm --filter prototype-mode start   # 或组合示例:
+pnpm --filter @aigility-harness/example-openai-gateway start
+```
+
+起服务后浏览器打开 `http://localhost:<port>/`（或 `/ui`），即可与两个角色对话：
+
+| 页签 | 端点 | 功能 |
+|------|------|------|
+| **销售客服** | `POST /api/chat` | 业务对话（销售客服角色 → 工作流回复） |
+| **插件安装助手** | `POST /api/plugin-helper` | 开箱引导安装：问"怎么加插件/RAG/记忆" → 真实扫描插件清单 → 返回接入指引 |
+
+agent 路径→角色映射可配置（`agentRoutes`），未命中路径回退 `perceptionId`。
+
 ### 现有验证案例（均为可替换示例）
 
 | 能力 | 当前实现 | 可替换为 |
@@ -189,6 +205,9 @@ pnpm example:prototype
 | 编码 Agent | `codex-agent`（codex CLI → localhost:4000） | 任意符合契约的 Agent Provider |
 | 协议适配 | `protocol-adapter`（api-router 协议翻译） | 任意协议桥接实现 |
 | HTTP 入口 + 流式 | `http-ingress` + `sse.ts`（`/v1/chat/completions` 支持 `stream:true` → SSE 帧流） | 任意传输实现（Hono 备件换装时 import 同款 sse helper） |
+| **角色对话** | `sales-chat`（销售客服角色, 由 chat-agent 正名而来） | 任意 L2 角色（特性打包为 persona 插件） |
+| **开箱引导安装** | `plugin-helper` 角色 → `plugin-install` 工作流（扫描 py-plugins.json + packages → 契约匹配 → 接入指引） | 任意安装/引导工作流 |
+| **最小 Web UI** | http-ingress `GET /` / `/ui`（单文件 HTML, 双角色页签, 零依赖） | 任意前端 |
 | TTS | `text-to-speech` | 任意 TTS 引擎 |
 | **Python 能力桥接** | `py-bridge`（JSON-RPC over stdio → aigility ADK） | 任意 Python 包，声明式配置接入 |
 | **工作流编排** | `aigility.workflow.WorkflowEngine`（YAML → LangGraph） | 任意编排引擎，通过 Seam 契约替换 |
@@ -263,10 +282,11 @@ harness (TS)                          Python (子进程)
 |------|------|------|
 | **阶段 1**（✅ 已完成） | 原型闭环 | 五层能力 DSH 插件化，验证完整业务逻辑；kernel-dsh 35 测例 + codex-agent 规划闭环通过 |
 | **阶段 1.5**（✅ 已完成） | 跨语言桥接 | py-bridge 通用 Python 对接器，aigility ADK 端到端验证通过 |
-| **阶段 2** | 桥接层开发 | Seam ↔ NATS 双向桥接，打通跨进程通信 |
-| **阶段 3** | 进程载体封装 | 守护进程管理、多载体统一抽象 |
-| **阶段 4** | 智能调度与自动替换 | 健康探测、指标采集、自动切换控制器 |
-| **阶段 5** | 生产加固 | 安全、鉴权、全链路追踪、状态迁移、熔断降级 |
+| **阶段 1.75**（✅ 已完成） | 开箱可用 | sales-chat/plugin-helper 角色 + plugin-install 引导工作流 + 最小 Web UI（`GET /` `/ui`）+ agent 路径→角色路由 |
+| **阶段 2**（⏳ 未实现） | 桥接层开发 | Seam ↔ NATS 双向桥接，打通跨进程通信（当前仅接口占位 `natsUrl?`，无实现无依赖） |
+| **阶段 3**（⏳ 未实现） | 进程载体封装 | 守护进程管理、多载体统一抽象 |
+| **阶段 4**（⏳ 未实现） | 智能调度与自动替换 | 健康探测、指标采集、自动切换控制器 |
+| **阶段 5**（⏳ 未实现） | 生产加固 | 安全、鉴权、全链路追踪、状态迁移、熔断降级 |
 
 ---
 
@@ -279,10 +299,15 @@ aigility-harness/
 │   │                              #   Provider / Consumer / LayerPlugin / KernelAdapter
 │   ├── kernel-dsh/                # DSH-Cordis 内核适配器（Seam Registry / Effect Manager / Carrier Manager）
 │   ├── layer-cognitive/           # L1 认知决策层（LLM 推理：stub + litellm）
-│   ├── layer-persona/            # L2 角色人格层（sales-chat / advisory-chat 等角色）
-│   ├── layer-orchestration/       # L3 编排规划层（任务规划 + codex-agent）
+│   ├── layer-persona/            # L2 角色人格层（sales-chat / plugin-helper / advisory-chat 等角色）
+│   ├── layer-orchestration/       # L3 编排规划层（任务规划 + plugin-install + codex-agent）
 │   ├── layer-action/              # L4 行动执行层（TTS）
 │   ├── layer-infrastructure/      # L5 底座基础层（config/logging/protocol-adapter）
+│   │   ├── src/
+│   │   │   ├── protocol-adapter.ts    # 协议翻译（Anthropic/OpenAI/Responses → 内部标准）
+│   │   │   ├── http-ingress.ts        # HTTP 唯一入口（dev/agent 双链路 + SSE 流式 + 最小 UI）
+│   │   │   ├── sse.ts                 # SSE 帧编码原子模块（传输无关）
+│   │   │   └── ui.ts                  # 最小 Web UI（单文件内嵌 HTML, GET / /ui）
 │   │   └── bridge/               # 跨语言桥接（L5 底座层）：py-bridge 为首个实现
 │   │   ├── src/
 │   │   │   ├── types.ts           # 声明式配置 + 通信协议类型
