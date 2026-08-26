@@ -113,9 +113,9 @@ export const LAYER_DESCRIPTORS: Record<LayerId, LayerDescriptor> = {
     prototypeCarrier: C.Thread,
     productionCarrier: C.NetworkService,
   },
-  [L.Perception]: {
-    id: L.Perception,
-    name: "多模态感知交互层",
+  [L.Persona]: {
+    id: L.Persona,
+    name: "角色人格层",
     dependsOn: [L.Infrastructure, L.Cognitive],
     alwaysOn: false,
     prototypeCarrier: C.Subprocess,

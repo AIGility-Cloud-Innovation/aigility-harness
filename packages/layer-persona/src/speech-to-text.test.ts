@@ -5,10 +5,10 @@ import {
   whisperSttProvider,
 } from "./index.js";
 
-describe("@perception/speech-to-text 契约", () => {
-  it("服务定义归属 Perception 层并声明 audio 必填", () => {
-    expect(speechToTextService.id).toBe("@perception/speech-to-text");
-    expect(speechToTextService.layer).toBe("perception");
+describe("@persona/speech-to-text 契约", () => {
+  it("服务定义归属 Persona 层并声明 audio 必填", () => {
+    expect(speechToTextService.id).toBe("@persona/speech-to-text");
+    expect(speechToTextService.layer).toBe("persona");
     expect(speechToTextService.requestSchema.required).toContain("audio");
     expect(speechToTextService.responseSchema.required).toEqual([
       "text",

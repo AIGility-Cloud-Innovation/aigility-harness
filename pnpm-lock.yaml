@@ -34,26 +34,14 @@ importers:
         specifier: ^2.0.0
         version: 2.0.0(@types/node@20.19.43)
 
-  packages/core:
-    devDependencies:
-      '@types/node':
-        specifier: ^20.14.0
-        version: 20.19.43
-      typescript:
-        specifier: ^5.5.0
-        version: 5.5.2
-      vitest:
-        specifier: ^2.0.0
-        version: 2.0.0(@types/node@20.19.43)
-
-  packages/gateway:
+  examples/http-gateway-alternative:
     dependencies:
       '@ai-sdk/openai':
         specifier: ^4.0.46
         version: 4.0.46(zod@4.4.3)
       '@aigility-harness/core':
         specifier: workspace:*
-        version: link:../core
+        version: link:../../packages/core
       ai:
         specifier: ^7.0.77
         version: 7.0.77(zod@4.4.3)
@@ -67,6 +55,18 @@ importers:
       tsx:
         specifier: ^4.19.0
         version: 4.23.12
+      typescript:
+        specifier: ^5.5.0
+        version: 5.5.2
+      vitest:
+        specifier: ^2.0.0
+        version: 2.0.0(@types/node@20.19.43)
+
+  packages/core:
+    devDependencies:
+      '@types/node':
+        specifier: ^20.14.0
+        version: 20.19.43
       typescript:
         specifier: ^5.5.0
         version: 5.5.2
@@ -163,7 +163,7 @@ importers:
         specifier: ^2.0.0
         version: 2.0.0(@types/node@20.19.43)
 
-  packages/layer-perception:
+  packages/layer-persona:
     dependencies:
       '@aigility-harness/core':
         specifier: workspace:*
@@ -203,12 +203,9 @@ importers:
       '@aigility-harness/layer-orchestration':
         specifier: workspace:*
         version: link:../layer-orchestration
-      '@aigility-harness/layer-perception':
+      '@aigility-harness/layer-persona':
         specifier: workspace:*
-        version: link:../layer-perception
-      '@aigility-harness/py-bridge':
-        specifier: workspace:*
-        version: link:../py-bridge
+        version: link:../layer-persona
     devDependencies:
       '@types/node':
         specifier: ^20.14.0
@@ -216,22 +213,6 @@ importers:
       tsx:
         specifier: ^4.19.0
         version: 4.23.12
-      typescript:
-        specifier: ^5.5.0
-        version: 5.5.2
-      vitest:
-        specifier: ^2.0.0
-        version: 2.0.0(@types/node@20.19.43)
-
-  packages/py-bridge:
-    dependencies:
-      '@aigility-harness/core':
-        specifier: workspace:*
-        version: link:../core
-    devDependencies:
-      '@types/node':
-        specifier: ^20.14.0
-        version: 20.19.43
       typescript:
         specifier: ^5.5.0
         version: 5.5.2

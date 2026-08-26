@@ -373,7 +373,7 @@ describe("DshCarrierManager", () => {
   it("list returns all handles", async () => {
     const mgr = new DshCarrierManager(() => stubCtx());
     await mgr.launch(makePlugin("a", LayerId.Cognitive), CarrierKind.Thread);
-    await mgr.launch(makePlugin("b", LayerId.Perception), CarrierKind.Subprocess);
+    await mgr.launch(makePlugin("b", LayerId.Persona), CarrierKind.Subprocess);
     expect(mgr.list()).toHaveLength(2);
   });
 });

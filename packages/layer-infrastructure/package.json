@@ -1,14 +1,14 @@
 {
   "name": "@aigility-harness/layer-infrastructure",
   "version": "0.1.0",
-  "description": "底座兼容基础层插件：日志 + 配置",
+  "description": "底座基础层：日志 + 配置 + 协议适配 + HTTP 入口 + 跨语言桥接（bridge）",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@aigility-harness/core": "workspace:*",
@@ -23,6 +23,14 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./bridge": {
+      "types": "./bridge/src/index.ts",
+      "default": "./bridge/src/index.ts"
+    },
+    "./bridge/py": {
+      "types": "./bridge/src/py-bridge.ts",
+      "default": "./bridge/src/py-bridge.ts"
     }
   }
 }

@@ -26,13 +26,13 @@ import { InMemoryKernelAdapter } from "./in-memory-kernel.js";
 
 import { plugin as infrastructurePlugin } from "@aigility-harness/layer-infrastructure";
 import { plugin as cognitivePlugin } from "@aigility-harness/layer-cognitive";
-import { plugin as perceptionPlugin } from "@aigility-harness/layer-perception";
+import { plugin as perceptionPlugin } from "@aigility-harness/layer-persona";
 import { plugin as orchestrationPlugin } from "@aigility-harness/layer-orchestration";
 import { plugin as actionPlugin } from "@aigility-harness/layer-action";
 import {
   createPyBridgePlugin,
   loadPyPluginsConfig,
-} from "@aigility-harness/py-bridge";
+} from "@aigility-harness/layer-infrastructure/bridge";
 import { httpIngressService, stopHttpServer } from "@aigility-harness/layer-infrastructure";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,7 +62,7 @@ import type {
 import type {
   ChatAgentRequest,
   ChatAgentResponse,
-} from "@aigility-harness/layer-perception";
+} from "@aigility-harness/layer-persona";
 
 function log(tag: string, msg: string): void {
   // eslint-disable-next-line no-console
@@ -302,11 +302,11 @@ async function main(): Promise<void> {
   }
 
   // 9a. 角色形象演示：perception -> orchestration（chat-agent → workflow-engine）
-  console.log("\n9a. 角色形象演示：@perception/chat-agent（L2）→ @orchestration/workflow-engine（L3）");
-  const ctx6 = kernel.createContext("session-006", LayerId.Perception);
+  console.log("\n9a. 角色形象演示：@persona/chat-agent（L2）→ @orchestration/workflow-engine（L3）");
+  const ctx6 = kernel.createContext("session-006", LayerId.Persona);
 
   const chatAgentRef: CapabilityRef = {
-    id: "@perception/chat-agent",
+    id: "@persona/chat-agent",
     versionRange: "^1.0.0",
   };
   const chatRes = await kernel.registry.resolve<ChatAgentRequest, ChatAgentResponse>(chatAgentRef);

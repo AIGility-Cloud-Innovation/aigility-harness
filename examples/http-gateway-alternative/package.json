@@ -1,13 +1,13 @@
 {
-  "name": "@aigility-harness/gateway",
+  "name": "@aigility-harness/http-gateway-alternative",
   "version": "1.0.0",
-  "description": "HTTP Gateway 插件 — Hono + Vercel AI SDK，暴露 OpenAI 兼容接口",
+  "description": "HTTP 网关替代实现（参考）— Hono + Vercel AI SDK，OpenAI 兼容端点；与 http-ingress 可互换",
   "type": "module",
   "private": true,
   "scripts": {
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@aigility-harness/core": "workspace:*",

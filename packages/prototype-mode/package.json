@@ -7,16 +7,15 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@aigility-harness/core": "workspace:*",
     "@aigility-harness/layer-infrastructure": "workspace:*",
     "@aigility-harness/layer-cognitive": "workspace:*",
-    "@aigility-harness/layer-perception": "workspace:*",
     "@aigility-harness/layer-orchestration": "workspace:*",
     "@aigility-harness/layer-action": "workspace:*",
-    "@aigility-harness/py-bridge": "workspace:*"
+    "@aigility-harness/layer-persona": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.5.0",

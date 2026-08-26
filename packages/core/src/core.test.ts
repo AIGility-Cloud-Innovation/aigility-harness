@@ -38,7 +38,7 @@ describe("Layer ordering", () => {
   it("LAYER_ORDER lists all five layers", () => {
     expect(LAYER_ORDER).toEqual([
       LayerId.Cognitive,
-      LayerId.Perception,
+      LayerId.Persona,
       LayerId.Orchestration,
       LayerId.Action,
       LayerId.Infrastructure,

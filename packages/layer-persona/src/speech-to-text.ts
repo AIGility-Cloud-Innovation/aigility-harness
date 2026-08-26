@@ -1,5 +1,5 @@
 /**
- * @aigility-harness/layer-perception — 语音转文本能力（@perception/speech-to-text）
+ * @aigility-harness/layer-persona — 语音转文本能力（@persona/speech-to-text）
  *
  * 契约：输入 PCM 16-bit 单声道音频 Buffer + 采样率，输出识别文本。
  * 音频是「外部信号摄入系统」的过程，故归属 Perception 层（感官层）。
@@ -46,9 +46,9 @@ export const speechToTextService: ServiceDefinition<
   SpeechToTextRequest,
   SpeechToTextResponse
 > = {
-  id: "@perception/speech-to-text",
+  id: "@persona/speech-to-text",
   version: "1.0.0",
-  layer: LayerId.Perception,
+  layer: LayerId.Persona,
   description: "语音转文本（ASR）：PCM 音频 → 文本",
   requestSchema: {
     type: "object",

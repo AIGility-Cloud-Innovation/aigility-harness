@@ -46,9 +46,9 @@ export interface ChatAgentResponse {
 }
 
 export const chatAgentService: ServiceDefinition<ChatAgentRequest, ChatAgentResponse> = {
-  id: "@perception/chat-agent",
+  id: "@persona/chat-agent",
   version: "1.0.0",
-  layer: LayerId.Perception,
+  layer: LayerId.Persona,
   description: "文字对话方角色形象：收消息 → 委托 L3 → 回文字",
 };
 
@@ -108,8 +108,8 @@ export { chatAgentProvider };
 // ── 插件 Manifest 与 LayerPlugin ─────────────────────────────────
 
 export const manifest: PluginManifest = {
-  name: "@perception/chat-agent",
-  layer: LayerId.Perception,
+  name: "@persona/chat-agent",
+  layer: LayerId.Persona,
   description: "感知层：文字对话方角色形象",
   version: "0.1.0",
   provides: [chatAgentService],

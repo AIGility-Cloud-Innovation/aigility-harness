@@ -6,7 +6,7 @@
  *   A. 开发者协议链路：/v1/chat/completions 等 → @infrastructure/protocol-adapter
  *      (翻译 Anthropic/OpenAI/Responses → 内部标准 → 认知层 LLM → 翻译回原协议)
  *
- *   B. 角色形象链路：/api/chat 等 → @perception/chat-agent
+ *   B. 角色形象链路：/api/chat 等 → @persona/chat-agent
  *      (用户与人格化 Agent 对话 → 角色形象 → 编排层 workflow-engine)
  *
  * 纯传输通道 + 路由，不含业务逻辑。协议翻译交给 protocol-adapter，
@@ -40,7 +40,7 @@ export interface HttpIngressRequest {
   devPaths?: string[];
   /** 角色形象链路: 哪些路径走 chat-agent (默认 /api/chat) */
   agentPaths?: string[];
-  /** 交给哪个 L2 角色形象处理 (能力 ID), 默认 @perception/chat-agent */
+  /** 交给哪个 L2 角色形象处理 (能力 ID), 默认 @persona/chat-agent */
   perceptionId?: string;
   /** 能力版本范围 */
   perceptionVersion?: string;
@@ -73,7 +73,7 @@ export const protocolAdapterRef: CapabilityRef = {
 
 /** 消费角色形象能力（用户链路） */
 export const chatAgentRef: CapabilityRef = {
-  id: "@perception/chat-agent",
+  id: "@persona/chat-agent",
   versionRange: "^1.0.0",
 };
 
@@ -121,7 +121,7 @@ const httpIngressProvider: Provider<HttpIngressRequest, HttpIngressResponse> = {
 
     const devPaths = request.devPaths ?? DEFAULT_DEV_PATHS;
     const agentPaths = request.agentPaths ?? DEFAULT_AGENT_PATHS;
-    const perceptionId = request.perceptionId ?? "@perception/chat-agent";
+    const perceptionId = request.perceptionId ?? "@persona/chat-agent";
     const perceptionVersion = request.perceptionVersion ?? "^1.0.0";
 
     if (server) {

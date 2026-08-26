@@ -56,7 +56,7 @@
 | Model 模型层 | 认知决策层（大脑） |
 | Harness 调度循环层 | 编排规划层（小脑） |
 | Tools 工具执行层 | 行动执行工具层（手脚） |
-| Environment 运行环境层 | 多模态感知交互层（感官）+ 底座兼容基础层（地基） |
+| Environment 运行环境层 | 角色人格层（Persona）+ 底座基础层（地基） |
 
 **结论：本五层架构是标准 Harness 范式的工程落地增强版** —— 任务调度循环（Harness）本就是编排规划层的职责，而本架构把 Model / Tools / Environment 全部升级为可插拔契约。
 
@@ -77,7 +77,7 @@
 | 层 | 名称 | 定位 | 典型模块 | 载体策略（原型 → 生产） |
 |----|------|------|---------|--------------------------|
 | L1 | **认知决策核心层**（大脑） | 智能体自我、推理、决策、身份中枢 | LLM 模型适配器、多模型算力路由、人格系统、记忆引擎、会话/身份上下文 | DSH 进程内插件 → 算力路由 + 记忆抽离为独立网络服务 |
-| L2 | **多模态感知交互层**（感官） | 输入接收、输出渲染、外部用户触达网关 | ASR / TTS、音视频编解码、数字人渲染、IM 网关、Web 对话界面 | 附属子进程 → 本机独立守护进程（声卡/显卡独占）→ 网络服务集群 |
+| L2 | **角色人格层**（Persona） | 特性打包为可交互角色：性格 + 信息接收/表达方式 | 文本对话、ASR/TTS、数字人渲染、生物识别专家、客服机器人（按角色定制） | 附属子进程 → 本机独立守护进程 → 网络服务集群 |
 | L3 | **编排规划层**（小脑） | 任务调度、思考循环、多智能体协作 | Agent 主思考循环（ReAct/PlanExecute）、任务规划/复盘、SubAgent 调度、定时/长任务 | DSH 插件线程 → 复杂子 Agent 拆独立 Worker 进程/服务 |
 | L4 | **行动执行工具层**（手脚） | 产生真实外部副作用 | 代码沙箱、文档/文件操作、系统资源管控、IoT/机器人控制 | 附属子进程 → 独立守护进程/远程隔离服务 |
 | L5 | **底座兼容基础层**（地基） | 通信、契约、安全、观测基础设施 | 全局消息总线、统一消息契约、MCP/A2A 协议桥接、鉴权/限流/熔断、全链路追踪、自动切换控制器 | 全部独立网络服务，不属于 DSH 进程 |
@@ -278,15 +278,15 @@ aigility-harness/
 │   │                              #   Provider / Consumer / LayerPlugin / KernelAdapter
 │   ├── kernel-dsh/                # DSH-Cordis 内核适配器（Seam Registry / Effect Manager / Carrier Manager）
 │   ├── layer-cognitive/           # L1 认知决策层（LLM 推理：stub + litellm）
-│   ├── layer-perception/          # L2 多模态感知层（文本输入）
+│   ├── layer-persona/            # L2 角色人格层（chat-agent / advisory-chat 等角色）
 │   ├── layer-orchestration/       # L3 编排规划层（任务规划 + codex-agent）
 │   ├── layer-action/              # L4 行动执行层（TTS）
 │   ├── layer-infrastructure/      # L5 底座基础层（config/logging/protocol-adapter）
-│   ├── py-bridge/                 # 跨语言桥接器（JSON-RPC over stdio → Python）
+│   │   └── bridge/               # 跨语言桥接（L5 底座层）：py-bridge 为首个实现
 │   │   ├── src/
 │   │   │   ├── types.ts           # 声明式配置 + 通信协议类型
 │   │   │   ├── py-worker.ts       # 子进程管理 + 请求队列 + 批量调用
-│   │   │   ├── py-bridge.ts       # Provider 工厂：配置 → Seam Provider
+│   │   │   ├── py-bridge.ts       # Provider 工厂：配置 → Seam Provider（首个语言桥实现）
 │   │   │   ├── config-loader.ts   # 配置加载 + 环境变量替换
 │   │   │   └── py-bridge.test.ts  # 端到端测试（7 例）
 │   │   └── scripts/

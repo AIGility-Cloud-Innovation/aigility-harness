@@ -1,7 +1,7 @@
 /**
- * @aigility-harness/layer-perception — 多模态感知交互层
+ * @aigility-harness/layer-persona — 角色人格层
  *
- * 提供文本输入能力（@perception/text-input）。
+ * 提供文本输入能力（@persona/text-input）。
  * 原型模式下对输入文本做归一化（trim + 元数据）。
  */
 
@@ -81,9 +81,9 @@ export const textInputService: ServiceDefinition<
   TextInputRequest,
   TextInputResponse
 > = {
-  id: "@perception/text-input",
+  id: "@persona/text-input",
   version: "1.0.0",
-  layer: LayerId.Perception,
+  layer: LayerId.Persona,
   description: "文本输入归一化能力",
 };
 
@@ -91,7 +91,7 @@ export const textInputService: ServiceDefinition<
 
 const textInputProvider: Provider<TextInputRequest, TextInputResponse> = {
   service: textInputService,
-  name: "perception-text-input-basic",
+  name: "persona-text-input-basic",
   state: PluginState.Active,
   async execute(
     request: TextInputRequest,
@@ -116,9 +116,9 @@ const textInputProvider: Provider<TextInputRequest, TextInputResponse> = {
 // ── 插件 Manifest 与 LayerPlugin ─────────────────────────────────
 
 export const manifest: PluginManifest = {
-  name: "@perception/multimodal-input",
-  layer: LayerId.Perception,
-  description: "感知交互层：文本输入归一化 + 语音转文本（ASR）",
+  name: "@persona/character",
+  layer: LayerId.Persona,
+  description: "角色人格层：感知（文本/语音）+ 角色形象（chat-agent/advisory-chat）",
   version: "0.2.0",
   provides: [textInputService, speechToTextService, advisoryChatService],
   consumes: [],

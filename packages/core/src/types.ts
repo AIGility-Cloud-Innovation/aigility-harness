@@ -11,8 +11,8 @@
 export enum LayerId {
   /** 第1层：认知决策核心层（大脑） */
   Cognitive = "cognitive",
-  /** 第2层：多模态感知交互层（感官） */
-  Perception = "perception",
+  /** 第2层：角色人格层（角色打包感知/表达/性格） */
+  Persona = "persona",
   /** 第3层：编排规划层（小脑） */
   Orchestration = "orchestration",
   /** 第4层：行动执行工具层（手脚） */
@@ -23,7 +23,7 @@ export enum LayerId {
 
 export const LAYER_ORDER: readonly LayerId[] = [
   LayerId.Cognitive,
-  LayerId.Perception,
+  LayerId.Persona,
   LayerId.Orchestration,
   LayerId.Action,
   LayerId.Infrastructure,

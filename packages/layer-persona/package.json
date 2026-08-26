@@ -1,14 +1,14 @@
 {
-  "name": "@aigility-harness/layer-perception",
+  "name": "@aigility-harness/layer-persona",
   "version": "0.2.0",
-  "description": "多模态感知交互层插件：文本输入 + 语音转文本（ASR）",
+  "description": "角色人格层：特性打包为可交互 Agent 角色（性格/接收方式/表达方式）",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@aigility-harness/core": "workspace:*"
