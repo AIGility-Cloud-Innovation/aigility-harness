@@ -77,7 +77,7 @@
 | 层 | 名称 | 定位 | 典型模块 | 载体策略（原型 → 生产） |
 |----|------|------|---------|--------------------------|
 | L1 | **认知决策核心层**（大脑） | 智能体自我、推理、决策、身份中枢 | LLM 模型适配器、多模型算力路由、人格系统、记忆引擎、会话/身份上下文 | DSH 进程内插件 → 算力路由 + 记忆抽离为独立网络服务 |
-| L2 | **角色人格层**（Persona） | 特性打包为可交互角色：性格 + 信息接收/表达方式 | 文本对话、ASR/TTS、数字人渲染、生物识别专家、客服机器人（按角色定制） | 附属子进程 → 本机独立守护进程 → 网络服务集群 |
+| L2 | **角色人格层**（Persona） | 特性打包为可交互角色：性格 + 信息接收/表达方式 | 具名角色：销售客服（sales-chat）、插件安装助手（plugin-helper）、编码助手（coder）、就业顾问（advisory-chat）；感知（文本/语音，ASR/TTS）、按角色定制 | 附属子进程 → 本机独立守护进程 → 网络服务集群 |
 | L3 | **编排规划层**（小脑） | 任务调度、思考循环、多智能体协作 | Agent 主思考循环（ReAct/PlanExecute）、任务规划/复盘、SubAgent 调度、定时/长任务 | DSH 插件线程 → 复杂子 Agent 拆独立 Worker 进程/服务 |
 | L4 | **行动执行工具层**（手脚） | 产生真实外部副作用 | 代码沙箱、文档/文件操作、系统资源管控、IoT/机器人控制 | 附属子进程 → 独立守护进程/远程隔离服务 |
 | L5 | **底座兼容基础层**（地基） | 通信、契约、安全、观测基础设施 | 全局消息总线、统一消息契约、MCP/A2A 协议桥接、鉴权/限流/熔断、全链路追踪、自动切换控制器 | 全部独立网络服务，不属于 DSH 进程 |
@@ -85,7 +85,7 @@
 ### 各层运行特征
 
 - **L1 认知层**：Always-On 核心常驻，强状态、强一致性、不可随意重启。
-- **L2 感知层**：延迟敏感、硬件绑定、极易崩溃，纯信号转换、无核心决策。
+- **L2 角色层**：延迟敏感、硬件绑定、与用户直接交互，纯信号转换与角色形象，无核心决策。
 - **L3 编排层**：流程驱动、状态机复杂、多分支多迭代，不直接操作硬件。
 - **L4 执行层**：高风险、高权限、崩溃影响外部环境，必须强隔离、强沙箱、强故障域。
 - **L5 底座层**：全局唯一、所有模块依赖、完全与业务解耦。
@@ -188,12 +188,13 @@ pnpm --filter prototype-mode start   # 或组合示例:
 pnpm --filter @aigility-harness/example-openai-gateway start
 ```
 
-起服务后浏览器打开 `http://localhost:<port>/`（或 `/ui`），即可与两个角色对话：
+起服务后浏览器打开 `http://localhost:<port>/`（或 `/ui`），即可与三个角色对话：
 
 | 页签 | 端点 | 功能 |
 |------|------|------|
 | **销售客服** | `POST /api/chat` | 业务对话（销售客服角色 → 工作流回复） |
 | **插件安装助手** | `POST /api/plugin-helper` | 开箱引导安装：问"怎么加插件/RAG/记忆" → 真实扫描插件清单 → 返回接入指引 |
+| **编码助手** | `POST /api/coder` | 编码对话（coder 角色 → codex-agent → Codex 真实干活） |
 
 agent 路径→角色映射可配置（`agentRoutes`），未命中路径回退 `perceptionId`。
 
@@ -329,7 +330,7 @@ aigility-harness/
 │   │                              #   Provider / Consumer / LayerPlugin / KernelAdapter
 │   ├── kernel-dsh/                # DSH-Cordis 内核适配器（Seam Registry / Effect Manager / Carrier Manager）
 │   ├── layer-cognitive/           # L1 认知决策层（LLM 推理：stub + litellm）
-│   ├── layer-persona/            # L2 角色人格层（sales-chat / plugin-helper / advisory-chat 等角色）
+│   ├── layer-persona/            # L2 角色人格层（sales-chat / plugin-helper / coder / advisory-chat 等角色）
 │   ├── layer-orchestration/       # L3 编排规划层（任务规划 + plugin-install + codex-agent）
 │   ├── layer-action/              # L4 行动执行层（TTS）
 │   ├── layer-infrastructure/      # L5 底座基础层（config/logging/protocol-adapter）
