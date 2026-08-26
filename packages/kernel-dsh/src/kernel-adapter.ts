@@ -16,7 +16,7 @@
  *   getMode / isReady      →   local state flags
  */
 
-import { Context } from "@cordisjs/core";
+import { Context } from "@deepseek-ai/cordis";
 import type {
   CarrierKind,
   LayerId,

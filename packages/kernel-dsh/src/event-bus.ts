@@ -15,7 +15,7 @@
  * Pure delegation: no business logic, only translation.
  */
 
-import type { Context } from "@cordisjs/core";
+import type { Context } from "@deepseek-ai/cordis";
 import type { LayerId, SystemEvent } from "@aigility-harness/core";
 import type { EventBus } from "@aigility-harness/core";
 

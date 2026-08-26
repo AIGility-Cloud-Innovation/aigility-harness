@@ -15,7 +15,7 @@
  * the Seam abstraction and Cordis primitives.
  */
 
-import type { Context } from "@cordisjs/core";
+import type { Context } from "@deepseek-ai/cordis";
 import type {
   CapabilityId,
   CapabilityRef,

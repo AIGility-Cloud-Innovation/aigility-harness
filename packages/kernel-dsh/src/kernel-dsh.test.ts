@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { Context } from "@cordisjs/core";
+import { Context } from "@deepseek-ai/cordis";
 import {
   CarrierKind,
   LayerId,
