@@ -45,9 +45,11 @@ export interface HttpIngressRequest {
   port: number;
   /** 开发者协议链路: 哪些路径走 protocol-adapter (默认 /v1/chat/completions, /v1/messages) */
   devPaths?: string[];
-  /** 角色形象链路: 哪些路径走角色 (默认 /api/chat) */
+  /** 角色形象链路: 哪些路径走角色 (默认 /api/chat, /api/plugin-helper) */
   agentPaths?: string[];
-  /** 交给哪个 L2 角色形象处理 (能力 ID), 默认 @persona/sales-chat */
+  /** 路径 → 角色能力 ID 映射 (默认 /api/chat → @persona/sales-chat, /api/plugin-helper → @persona/plugin-helper) */
+  agentRoutes?: Record<string, string>;
+  /** 交给哪个 L2 角色形象处理 (能力 ID), 默认 @persona/sales-chat (agentRoutes 未命中时兜底) */
   perceptionId?: string;
   /** 能力版本范围 */
   perceptionVersion?: string;
@@ -81,6 +83,12 @@ export const protocolAdapterRef: CapabilityRef = {
 /** 消费销售客服角色能力（用户链路） */
 export const salesChatRef: CapabilityRef = {
   id: "@persona/sales-chat",
+  versionRange: "^1.0.0",
+};
+
+/** 消费插件安装助手角色能力（开箱引导链路） */
+export const pluginHelperRef: CapabilityRef = {
+  id: "@persona/plugin-helper",
   versionRange: "^1.0.0",
 };
 
@@ -125,7 +133,12 @@ const DEFAULT_DEV_PATHS = [
   "/v1/messages",
   "/v1/responses",
 ];
-const DEFAULT_AGENT_PATHS = ["/api/chat"];
+const DEFAULT_AGENT_PATHS = ["/api/chat", "/api/plugin-helper"];
+/** 默认 agent 路径 → 角色映射（开箱即用：销售客服 + 插件安装助手两条链路） */
+const DEFAULT_AGENT_ROUTES: Record<string, string> = {
+  "/api/chat": "@persona/sales-chat",
+  "/api/plugin-helper": "@persona/plugin-helper",
+};
 
 // ── Provider 实现 ────────────────────────────────────────────────
 
@@ -144,6 +157,7 @@ const httpIngressProvider: Provider<HttpIngressRequest, HttpIngressResponse> = {
 
     const devPaths = request.devPaths ?? DEFAULT_DEV_PATHS;
     const agentPaths = request.agentPaths ?? DEFAULT_AGENT_PATHS;
+    const agentRoutes = request.agentRoutes ?? DEFAULT_AGENT_ROUTES;
     const perceptionId = request.perceptionId ?? "@persona/sales-chat";
     const perceptionVersion = request.perceptionVersion ?? "^1.0.0";
 
@@ -242,9 +256,11 @@ const httpIngressProvider: Provider<HttpIngressRequest, HttpIngressResponse> = {
           return;
         }
 
-        // agent 链路：角色形象（用户人格化对话）
+        // agent 链路：角色形象（用户人格化对话, 按路径选角色）
+        const routePath = (req.url ?? "").split("?")[0];
+        const agentRoleId = agentRoutes[routePath] ?? perceptionId;
         const result = await ctx.call(
-          { id: perceptionId, versionRange: perceptionVersion },
+          { id: agentRoleId, versionRange: perceptionVersion },
           payload,
         );
 
@@ -302,7 +318,7 @@ export const manifest: PluginManifest = {
   description: "底座层：HTTP 唯一入口（路由到协议适配 / 角色形象）",
   version: "1.1.0",
   provides: [httpIngressService],
-  consumes: [protocolAdapterRef, salesChatRef],
+  consumes: [protocolAdapterRef, salesChatRef, pluginHelperRef],
   preferredCarrier: CarrierKind.Thread,
 };
 

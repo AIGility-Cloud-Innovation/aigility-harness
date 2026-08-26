@@ -188,3 +188,80 @@ describe("http-ingress SSE 流式分支", () => {
     expect(lines[lines.length - 1]).toBe("data: [DONE]");
   });
 });
+
+// ── agent 角色路由集成测试 ────────────────────────────────────────
+
+/** mock ctx 记录每次 call 的角色 id, 验证路径→角色路由 */
+function mockRouteCtx(calls: { id: string }[]): SeamContext {
+  return {
+    sessionId: "it-route-session",
+    traceId: "it-route-trace",
+    callerLayer: LayerId.Infrastructure,
+    addEffect: () => "e",
+    emit: () => {},
+    getState: () => undefined,
+    setState: () => {},
+    call: (async (ref: { id?: string }) => {
+      calls.push({ id: String(ref.id) });
+      return ok({ ok: true, value: { response: `role=${String(ref.id)}`, agent_name: "role", session_id: "s", trace_id: "t" } });
+    }) as SeamContext["call"],
+  };
+}
+
+describe("http-ingress agent 路径 → 角色路由", () => {
+  it("/api/chat 默认路由到 @persona/sales-chat", async () => {
+    const calls: { id: string }[] = [];
+    const bind = await httpIngressProvider.execute(
+      { port: 18331 },
+      mockRouteCtx(calls),
+    );
+    expect(bind.ok).toBe(true);
+
+    await fetch("http://127.0.0.1:18331/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_input: "你好" }),
+    });
+    expect(calls.length).toBe(1);
+    expect(calls[0].id).toBe("@persona/sales-chat");
+  });
+
+  it("/api/plugin-helper 默认路由到 @persona/plugin-helper", async () => {
+    const calls: { id: string }[] = [];
+    const bind = await httpIngressProvider.execute(
+      { port: 18332 },
+      mockRouteCtx(calls),
+    );
+    expect(bind.ok).toBe(true);
+
+    await fetch("http://127.0.0.1:18332/api/plugin-helper", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_input: "帮我加个 RAG 插件" }),
+    });
+    expect(calls.length).toBe(1);
+    expect(calls[0].id).toBe("@persona/plugin-helper");
+  });
+
+  it("自定义 agentRoutes 覆盖默认映射, 未命中路径走 perceptionId 兜底", async () => {
+    const calls: { id: string }[] = [];
+    const bind = await httpIngressProvider.execute(
+      {
+        port: 18333,
+        agentPaths: ["/api/chat", "/api/custom-role"],
+        agentRoutes: { "/api/custom-role": "@profile/advisor" },
+        perceptionId: "@persona/sales-chat",
+      },
+      mockRouteCtx(calls),
+    );
+    expect(bind.ok).toBe(true);
+
+    // 命中自定义映射
+    await fetch("http://127.0.0.1:18333/api/custom-role", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_input: "hi" }) });
+    expect(calls[0].id).toBe("@profile/advisor");
+
+    // 未命中 agentRoutes → perceptionId 兜底
+    await fetch("http://127.0.0.1:18333/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_input: "hi" }) });
+    expect(calls[1].id).toBe("@persona/sales-chat");
+  });
+});
