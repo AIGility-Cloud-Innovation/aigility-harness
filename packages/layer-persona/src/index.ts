@@ -38,16 +38,16 @@ import {
   whisperSttProvider,
 } from "./speech-to-text.js";
 
-// 角色形象插件
+// 销售客服角色形象
 export {
-  chatAgentService,
-  chatAgentProvider,
-} from "./chat-agent.js";
+  salesChatService,
+  salesChatProvider,
+} from "./sales-chat.js";
 export type {
-  ChatAgentRequest,
-  ChatAgentResponse,
-} from "./chat-agent.js";
-import { chatAgentService, chatAgentProvider } from "./chat-agent.js";
+  SalesChatRequest,
+  SalesChatResponse,
+} from "./sales-chat.js";
+import { salesChatService, salesChatProvider } from "./sales-chat.js";
 
 // 就业数据顾问角色形象 (CareerEdu)
 export {
@@ -59,6 +59,17 @@ export type {
   AdvisoryChatResponse,
 } from "./advisory-chat.js";
 import { advisoryChatService, advisoryChatProvider } from "./advisory-chat.js";
+
+// 插件安装助手角色形象 (开箱即用引导)
+export {
+  pluginHelperService,
+  pluginHelperProvider,
+} from "./plugin-helper.js";
+export type {
+  PluginHelperRequest,
+  PluginHelperResponse,
+} from "./plugin-helper.js";
+import { pluginHelperService, pluginHelperProvider } from "./plugin-helper.js";
 
 // ── 服务定义 ─────────────────────────────────────────────────────
 
@@ -118,9 +129,9 @@ const textInputProvider: Provider<TextInputRequest, TextInputResponse> = {
 export const manifest: PluginManifest = {
   name: "@persona/character",
   layer: LayerId.Persona,
-  description: "角色人格层：感知（文本/语音）+ 角色形象（chat-agent/advisory-chat）",
+  description: "角色人格层：感知（文本/语音）+ 角色形象（sales-chat/plugin-helper/advisory-chat）",
   version: "0.2.0",
-  provides: [textInputService, speechToTextService, advisoryChatService],
+  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, advisoryChatService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
 };
@@ -142,7 +153,8 @@ export const plugin: LayerPlugin = {
       textInputProvider,
       voskSttProvider,
       whisperSttProvider,
-      chatAgentProvider,
+      salesChatProvider,
+      pluginHelperProvider,
       advisoryChatProvider,
     ];
   },

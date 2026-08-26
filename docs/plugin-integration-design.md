@@ -303,7 +303,7 @@ export const anthropicAdapterProvider: Provider<
 当前为 `packages/layer-infrastructure/src/http-ingress.ts`（node:http 实现），提供唯一 HTTP 入口，按路径路由两条链路：
 
 - **dev 链路**：`/v1/chat/completions`、`/v1/messages`、`/v1/responses` → `@infrastructure/protocol-adapter`
-- **agent 链路**：`/api/chat` → `@persona/chat-agent`
+- **agent 链路**：`/api/chat` → `@persona/sales-chat`
 
 **方案**：http-ingress 收到 HTTP 请求后：
 

@@ -28,6 +28,15 @@ import inspect
 from typing import Any, Optional
 from concurrent.futures import ThreadPoolExecutor
 
+# ── 导入路径 ──────────────────────────────────────────────────────
+# TS 侧 PyWorker 以绝对路径 spawn 本脚本, sys.path[0] 是脚本目录而非 cwd,
+# 而 workDir 下的相对模块 (如 tests.workflow_nodes) 需要从 cwd 导入。
+# 将 cwd 显式加入 sys.path, 保证 py-plugins.json 中声明的相对 node_module
+# / state_schema / condition_module 可正常解析。
+_cwd = os.getcwd()
+if _cwd not in sys.path:
+    sys.path.insert(0, _cwd)
+
 # ── 紧凑 JSON 编解码 ──────────────────────────────────────────────
 
 def _dumps(obj: Any) -> str:

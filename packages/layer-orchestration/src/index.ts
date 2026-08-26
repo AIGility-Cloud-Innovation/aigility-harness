@@ -75,7 +75,7 @@ export const llmInferenceRef: CapabilityRef = {
 
 // ── WorkflowEngine 占位 Provider（@orchestration/workflow-engine）──
 //
-// 契约：接收感知层角色形象（chat-agent）委托的 ChatRequest，产出最终回复。
+// 契约：接收感知层角色形象（sales-chat）委托的 ChatRequest，产出最终回复。
 // 生产实现由 py-bridge 热切换 → aigility.workflow.WorkflowEngine（YAML → LangGraph）。
 // 此处为确定性 stub，让纯 TS 原型链路（L2 → L3 → 回复）无需 Python 也能跑通。
 

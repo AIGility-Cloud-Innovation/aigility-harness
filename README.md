@@ -279,7 +279,7 @@ aigility-harness/
 │   │                              #   Provider / Consumer / LayerPlugin / KernelAdapter
 │   ├── kernel-dsh/                # DSH-Cordis 内核适配器（Seam Registry / Effect Manager / Carrier Manager）
 │   ├── layer-cognitive/           # L1 认知决策层（LLM 推理：stub + litellm）
-│   ├── layer-persona/            # L2 角色人格层（chat-agent / advisory-chat 等角色）
+│   ├── layer-persona/            # L2 角色人格层（sales-chat / advisory-chat 等角色）
 │   ├── layer-orchestration/       # L3 编排规划层（任务规划 + codex-agent）
 │   ├── layer-action/              # L4 行动执行层（TTS）
 │   ├── layer-infrastructure/      # L5 底座基础层（config/logging/protocol-adapter）

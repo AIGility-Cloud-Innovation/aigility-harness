@@ -1,5 +1,5 @@
 /**
- * L2 感知交互层: 角色形象插件
+ * L2 感知交互层: 销售客服角色形象 (sales-chat)
  *
  * L2 的职责: 构建主体形象，接收信号，委托 L3 编排，由同一角色反馈。
  * 不关心调什么工具、走什么流程——那是 L3 的事。
@@ -23,7 +23,7 @@ import type {
 
 // ── 服务定义 ─────────────────────────────────────────────────────
 
-export interface ChatAgentRequest {
+export interface SalesChatRequest {
   /** 用户输入 */
   user_input: string;
   /** 商户 ID */
@@ -34,7 +34,7 @@ export interface ChatAgentRequest {
   session_id?: string;
 }
 
-export interface ChatAgentResponse {
+export interface SalesChatResponse {
   /** 回复内容 */
   response: string;
   /** 角色身份 */
@@ -45,8 +45,8 @@ export interface ChatAgentResponse {
   trace_id: string;
 }
 
-export const chatAgentService: ServiceDefinition<ChatAgentRequest, ChatAgentResponse> = {
-  id: "@persona/chat-agent",
+export const salesChatService: ServiceDefinition<SalesChatRequest, SalesChatResponse> = {
+  id: "@persona/sales-chat",
   version: "1.0.0",
   layer: LayerId.Persona,
   description: "文字对话方角色形象：收消息 → 委托 L3 → 回文字",
@@ -54,14 +54,14 @@ export const chatAgentService: ServiceDefinition<ChatAgentRequest, ChatAgentResp
 
 // ── Provider 实现 ────────────────────────────────────────────────
 
-const chatAgentProvider: Provider<ChatAgentRequest, ChatAgentResponse> = {
-  service: chatAgentService,
-  name: "perception-chat-agent-text",
+const salesChatProvider: Provider<SalesChatRequest, SalesChatResponse> = {
+  service: salesChatService,
+  name: "persona-sales-chat-text",
   state: PluginState.Active,
   async execute(
-    request: ChatAgentRequest,
+    request: SalesChatRequest,
     ctx: SeamContext,
-  ): Promise<Result<ChatAgentResponse>> {
+  ): Promise<Result<SalesChatResponse>> {
     // 1. 角色形象: "我是销售客服AI"
     const agentName = "销售客服AI";
 
@@ -97,22 +97,22 @@ const chatAgentProvider: Provider<ChatAgentRequest, ChatAgentResponse> = {
   async health(): Promise<HealthStatus> {
     return {
       healthy: true,
-      detail: "chat-agent ready",
+      detail: "sales-chat ready",
       checkedAt: new Date().toISOString(),
     };
   },
 };
 
-export { chatAgentProvider };
+export { salesChatProvider };
 
 // ── 插件 Manifest 与 LayerPlugin ─────────────────────────────────
 
 export const manifest: PluginManifest = {
-  name: "@persona/chat-agent",
+  name: "@persona/sales-chat",
   layer: LayerId.Persona,
   description: "感知层：文字对话方角色形象",
   version: "0.1.0",
-  provides: [chatAgentService],
+  provides: [salesChatService],
   consumes: [{ id: "@orchestration/workflow-engine", versionRange: "^1.0.0" }],
   preferredCarrier: CarrierKind.Thread,
 };
@@ -130,7 +130,7 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [chatAgentProvider];
+    return [salesChatProvider];
   },
   getState(): PluginState {
     return pluginState;

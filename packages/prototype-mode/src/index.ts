@@ -60,8 +60,8 @@ import type {
   TextToSpeechResponse,
 } from "@aigility-harness/layer-action";
 import type {
-  ChatAgentRequest,
-  ChatAgentResponse,
+  SalesChatRequest,
+  SalesChatResponse,
 } from "@aigility-harness/layer-persona";
 
 function log(tag: string, msg: string): void {
@@ -301,19 +301,19 @@ async function main(): Promise<void> {
     }
   }
 
-  // 9a. 角色形象演示：perception -> orchestration（chat-agent → workflow-engine）
-  console.log("\n9a. 角色形象演示：@persona/chat-agent（L2）→ @orchestration/workflow-engine（L3）");
+  // 9a. 角色形象演示：perception -> orchestration（sales-chat → workflow-engine）
+  console.log("\n9a. 角色形象演示：@persona/sales-chat（L2）→ @orchestration/workflow-engine（L3）");
   const ctx6 = kernel.createContext("session-006", LayerId.Persona);
 
-  const chatAgentRef: CapabilityRef = {
-    id: "@persona/chat-agent",
+  const salesChatRef: CapabilityRef = {
+    id: "@persona/sales-chat",
     versionRange: "^1.0.0",
   };
-  const chatRes = await kernel.registry.resolve<ChatAgentRequest, ChatAgentResponse>(chatAgentRef);
+  const chatRes = await kernel.registry.resolve<SalesChatRequest, SalesChatResponse>(salesChatRef);
   if (!chatRes.ok) {
-    console.error("   resolve chat-agent 失败:", chatRes.error);
+    console.error("   resolve sales-chat 失败:", chatRes.error);
   } else {
-    const chatReq: ChatAgentRequest = {
+    const chatReq: SalesChatRequest = {
       user_input: "帮我查一下今天的订单",
       merchant_id: "M001",
       customer_id: "C001",
@@ -321,7 +321,7 @@ async function main(): Promise<void> {
     log("request", JSON.stringify(chatReq));
     const chatExec = await chatRes.value.execute(chatReq, ctx6);
     if (!chatExec.ok) {
-      console.error("   chat-agent 执行失败:", chatExec.error);
+      console.error("   sales-chat 执行失败:", chatExec.error);
     } else {
       log("response", `agent = ${chatExec.value.agent_name}`);
       log("response", `response = ${chatExec.value.response}`);
@@ -367,7 +367,7 @@ async function main(): Promise<void> {
         const devBody = await devRes.json() as Record<string, unknown>;
         log("dev", `HTTP ${devRes.status}: ${JSON.stringify(devBody).slice(0, 200)}`);
 
-        // 链路 B：角色形象 (/api/chat → chat-agent → workflow-engine)
+        // 链路 B：角色形象 (/api/chat → sales-chat → workflow-engine)
         const agentRes = await fetch("http://127.0.0.1:3399/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
