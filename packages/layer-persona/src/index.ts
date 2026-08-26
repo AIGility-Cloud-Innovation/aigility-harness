@@ -49,6 +49,17 @@ export type {
 } from "./sales-chat.js";
 import { salesChatService, salesChatProvider } from "./sales-chat.js";
 
+// 框架介绍员角色形象
+export {
+  harnessGuideService,
+  harnessGuideProvider,
+} from "./harness-guide.js";
+export type {
+  HarnessGuideRequest,
+  HarnessGuideResponse,
+} from "./harness-guide.js";
+import { harnessGuideService, harnessGuideProvider } from "./harness-guide.js";
+
 // 就业数据顾问角色形象 (CareerEdu)
 export {
   advisoryChatService,
@@ -140,9 +151,9 @@ const textInputProvider: Provider<TextInputRequest, TextInputResponse> = {
 export const manifest: PluginManifest = {
   name: "@persona/character",
   layer: LayerId.Persona,
-  description: "角色人格层：感知（文本/语音）+ 角色形象（sales-chat/plugin-helper/coder/advisory-chat）",
-  version: "0.2.0",
-  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, coderService, advisoryChatService],
+  description: "角色人格层：感知（文本/语音）+ 角色形象（sales-chat/plugin-helper/coder/advisory-chat/harness-guide）",
+  version: "0.3.0",
+  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, coderService, advisoryChatService, harnessGuideService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
 };
@@ -168,6 +179,7 @@ export const plugin: LayerPlugin = {
       pluginHelperProvider,
       coderProvider,
       advisoryChatProvider,
+      harnessGuideProvider,
     ];
   },
   getState(): PluginState {
