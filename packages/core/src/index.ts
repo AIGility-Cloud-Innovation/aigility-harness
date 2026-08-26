@@ -48,6 +48,21 @@ export type {
   BusKind,
 } from "./bus-bridge.js";
 
+// ── TaskQueue (任务队列契约, PG 单库化) ───────────────────────────
+export { taskQueueName } from "./task-queue.js";
+export type {
+  QueueMessage,
+  TaskQueue,
+} from "./task-queue.js";
+
+// ── VectorStore (向量检索契约, PG 单库化) ─────────────────────────
+export type {
+  VectorPoint,
+  VectorSearchHit,
+  VectorMetric,
+  VectorStore,
+} from "./vector-store.js";
+
 // ── Capability Seam ───────────────────────────────────────────────
 export type {
   ServiceDefinition,

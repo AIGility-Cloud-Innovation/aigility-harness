@@ -276,14 +276,29 @@ harness (TS)                          Python (子进程)
 
 ---
 
-## 九、落地实施路线
+## 九、统一数据底座：PostgreSQL 单库多职
+
+**架构决策（2026-08-26）**：所有项目的数据库统一用 **PostgreSQL 单库多职**——业务表 + 消息总线 + 任务队列 + 向量检索，替代 Redis / RabbitMQ / Qdrant / Chroma / MySQL 分散中间件。一个库 = 一套备份/监控/高可用，且跨四职的事务可原子提交。
+
+| 职责 | PG 实现 | 契约（core） | 状态 |
+|------|---------|-------------|------|
+| **业务持久化** | 普通表 | — | ✅ 既有 |
+| **消息总线** | `LISTEN/NOTIFY` + `event_log` 表（小信封避开 8KB 限制，seq 自增支持事件溯源） | `BusBridge` / `BusEnvelope` | ✅ `PgBusBridge` 已实现 |
+| **任务队列** | pgmq 扩展 或 `FOR UPDATE SKIP LOCKED` | `TaskQueue`（enqueue/dequeue/ack/nack/stats，租约式消费语义对齐 SQS/pgmq） | 🔶 契约就绪，实现后置 |
+| **向量检索** | pgvector（HNSW 索引） | `VectorStore`（upsert/search/remove/count，支持 metadata 过滤） | 🔶 契约就绪，实现后置 |
+
+**可更换原则**：三个契约（BusBridge / TaskQueue / VectorStore）全部"契约在 core、实现在层"——将来任何一职要换独立中间件（NATS / Redis Stream / Milvus），只动工厂一行，上层业务零改动。
+
+---
+
+## 十、落地实施路线
 
 | 阶段 | 目标 | 内容 |
 |------|------|------|
 | **阶段 1**（✅ 已完成） | 原型闭环 | 五层能力 DSH 插件化，验证完整业务逻辑；kernel-dsh 35 测例 + codex-agent 规划闭环通过 |
 | **阶段 1.5**（✅ 已完成） | 跨语言桥接 | py-bridge 通用 Python 对接器，aigility ADK 端到端验证通过 |
 | **阶段 1.75**（✅ 已完成） | 开箱可用 | sales-chat/plugin-helper 角色 + plugin-install 引导工作流 + 最小 Web UI（`GET /` `/ui`）+ agent 路径→角色路由 |
-| **阶段 2**（🔶 部分完成） | 桥接层开发 | BusBridge 契约 + BusEnvelope 信封 + RemoteEventBus 跨进程事件桥 + memory 总线 mock（8 单测）；真实总线（NATS/Redis/RabbitMQ 候选）接入 createBusBridge 后置 |
+| **阶段 2**（🔶 桥与契约就绪） | 桥接层开发 | BusBridge 契约 + BusEnvelope 信封 + RemoteEventBus 跨进程事件桥 + `PgBusBridge` 实现（LISTEN/NOTIFY + event_log，✅）；`TaskQueue` / `VectorStore` 契约就绪（🔶 实现后置）；真实总线可更换（pgmq/pgvector/NATS/Milvus 按部署选定） |
 | **阶段 3**（⏳ 未实现） | 进程载体封装 | 守护进程管理、多载体统一抽象 |
 | **阶段 4**（⏳ 未实现） | 智能调度与自动替换 | 健康探测、指标采集、自动切换控制器 |
 | **阶段 5**（⏳ 未实现） | 生产加固 | 安全、鉴权、全链路追踪、状态迁移、熔断降级 |
