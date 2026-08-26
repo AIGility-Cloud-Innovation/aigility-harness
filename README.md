@@ -17,47 +17,132 @@
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                         aigility-harness 五层架构                        │
+│                        aigility-harness 五层架构                          │
+│                 「契约是主体，插件是过客」— 一切可插拔                     │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
+│   外部信号:  HTTP / 企业微信 / IM / Web UI                                │
+│        │  (L5 http-ingress / wecom-ingress 收口)                        │
+│        ▼                                                                 │
 │   ┌─────────────────────────────────────────────────────────────────┐   │
-│   │  L1 认知决策层 (layer-cognitive)    LLM 推理 / 记忆检索           │   │
-│   │      @cognitive/llm-inference  @cognitive/memory                 │   │
-│   └────────────────────────────┬────────────────────────────────────┘   │
-│                                │ Seam 契约 (ctx.call)                   │
-│   ┌────────────────────────────┴────────────────────────────────────┐   │
-│   │  L2 角色人格层 (layer-persona)    角色形象 / 输入输出归一          │   │
+│   │  L2 角色人格层 (layer-persona)     角色 = 入口 + 人格             │   │
 │   │      sales-chat  plugin-helper  coder  advisory-chat             │   │
+│   │      (定义性格/输入方式/表达方式, 统一 PersonaInput)               │   │
 │   └────────────────────────────┬────────────────────────────────────┘   │
-│                                │                                       │
-│   ┌────────────────────────────┴────────────────────────────────────┐   │
-│   │  L3 编排规划层 (layer-orchestration)  任务规划 / 工作流引擎       │   │
+│                                │ ① ctx.call (Seam 契约)                 │
+│                                ▼                                         │
+│   ┌─────────────────────────────────────────────────────────────────┐   │
+│   │  L3 编排规划层 (layer-orchestration)   任务规划 / 工作流          │   │
 │   │      @orchestration/workflow-engine  codex-agent                 │   │
 │   └────────────────────────────┬────────────────────────────────────┘   │
-│                                │                                       │
-│   ┌────────────────────────────┴────────────────────────────────────┐   │
-│   │  L4 行动执行层 (layer-action)    工具执行 / TTS / 多渠道输出      │   │
-│   │      @action/text-to-speech                                     │   │
+│                                │ ② 推理/检索                             │
+│                                ▼                                         │
+│   ┌─────────────────────────────────────────────────────────────────┐   │
+│   │  L1 认知决策层 (layer-cognitive)    大脑                          │   │
+│   │      @cognitive/llm-inference  @cognitive/memory                 │   │
 │   └────────────────────────────┬────────────────────────────────────┘   │
-│                                │                                       │
-│   ┌────────────────────────────┴────────────────────────────────────┐   │
-│   │  L5 底座基础层 (layer-infrastructure)                           │   │
-│   │      http-ingress  protocol-adapter  wecom-ingress              │   │
-│   │      bridge(跨语言桥: py-bridge → aigility)  PgBusBridge         │   │
+│                                │ ③ 决策结果回传                         │
+│                                ▼                                         │
+│   ┌─────────────────────────────────────────────────────────────────┐   │
+│   │  L4 行动执行层 (layer-action)     手脚                            │   │
+│   │      @action/text-to-speech  工具执行 / 多渠道输出                │   │
 │   └─────────────────────────────────────────────────────────────────┘   │
 │                                                                         │
 │   ┌─────────────────────────────────────────────────────────────────┐   │
-│   │  内核: kernel-dsh (DSH-Cordis)                                  │   │
+│   │  L5 底座基础层 (layer-infrastructure)   系统地基                  │   │
+│   │      config / logging / protocol-adapter / PgBusBridge           │   │
+│   │      bridge 跨语言桥: py-bridge → aigility (Python 生态)          │   │
+│   └─────────────────────────────────────────────────────────────────┘   │
+│   ┌─────────────────────────────────────────────────────────────────┐   │
+│   │  内核 kernel-dsh (DSH-Cordis)                                     │   │
 │   │      KernelAdapter / Seam Registry / Event Bus / Carrier         │   │
-│   │      可加载 cordis 插件 (如 dsh-plugin-timem → 记忆/规则)        │   │
+│   │      cordis 插件可插拔: dsh-plugin-timem → TiMEM 记忆/规则        │   │
 │   └─────────────────────────────────────────────────────────────────┘   │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 
 外部接入:
-  LLM (LiteLLM/华为云/DeepSeek) ←→ L1   ·   TiMEM Engine ←→ bridge/timem插件
-  HTTP/企业微信/IM ←→ L5 入口           ·   Python 生态 ←→ py-bridge
+  LLM (LiteLLM/华为云/DeepSeek) ←→ L1   ·   TiMEM Engine ←→ bridge / timem 插件
+  HTTP / 企业微信 / IM ←→ L5 入口       ·   Python 生态 ←→ py-bridge
+  调用顺序: 外部信号 → L2(角色) → L3(编排) → L1(认知) 回传 → L4(行动)
 ```
+
+### 详细架构（Mermaid）
+
+```mermaid
+flowchart TB
+    subgraph 外部["外部接入"]
+        HTTP[HTTP / Web UI]
+        WECOM[企业微信]
+        LLM_API[LiteLLM / 华为云 / DeepSeek]
+        TIMEM[TiMEM Engine]
+        PY[Python 生态]
+    end
+
+    subgraph 内核["内核 kernel-dsh (DSH-Cordis)"]
+        KA[KernelAdapter]
+        SR[Seam Registry]
+        EB[Event Bus]
+        CM[Carrier Manager]
+        CP[可插拔 cordis 插件<br/>dsh-plugin-timem]
+    end
+
+    subgraph L5["L5 底座基础层 layer-infrastructure"]
+        ING[http-ingress]
+        WEC[wecom-ingress]
+        PA[protocol-adapter]
+        BR[bridge / py-bridge]
+        PG[PgBusBridge]
+    end
+
+    subgraph L2["L2 角色人格层 layer-persona"]
+        SC[sales-chat]
+        PH[plugin-helper]
+        CD[coder]
+        AC[advisory-chat]
+    end
+
+    subgraph L3["L3 编排规划层 layer-orchestration"]
+        WE[workflow-engine]
+        CA[codex-agent]
+    end
+
+    subgraph L1["L1 认知决策层 layer-cognitive"]
+        LLM[llm-inference]
+        MEM[cognitive/memory]
+    end
+
+    subgraph L4["L4 行动执行层 layer-action"]
+        TTS[text-to-speech]
+        TOOL[工具执行]
+    end
+
+    HTTP --> ING
+    WECOM --> WEC
+    ING --> L2
+    WEC --> L2
+
+    L2 -->|① ctx.call Seam| L3
+    L3 -->|② 推理/检索| L1
+    L1 -->|③ 回传决策| L4
+    L3 --> WE
+    WE --> BR
+    BR -->|JSON-RPC| PY
+    L1 --> MEM
+    MEM --> BR
+    BR --> TIMEM
+    CP --> TIMEM
+    LLM --> LLM_API
+    PA --> LLM_API
+    ING --> PA
+
+    L2 -.-> 内核
+    L3 -.-> 内核
+    L1 -.-> 内核
+    L4 -.-> 内核
+    L5 -.-> 内核
+```
+
 
 
 ---
@@ -368,7 +453,7 @@ harness (TS)                          Python (子进程)
 
 ---
 
-## 十、目录结构
+## 十一、目录结构
 
 ```
 aigility-harness/
@@ -407,7 +492,7 @@ aigility-harness/
 
 ---
 
-## 十一、终极架构总结
+## 十二、终极架构总结
 
 1. **五层业务域**：认知、感知、编排、执行、底座 —— 单向依赖，永不交叉
 2. **四层运行内核**：DSH-Cordis 原生支撑（插件 / Seam / 运行时 / 传输）
@@ -422,7 +507,7 @@ aigility-harness/
 
 License: MIT · 技术栈：TypeScript 5.5 + pnpm workspace + vitest · Node ≥ 20
 
-## 十二、dsh-plugin-timem 演示（TiMEM 记忆/规则接入）
+## 十三、dsh-plugin-timem 演示（TiMEM 记忆/规则接入）
 
 [`examples/dsh-timem-demo`](examples/dsh-timem-demo) 演示 TiMEM 能力插件插入 DeepSeek Harness 运行时：
 
