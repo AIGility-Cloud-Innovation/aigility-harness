@@ -93,6 +93,7 @@ const harnessGuideProvider: Provider<HarnessGuideRequest, HarnessGuideResponse> 
     const agentName = "aigility-harness 介绍员";
 
     // 2. 构建带框架知识人设的请求
+    console.log(`[harness-guide] 收到 user_input: "${request.user_input}"`);
     const guideRequest = {
       user_input: request.user_input,
       session_id: request.session_id ?? ctx.sessionId,

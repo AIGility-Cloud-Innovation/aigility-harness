@@ -14,26 +14,34 @@
           "method": "invoke",
           "init": {
             "name": "chat-workflow",
-            "config_path": "/home/johnny/AI/aigility/tests/workflow_test_config.yaml",
-            "state_schema": "tests.workflow_state.TestState",
+            "config_path": "/home/johnny/AI/aigility/config/harness_guide_workflow.yaml",
+            "state_schema": "aigility.harness_guide_state.HarnessGuideState",
             "node_module": "tests.workflow_nodes",
             "condition_module": "tests.workflow_nodes"
+          },
+          "env": {
+            "LITELLM_URL": "http://127.0.0.1:48724",
+            "LITELLM_KEY": "sk-1234",
+            "LLM_MODEL": "deepseek-v4-flash"
           }
-        }
-      ]
-    },
-    {
-      "name": "aigility-memory",
-      "comment": "长期记忆",
-      "pythonExecutable": "/home/johnny/AI/aigility/.venv/bin/python",
-      "workDir": "/home/johnny/AI/aigility",
-      "capabilities": [
+        },
         {
-          "id": "@cognitive/memory",
-          "layer": "cognitive",
-          "function": "aigility.memory.Memory",
-          "method": "search",
-          "init": {}
+          "id": "@orchestration/workflow-engine-timem",
+          "layer": "orchestration",
+          "function": "aigility.workflow.WorkflowEngine",
+          "method": "invoke",
+          "init": {
+            "name": "timem-support-workflow",
+            "config_path": "/home/johnny/AI/aigility/config/timem_support_workflow.yaml",
+            "state_schema": "aigility.harness_guide_state.HarnessGuideState",
+            "node_module": "aigility.timem_kb_retriever",
+            "condition_module": null
+          },
+          "env": {
+            "LITELLM_URL": "http://127.0.0.1:48724",
+            "LITELLM_KEY": "sk-1234",
+            "LLM_MODEL": "deepseek-v4-flash"
+          }
         }
       ]
     }

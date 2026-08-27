@@ -176,6 +176,8 @@ class InstanceRegistry:
             raise KeyError(f"Capability '{cap_id}' not initialized. Call initialize first.")
 
         method = self._instances[cap_id]
+        # 调试日志: 记录实际传入参数
+        print(f"[py_bridge_worker] call {cap_id} kwargs={json.dumps(kwargs, ensure_ascii=False)[:300]}")
 
         # 异步函数直接 await
         if asyncio.iscoroutinefunction(method):

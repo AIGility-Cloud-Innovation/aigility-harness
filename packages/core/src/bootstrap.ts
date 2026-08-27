@@ -126,6 +126,16 @@ export async function bootstrap(
           );
         }
       }
+
+      // Activate plugin lifecycle (onLoad) — 启动 worker/预热等副作用
+      const lifeResult = await plugin.onLoad(
+        kernel.createContext(`plugin:${plugin.manifest.name}`, plugin.manifest.layer),
+      );
+      if (!lifeResult.ok) {
+        return err(
+          `Failed to activate plugin ${plugin.manifest.name}: ${lifeResult.error}`,
+        );
+      }
     }
   }
 

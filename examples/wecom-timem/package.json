@@ -1,0 +1,27 @@
+{
+  "name": "wecom-timem",
+  "version": "0.1.0",
+  "description": "企微机器人 → @persona/timem-support TiMEM Space 客服（独立 botId/secret 接入）",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@aigility-harness/core": "workspace:*",
+    "@aigility-harness/layer-infrastructure": "workspace:*",
+    "@aigility-harness/layer-cognitive": "workspace:*",
+    "@aigility-harness/layer-persona": "workspace:*",
+    "@aigility-harness/layer-orchestration": "workspace:*",
+    "@wecom/aibot-node-sdk": "^1.0.7",
+    "prototype-mode": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0",
+    "tsx": "^4.19.0",
+    "@types/node": "^20.14.0"
+  }
+}
