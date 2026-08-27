@@ -7,8 +7,8 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// 仓库根 = examples/wecom-guide/src → ../../../../
-const ROOT = resolve(__dirname, "../../../../");
+// 仓库根 = examples/wecom-guide/src → ../../../  (3 层: wecom-guide → examples → aigility-harness)
+const ROOT = resolve(__dirname, "../../../");
 
 export function loadEnv(path = resolve(ROOT, ".env")): void {
   if (!existsSync(path)) {
