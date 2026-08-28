@@ -18,6 +18,8 @@ import { ok, err } from "@aigility-harness/core";
 import type { Result } from "@aigility-harness/core";
 import type {
   JsonRpcResponse,
+  RequestHandler,
+  RequestMessage,
   WorkerReadyNotification,
   PyWorkerHealth,
 } from "./types.js";
@@ -91,7 +93,12 @@ export class PyWorker {
             resolveReady();
             return;
           }
-          // 批量响应 (数组)
+          // Python→TS 请求 (反向通道): 如 call_capability
+          if ("method" in msg && msg.method) {
+            void this.handleRequest(msg as RequestMessage);
+            return;
+          }
+          // 批量响应 (数组)[truncated]
           if (Array.isArray(msg)) {
             this.handleBatchResponse(msg as JsonRpcResponse[]);
             return;
@@ -302,6 +309,49 @@ export class PyWorker {
   private handleBatchResponse(responses: JsonRpcResponse[]): void {
     for (const resp of responses) {
       this.handleResponse(resp);
+    }
+  }
+
+  // ── Python→TS 反向通道 ───────────────────────────────────────
+
+  private requestHandlers = new Map<string, RequestHandler>();
+
+  /** 注册反向请求处理器 (method → handler) */
+  setRequestHandler(method: string, handler: RequestHandler): void {
+    this.requestHandlers.set(method, handler);
+  }
+
+  /** 处理 Python worker 发起的反向请求: 执行 handler, 结果写回 stdin */
+  private async handleRequest(msg: RequestMessage): Promise<void> {
+    const t0 = Date.now();
+    console.log(`[py-worker] 收到反向请求 method=${msg.method} id=${msg.id ?? "?"}`);
+    const handler = this.requestHandlers.get(msg.method);
+    const resp: JsonRpcResponse = {
+      jsonrpc: "2.0",
+      id: msg.id ?? null,
+    };
+
+    try {
+      if (!handler) {
+        resp.error = {
+          code: -32601,
+          message: `No handler registered for method '${msg.method}'`,
+        };
+      } else {
+        resp.result = await handler(msg.params ?? {}, msg.id ?? 0);
+      }
+    } catch (e) {
+      resp.error = {
+        code: -32603,
+        message: e instanceof Error ? e.message : String(e),
+      };
+    }
+
+    if (this.proc?.stdin) {
+      this.proc.stdin.write(JSON.stringify(resp) + "\n");
+      console.log(`[py-worker] 反向请求 ${msg.method} 已响应 (${Date.now() - t0}ms) id=${msg.id ?? "?"}`);
+    } else {
+      console.log(`[py-worker] ⚠️ 无 stdin, 无法响应 ${msg.method}`);
     }
   }
 

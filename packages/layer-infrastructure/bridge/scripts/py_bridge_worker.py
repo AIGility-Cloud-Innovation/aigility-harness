@@ -165,6 +165,12 @@ class InstanceRegistry:
         else:
             method = instance  # 直接 callable
 
+        # 反向通道: 若实例有 set_seam_caller (如 WorkflowEngine), 注入 TS 回调
+        set_seam = getattr(instance, 'set_seam_caller', None)
+        if callable(set_seam):
+            set_seam(call_ts_capability)
+            print(f"[py_bridge_worker] {cap_id} 已注入 seam_caller (Python→TS 反向通道)")
+
         self._instances[cap_id] = method
         self._configs[cap_id] = config
 
@@ -215,6 +221,56 @@ class InstanceRegistry:
         self._instances.clear()
         self._configs.clear()
         self._executor.shutdown(wait=False)
+
+
+# ── Python→TS 反向通道 ──────────────────────────────────────────
+
+# 未完成的 call_capability future: {req_id: asyncio.Future}
+_PENDING_CALLBACKS: dict = {}
+_CALLBACK_SEQ = 0
+
+
+async def call_ts_capability(capability_ref: str, state: Any) -> Any:
+    """Python 侧回调 TS: 请求 TS Seam 执行 capability, 等待结果返回."""
+    global _CALLBACK_SEQ
+    _CALLBACK_SEQ += 1
+    req_id = _CALLBACK_SEQ
+
+    future = asyncio.get_running_loop().create_future()
+    _PENDING_CALLBACKS[req_id] = future
+
+    await _write_response({
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "method": "call_capability",
+        "params": {
+            "capability_ref": capability_ref,
+            "state": state,
+        },
+    })
+
+    try:
+        # 等待 TS 侧 handler 返回 (超时 30s)
+        return await asyncio.wait_for(future, timeout=30.0)
+    except asyncio.TimeoutError:
+        return {"error": f"call_capability '{capability_ref}' 超时 (30s)", "timeout": True}
+    finally:
+        _PENDING_CALLBACKS.pop(req_id, None)
+
+
+def resolve_callback_response(resp: dict) -> bool:
+    """主循环收到 TS 响应时调用: 若是对应 call_capability 的响应, resolve future."""
+    req_id = resp.get("id")
+    if req_id is None:
+        return False
+    future = _PENDING_CALLBACKS.get(req_id)
+    if future is None or future.done():
+        return False
+    if resp.get("error"):
+        future.set_result({"error": resp["error"]["message"] if isinstance(resp["error"], dict) else str(resp["error"])})
+    else:
+        future.set_result(resp.get("result"))
+    return True
 
 
 # ── JSON-RPC 处理 ────────────────────────────────────────────────
@@ -268,8 +324,57 @@ async def handle_request(req: Any) -> Any:
         return await handle_single(req)
 
 
+async def _dispatch_request(req: Any) -> None:
+    """后台处理单个/批量请求: 处理 + 写回. (与主读循环解耦)"""
+    try:
+        # 先检查是否为 TS 对 call_capability 的响应 (反向通道)
+        if isinstance(req, dict) and "method" not in req:
+            if resolve_callback_response(req):
+                return
+        elif isinstance(req, list):
+            kept = []
+            for item in req:
+                if isinstance(item, dict) and "method" not in item:
+                    if not resolve_callback_response(item):
+                        kept.append(item)
+                else:
+                    kept.append(item)
+            if not kept:
+                return
+            req = kept[0] if len(kept) == 1 else kept
+
+        req_id = req.get('id') if isinstance(req, dict) else None
+
+        try:
+            result = await handle_request(req)
+            if isinstance(req, list):
+                await _write_response(result)
+            else:
+                await _write_response({"jsonrpc": "2.0", "id": req_id, "result": result})
+        except Exception as e:
+            await _write_response({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {
+                    "code": -32603,
+                    "message": str(e),
+                    "data": traceback.format_exc() if os.environ.get('PY_BRIDGE_DEBUG') else None,
+                },
+            })
+    except Exception as e:
+        # 兜底: 任何处理异常都尝试回一个错误响应
+        try:
+            await _write_response({
+                "jsonrpc": "2.0",
+                "id": req.get("id") if isinstance(req, dict) else None,
+                "error": {"code": -32603, "message": f"dispatch error: {e}"},
+            })
+        except Exception:
+            pass
+
+
 async def main():
-    """主循环: 逐行读 stdin, 处理 JSON-RPC, 写 stdout."""
+    """主循环: 读 stdin 即派发 (并发), 不串行阻塞; 反向响应可随时被读. """
     # 通知 TS 侧 worker 已就绪
     await _write_response({
         "jsonrpc": "2.0",
@@ -283,6 +388,8 @@ async def main():
     reader = asyncio.StreamReader()
     protocol = asyncio.StreamReaderProtocol(reader)
     await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+
+    pending_tasks: set = set()
 
     while True:
         line = await reader.readline()
@@ -303,30 +410,20 @@ async def main():
             })
             continue
 
-        req_id = req.get('id') if isinstance(req, dict) else None
-
-        try:
-            result = await handle_request(req)
-            if isinstance(req, list):
-                await _write_response(result)
-            else:
-                await _write_response({"jsonrpc": "2.0", "id": req_id, "result": result})
-        except Exception as e:
-            await _write_response({
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {
-                    "code": -32603,
-                    "message": str(e),
-                    "data": traceback.format_exc() if os.environ.get('PY_BRIDGE_DEBUG') else None,
-                },
-            })
+        # 立即派发为后台任务, 主循环继续 readline (反向响应不阻塞)
+        task = asyncio.create_task(_dispatch_request(req))
+        pending_tasks.add(task)
+        task.add_done_callback(pending_tasks.discard)
 
         # shutdown 方法 → 退出
         if isinstance(req, dict) and req.get('method') == 'shutdown':
             break
         if isinstance(req, list) and any(r.get('method') == 'shutdown' for r in req):
             break
+
+    # 等待所有后台任务完成再退出
+    if pending_tasks:
+        await asyncio.gather(*pending_tasks, return_exceptions=True)
 
 
 if __name__ == '__main__':

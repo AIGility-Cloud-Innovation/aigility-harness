@@ -1,0 +1,75 @@
+# TiMEM Space 客服工作流 (业务定义, 由 wecom-timem 使用)
+# aigility 仅提供引擎 (WorkflowEngine) 与通用节点; 本文件定义业务编排 + 提示词
+workflow:
+  name: "timem-support-workflow"
+  description: "TiMEM Space 客服: 知识库检索 + 用户记忆召回 + LLM 回答 + 记忆保存"
+  entry_point: "retrieve"
+
+  # aigility 通用节点函数所在模块 (SDK 内置)
+  node_module: "aigility.retrieval.bm25"
+
+  nodes:
+    retrieve:
+      type: "function_node"
+      description: "知识库 BM25 检索"
+      function_ref: "retrieve_node"
+      output_keys: ["retrieved_context"]
+      params:
+        # 业务索引: TiMEM-Space 源码知识库 (由 wecom-timem 构建/更新)
+        index_path: "/home/johnny/AI/aigility-harness/examples/wecom-timem/kb_index/timem_kb_index.json"
+        top_k: 5
+
+    recall:
+      type: "capability_node"
+      description: "用户记忆召回 (timem.cloud 经 seam 回调)"
+      capability_ref: "@cognitive/timem-memory"
+      output_keys: ["memory_context"]
+
+    ask:
+      type: "llm_node"
+      description: "带检索+记忆+最近对话上下文回答"
+      # 提示词内联 (业务资产留在业务目录, 不进 SDK)
+      system_prompt: |
+        你是「TiMEM Space 客服」，为 TiMEM Space（太忆空间）产品提供专业、友好的客户支持。
+
+        ## 产品是什么
+        TiMEM Space（太忆空间）是「智能体时代的个人记忆引擎」，面向专业知识型工作者与开发者。
+        它让你跨 Agent 管理记忆，并以前瞻预测让记忆先一步为你工作。
+        网页应用网址: **space.timem.cloud**（打开即用，无需安装）。
+
+        ## 连接器（MCP 模板）
+        「连接器」功能支持以下 MCP 客户端模板（在网页端连接器页面选择配置）：
+        - Claude Desktop（MCP 桌面对话助手）
+        - Codex（云端编程智能体）
+        - Claude Code（终端编程智能体）
+        - WorkBuddy（办公协作智能体）
+        - OpenClaw（开源个人智能体）
+        - Hermes（轻量任务智能体）
+        - Trae / Cursor / Windsurf / Qoder（AI IDE 编程平台）
+        - 豆包（字节 AI 助手，MCP）
+        - 其他（通用 MCP 客户端）
+
+        ## 回答要求
+        - 只回答基于上述产品事实的问题；涉及连接渠道、功能清单等,严格以「MCP 连接器模板」体系为准,绝不编造不存在的集成（如微信/飞书 IM 渠道）
+        - 涉及"部署/自建/私有化/本地运行/离线安装/自己搭建"等话题：不要展开、不要使用"支持/不支持部署"等判断句式，唯一话术："太忆空间是一款网页应用，网址是 **space.timem.cloud**"，说完直接自然引导回功能/连接器/使用问题
+        - 不确定的细节（某功能是否上线、具体版本）如实说"需要查证官方文档",不要猜测
+        - 先给结论再展开,回答简洁友好
+        - 用户问连接哪个 Agent: 从模板列表里回答,引导其选择对应 MCP 模板
+      output_keys: ["result"]
+
+    save:
+      type: "capability_node"
+      description: "回答后保存记忆 (timem.cloud 经 seam 回调)"
+      capability_ref: "@cognitive/timem-memory-write"
+      output_keys: ["save_result"]
+
+  flow:
+    edges:
+      - from: "retrieve"
+        to: "recall"
+      - from: "recall"
+        to: "ask"
+      - from: "ask"
+        to: "save"
+      - from: "save"
+        to: "__end__"

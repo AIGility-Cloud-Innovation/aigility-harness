@@ -27,7 +27,17 @@ import { plugin as cognitivePlugin } from "@aigility-harness/layer-cognitive";
 import { plugin as personaPlugin } from "@aigility-harness/layer-persona";
 import { plugin as orchestrationPlugin } from "@aigility-harness/layer-orchestration";
 import { wecomIngressProvider } from "@aigility-harness/layer-infrastructure";
+import {
+  createPyBridgePlugin,
+  loadPyPluginsConfig,
+} from "@aigility-harness/layer-infrastructure/bridge";
 import { loadEnv } from "./env.js";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+// 仓库根 = examples/wecom-guide/src → ../../../ (wecom-guide → examples → aigility-harness)
+const REPO_ROOT = resolve(__dirname, "../../../");
 
 async function main(): Promise<void> {
   console.log("=== 企微机器人 → aigility-harness 框架介绍员 ===\n");
@@ -47,9 +57,13 @@ async function main(): Promise<void> {
   // 2. 内核（原型模式）
   const kernel = new InMemoryKernelAdapter();
 
-  // 3. 装配: 底座 + 认知 + 角色 + 编排（介绍员 → workflow-engine → LLM）
+  // 3. 装配: 底座 + Python 桥接 + 认知 + 角色 + 编排（py-bridge 在 orchestration 前注册 → resolve 优先真实引擎）
+  const pyBridgePlugin = createPyBridgePlugin(
+    loadPyPluginsConfig(resolve(REPO_ROOT, "config/py-plugins.json")),
+  );
   const plugins = [
     infrastructurePlugin,
+    pyBridgePlugin,
     cognitivePlugin,
     personaPlugin,
     orchestrationPlugin,

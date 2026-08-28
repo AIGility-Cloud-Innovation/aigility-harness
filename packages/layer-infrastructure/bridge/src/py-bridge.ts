@@ -213,8 +213,23 @@ export function createPyBridgeProviders(
  */
 export function createPyBridgePlugin(
   configs: PyPluginConfig[],
+  opts?: {
+    /** Seam capability 回调: (ref, state) => Promise<any>; 供 Python→TS 反向通道调用 */
+    seamCaller?: (ref: string, state: unknown) => Promise<unknown>;
+  },
 ): LayerPlugin {
   const { providers, workers, initFn } = createPyBridgeProviders(configs);
+
+  // 注册反向通道 handler: Python 侧 call_capability → TS Seam
+  if (opts?.seamCaller) {
+    for (const w of workers) {
+      w.setRequestHandler("call_capability", async (params) => {
+        const ref = String(params.capability_ref ?? "");
+        const state = params.state;
+        return opts.seamCaller!(ref, state);
+      });
+    }
+  }
 
   let pluginState: PluginState = PluginState.Registered;
 

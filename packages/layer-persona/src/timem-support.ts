@@ -28,6 +28,8 @@ import type {
 export interface TimemSupportRequest {
   /** 用户输入 */
   user_input: string;
+  /** 用户 ID (企微 userid, 用于记忆隔离) */
+  user_id?: string;
   /** 会话 ID (可选) */
   session_id?: string;
 }
@@ -82,6 +84,25 @@ TiMEM Space 通过「连接器」为各类 Agent 建立记忆云席位，**全�
 
 // ── Provider 实现 ────────────────────────────────────────────────
 
+// 瞬时记忆环: 每个用户的最近 N 轮对话 [role: "user"|"assistant", content]
+const RECENT_TURNS = 2;
+const recentRings = new Map<string, Array<{ role: "user" | "assistant"; content: string }>>();
+
+function pushTurn(userId: string, turn: { role: "user" | "assistant"; content: string }): void {
+  const ring = recentRings.get(userId) ?? [];
+  ring.push(turn);
+  // 只保留最近 RECENT_TURNS 轮 (2 轮 = 4 条 message)
+  while (ring.length > RECENT_TURNS * 2) ring.shift();
+  recentRings.set(userId, ring);
+}
+
+function formatHistory(userId: string): string {
+  const ring = recentRings.get(userId) ?? [];
+  if (ring.length === 0) return "";
+  const lines = ring.map((m) => `${m.role === "user" ? "用户" : "助手"}: ${m.content}`);
+  return lines.join("\n");
+}
+
 const timemSupportProvider: Provider<TimemSupportRequest, TimemSupportResponse> = {
   service: timemSupportService,
   name: "persona-timem-support-text",
@@ -92,12 +113,17 @@ const timemSupportProvider: Provider<TimemSupportRequest, TimemSupportResponse> 
   ): Promise<Result<TimemSupportResponse>> {
     // 1. 角色形象: TiMEM 客服
     const agentName = "TiMEM 客服";
+    const userId = request.user_id ?? "wecom-unknown";
 
-    // 2. 构建带产品知识人设的请求
+    // 2. 构建带产品知识人设 + 最近对话上下文的请求
     const supportRequest = {
       user_input: request.user_input,
+      user_id: userId,
+      agent_id: "timem-support",   // 本客服的 agent 标识 (记忆隔离)
       session_id: request.session_id ?? ctx.sessionId,
       system_prompt: TIMEM_SUPPORT_SYSTEM_PROMPT,
+      // 瞬时记忆: 最近 2 轮对话 (用户说过的短词如 "trae"/"需要" 依赖此上下文)
+      recent_history: formatHistory(userId),
     };
 
     // 3. 委托 L3 workflow（llm_node 真实回答, 独立 workflow-engine-timem 实例）
@@ -112,6 +138,10 @@ const timemSupportProvider: Provider<TimemSupportRequest, TimemSupportResponse> 
       : undefined;
 
     const response = value?.result ?? value?.response ?? "抱歉，我没有理解您的意思，请换个方式再问。";
+
+    // 4.5 更新瞬时记忆环: 本轮 Q&A 入环 (下次提问携带)
+    pushTurn(userId, { role: "user", content: request.user_input });
+    pushTurn(userId, { role: "assistant", content: response });
 
     return ok({
       response,

@@ -155,10 +155,13 @@ export const wecomIngressProvider: Provider<WeComIngressRequest, WeComIngressRes
         streamId = AiBot.generateReqId ? AiBot.generateReqId("stream") : `stream_${Date.now()}`;
         await client.replyStream(frame, streamId, thinkingText, false);
 
-        // 2. 调角色（与 http-ingress agent 链路同一载荷形状）
+        // 2. 调角色（与 http-ingress agent 链路同一载荷形状, 附带企微用户 ID 用于记忆隔离）
         const result = await ctx.call(
           { id: roleId, versionRange: "^1.0.0" },
-          { user_input: trimmed },
+          {
+            user_input: trimmed,
+            user_id: (frame.body?.from as { userid?: string })?.userid ?? "wecom-unknown",
+          },
         );
 
         // 3. 最终回复（支持 Markdown: codex 输出通常带代码块）

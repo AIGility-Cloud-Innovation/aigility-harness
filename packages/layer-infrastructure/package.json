@@ -14,7 +14,8 @@
     "@aigility-harness/core": "workspace:*",
     "@aigility-harness/layer-cognitive": "workspace:*",
     "@wecom/aibot-node-sdk": "^1.0.7",
-    "pg": "^8.23.0"
+    "pg": "^8.23.0",
+    "@timem/dsh-plugin-timem": "git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
@@ -34,6 +35,10 @@
     "./bridge/py": {
       "types": "./bridge/src/py-bridge.ts",
       "default": "./bridge/src/py-bridge.ts"
+    },
+    "./timem-memory-provider": {
+      "types": "./bridge/src/timem-memory-provider.ts",
+      "default": "./bridge/src/timem-memory-provider.ts"
     }
   }
 }

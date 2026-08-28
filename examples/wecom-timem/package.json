@@ -16,7 +16,8 @@
     "@aigility-harness/layer-persona": "workspace:*",
     "@aigility-harness/layer-orchestration": "workspace:*",
     "@wecom/aibot-node-sdk": "^1.0.7",
-    "prototype-mode": "workspace:*"
+    "prototype-mode": "workspace:*",
+    "@timem/dsh-plugin-timem": "git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git"
   },
   "devDependencies": {
     "typescript": "^5.5.0",

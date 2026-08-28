@@ -31,6 +31,13 @@ import {
   createPyBridgePlugin,
   loadPyPluginsConfig,
 } from "@aigility-harness/layer-infrastructure/bridge";
+import {
+  createTimemMemoryProvider,
+  createTimemMemoryWriteProvider,
+  timemMemoryService,
+  timemMemoryWriteService,
+} from "@aigility-harness/layer-infrastructure/timem-memory-provider";
+import { TimemClient } from "@timem/dsh-plugin-timem";
 import { loadEnv } from "./env.js";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -58,8 +65,30 @@ async function main(): Promise<void> {
   const kernel = new InMemoryKernelAdapter();
 
   // 3. 装配: 底座 + Python 桥接 + 认知 + 角色 + 编排（py-bridge 在 orchestration 前注册 → resolve 优先真实引擎）
+  const timemClient = new TimemClient({
+    apiKey: process.env["TIMEM_API_KEY"] ?? "",
+    baseUrl: process.env["TIMEM_BASE_URL"] ?? "https://api.timem.cloud",
+  });
+  const timemMemoryProvider = createTimemMemoryProvider(timemClient);
+  const timemMemoryWriteProvider = createTimemMemoryWriteProvider(timemClient);
+
+  // seamCaller: Python worker 回调 TS Seam (如 @cognitive/timem-memory)
+  const seamCaller = async (ref: string, state: unknown): Promise<unknown> => {
+    const resolved = await kernel.registry.resolve({ id: ref, versionRange: "^1.0.0" });
+    if (!resolved.ok) {
+      return { error: `Seam resolve 失败: ${resolved.error}` };
+    }
+    const provider = resolved.value as {
+      execute?: (req: unknown, ctx: unknown) => Promise<{ ok: boolean; value?: unknown; error?: string }>;
+    };
+    if (!provider.execute) return { error: `capability ${ref} 无 execute` };
+    const run = await provider.execute(state, kernel.createContext(`py-callback:${ref}`, LayerId.Infrastructure));
+    return run.ok ? run.value : { error: run.error };
+  };
+
   const pyBridgePlugin = createPyBridgePlugin(
     loadPyPluginsConfig(resolve(REPO_ROOT, "config/py-plugins.json")),
+    { seamCaller },
   );
   const plugins = [
     infrastructurePlugin,
@@ -86,6 +115,20 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   console.log(`bootstrap 成功 (kernel.isReady=${kernel.isReady()})`);
+
+  // 4.5 注册 timem-memory provider (只读检索 + 写入, dsh-plugin-timem 封装)
+  const reg = await kernel.registry.register(timemMemoryService, timemMemoryProvider);
+  if (!reg.ok) {
+    console.error("timem-memory 注册失败:", reg.error);
+  } else {
+    console.log("[timem] @cognitive/timem-memory 已注册 (只读检索)");
+  }
+  const regW = await kernel.registry.register(timemMemoryWriteService, timemMemoryWriteProvider);
+  if (!regW.ok) {
+    console.error("timem-memory-write 注册失败:", regW.error);
+  } else {
+    console.log("[timem] @cognitive/timem-memory-write 已注册 (记忆写入)");
+  }
 
   // 5. 启动企业微信入口 → 全部分组走框架介绍员
   const ctx = kernel.createContext("wecom-guide", LayerId.Infrastructure);

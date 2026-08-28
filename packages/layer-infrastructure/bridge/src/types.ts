@@ -115,3 +115,19 @@ export interface PyWorkerHealth {
   detail: string;
   checkedAt: string;
 }
+
+// ── Python→TS 反向通道请求 ──────────────────────────────────────
+
+/** Python worker 发起的反向请求 (如 call_capability) */
+export interface RequestMessage {
+  jsonrpc: "2.0";
+  id: number;
+  method: string;
+  params?: Record<string, unknown>;
+}
+
+/** 反向请求处理器: (params, requestId) => Promise<result> */
+export type RequestHandler = (
+  params: Record<string, unknown>,
+  requestId: number,
+) => Promise<unknown>;

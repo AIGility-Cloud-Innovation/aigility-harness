@@ -14,9 +14,9 @@
           "method": "invoke",
           "init": {
             "name": "chat-workflow",
-            "config_path": "/home/johnny/AI/aigility/config/harness_guide_workflow.yaml",
-            "state_schema": "aigility.harness_guide_state.HarnessGuideState",
-            "node_module": "tests.workflow_nodes",
+            "config_path": "/home/johnny/AI/aigility-harness/examples/wecom-guide/workflows/harness_guide_workflow.yaml",
+            "state_schema": null,
+            "node_module": null,
             "condition_module": "tests.workflow_nodes"
           },
           "env": {
@@ -29,12 +29,12 @@
           "id": "@orchestration/workflow-engine-timem",
           "layer": "orchestration",
           "function": "aigility.workflow.WorkflowEngine",
-          "method": "invoke",
+          "method": "ainvoke",
           "init": {
             "name": "timem-support-workflow",
-            "config_path": "/home/johnny/AI/aigility/config/timem_support_workflow.yaml",
-            "state_schema": "aigility.harness_guide_state.HarnessGuideState",
-            "node_module": "aigility.timem_kb_retriever",
+            "config_path": "/home/johnny/AI/aigility-harness/examples/wecom-timem/workflows/timem_support_workflow.yaml",
+            "state_schema": null,
+            "node_module": "aigility.retrieval.bm25",
             "condition_module": null
           },
           "env": {
