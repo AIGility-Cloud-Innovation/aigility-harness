@@ -1,5 +1,5 @@
 /**
- * L5 底座层: 最小 Web UI (单文件内嵌 HTML)
+ * L1 底座层: 最小 Web UI (单文件内嵌 HTML)
  *
  * 浏览器可访问的最小实现:
  *   - 两个页签: 销售客服 (/api/chat) 与 插件安装助手 (/api/plugin-helper)

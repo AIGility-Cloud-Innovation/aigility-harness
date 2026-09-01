@@ -27,7 +27,7 @@ import type {
   LlmInferenceRequest,
   LlmInferenceResponse,
   ChatMessage,
-} from "@aigility-harness/layer-cognitive";
+} from "@aigility-harness/core";
 
 // ── 内部标准引用（声明消费认知层能力）────────────────────────────
 

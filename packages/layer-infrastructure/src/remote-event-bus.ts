@@ -1,5 +1,5 @@
 /**
- * L5 底座层: RemoteEventBus — 跨进程事件桥 (阶段 2)
+ * L1 底座层: RemoteEventBus — 跨进程事件桥 (阶段 2)
  *
  * 把「进程内 EventBus」升级为「跨进程 EventBus」:
  *   - 本地发布: 事件同时发到本地订阅者(原逻辑不变) 与 BusBridge(广播给其他节点)

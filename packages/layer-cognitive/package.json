@@ -11,7 +11,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@aigility-harness/core": "workspace:*"
+    "@aigility-harness/core": "workspace:*",
+    "@timem/dsh-plugin-timem": "git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git"
   },
   "devDependencies": {
     "typescript": "^5.5.0",
@@ -22,6 +23,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./timem-memory-provider": {
+      "types": "./src/timem-memory-provider.ts",
+      "default": "./src/timem-memory-provider.ts"
     }
   }
 }

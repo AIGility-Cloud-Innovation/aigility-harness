@@ -93,7 +93,7 @@ export type {
 } from "./plugin-helper.js";
 import { pluginHelperService, pluginHelperProvider } from "./plugin-helper.js";
 
-// 编码助手角色形象 (实现无关, 委托 L3 编码 Agent)
+// 编码助手角色形象 (实现无关, 委托 L4 编码 Agent)
 export {
   coderService,
   coderProvider,

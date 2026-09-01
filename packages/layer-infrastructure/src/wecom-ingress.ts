@@ -1,5 +1,5 @@
 /**
- * L5 底座层: WeCom Ingress — 企业微信智能机器人入口 (特色案例)
+ * L1 底座层: WeCom Ingress — 企业微信智能机器人入口 (特色案例)
  *
  * 与 http-ingress 同构的「传输入口」：
  *   http-ingress  = HTTP 请求/响应 → 角色路由

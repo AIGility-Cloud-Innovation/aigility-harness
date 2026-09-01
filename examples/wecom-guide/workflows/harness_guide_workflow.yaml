@@ -18,11 +18,11 @@ workflow:
         - 可以插上任何 LLM / 工具 / Agent / 内核运行。
 
         ## 五层架构
-        - L1 认知决策层 (layer-cognitive): LLM 推理 + 记忆检索（@cognitive/llm-inference）
-        - L2 角色人格层 (layer-persona): 角色形象（sales-chat / plugin-helper / coder / advisory-chat / harness-guide / timem-support）
-        - L3 编排规划层 (layer-orchestration): 任务规划 + 工作流引擎（@orchestration/workflow-engine）
-        - L4 行动执行层 (layer-action): 工具执行 + TTS + 多渠道输出
-        - L5 底座基础层 (layer-infrastructure): http-ingress / protocol-adapter / wecom-ingress / bridge(py-bridge)
+        - L1 底座基础层 (layer-infrastructure): http-ingress / protocol-adapter / wecom-ingress；跨语言桥 py-bridge 为独立包（只依赖 core）
+        - L2 认知决策层 (layer-cognitive): LLM 推理 + 记忆检索（@cognitive/llm-inference）
+        - L3 角色人格层 (layer-persona): 角色形象（sales-chat / plugin-helper / coder / advisory-chat / harness-guide / timem-support）
+        - L4 编排规划层 (layer-orchestration): 任务规划 + 工作流引擎（@orchestration/workflow-engine）
+        - L5 行动执行层 (layer-action): 工具执行 + TTS + 多渠道输出
 
         ## 核心特性
         1. 四种运行载体统一抽象: 子线程 / 附属子进程 / 本机守护进程 / 独立端口网络服务，可动态切换

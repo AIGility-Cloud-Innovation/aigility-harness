@@ -25,46 +25,19 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// ── 内部标准格式：OpenAI Chat ─────────────────────────────────────
-
-export interface ToolCall {
-  id: string;
-  type: "function";
-  function: { name: string; arguments: string };
-}
-
-export interface ChatMessage {
-  role: "system" | "user" | "assistant" | "tool";
-  content: string | null;
-  tool_calls?: ToolCall[];
-  tool_call_id?: string;
-}
-
-export interface LlmInferenceRequest {
-  model: string;
-  messages: ChatMessage[];
-  max_tokens?: number;
-  temperature?: number;
-  top_p?: number;
-  stop?: string[];
-  stream?: boolean;
-  tools?: Array<Record<string, unknown>>;
-  tool_choice?: unknown;
-}
-
-export interface LlmInferenceResponse {
-  /** choices[0].message.content 便捷访问（可能为空串） */
-  text: string;
-  /** 完整 assistant 消息（含 tool_calls，供协议适配层翻译回原协议） */
-  message: {
-    role: "assistant";
-    content: string | null;
-    tool_calls?: ToolCall[];
-  };
-  model: string;
-  finish_reason?: string;
-  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
-}
+// ── LLM Inference 契约（类型下沉 core，此包只做 re-export 保持兼容）─
+export type {
+  ToolCall,
+  ChatMessage,
+  LlmInferenceRequest,
+  LlmInferenceResponse,
+} from "@aigility-harness/core";
+export { llmInferenceRef } from "@aigility-harness/core";
+import type {
+  LlmInferenceRequest,
+  LlmInferenceResponse,
+  ToolCall,
+} from "@aigility-harness/core";
 
 // ── 服务定义 ─────────────────────────────────────────────────────
 

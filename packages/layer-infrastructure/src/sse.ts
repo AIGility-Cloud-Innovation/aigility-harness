@@ -1,5 +1,5 @@
 /**
- * L5 底座层: SSE (Server-Sent Events) 帧编码 — 纯函数原子模块
+ * L1 底座层: SSE (Server-Sent Events) 帧编码 — 纯函数原子模块
  *
  * SSE 是「传输模式」，不是独立能力：它必须挂在某个 socket/response 上才有
  * 意义，单独成插件会造出内核无法驱动的空洞能力。因此不注册为插件，而是

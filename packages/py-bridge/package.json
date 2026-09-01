@@ -1,7 +1,7 @@
 {
-  "name": "@aigility-harness/layer-infrastructure",
+  "name": "@aigility-harness/py-bridge",
   "version": "0.1.0",
-  "description": "底座基础层（L1）：日志 + 配置 + 协议适配 + HTTP/企微入口 + 消息总线",
+  "description": "通用 Python 对接器：声明式配置接入任意 Python 包（JSON-RPC over stdio，零端口），只依赖 core",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -11,13 +11,10 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@aigility-harness/core": "workspace:*",
-    "@wecom/aibot-node-sdk": "^1.0.7",
-    "pg": "^8.23.0"
+    "@aigility-harness/core": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
-    "@types/pg": "^8.23.1",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"
   },
@@ -26,9 +23,9 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     },
-    "./timem-memory-provider": {
-      "types": "./src/timem-memory-provider.ts",
-      "default": "./src/timem-memory-provider.ts"
+    "./py": {
+      "types": "./src/py-bridge.ts",
+      "default": "./src/py-bridge.ts"
     }
   }
 }

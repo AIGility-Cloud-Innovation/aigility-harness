@@ -1,13 +1,13 @@
 /**
- * L2 感知交互层: 插件安装助手角色形象 (plugin-helper)
+ * L3 感知交互层: 插件安装助手角色形象 (plugin-helper)
  *
  * 开箱即用引导角色：用户问「怎么加个插件 / RAG / 记忆」时，由本角色
- * 承接，委托 L3 的 plugin-install 工作流完成：
+ * 承接，委托 L4 的 plugin-install 工作流完成：
  *   扫描插件目录 / py-plugins.json → 契约校验（provides/consumes）→ 输出装配指引
  *
  * 设计要点（与 advisory-chat 同款骨架）:
  *   - 角色知识的「载体」: 系统提示词在本角色内构建, 随请求下发
- *   - 不关心插件怎么装: 那是 plugin-install 工作流 (L3) 的事
+ *   - 不关心插件怎么装: 那是 plugin-install 工作流 (L4) 的事
  */
 
 import {
@@ -92,7 +92,7 @@ const pluginHelperProvider: Provider<PluginHelperRequest, PluginHelperResponse> 
       system_prompt: PLUGIN_HELPER_SYSTEM_PROMPT,
     };
 
-    // 3. 委托 L3 编排 (plugin-install 工作流: 扫描 → 契约校验 → 指引)
+    // 3. 委托 L4 编排 (plugin-install 工作流: 扫描 → 契约校验 → 指引)
     const result = await ctx.call(
       { id: "@orchestration/plugin-install", versionRange: "^1.0.0" },
       installRequest,

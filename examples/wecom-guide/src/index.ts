@@ -30,7 +30,7 @@ import { wecomIngressProvider } from "@aigility-harness/layer-infrastructure";
 import {
   createPyBridgePlugin,
   loadPyPluginsConfig,
-} from "@aigility-harness/layer-infrastructure/bridge";
+} from "@aigility-harness/py-bridge";
 import { loadEnv } from "./env.js";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";

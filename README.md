@@ -22,36 +22,39 @@
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
 │   外部信号:  HTTP / 企业微信 / IM / Web UI                                │
-│        │  (L5 http-ingress / wecom-ingress 收口)                        │
+│        │  (L1 http-ingress / wecom-ingress 收口)                        │
 │        ▼                                                                 │
 │   ┌─────────────────────────────────────────────────────────────────┐   │
-│   │  L2 角色人格层 (layer-persona)     角色 = 入口 + 人格             │   │
+│   │  L3 角色人格层 (layer-persona)     角色 = 入口 + 人格             │   │
 │   │      sales-chat  plugin-helper  coder  advisory-chat             │   │
 │   │      (定义性格/输入方式/表达方式, 统一 PersonaInput)               │   │
 │   └────────────────────────────┬────────────────────────────────────┘   │
 │                                │ ① ctx.call (Seam 契约)                 │
 │                                ▼                                         │
 │   ┌─────────────────────────────────────────────────────────────────┐   │
-│   │  L3 编排规划层 (layer-orchestration)   任务规划 / 工作流          │   │
+│   │  L4 编排规划层 (layer-orchestration)   任务规划 / 工作流          │   │
 │   │      @orchestration/workflow-engine  codex-agent                 │   │
 │   └────────────────────────────┬────────────────────────────────────┘   │
 │                                │ ② 推理/检索                             │
 │                                ▼                                         │
 │   ┌─────────────────────────────────────────────────────────────────┐   │
-│   │  L1 认知决策层 (layer-cognitive)    大脑                          │   │
+│   │  L2 认知决策层 (layer-cognitive)    大脑                          │   │
 │   │      @cognitive/llm-inference  @cognitive/memory                 │   │
 │   └────────────────────────────┬────────────────────────────────────┘   │
 │                                │ ③ 决策结果回传                         │
 │                                ▼                                         │
 │   ┌─────────────────────────────────────────────────────────────────┐   │
-│   │  L4 行动执行层 (layer-action)     手脚                            │   │
+│   │  L5 行动执行层 (layer-action)     手脚                            │   │
 │   │      @action/text-to-speech  工具执行 / 多渠道输出                │   │
 │   └─────────────────────────────────────────────────────────────────┘   │
 │                                                                         │
 │   ┌─────────────────────────────────────────────────────────────────┐   │
-│   │  L5 底座基础层 (layer-infrastructure)   系统地基                  │   │
+│   │  L1 底座基础层 (layer-infrastructure)   系统地基                  │   │
 │   │      config / logging / protocol-adapter / PgBusBridge           │   │
-│   │      bridge 跨语言桥: py-bridge → aigility (Python 生态)          │   │
+│   └─────────────────────────────────────────────────────────────────┘   │
+│   ┌─────────────────────────────────────────────────────────────────┐   │
+│   │  跨语言桥 py-bridge (独立包, 只依赖 core)                         │   │
+│   │      声明式接入 Python 生态 (aigility 等) — 能力可声明到任意层     │   │
 │   └─────────────────────────────────────────────────────────────────┘   │
 │   ┌─────────────────────────────────────────────────────────────────┐   │
 │   │  内核 kernel-dsh (DSH-Cordis)                                     │   │
@@ -62,9 +65,10 @@
 └─────────────────────────────────────────────────────────────────────────┘
 
 外部接入:
-  LLM (LiteLLM/华为云/DeepSeek) ←→ L1   ·   TiMEM Engine ←→ bridge / timem 插件
-  HTTP / 企业微信 / IM ←→ L5 入口       ·   Python 生态 ←→ py-bridge
-  调用顺序: 外部信号 → L2(角色) → L3(编排) → L1(认知) 回传 → L4(行动)
+  LLM (LiteLLM/华为云/DeepSeek) ←→ L2   ·   TiMEM Engine ←→ timem 插件 / @cognitive/timem-memory
+  HTTP / 企业微信 / IM ←→ L1 入口       ·   Python 生态 ←→ py-bridge（独立包）
+  调用顺序: 外部信号 → L3(角色) → L4(编排) → L2(认知) 回传 → L5(行动)
+  依赖方向: L5→L4→L3→L2→L1（只依赖比自己小的层号；py-bridge 只依赖 core）
 ```
 
 ### 详细架构（Mermaid）
@@ -87,48 +91,51 @@ flowchart TB
         CP[可插拔 cordis 插件<br/>dsh-plugin-timem]
     end
 
-    subgraph L5["L5 底座基础层 layer-infrastructure"]
+    subgraph L1["L1 底座基础层 layer-infrastructure"]
         ING[http-ingress]
         WEC[wecom-ingress]
         PA[protocol-adapter]
-        BR[bridge / py-bridge]
         PG[PgBusBridge]
     end
 
-    subgraph L2["L2 角色人格层 layer-persona"]
+    subgraph PYB["跨语言桥 py-bridge (独立包)"]
+        BR[py-bridge → Python 生态]
+    end
+
+    subgraph L3["L3 角色人格层 layer-persona"]
         SC[sales-chat]
         PH[plugin-helper]
         CD[coder]
         AC[advisory-chat]
     end
 
-    subgraph L3["L3 编排规划层 layer-orchestration"]
+    subgraph L4["L4 编排规划层 layer-orchestration"]
         WE[workflow-engine]
         CA[codex-agent]
     end
 
-    subgraph L1["L1 认知决策层 layer-cognitive"]
+    subgraph L2["L2 认知决策层 layer-cognitive"]
         LLM[llm-inference]
         MEM[cognitive/memory]
     end
 
-    subgraph L4["L4 行动执行层 layer-action"]
+    subgraph L5["L5 行动执行层 layer-action"]
         TTS[text-to-speech]
         TOOL[工具执行]
     end
 
     HTTP --> ING
     WECOM --> WEC
-    ING --> L2
-    WEC --> L2
+    ING --> L3
+    WEC --> L3
 
-    L2 -->|① ctx.call Seam| L3
-    L3 -->|② 推理/检索| L1
-    L1 -->|③ 回传决策| L4
-    L3 --> WE
+    L3 -->|① ctx.call Seam| L4
+    L4 -->|② 推理/检索| L2
+    L2 -->|③ 回传决策| L5
+    L4 --> WE
     WE --> BR
     BR -->|JSON-RPC| PY
-    L1 --> MEM
+    L2 --> MEM
     MEM --> BR
     BR --> TIMEM
     CP --> TIMEM
@@ -136,11 +143,11 @@ flowchart TB
     PA --> LLM_API
     ING --> PA
 
-    L2 -.-> 内核
     L3 -.-> 内核
-    L1 -.-> 内核
     L4 -.-> 内核
+    L2 -.-> 内核
     L5 -.-> 内核
+    L1 -.-> 内核
 ```
 
 
@@ -208,19 +215,19 @@ flowchart TB
 
 | 层 | 名称 | 定位 | 典型模块 | 载体策略（原型 → 生产） |
 |----|------|------|---------|--------------------------|
-| L1 | **认知决策核心层**（大脑） | 智能体自我、推理、决策、身份中枢 | LLM 模型适配器、多模型算力路由、人格系统、记忆引擎、会话/身份上下文 | DSH 进程内插件 → 算力路由 + 记忆抽离为独立网络服务 |
-| L2 | **角色人格层**（Persona） | 特性打包为可交互角色：性格 + 信息接收/表达方式 | 具名角色：销售客服（sales-chat）、插件安装助手（plugin-helper）、编码助手（coder）、就业顾问（advisory-chat）；感知（文本/语音，ASR/TTS）、按角色定制 | 附属子进程 → 本机独立守护进程 → 网络服务集群 |
-| L3 | **编排规划层**（小脑） | 任务调度、思考循环、多智能体协作 | Agent 主思考循环（ReAct/PlanExecute）、任务规划/复盘、SubAgent 调度、定时/长任务 | DSH 插件线程 → 复杂子 Agent 拆独立 Worker 进程/服务 |
-| L4 | **行动执行工具层**（手脚） | 产生真实外部副作用 | 代码沙箱、文档/文件操作、系统资源管控、IoT/机器人控制 | 附属子进程 → 独立守护进程/远程隔离服务 |
-| L5 | **底座兼容基础层**（地基） | 通信、契约、安全、观测基础设施 | 全局消息总线、统一消息契约、MCP/A2A 协议桥接、鉴权/限流/熔断、全链路追踪、自动切换控制器 | 全部独立网络服务，不属于 DSH 进程 |
+| L1 | **底座兼容基础层**（地基） | 通信、契约、安全、观测基础设施 | 全局消息总线、统一消息契约、MCP/A2A 协议桥接、鉴权/限流/熔断、全链路追踪、自动切换控制器 | 全部独立网络服务，不属于 DSH 进程 |
+| L2 | **认知决策核心层**（大脑） | 智能体自我、推理、决策、身份中枢 | LLM 模型适配器、多模型算力路由、人格系统、记忆引擎、会话/身份上下文 | DSH 进程内插件 → 算力路由 + 记忆抽离为独立网络服务 |
+| L3 | **角色人格层**（Persona） | 特性打包为可交互角色：性格 + 信息接收/表达方式 | 具名角色：销售客服（sales-chat）、插件安装助手（plugin-helper）、编码助手（coder）、就业顾问（advisory-chat）；感知（文本/语音，ASR/TTS）、按角色定制 | 附属子进程 → 本机独立守护进程 → 网络服务集群 |
+| L4 | **编排规划层**（小脑） | 任务调度、思考循环、多智能体协作 | Agent 主思考循环（ReAct/PlanExecute）、任务规划/复盘、SubAgent 调度、定时/长任务 | DSH 插件线程 → 复杂子 Agent 拆独立 Worker 进程/服务 |
+| L5 | **行动执行工具层**（手脚） | 产生真实外部副作用 | 代码沙箱、文档/文件操作、系统资源管控、IoT/机器人控制 | 附属子进程 → 独立守护进程/远程隔离服务 |
 
 ### 各层运行特征
 
-- **L1 认知层**：Always-On 核心常驻，强状态、强一致性、不可随意重启。
-- **L2 角色层**：延迟敏感、硬件绑定、与用户直接交互，纯信号转换与角色形象，无核心决策。
-- **L3 编排层**：流程驱动、状态机复杂、多分支多迭代，不直接操作硬件。
-- **L4 执行层**：高风险、高权限、崩溃影响外部环境，必须强隔离、强沙箱、强故障域。
-- **L5 底座层**：全局唯一、所有模块依赖、完全与业务解耦。
+- **L1 底座层**：全局唯一、所有模块依赖、完全与业务解耦。
+- **L2 认知层**：Always-On 核心常驻，强状态、强一致性、不可随意重启。
+- **L3 角色层**：延迟敏感、硬件绑定、与用户直接交互，纯信号转换与角色形象，无核心决策。
+- **L4 编排层**：流程驱动、状态机复杂、多分支多迭代，不直接操作硬件。
+- **L5 执行层**：高风险、高权限、崩溃影响外部环境，必须强隔离、强沙箱、强故障域。
 
 ---
 
@@ -352,7 +359,7 @@ pnpm --filter wecom-coder start
 | 编码 Agent | `codex-agent`（codex CLI → localhost:4000） | 任意符合契约的 Agent Provider |
 | 协议适配 | `protocol-adapter`（api-router 协议翻译） | 任意协议桥接实现 |
 | HTTP 入口 + 流式 | `http-ingress` + `sse.ts`（`/v1/chat/completions` 支持 `stream:true` → SSE 帧流） | 任意传输实现（Hono 备件换装时 import 同款 sse helper） |
-| **角色对话** | `sales-chat`（销售客服角色, 由 chat-agent 正名而来） | 任意 L2 角色（特性打包为 persona 插件） |
+| **角色对话** | `sales-chat`（销售客服角色, 由 chat-agent 正名而来） | 任意 L3 角色（特性打包为 persona 插件） |
 | **开箱引导安装** | `plugin-helper` 角色 → `plugin-install` 工作流（扫描 py-plugins.json + packages → 契约匹配 → 接入指引） | 任意安装/引导工作流 |
 | **最小 Web UI** | http-ingress `GET /` / `/ui`（单文件 HTML, 双角色页签, 零依赖） | 任意前端 |
 | **企业微信入口（特色案例）** | `wecom-ingress`（aibot-node-sdk WebSocket 长连接 → 角色路由 → replyStream）+ `examples/wecom-coder`（企微 @机器人 → coder → codex） | 任意 IM 通道（钉钉/飞书/微信，同构接入） |
@@ -365,6 +372,11 @@ pnpm --filter wecom-coder start
 ---
 
 ## 八、py-bridge：跨语言插件桥接
+
+> **包定位**：`@aigility-harness/py-bridge` 是独立包（不在 layer-infrastructure 内），只依赖 core。
+> 职责边界：**DSH/cordis 侧插件**（如 dsh-plugin-timem）由内核插件树承载；**aigility 系等 Python 插件**
+> 由 py-bridge 承载 —— `py_bridge_worker.py` 是纯 Python 进程（JSON-RPC over stdio），不依赖 TS 运行时，
+> TS 侧只负责 spawn 与字段映射。能力 ID 由配置声明（`layer` 字段），可挂到任意层（如 @orchestration/workflow-engine）。
 
 ### 8.1 已兼容的插件类别
 
@@ -406,10 +418,10 @@ harness (TS)                          Python (子进程)
 
 | Seam 能力 ID | 层 | aigility 模块 | 方法 | 端到端测试 |
 |-------------|-----|-------------|------|-----------|
-| `@orchestration/workflow-engine` | L3 | `aigility.workflow.WorkflowEngine` | `invoke` | ✅ YAML → LangGraph → 条件分支 |
-| `@cognitive/memory` | L1 | `aigility.memory.Memory` | `search` | ✅ 异步方法正确处理 |
-| `@cognitive/rag-retrieval` | L1 | `aigility.rag.RAGService` | `search` | ⚠️ 需 dashscope 包 |
-| `@orchestration/chat-flow` | L3 | `aigility.chatflow.ChatFlow` | `invoke` | ✅ 初始化成功 |
+| `@orchestration/workflow-engine` | L4 | `aigility.workflow.WorkflowEngine` | `invoke` | ✅ YAML → LangGraph → 条件分支 |
+| `@cognitive/memory` | L2 | `aigility.memory.Memory` | `search` | ✅ 异步方法正确处理 |
+| `@cognitive/rag-retrieval` | L2 | `aigility.rag.RAGService` | `search` | ⚠️ 需 dashscope 包 |
+| `@orchestration/chat-flow` | L4 | `aigility.chatflow.ChatFlow` | `invoke` | ✅ 初始化成功 |
 
 ### 8.4 编排工具 + 编排实例分离
 
@@ -461,25 +473,25 @@ aigility-harness/
 │   ├── core/                      # 核心契约：LayerId / CarrierKind / ServiceDefinition / Seam
 │   │                              #   Provider / Consumer / LayerPlugin / KernelAdapter
 │   ├── kernel-dsh/                # DSH-Cordis 内核适配器（Seam Registry / Effect Manager / Carrier Manager）
-│   ├── layer-cognitive/           # L1 认知决策层（LLM 推理：stub + litellm）
-│   ├── layer-persona/            # L2 角色人格层（sales-chat / plugin-helper / coder / advisory-chat 等角色）
-│   ├── layer-orchestration/       # L3 编排规划层（任务规划 + plugin-install + codex-agent）
-│   ├── layer-action/              # L4 行动执行层（TTS）
-│   ├── layer-infrastructure/      # L5 底座基础层（config/logging/protocol-adapter）
-│   │   ├── src/
-│   │   │   ├── protocol-adapter.ts    # 协议翻译（Anthropic/OpenAI/Responses → 内部标准）
-│   │   │   ├── http-ingress.ts        # HTTP 唯一入口（dev/agent 双链路 + SSE 流式 + 最小 UI）
-│   │   │   ├── sse.ts                 # SSE 帧编码原子模块（传输无关）
-│   │   │   └── ui.ts                  # 最小 Web UI（单文件内嵌 HTML, GET / /ui）
-│   │   └── bridge/               # 跨语言桥接（L5 底座层）：py-bridge 为首个实现
+│   ├── layer-cognitive/           # L2 认知决策层（LLM 推理：stub + litellm + timem-memory-provider）
+│   ├── layer-persona/            # L3 角色人格层（sales-chat / plugin-helper / coder / advisory-chat 等角色）
+│   ├── layer-orchestration/       # L4 编排规划层（任务规划 + plugin-install + codex-agent）
+│   ├── layer-action/              # L5 行动执行层（TTS）
+│   ├── layer-infrastructure/      # L1 底座基础层（config/logging/protocol-adapter/http-ingress/wecom-ingress/PgBusBridge）
+│   │   └── src/
+│   │       ├── protocol-adapter.ts    # 协议翻译（Anthropic/OpenAI/Responses → 内部标准，类型取自 core 契约）
+│   │       ├── http-ingress.ts        # HTTP 唯一入口（dev/agent 双链路 + SSE 流式 + 最小 UI）
+│   │       ├── sse.ts                 # SSE 帧编码原子模块（传输无关）
+│   │       └── ui.ts                  # 最小 Web UI（单文件内嵌 HTML, GET / /ui）
+│   ├── py-bridge/                 # 跨语言桥接（独立包，只依赖 core）：Python 生态声明式接入
 │   │   ├── src/
 │   │   │   ├── types.ts           # 声明式配置 + 通信协议类型
 │   │   │   ├── py-worker.ts       # 子进程管理 + 请求队列 + 批量调用
-│   │   │   ├── py-bridge.ts       # Provider 工厂：配置 → Seam Provider（首个语言桥实现）
+│   │   │   ├── py-bridge.ts       # Provider 工厂：配置 → Seam Provider（能力可声明到任意层）
 │   │   │   ├── config-loader.ts   # 配置加载 + 环境变量替换
-│   │   │   └── py-bridge.test.ts  # 端到端测试（7 例）
+│   │   │   └── py-bridge.test.ts  # 端到端测试（7 例，真实 spawn Python worker）
 │   │   └── scripts/
-│   │       └── py_bridge_worker.py  # 通用 Python worker
+│   │       └── py_bridge_worker.py  # 通用 Python worker（纯 Python 运行，不依赖 TS）
 │   └── prototype-mode/            # 原型演示入口（InMemoryKernel → 五层插件装配）
 ├── config/
 │   └── py-plugins.json            # Python 插件声明式配置（aigility 能力映射）

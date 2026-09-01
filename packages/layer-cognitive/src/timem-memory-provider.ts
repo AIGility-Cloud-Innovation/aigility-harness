@@ -60,7 +60,7 @@ export interface TimemMemoryWriteRequest {
   user_id?: string | number;
   /** Agent 标识 */
   agent_id?: string;
-  /** 目标层 (默认 L1) */
+  /** 目标层 (默认 L2) */
   layer?: number;
 }
 

@@ -9,24 +9,24 @@
 // ── Layer Identity ────────────────────────────────────────────────
 
 export enum LayerId {
-  /** 第1层：认知决策核心层（大脑） */
-  Cognitive = "cognitive",
-  /** 第2层：角色人格层（角色打包感知/表达/性格） */
-  Persona = "persona",
-  /** 第3层：编排规划层（小脑） */
-  Orchestration = "orchestration",
-  /** 第4层：行动执行工具层（手脚） */
-  Action = "action",
-  /** 第5层：底座兼容基础层（系统地基） */
+  /** 第1层：底座兼容基础层（系统地基，dependsOn:[]，最先加载） */
   Infrastructure = "infrastructure",
+  /** 第2层：认知决策核心层（大脑） */
+  Cognitive = "cognitive",
+  /** 第3层：角色人格层（角色打包感知/表达/性格） */
+  Persona = "persona",
+  /** 第4层：编排规划层（小脑） */
+  Orchestration = "orchestration",
+  /** 第5层：行动执行工具层（手脚） */
+  Action = "action",
 }
 
 export const LAYER_ORDER: readonly LayerId[] = [
+  LayerId.Infrastructure,
   LayerId.Cognitive,
   LayerId.Persona,
   LayerId.Orchestration,
   LayerId.Action,
-  LayerId.Infrastructure,
 ] as const;
 
 // ── Carrier (运行载体) ───────────────────────────────────────────

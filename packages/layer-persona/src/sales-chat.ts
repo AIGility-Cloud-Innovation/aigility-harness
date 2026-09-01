@@ -1,8 +1,8 @@
 /**
- * L2 感知交互层: 销售客服角色形象 (sales-chat)
+ * L3 感知交互层: 销售客服角色形象 (sales-chat)
  *
- * L2 的职责: 构建主体形象，接收信号，委托 L3 编排，由同一角色反馈。
- * 不关心调什么工具、走什么流程——那是 L3 的事。
+ * L3 的职责: 构建主体形象，接收信号，委托 L4 编排，由同一角色反馈。
+ * 不关心调什么工具、走什么流程——那是 L4 的事。
  */
 
 import {
@@ -49,7 +49,7 @@ export const salesChatService: ServiceDefinition<SalesChatRequest, SalesChatResp
   id: "@persona/sales-chat",
   version: "1.0.0",
   layer: LayerId.Persona,
-  description: "文字对话方角色形象：收消息 → 委托 L3 → 回文字",
+  description: "文字对话方角色形象：收消息 → 委托 L4 → 回文字",
 };
 
 // ── Provider 实现 ────────────────────────────────────────────────
@@ -74,7 +74,7 @@ const salesChatProvider: Provider<SalesChatRequest, SalesChatResponse> = {
       agent_name: agentName,
     };
 
-    // 3. 委托 L3 编排 (L3 决定调什么工具、走什么流程)
+    // 3. 委托 L4 编排 (L4 决定调什么工具、走什么流程)
     const result = await ctx.call(
       { id: "@orchestration/workflow-engine", versionRange: "^1.0.0" },
       chatRequest,

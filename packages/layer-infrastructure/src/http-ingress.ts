@@ -1,5 +1,5 @@
 /**
- * L5 底座层: HTTP Server — 唯一入口 + 显式路由
+ * L1 底座层: HTTP Server — 唯一入口 + 显式路由
  *
  * 接收外部 HTTP 请求，按路径/内容特征路由到两条链路：
  *
@@ -51,7 +51,7 @@ export interface HttpIngressRequest {
   agentPaths?: string[];
   /** 路径 → 角色能力 ID 映射 (默认 /api/chat → @persona/sales-chat, /api/plugin-helper → @persona/plugin-helper) */
   agentRoutes?: Record<string, string>;
-  /** 交给哪个 L2 角色形象处理 (能力 ID), 默认 @persona/sales-chat (agentRoutes 未命中时兜底) */
+  /** 交给哪个 L3 角色形象处理 (能力 ID), 默认 @persona/sales-chat (agentRoutes 未命中时兜底) */
   perceptionId?: string;
   /** 能力版本范围 */
   perceptionVersion?: string;

@@ -32,7 +32,7 @@ import { plugin as actionPlugin } from "@aigility-harness/layer-action";
 import {
   createPyBridgePlugin,
   loadPyPluginsConfig,
-} from "@aigility-harness/layer-infrastructure/bridge";
+} from "@aigility-harness/py-bridge";
 import { httpIngressService, stopHttpServer } from "@aigility-harness/layer-infrastructure";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -302,7 +302,7 @@ async function main(): Promise<void> {
   }
 
   // 9a. 角色形象演示：perception -> orchestration（sales-chat → workflow-engine）
-  console.log("\n9a. 角色形象演示：@persona/sales-chat（L2）→ @orchestration/workflow-engine（L3）");
+  console.log("\n9a. 角色形象演示：@persona/sales-chat（L3）→ @orchestration/workflow-engine（L4）");
   const ctx6 = kernel.createContext("session-006", LayerId.Persona);
 
   const salesChatRef: CapabilityRef = {

@@ -1,5 +1,5 @@
 /**
- * L5 底座层: PgBusBridge — PostgreSQL 消息总线实现 (阶段 2 落地)
+ * L1 底座层: PgBusBridge — PostgreSQL 消息总线实现 (阶段 2 落地)
  *
  * 架构决策(2026-08-26): 数据库统一用 PostgreSQL 单库多职——
  * 业务表 + 消息总线 + 队列 + 向量(pgvector)。本文件即「消息总线」一职。

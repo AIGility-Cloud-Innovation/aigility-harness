@@ -16,7 +16,8 @@
     "@aigility-harness/layer-persona": "workspace:*",
     "@aigility-harness/layer-orchestration": "workspace:*",
     "@wecom/aibot-node-sdk": "^1.0.7",
-    "prototype-mode": "workspace:*"
+    "prototype-mode": "workspace:*",
+    "@aigility-harness/py-bridge": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.5.0",

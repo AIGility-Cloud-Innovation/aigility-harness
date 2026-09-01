@@ -63,6 +63,15 @@ export type {
   VectorStore,
 } from "./vector-store.js";
 
+// ── LLM Inference 契约（跨层共享的内部标准） ──────────────────────
+export type {
+  ToolCall,
+  ChatMessage,
+  LlmInferenceRequest,
+  LlmInferenceResponse,
+} from "./llm-contract.js";
+export { llmInferenceRef } from "./llm-contract.js";
+
 // ── Capability Seam ───────────────────────────────────────────────
 export type {
   ServiceDefinition,

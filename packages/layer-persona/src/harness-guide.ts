@@ -1,8 +1,8 @@
 /**
- * L2 角色人格层: 框架介绍员角色形象 (harness-guide)
+ * L3 角色人格层: 框架介绍员角色形象 (harness-guide)
  *
  * 职责: 向用户介绍 aigility-harness 框架 — 五层架构 / 内核 / 组件 /
- *      接入方式 / 运行演示。收问题 → 带框架知识人设 → 委托 L3 → 回传。
+ *      接入方式 / 运行演示。收问题 → 带框架知识人设 → 委托 L4 → 回传。
  */
 
 import {
@@ -57,11 +57,11 @@ aigility-harness 是一套「五层可插拔智能 Agent 全域架构」— 契�
 核心哲学：「契约是主体，插件是过客。接口永久不变，实现任意替换。」
 
 # 五层架构（自上而下）
-1. L1 认知决策层 (layer-cognitive)：LLM 推理 / 记忆检索。契约 @cognitive/llm-inference、@cognitive/memory
-2. L2 角色人格层 (layer-persona)：角色形象 / 输入输出归一。角色: sales-chat / coder / plugin-helper / advisory-chat / harness-guide(我)
-3. L3 编排规划层 (layer-orchestration)：任务规划 / 工作流引擎。契约 @orchestration/workflow-engine、codex-agent
-4. L4 行动执行层 (layer-action)：工具执行 / TTS / 多渠道输出
-5. L5 底座基础层 (layer-infrastructure)：http-ingress / wecom-ingress / protocol-adapter / bridge(跨语言桥) / PgBusBridge
+1. L1 底座基础层 (layer-infrastructure)：http-ingress / wecom-ingress / protocol-adapter / PgBusBridge；跨语言桥 py-bridge 为独立包（只依赖 core）
+2. L2 认知决策层 (layer-cognitive)：LLM 推理 / 记忆检索。契约 @cognitive/llm-inference、@cognitive/memory
+3. L3 角色人格层 (layer-persona)：角色形象 / 输入输出归一。角色: sales-chat / coder / plugin-helper / advisory-chat / harness-guide(我)
+4. L4 编排规划层 (layer-orchestration)：任务规划 / 工作流引擎。契约 @orchestration/workflow-engine、codex-agent
+5. L5 行动执行层 (layer-action)：工具执行 / TTS / 多渠道输出
 
 # 内核
 kernel-dsh：基于 DSH-Cordis 的内核适配器（KernelAdapter / Seam Registry / Event Bus / Carrier Manager）。
@@ -100,7 +100,7 @@ const harnessGuideProvider: Provider<HarnessGuideRequest, HarnessGuideResponse> 
       system_prompt: HARNESS_GUIDE_SYSTEM_PROMPT,
     };
 
-    // 3. 委托 L3 编排（带人设的对话由认知层 LLM 回复）
+    // 3. 委托 L4 编排（带人设的对话由认知层 LLM 回复）
     const result = await ctx.call(
       { id: "@orchestration/workflow-engine", versionRange: "^1.0.0" },
       guideRequest,

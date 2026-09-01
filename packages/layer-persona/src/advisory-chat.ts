@@ -1,10 +1,10 @@
 /**
- * L2 感知交互层: 就业数据顾问角色形象
+ * L3 感知交互层: 就业数据顾问角色形象
  *
  * CareerEdu 专属角色: 面向高校就业数据驾驶舱的业务顾问。
  * 职责:
  *   - 持有行业/指标知识 (system prompt 注入给编排层)
- *   - 接收用户自由提问 → 委托 L3 workflow-engine 完成
+ *   - 接收用户自由提问 → 委托 L4 workflow-engine 完成
  *     (意图识别 → 取数 → 生成图表 + 分析文字)
  *   - 由同一角色形象反馈带图表的回复
  *
@@ -112,7 +112,7 @@ const advisoryChatProvider: Provider<AdvisoryChatRequest, AdvisoryChatResponse> 
       role: request.role ?? "default",
     };
 
-    // 3. 委托 L3 编排 (workflow-engine: 意图识别→取数→图表+分析)
+    // 3. 委托 L4 编排 (workflow-engine: 意图识别→取数→图表+分析)
     const result = await ctx.call(
       { id: "@orchestration/workflow-engine", versionRange: "^1.0.0" },
       chatRequest,

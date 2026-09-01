@@ -5,7 +5,7 @@
  *   1. memory 桥: 连接/发布/订阅/退订
  *   2. 跨进程互通: 节点 A 发布 → 节点 B 订阅者收到
  *   3. 回环保护: 节点收到自己的信封被丢弃
- *   4. layer 隔离: 订阅 L1 收不到 L2 事件
+ *   4. layer 隔离: 订阅 L2 收不到 L3 事件
  *   5. 信封协议: BUS_PROTOCOL / sourceNode / topic
  */
 import { describe, it, expect } from "vitest";
@@ -142,7 +142,7 @@ describe("RemoteEventBus 跨进程桥", () => {
     expect(remoteOnes.length).toBe(0);
   });
 
-  it("layer 隔离: 订阅 L1 收不到 L2 远端事件", async () => {
+  it("layer 隔离: 订阅 L2 收不到 L3 远端事件", async () => {
     const bridgeA = createBusBridge("memory", { nodeId: "node-a" });
     const bridgeB = createBusBridge("memory", { nodeId: "node-b" });
     await bridgeA.connect();
@@ -151,18 +151,18 @@ describe("RemoteEventBus 跨进程桥", () => {
     const busA = new RemoteEventBus(new MemoryLocalBus(), bridgeA);
     const busB = new RemoteEventBus(new MemoryLocalBus(), bridgeB);
 
-    const gotL1: unknown[] = [];
     const gotL2: unknown[] = [];
-    busB.subscribe(LayerId.Cognitive, (e) => gotL1.push(e));
-    busB.subscribe(LayerId.Orchestration, (e) => gotL2.push(e));
+    const gotL3: unknown[] = [];
+    busB.subscribe(LayerId.Cognitive, (e) => gotL2.push(e));
+    busB.subscribe(LayerId.Orchestration, (e) => gotL3.push(e));
 
     await busA.publish(
       demoEvent(LayerId.Orchestration, "l2.event", { x: 1 }),
     );
     await new Promise((r) => setTimeout(r, 10));
 
-    expect(gotL1.length).toBe(0);
-    expect(gotL2.length).toBe(1);
+    expect(gotL2.length).toBe(0);
+    expect(gotL3.length).toBe(1);
   });
 
   it("bridgeEventBus 便捷装配: remote 可当原 EventBus 用", async () => {

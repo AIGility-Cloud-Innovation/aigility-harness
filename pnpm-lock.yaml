@@ -122,6 +122,9 @@ importers:
       '@aigility-harness/layer-persona':
         specifier: workspace:*
         version: link:../../packages/layer-persona
+      '@aigility-harness/py-bridge':
+        specifier: workspace:*
+        version: link:../../packages/py-bridge
       '@wecom/aibot-node-sdk':
         specifier: ^1.0.7
         version: 1.0.7(debug@4.4.3)
@@ -159,6 +162,9 @@ importers:
       '@aigility-harness/layer-persona':
         specifier: workspace:*
         version: link:../../packages/layer-persona
+      '@aigility-harness/py-bridge':
+        specifier: workspace:*
+        version: link:../../packages/py-bridge
       '@timem/dsh-plugin-timem':
         specifier: git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git
         version: git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git#7eaed2e3a78217d99a81e1ad88961bb11bf3c0e4(@deepseek-ai/cordis@4.0.1)
@@ -237,6 +243,9 @@ importers:
       '@aigility-harness/core':
         specifier: workspace:*
         version: link:../core
+      '@timem/dsh-plugin-timem':
+        specifier: git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git
+        version: git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git#7eaed2e3a78217d99a81e1ad88961bb11bf3c0e4(@deepseek-ai/cordis@4.0.1)
     devDependencies:
       '@types/node':
         specifier: ^20.14.0
@@ -253,12 +262,6 @@ importers:
       '@aigility-harness/core':
         specifier: workspace:*
         version: link:../core
-      '@aigility-harness/layer-cognitive':
-        specifier: workspace:*
-        version: link:../layer-cognitive
-      '@timem/dsh-plugin-timem':
-        specifier: git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git
-        version: git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git#7eaed2e3a78217d99a81e1ad88961bb11bf3c0e4(@deepseek-ai/cordis@4.0.1)
       '@wecom/aibot-node-sdk':
         specifier: ^1.0.7
         version: 1.0.7(debug@4.4.3)
@@ -338,6 +341,9 @@ importers:
       '@aigility-harness/layer-persona':
         specifier: workspace:*
         version: link:../layer-persona
+      '@aigility-harness/py-bridge':
+        specifier: workspace:*
+        version: link:../py-bridge
     devDependencies:
       '@types/node':
         specifier: ^20.14.0
@@ -345,6 +351,22 @@ importers:
       tsx:
         specifier: ^4.19.0
         version: 4.23.12
+      typescript:
+        specifier: ^5.5.0
+        version: 5.5.2
+      vitest:
+        specifier: ^2.0.0
+        version: 2.0.0(@types/node@20.19.43)
+
+  packages/py-bridge:
+    dependencies:
+      '@aigility-harness/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: ^20.14.0
+        version: 20.19.43
       typescript:
         specifier: ^5.5.0
         version: 5.5.2

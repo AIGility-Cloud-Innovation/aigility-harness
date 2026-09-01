@@ -37,11 +37,11 @@ describe("Result helpers", () => {
 describe("Layer ordering", () => {
   it("LAYER_ORDER lists all five layers", () => {
     expect(LAYER_ORDER).toEqual([
+      LayerId.Infrastructure,
       LayerId.Cognitive,
       LayerId.Persona,
       LayerId.Orchestration,
       LayerId.Action,
-      LayerId.Infrastructure,
     ]);
   });
 

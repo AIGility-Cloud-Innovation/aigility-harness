@@ -1,8 +1,8 @@
 /**
- * L2 角色人格层: TiMEM Space 客服角色形象 (timem-support)
+ * L3 角色人格层: TiMEM Space 客服角色形象 (timem-support)
  *
  * 职责: 向用户解答 TiMEM Space（太忆空间）产品问题 — 功能/用法/计费。
- *      收问题 → 带 TiMEM 产品知识人设 → 委托 L3 workflow(llm_node) → 回传。
+ *      收问题 → 带 TiMEM 产品知识人设 → 委托 L4 workflow(llm_node) → 回传。
  *      注: 实际生效的客服提示词在 aigility 仓库 aigility/timem_support_prompts.py
  *      (workflow llm_node 经 prompt_ref 引用)，此处常量仅作角色描述参考。
  */
@@ -126,7 +126,7 @@ const timemSupportProvider: Provider<TimemSupportRequest, TimemSupportResponse> 
       recent_history: formatHistory(userId),
     };
 
-    // 3. 委托 L3 workflow（llm_node 真实回答, 独立 workflow-engine-timem 实例）
+    // 3. 委托 L4 workflow（llm_node 真实回答, 独立 workflow-engine-timem 实例）
     const result = await ctx.call(
       { id: "@orchestration/workflow-engine-timem", versionRange: "^1.0.0" },
       supportRequest,

@@ -1,15 +1,15 @@
 /**
- * L2 感知交互层: 编码助手角色形象 (coder)
+ * L3 感知交互层: 编码助手角色形象 (coder)
  *
  * 编码能力的人格化入口——角色名与实现无关(@persona/coder 不绑定任何
- * 具体编码 Agent)，委托 L3 的 @orchestration/codex-agent 完成真实编码:
+ * 具体编码 Agent)，委托 L4 的 @orchestration/codex-agent 完成真实编码:
  *   收"帮我写个 X / 修个 bug" → 人设引导 → 委托 codex-agent(规划+spawn)
  *   → 同一角色反馈结果(代码/改动/计划)
  *
  * 设计要点:
- *   - 角色名永不含实现名(codex/claude/opencode), 换 L3 Provider 零改动
+ *   - 角色名永不含实现名(codex/claude/opencode), 换 L4 Provider 零改动
  *   - 角色知识的「载体」: 系统提示词在本角色内构建, 随请求下发
- *   - 不关心编码怎么执行: 那是 codex-agent (L3) 的事
+ *   - 不关心编码怎么执行: 那是 codex-agent (L4) 的事
  *   - 认知层供能: 由 http-ingress 的 dev 链路暴露的兼容网关统一供模型
  */
 
@@ -61,7 +61,7 @@ export const coderService: ServiceDefinition<CoderRequest, CoderResponse> = {
   description: "编码助手角色形象：收编码任务 → 委托编排层编码 Agent → 同角色反馈代码/改动",
 };
 
-/** 委托的 L3 编码 Agent (实现无关; 换 claude-code/opencode 只改这一处) */
+/** 委托的 L4 编码 Agent (实现无关; 换 claude-code/opencode 只改这一处) */
 export const codexAgentRef: CapabilityRef = {
   id: "@orchestration/codex-agent",
   versionRange: "^1.0.0",
@@ -100,13 +100,13 @@ const coderProvider: Provider<CoderRequest, CoderResponse> = {
     // 1. 角色形象: 编码助手
     const agentName = "编码助手";
 
-    // 2. 构建带角色知识的编码任务 (委托 L3 codex-agent)
+    // 2. 构建带角色知识的编码任务 (委托 L4 codex-agent)
     const task = {
       prompt: `${CODER_SYSTEM_PROMPT}\n\n用户任务:\n${request.user_input}`,
       ...(request.cwd ? { cwd: request.cwd } : {}),
     };
 
-    // 3. 委托 L3: codex-agent 负责 规划(经认知层 LLM) + spawn Codex 执行
+    // 3. 委托 L4: codex-agent 负责 规划(经认知层 LLM) + spawn Codex 执行
     const result = await ctx.call(codexAgentRef, task);
 
     // 4. 由同一角色形象反馈
@@ -148,7 +148,7 @@ export { coderProvider };
 export const manifest: PluginManifest = {
   name: "@persona/coder",
   layer: LayerId.Persona,
-  description: "感知层：编码助手角色形象（实现无关，委托 L3 编码 Agent）",
+  description: "感知层：编码助手角色形象（实现无关，委托 L4 编码 Agent）",
   version: "0.1.0",
   provides: [coderService],
   consumes: [codexAgentRef],

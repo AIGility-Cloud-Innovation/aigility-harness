@@ -30,13 +30,13 @@ import { wecomIngressProvider } from "@aigility-harness/layer-infrastructure";
 import {
   createPyBridgePlugin,
   loadPyPluginsConfig,
-} from "@aigility-harness/layer-infrastructure/bridge";
+} from "@aigility-harness/py-bridge";
 import {
   createTimemMemoryProvider,
   createTimemMemoryWriteProvider,
   timemMemoryService,
   timemMemoryWriteService,
-} from "@aigility-harness/layer-infrastructure/timem-memory-provider";
+} from "@aigility-harness/layer-cognitive/timem-memory-provider";
 import { TimemClient } from "@timem/dsh-plugin-timem";
 import { loadEnv } from "./env.js";
 import { resolve, dirname } from "node:path";
