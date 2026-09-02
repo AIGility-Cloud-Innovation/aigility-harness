@@ -143,6 +143,7 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
 
     const agentRoutes = request.agentRoutes ?? { "*": "@persona/timem-project-assistant" };
     const perceptionId = request.perceptionId ?? "@persona/timem-project-assistant";
+    const thinkingText = request.thinkingText ?? "正在处理中，请稍候…";
 
     const options: LarkChannelOptions = {
       appId,
@@ -164,20 +165,36 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
         const roleId = agentRoutes[routeKey] ?? agentRoutes["*"] ?? perceptionId;
 
         try {
-          // 调角色人格（与 http/wecom agent 链路同一载荷形状，附带用户 ID 记忆隔离）
-          const result = await ctx.call(
-            { id: roleId, versionRange: "^1.0.0" },
-            {
-              user_input: text,
-              user_id: msg.senderId || "feishu-unknown",
-            },
-          );
-          const finalText =
-            (result.ok
-              ? (result.value as { response?: string })?.response
-              : "") || "抱歉，处理失败，请稍后重试或查看服务日志。";
-          await channel.send(msg.chatId || msg.senderId, { text: finalText });
+          // 两段式回复（方案 C，零权限）：
+          // 1) 立即发占位消息「✍️ 正在处理…」（敲键盘提示）
+          // 2) 处理完成 → 原地编辑成最终回复（一条消息变内容，无刷屏）
+          const placeholder = await channel.send(msg.chatId || msg.senderId, {
+            text: thinkingText,
+          });
+          let finalText = "抱歉，处理失败，请稍后重试或查看服务日志。";
+          try {
+            const result = await ctx.call(
+              { id: roleId, versionRange: "^1.0.0" },
+              {
+                user_input: text,
+                user_id: msg.senderId || "feishu-unknown",
+              },
+            );
+            if (result.ok) {
+              finalText =
+                (result.value as { response?: string })?.response ?? finalText;
+            }
+          } catch (e) {
+            finalText = `处理异常: ${e instanceof Error ? e.message : String(e)}`;
+          }
+          try {
+            await channel.editMessage(placeholder.messageId, finalText);
+          } catch {
+            // 编辑失败（罕见）→ 占位消息已在上方，直接补发最终内容
+            await channel.send(msg.chatId || msg.senderId, { text: finalText });
+          }
         } catch (e) {
+          // 占位消息发送失败 → 直接发最终回复
           const errText = `处理异常: ${e instanceof Error ? e.message : String(e)}`;
           try {
             await channel.send(msg.chatId || msg.senderId, { text: errText });
