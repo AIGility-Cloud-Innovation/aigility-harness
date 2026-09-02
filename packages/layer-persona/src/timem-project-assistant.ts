@@ -42,6 +42,12 @@ export interface TimemProjectAssistantRequest {
   title?: string;
   /** 显式指定项目 ID（跳过项目确认，直接执行） */
   project_id?: string;
+  /** 会话 ID（identify 绑定查询用） */
+  conversation_id?: string;
+  /** 聊天类型: p2p | group */
+  chat_type?: string;
+  /** 资源引用（图片等，透传给编排层） */
+  resources?: Array<Record<string, unknown>>;
 }
 
 export interface TimemProjectAssistantResponse {
@@ -113,6 +119,9 @@ export const timemProjectAssistantProvider: Provider<
         source: request.source ?? "feishu",
         title: request.title,
         project_id: request.project_id,
+        conversation_id: request.conversation_id,
+        chat_type: request.chat_type,
+        resources: request.resources,
       },
     );
 
