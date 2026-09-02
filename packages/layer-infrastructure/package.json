@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@aigility-harness/core": "workspace:*",
+    "@larksuiteoapi/node-sdk": "^1.73.1",
     "@wecom/aibot-node-sdk": "^1.0.7",
     "pg": "^8.23.0"
   },

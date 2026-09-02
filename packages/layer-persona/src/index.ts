@@ -71,6 +71,17 @@ export type {
 } from "./timem-support.js";
 import { timemSupportService, timemSupportProvider } from "./timem-support.js";
 
+// TiMEM Project 项目任务助手角色形象
+export {
+  timemProjectAssistantService,
+  timemProjectAssistantProvider,
+} from "./timem-project-assistant.js";
+export type {
+  TimemProjectAssistantRequest,
+  TimemProjectAssistantResponse,
+} from "./timem-project-assistant.js";
+import { timemProjectAssistantService, timemProjectAssistantProvider } from "./timem-project-assistant.js";
+
 // 就业数据顾问角色形象 (CareerEdu)
 export {
   advisoryChatService,
@@ -162,9 +173,9 @@ const textInputProvider: Provider<TextInputRequest, TextInputResponse> = {
 export const manifest: PluginManifest = {
   name: "@persona/character",
   layer: LayerId.Persona,
-  description: "角色人格层：感知（文本/语音）+ 角色形象（sales-chat/plugin-helper/coder/advisory-chat/harness-guide/timem-support）",
+  description: "角色人格层：感知（文本/语音）+ 角色形象（sales-chat/plugin-helper/coder/advisory-chat/harness-guide/timem-support/timem-project-assistant）",
   version: "0.3.0",
-  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, coderService, advisoryChatService, harnessGuideService, timemSupportService],
+  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, coderService, advisoryChatService, harnessGuideService, timemSupportService, timemProjectAssistantService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
 };
@@ -192,6 +203,7 @@ export const plugin: LayerPlugin = {
       advisoryChatProvider,
       harnessGuideProvider,
       timemSupportProvider,
+      timemProjectAssistantProvider,
     ];
   },
   getState(): PluginState {

@@ -189,3 +189,15 @@ export type {
   WeComIngressRequest,
   WeComIngressResponse,
 } from "./wecom-ingress.js";
+
+// 飞书机器人入口（多机器人共用 gateway: AppID → 角色人格路由）
+export {
+  feishuIngressService,
+  feishuIngressProvider,
+  feishuTimemSupportRef,
+  manifest as feishuManifest,
+} from "./feishu-ingress.js";
+export type {
+  FeishuIngressRequest,
+  FeishuIngressResponse,
+} from "./feishu-ingress.js";

@@ -7,6 +7,9 @@ allowBuilds:
   msedge-tts: false
   protobufjs: false
   sharp: false
-  onnxruntime-node: false   # 启用 whisper-tiny 时改 true
-  ffi-napi: false           # 启用 vosk 时改 true
+  onnxruntime-node: false # 启用 whisper-tiny 时改 true
+  ffi-napi: false # 启用 vosk 时改 true
   ref-napi: false
+
+minimumReleaseAgeExclude:
+  - '@larksuiteoapi/node-sdk@1.73.1'
