@@ -58,6 +58,15 @@ export interface TimemProjectAssistantResponse {
   trace_id: string;
 }
 
+// 编排层判别联合响应的局部 shape（不引用 orchestration 类型，层间解耦）
+interface TimemTaskResponseLike {
+  type?: string;
+  text?: string;
+  response?: string;
+  taskId?: string;
+  status?: string;
+}
+
 // ── 服务定义 ─────────────────────────────────────────────────────
 
 export const timemProjectAssistantService: ServiceDefinition<
@@ -126,10 +135,11 @@ export const timemProjectAssistantProvider: Provider<
     );
 
     const value = (result as { ok: boolean; value?: unknown }).ok
-      ? (result as { value?: { result?: string; response?: string } }).value
+      ? (result as { value?: TimemTaskResponseLike }).value
       : undefined;
+    // 适配三段式判别联合：chat/ask/error → text；task → response
     const response =
-      value?.result ??
+      value?.text ??
       value?.response ??
       "抱歉，任务执行遇到了问题，请稍后再试或查看服务日志。";
 
