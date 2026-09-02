@@ -156,6 +156,7 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
     activeUnsubscribe = channel.on({
       message: async (msg: NormalizedMessage) => {
         const text = messageText(msg);
+        console.log(`[feishu-ingress] message received: chat=${msg.chatId} sender=${msg.senderId} text="${text}"`);
         if (!text) return;
 
         // 路由：按会话来源 → 通配兜底

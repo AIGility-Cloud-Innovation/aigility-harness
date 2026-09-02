@@ -1,0 +1,27 @@
+{
+  "name": "feishu-timem",
+  "version": "0.1.0",
+  "description": "飞书机器人 → @persona/timem-project-assistant 项目小助手（多机器人共用 feishu-ingress gateway）",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@aigility-harness/core": "workspace:*",
+    "@aigility-harness/layer-infrastructure": "workspace:*",
+    "@aigility-harness/layer-cognitive": "workspace:*",
+    "@aigility-harness/layer-persona": "workspace:*",
+    "@aigility-harness/layer-orchestration": "workspace:*",
+    "@larksuiteoapi/node-sdk": "^1.73.1",
+    "prototype-mode": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0",
+    "tsx": "^4.19.0",
+    "@types/node": "^20.14.0"
+  }
+}

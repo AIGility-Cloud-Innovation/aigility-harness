@@ -100,6 +100,7 @@ export const timemProjectAssistantProvider: Provider<
       user_input: request.user_input,
       user_id: userId,
       agent_id: "timem-project-assistant",
+      agent_name: agentName,
       session_id: request.session_id ?? ctx.sessionId,
       system_prompt: PROJECT_ASSISTANT_SYSTEM_PROMPT,
       app_id: request.app_id,
