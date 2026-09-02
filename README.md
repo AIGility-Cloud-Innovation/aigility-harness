@@ -13,144 +13,114 @@
 
 双仓库同步维护，提交以 Gitea 为权威信源，GitHub fast-forward 同步。
 
-### 总体架构
+### 总体架构（依赖序）
 
 ```text
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        aigility-harness 五层架构                          │
-│                 「契约是主体，插件是过客」— 一切可插拔                     │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│   外部信号:  HTTP / 企业微信 / IM / Web UI                                │
-│        │  (L1 http-ingress / wecom-ingress 收口)                        │
-│        ▼                                                                 │
-│   ┌─────────────────────────────────────────────────────────────────┐   │
-│   │  L3 角色人格层 (layer-persona)     角色 = 入口 + 人格             │   │
-│   │      sales-chat  plugin-helper  coder  advisory-chat             │   │
-│   │      (定义性格/输入方式/表达方式, 统一 PersonaInput)               │   │
-│   └────────────────────────────┬────────────────────────────────────┘   │
-│                                │ ① ctx.call (Seam 契约)                 │
-│                                ▼                                         │
-│   ┌─────────────────────────────────────────────────────────────────┐   │
-│   │  L4 编排规划层 (layer-orchestration)   任务规划 / 工作流          │   │
-│   │      @orchestration/workflow-engine  codex-agent                 │   │
-│   └────────────────────────────┬────────────────────────────────────┘   │
-│                                │ ② 推理/检索                             │
-│                                ▼                                         │
-│   ┌─────────────────────────────────────────────────────────────────┐   │
-│   │  L2 认知决策层 (layer-cognitive)    大脑                          │   │
-│   │      @cognitive/llm-inference  @cognitive/memory                 │   │
-│   └────────────────────────────┬────────────────────────────────────┘   │
-│                                │ ③ 决策结果回传                         │
-│                                ▼                                         │
-│   ┌─────────────────────────────────────────────────────────────────┐   │
-│   │  L5 行动执行层 (layer-action)     手脚                            │   │
-│   │      @action/text-to-speech  工具执行 / 多渠道输出                │   │
-│   └─────────────────────────────────────────────────────────────────┘   │
-│                                                                         │
-│   ┌─────────────────────────────────────────────────────────────────┐   │
-│   │  L1 底座基础层 (layer-infrastructure)   系统地基                  │   │
-│   │      config / logging / protocol-adapter / PgBusBridge           │   │
-│   └─────────────────────────────────────────────────────────────────┘   │
-│   ┌─────────────────────────────────────────────────────────────────┐   │
-│   │  跨语言桥 py-bridge (独立包, 只依赖 core)                         │   │
-│   │      声明式接入 Python 生态 (aigility 等) — 能力可声明到任意层     │   │
-│   └─────────────────────────────────────────────────────────────────┘   │
-│   ┌─────────────────────────────────────────────────────────────────┐   │
-│   │  内核 kernel-dsh (DSH-Cordis)                                     │   │
-│   │      KernelAdapter / Seam Registry / Event Bus / Carrier         │   │
-│   │      cordis 插件可插拔: dsh-plugin-timem → TiMEM 记忆/规则        │   │
-│   └─────────────────────────────────────────────────────────────────┘   │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-外部接入:
-  LLM (LiteLLM/华为云/DeepSeek) ←→ L2   ·   TiMEM Engine ←→ timem 插件 / @cognitive/timem-memory
-  HTTP / 企业微信 / IM ←→ L1 入口       ·   Python 生态 ←→ py-bridge（独立包）
-  调用顺序: 外部信号 → L3(角色) → L4(编排) → L2(认知) 回传 → L5(行动)
-  依赖方向: L5→L4→L3→L2→L1（只依赖比自己小的层号；py-bridge 只依赖 core）
+┌────────────────────────────────────────────────────────────────────────┐
+│                    aigility-harness 分层架构（依赖序）                 │
+│           「契约是主体，插件是过客」— 一切可插拔                       │
+│                                                                        │
+│╔══════════════════════════════════════════════════════════════════╗    │
+│║   内核 kernel-dsh (DSH-Cordis) — 五层全部以插件形态运行其上      ║    │
+│║   KernelAdapter / Seam Registry / Event Bus / Carrier            ║    │
+│╠══════════════════════════════════════════════════════════════════╣    │
+│║  ┌──────────────────────────────────────────────────────────────┐║    │
+│║  │L5 行动执行层 (layer-action) — 手脚                           │║    │
+│║  │   @action/text-to-speech · 工具执行 / 多渠道输出             │║    │
+│║  └──────────────────────────────────────────────────────────────┘║    │
+│║        │ 依赖 L4 + L1                                            ║    │
+│║        ▼                                                         ║    │
+│║  ┌──────────────────────────────────────────────────────────────┐║    │
+│║  │L4 编排规划层 (layer-orchestration) — 小脑                    │║    │
+│║  │   @orchestration/workflow-engine · codex-agent               │║    │
+│║  └──────────────────────────────────────────────────────────────┘║    │
+│║        │ 依赖 L2 + L1（L3 与 L4 平级，互不依赖）                 ║    │
+│║        ▼                                                         ║    │
+│║  ┌──────────────────────────────────────────────────────────────┐║    │
+│║  │L3 角色人格层 (layer-persona)                                 │║    │
+│║  │   sales-chat / plugin-helper / coder / advisory-chat         │║    │
+│║  │   harness-guide / timem-support / speech-to-text             │║    │
+│║  └──────────────────────────────────────────────────────────────┘║    │
+│║        │ 依赖 L2 + L1                                            ║    │
+│║        ▼                                                         ║    │
+│║  ┌──────────────────────────────────────────────────────────────┐║    │
+│║  │L2 认知决策层 (layer-cognitive) — 大脑，L3/L4 共同依赖        │║    │
+│║  │   @cognitive/llm-inference · @cognitive/memory               │║    │
+│║  └──────────────────────────────────────────────────────────────┘║    │
+│║        │ 依赖 L1                                                 ║    │
+│║        ▼                                                         ║    │
+│║  ┌──────────────────────────────────────────────────────────────┐║    │
+│║  │L1 底座基础层 (layer-infrastructure) — 地基                   │║    │
+│║  │   dependsOn:[] 最先加载 · 外部入口唯一收口（ingress）        │║    │
+│║  │   http-ingress / wecom-ingress / protocol-adapter            │║    │
+│║  │   config / logging / PgBusBridge                             │║    │
+│║  └──────────────────────────────────────────────────────────────┘║    │
+│╚══════════════════════════════════════════════════════════════════╝    │
+│                                                                        │
+│  ┌──────────────────────────────────────────────┐                      │
+│  │ py-bridge（独立包，只依赖 core）             │                      │
+│  │  声明式接入 Python 生态（aigility 等）；     │                      │
+│  │  能力 ID 由 py-plugins.json 声明，可挂任意层 │                      │
+│  └──────────────────────────────────────────────┘                      │
+│                                                                        │
+│外部接入: LLM 网关/LiteLLM ↔ L2 · TiMEM Engine ↔ timem 插件/@cognitive/*│
+│          HTTP/企业微信/IM ↔ L1 入口 · Python 生态 ↔ py-bridge          │
+│依赖方向: 每层只依赖比自己小的层号（L2→L1; L3,L4→L1+L2; L5→L1+L4）      │
+│调用时序: 外部信号 → L1 收口 → ①L3 → ②L4 → ③L2 → ④L5 → 响应             │
+│          （调用流 ≠ 依赖流 — 运行时序见下方时序图，与上图解耦）        │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 详细架构（Mermaid）
+### 运行时调用时序（与依赖序解耦）
+
+```text
+外部信号 → L1 ingress 收口 → ① L3 人格 → ② L4 编排 → ③ L2 认知 → ④ L5 行动 → 响应
+```
+
+```mermaid
+sequenceDiagram
+    participant EXT as 外部信号<br/>(HTTP/企微/Web)
+    participant L1 as L1 底座<br/>(ingress 收口)
+    participant L3 as L3 人格
+    participant L4 as L4 编排
+    participant L2 as L2 认知
+    participant L5 as L5 行动
+    EXT->>L1: 原始信号
+    L1->>L3: ① 标准化输入 (PersonaInput)
+    L3->>L4: ② ctx.call (@orchestration/*)
+    L4->>L2: ③ 推理/检索 (@cognitive/*)
+    L2-->>L4: 决策结果回传
+    L4->>L5: ④ 执行 (@action/*)
+    L5-->>L1: 多渠道输出
+    L1-->>EXT: 响应 (SSE / IM 回复)
+```
+
+> 调用流（L3→L4→L2→L5）是 OSI 式 zigzag，与依赖序（每层只依赖更小层号）本就不同——
+> 前者看纵轴时间，后者看堆叠位置，两张图各管一件事。
+
+### 详细架构（Mermaid 依赖图）
 
 ```mermaid
 flowchart TB
-    subgraph 外部["外部接入"]
-        HTTP[HTTP / Web UI]
-        WECOM[企业微信]
-        LLM_API[LiteLLM / 华为云 / DeepSeek]
-        TIMEM[TiMEM Engine]
-        PY[Python 生态]
+    subgraph KERNEL["内核 kernel-dsh (DSH-Cordis) — 五层以插件形态运行其上"]
+        direction TB
+        L5["L5 行动执行层 layer-action<br/>text-to-speech / 工具执行"]
+        L4["L4 编排规划层 layer-orchestration<br/>workflow-engine / codex-agent"]
+        L3["L3 角色人格层 layer-persona<br/>sales-chat / coder / harness-guide / timem-support"]
+        L2["L2 认知决策层 layer-cognitive<br/>llm-inference / memory"]
+        L1["L1 底座基础层 layer-infrastructure<br/>http-ingress / wecom-ingress / protocol-adapter / PgBusBridge"]
+        L5 -->|依赖| L4
+        L4 -->|依赖| L2
+        L3 -->|依赖| L2
+        L2 -->|依赖| L1
+        L5 -.->|直接依赖| L1
     end
-
-    subgraph 内核["内核 kernel-dsh (DSH-Cordis)"]
-        KA[KernelAdapter]
-        SR[Seam Registry]
-        EB[Event Bus]
-        CM[Carrier Manager]
-        CP[可插拔 cordis 插件<br/>dsh-plugin-timem]
-    end
-
-    subgraph L1["L1 底座基础层 layer-infrastructure"]
-        ING[http-ingress]
-        WEC[wecom-ingress]
-        PA[protocol-adapter]
-        PG[PgBusBridge]
-    end
-
-    subgraph PYB["跨语言桥 py-bridge (独立包)"]
-        BR[py-bridge → Python 生态]
-    end
-
-    subgraph L3["L3 角色人格层 layer-persona"]
-        SC[sales-chat]
-        PH[plugin-helper]
-        CD[coder]
-        AC[advisory-chat]
-    end
-
-    subgraph L4["L4 编排规划层 layer-orchestration"]
-        WE[workflow-engine]
-        CA[codex-agent]
-    end
-
-    subgraph L2["L2 认知决策层 layer-cognitive"]
-        LLM[llm-inference]
-        MEM[cognitive/memory]
-    end
-
-    subgraph L5["L5 行动执行层 layer-action"]
-        TTS[text-to-speech]
-        TOOL[工具执行]
-    end
-
-    HTTP --> ING
-    WECOM --> WEC
-    ING --> L3
-    WEC --> L3
-
-    L3 -->|① ctx.call Seam| L4
-    L4 -->|② 推理/检索| L2
-    L2 -->|③ 回传决策| L5
-    L4 --> WE
-    WE --> BR
-    BR -->|JSON-RPC| PY
-    L2 --> MEM
-    MEM --> BR
-    BR --> TIMEM
-    CP --> TIMEM
-    LLM --> LLM_API
-    PA --> LLM_API
-    ING --> PA
-
-    L3 -.-> 内核
-    L4 -.-> 内核
-    L2 -.-> 内核
-    L5 -.-> 内核
-    L1 -.-> 内核
+    PYB["py-bridge（独立包）<br/>只依赖 core · 能力可声明挂任意层"]
+    PYB -.->|core 契约| KERNEL
 ```
 
-
+> 依赖边按真实 DAG 绘制（源码 `LAYER_DESCRIPTORS.dependsOn`）：L3 与 L4 平级互不依赖，
+> 两者都只依赖 L1+L2；L5 依赖 L4 与 L1；L1 无依赖、最先加载。
 
 ---
 
