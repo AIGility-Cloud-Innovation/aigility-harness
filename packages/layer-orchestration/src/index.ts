@@ -43,6 +43,17 @@ export type {
 };
 
 import {
+  timemTaskService,
+  timemTaskProvider,
+  enableTimemTask,
+} from "./timem-task.js";
+export { timemTaskService, timemTaskProvider, enableTimemTask };
+export type {
+  TimemTaskRequest,
+  TimemTaskResponse,
+} from "./timem-task.js";
+
+import {
   pluginInstallService,
   pluginInstallProvider,
 } from "./plugin-install.js";

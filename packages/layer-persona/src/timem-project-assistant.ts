@@ -36,6 +36,12 @@ export interface TimemProjectAssistantRequest {
   session_id?: string;
   /** 飞书 App ID（来源机器人身份） */
   app_id?: string;
+  /** 任务来源（默认 feishu） */
+  source?: string;
+  /** 任务标题（默认取 user_input 前 80 字） */
+  title?: string;
+  /** 显式指定项目 ID（跳过项目确认，直接执行） */
+  project_id?: string;
 }
 
 export interface TimemProjectAssistantResponse {
@@ -96,20 +102,18 @@ export const timemProjectAssistantProvider: Provider<
     const agentName = "TiMEM Project 小助手";
     const userId = request.user_id ?? "feishu-unknown";
 
-    const orchestratorRequest = {
-      user_input: request.user_input,
-      user_id: userId,
-      agent_id: "timem-project-assistant",
-      agent_name: agentName,
-      session_id: request.session_id ?? ctx.sessionId,
-      system_prompt: PROJECT_ASSISTANT_SYSTEM_PROMPT,
-      app_id: request.app_id,
-    };
-
-    // 委托 L4 编排（workflow-engine 含 codex-agent 执行链路）
+    // 委托 L4 编排：TIMEM_PROJECT 真实执行桥接（UDS → agentd → codex）
+    // 注：装配时若 timem-task 不可用（agentd 未起）会降级报错提示
     const result = await ctx.call(
-      { id: "@orchestration/workflow-engine", versionRange: "^1.0.0" },
-      orchestratorRequest,
+      { id: "@orchestration/timem-task", versionRange: "^1.0.0" },
+      {
+        user_input: request.user_input,
+        user_id: userId,
+        session_id: request.session_id ?? ctx.sessionId,
+        source: request.source ?? "feishu",
+        title: request.title,
+        project_id: request.project_id,
+      },
     );
 
     const value = (result as { ok: boolean; value?: unknown }).ok

@@ -30,7 +30,7 @@ import { InMemoryKernelAdapter } from "prototype-mode/in-memory-kernel";
 import { plugin as infrastructurePlugin } from "@aigility-harness/layer-infrastructure";
 import { plugin as cognitivePlugin } from "@aigility-harness/layer-cognitive";
 import { plugin as personaPlugin } from "@aigility-harness/layer-persona";
-import { plugin as orchestrationPlugin } from "@aigility-harness/layer-orchestration";
+import { plugin as orchestrationPlugin, enableTimemTask, timemTaskService, timemTaskProvider } from "@aigility-harness/layer-orchestration";
 import { feishuIngressProvider } from "@aigility-harness/layer-infrastructure";
 import { loadEnv } from "./env.js";
 
@@ -83,6 +83,19 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   console.log(`bootstrap 成功 (kernel.isReady=${kernel.isReady()})`);
+
+  // 4.5 接线 timem-task：真实执行桥接（UDS → agentd → codex）
+  //     socket/token 从 env 读；agentd 未起时 timem-task 会降级报错
+  enableTimemTask({
+    socketPath: process.env["TIMEM_AGENTD_SOCK"],
+    token: process.env["TIMEM_AGENTD_TOKEN"],
+  });
+  const timemReg = await kernel.registry.register(timemTaskService, timemTaskProvider);
+  if (timemReg.ok) {
+    console.log("[timem-task] 真实执行桥接已注册 (UDS → agentd)");
+  } else {
+    console.error("[timem-task] 注册失败:", timemReg.error);
+  }
 
   // 5. 启动飞书入口 → 按 AppID 路由到对应人格
   const ctx = kernel.createContext("feishu-timem", LayerId.Infrastructure);
