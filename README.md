@@ -166,7 +166,7 @@ flowchart TB
 
 | # | 创新点 | 说明 |
 |---|--------|------|
-| 1 | **五层业务域严格分层** | 认知 / 感知 / 编排 / 执行 / 底座，固定分层、单向依赖、永不交叉 |
+| 1 | **五层业务域严格分层** | 底座 / 认知 / 人格 / 编排 / 行动，固定分层、单向依赖、永不交叉 |
 | 2 | **四种运行载体统一抽象** | 子线程 / 附属子进程 / 本机守护进程 / 独立端口网络服务，可逐层动态切换 |
 | 3 | **原型 ↔ 生产双形态** | 同一套代码，原型单体 ↔ 生产分布式，上层业务零改动 |
 | 4 | **Seam 契约自动热替换** | 基于 Capability Seam 能力接缝，健康探测 + 负载/显存/故障指标驱动运行时无感切换 |
@@ -217,7 +217,7 @@ flowchart TB
 |----|------|------|---------|--------------------------|
 | L1 | **底座兼容基础层**（地基） | 通信、契约、安全、观测基础设施 | 全局消息总线、统一消息契约、MCP/A2A 协议桥接、鉴权/限流/熔断、全链路追踪、自动切换控制器 | 全部独立网络服务，不属于 DSH 进程 |
 | L2 | **认知决策核心层**（大脑） | 智能体自我、推理、决策、身份中枢 | LLM 模型适配器、多模型算力路由、人格系统、记忆引擎、会话/身份上下文 | DSH 进程内插件 → 算力路由 + 记忆抽离为独立网络服务 |
-| L3 | **角色人格层**（Persona） | 特性打包为可交互角色：性格 + 信息接收/表达方式 | 具名角色：销售客服（sales-chat）、插件安装助手（plugin-helper）、编码助手（coder）、就业顾问（advisory-chat）；感知（文本/语音，ASR/TTS）、按角色定制 | 附属子进程 → 本机独立守护进程 → 网络服务集群 |
+| L3 | **角色人格层**（Persona） | 特性打包为可交互角色：性格 + 信息接收/表达方式 | 具名角色：销售客服（sales-chat）、插件安装助手（plugin-helper）、编码助手（coder）、就业顾问（advisory-chat）、框架介绍员（harness-guide）、TiMEM 客服（timem-support）；输入/输出形态（文本/语音，ASR/TTS）、按角色定制 | 附属子进程 → 本机独立守护进程 → 网络服务集群 |
 | L4 | **编排规划层**（小脑） | 任务调度、思考循环、多智能体协作 | Agent 主思考循环（ReAct/PlanExecute）、任务规划/复盘、SubAgent 调度、定时/长任务 | DSH 插件线程 → 复杂子 Agent 拆独立 Worker 进程/服务 |
 | L5 | **行动执行工具层**（手脚） | 产生真实外部副作用 | 代码沙箱、文档/文件操作、系统资源管控、IoT/机器人控制 | 附属子进程 → 独立守护进程/远程隔离服务 |
 
@@ -280,7 +280,7 @@ flowchart TB
 | | 原型模式（极速开发） | 生产模式（企业级高可用） |
 |---|----------------------|--------------------------|
 | 认知层 | DSH 进程内插件、内存级 Provider | 重负载能力抽离网络服务 |
-| 感知层 | 附属子进程 | 全部改本机守护进程 |
+| 人格层 | 附属子进程 | 全部改本机守护进程 |
 | 编排层 | DSH 插件线程 | 复杂工作流拆 Worker 集群 |
 | 执行层 | 附属子进程 | 硬件/沙箱独立进程强隔离 |
 | 底座层 | 进程内事件总线 | 全局 NATS 总线统一通信 |
@@ -309,7 +309,7 @@ pnpm install
 ```bash
 pnpm run build        # 全部包构建
 pnpm run typecheck    # tsc --noEmit 全量类型检查
-pnpm run test         # vitest 全量测试（含 kernel-dsh 35 例 + codex-agent 7 例）
+pnpm run test         # vitest 全量测试（9 包 120+ 例，含 kernel-dsh 42 例）
 ```
 
 ### 运行原型演示
@@ -318,7 +318,7 @@ pnpm run test         # vitest 全量测试（含 kernel-dsh 35 例 + codex-agen
 pnpm example:prototype
 ```
 
-原型模式：五层能力全部以 DSH 进程内插件运行，内存级 Provider，无需任何外部服务。演示流程：感知（文本输入）→ 认知（litellm/内存推理）→ 编排（任务规划 + codex-agent）→ 执行（TTS）→ 底座（配置/日志/协议适配）。
+原型模式：五层能力全部以 DSH 进程内插件运行，内存级 Provider，无需任何外部服务。演示流程：人格（文本输入）→ 认知（litellm/内存推理）→ 编排（任务规划 + codex-agent）→ 行动（TTS）→ 底座（配置/日志/协议适配）。
 
 ### 开箱即用（最小 Web UI）
 
@@ -362,7 +362,9 @@ pnpm --filter wecom-coder start
 | **角色对话** | `sales-chat`（销售客服角色, 由 chat-agent 正名而来） | 任意 L3 角色（特性打包为 persona 插件） |
 | **开箱引导安装** | `plugin-helper` 角色 → `plugin-install` 工作流（扫描 py-plugins.json + packages → 契约匹配 → 接入指引） | 任意安装/引导工作流 |
 | **最小 Web UI** | http-ingress `GET /` / `/ui`（单文件 HTML, 双角色页签, 零依赖） | 任意前端 |
-| **企业微信入口（特色案例）** | `wecom-ingress`（aibot-node-sdk WebSocket 长连接 → 角色路由 → replyStream）+ `examples/wecom-coder`（企微 @机器人 → coder → codex） | 任意 IM 通道（钉钉/飞书/微信，同构接入） |
+| **企业微信入口（特色案例）** | `wecom-ingress`（aibot-node-sdk WebSocket 长连接 → 角色路由 → replyStream）+ 三个开箱案例：`wecom-coder`（@机器人 → coder → codex）/ `wecom-guide`（框架介绍员）/ `wecom-timem`（TiMEM 客服） | 任意 IM 通道（钉钉/飞书/微信，同构接入） |
+| **框架介绍员** | `harness-guide` 角色 → `@orchestration/workflow-engine-timem`（YAML 工作流经 py-bridge 驱动 aigility LangGraph） | 任意引导/编排流程 |
+| **TiMEM 记忆客服** | `timem-support` 角色（TiMEM 记忆作对话上下文）+ BM25 检索增强（`aigility.retrieval.bm25` 经 py-bridge） | 任意记忆/检索服务 |
 | TTS | `text-to-speech` | 任意 TTS 引擎 |
 | **Python 能力桥接** | `py-bridge`（JSON-RPC over stdio → aigility ADK） | 任意 Python 包，声明式配置接入 |
 | **工作流编排** | `aigility.workflow.WorkflowEngine`（YAML → LangGraph） | 任意编排引擎，通过 Seam 契约替换 |
@@ -422,6 +424,7 @@ harness (TS)                          Python (子进程)
 | `@cognitive/memory` | L2 | `aigility.memory.Memory` | `search` | ✅ 异步方法正确处理 |
 | `@cognitive/rag-retrieval` | L2 | `aigility.rag.RAGService` | `search` | ⚠️ 需 dashscope 包 |
 | `@orchestration/chat-flow` | L4 | `aigility.chatflow.ChatFlow` | `invoke` | ✅ 初始化成功 |
+| `@orchestration/workflow-engine-timem` | L4 | `aigility.workflow.WorkflowEngine` | `ainvoke` | ✅ 企微客服工作流（timem_support） |
 
 ### 8.4 编排工具 + 编排实例分离
 
@@ -472,9 +475,10 @@ aigility-harness/
 ├── packages/
 │   ├── core/                      # 核心契约：LayerId / CarrierKind / ServiceDefinition / Seam
 │   │                              #   Provider / Consumer / LayerPlugin / KernelAdapter
+│   │                              #   LlmInference 契约（llm-contract.ts）/ BusBridge / TaskQueue / VectorStore
 │   ├── kernel-dsh/                # DSH-Cordis 内核适配器（Seam Registry / Effect Manager / Carrier Manager）
 │   ├── layer-cognitive/           # L2 认知决策层（LLM 推理：stub + litellm + timem-memory-provider）
-│   ├── layer-persona/            # L3 角色人格层（sales-chat / plugin-helper / coder / advisory-chat 等角色）
+│   ├── layer-persona/            # L3 角色人格层（sales-chat / plugin-helper / coder / advisory-chat / harness-guide / timem-support / speech-to-text）
 │   ├── layer-orchestration/       # L4 编排规划层（任务规划 + plugin-install + codex-agent）
 │   ├── layer-action/              # L5 行动执行层（TTS）
 │   ├── layer-infrastructure/      # L1 底座基础层（config/logging/protocol-adapter/http-ingress/wecom-ingress/PgBusBridge）
@@ -493,6 +497,13 @@ aigility-harness/
 │   │   └── scripts/
 │   │       └── py_bridge_worker.py  # 通用 Python worker（纯 Python 运行，不依赖 TS）
 │   └── prototype-mode/            # 原型演示入口（InMemoryKernel → 五层插件装配）
+├── examples/                      # 可替换示例装配（各自独立 pnpm 包）
+│   ├── dsh-timem-demo/            # DSH 内核 TiMEM 插件演示
+│   ├── openai-gateway-composition/ # OpenAI 兼容网关组合示例
+│   ├── http-gateway-alternative/  # 备件式 HTTP 网关（换装演示）
+│   ├── wecom-coder/               # 企微 @机器人 → coder → codex
+│   ├── wecom-guide/               # 企微 → harness-guide 框架介绍员
+│   └── wecom-timem/               # 企微 → timem-support TiMEM 客服
 ├── config/
 │   └── py-plugins.json            # Python 插件声明式配置（aigility 能力映射）
 ├── tests/
@@ -506,7 +517,7 @@ aigility-harness/
 
 ## 十二、终极架构总结
 
-1. **五层业务域**：认知、感知、编排、执行、底座 —— 单向依赖，永不交叉
+1. **五层业务域**：底座、认知、人格、编排、行动 —— 单向依赖，永不交叉
 2. **四层运行内核**：DSH-Cordis 原生支撑（插件 / Seam / 运行时 / 传输）
 3. **四种运行载体**：线程 / 子进程 / 守护进程 / 网络服务 —— 逐层可切换
 4. **核心机制**：Capability Seam 契约热替换 —— 接口不变，实现任意替换
