@@ -25,32 +25,32 @@
 │║   KernelAdapter / Seam Registry / Event Bus / Carrier            ║    │
 │╠══════════════════════════════════════════════════════════════════╣    │
 │║  ┌──────────────────────────────────────────────────────────────┐║    │
-│║  │L5 行动执行层 (layer-action) — 手脚                           │║    │
+│║  │D5 行动执行层 (layer-action) — 手脚                           │║    │
 │║  │   @action/text-to-speech · 工具执行 / 多渠道输出             │║    │
 │║  └──────────────────────────────────────────────────────────────┘║    │
-│║        │ 依赖 L4 + L1                                            ║    │
+│║        │ 依赖 D4 + D1                                            ║    │
 │║        ▼                                                         ║    │
 │║  ┌──────────────────────────────────────────────────────────────┐║    │
-│║  │L4 编排规划层 (layer-orchestration) — 小脑                    │║    │
+│║  │D4 编排规划层 (layer-orchestration) — 小脑                    │║    │
 │║  │   @orchestration/workflow-engine · codex-agent               │║    │
 │║  └──────────────────────────────────────────────────────────────┘║    │
-│║        │ 依赖 L2 + L1（L3 与 L4 平级，互不依赖）                 ║    │
+│║        │ 依赖 D2 + D1（D3 与 D4 平级，互不依赖）                 ║    │
 │║        ▼                                                         ║    │
 │║  ┌──────────────────────────────────────────────────────────────┐║    │
-│║  │L3 角色人格层 (layer-persona)                                 │║    │
+│║  │D3 角色人格层 (layer-persona)                                 │║    │
 │║  │   sales-chat / plugin-helper / coder / advisory-chat         │║    │
 │║  │   harness-guide / timem-support / speech-to-text             │║    │
 │║  └──────────────────────────────────────────────────────────────┘║    │
-│║        │ 依赖 L2 + L1                                            ║    │
+│║        │ 依赖 D2 + D1                                            ║    │
 │║        ▼                                                         ║    │
 │║  ┌──────────────────────────────────────────────────────────────┐║    │
-│║  │L2 认知算力层 (layer-cognitive) — 电站，L3/L4 共同依赖        │║    │
+│║  │D2 认知算力层 (layer-cognitive) — 电站，D3/D4 共同依赖        │║    │
 │║  │   @cognitive/llm-inference · @cognitive/memory               │║    │
 │║  └──────────────────────────────────────────────────────────────┘║    │
-│║        │ 依赖 L1                                                 ║    │
+│║        │ 依赖 D1                                                 ║    │
 │║        ▼                                                         ║    │
 │║  ┌──────────────────────────────────────────────────────────────┐║    │
-│║  │L1 底座基础层 (layer-infrastructure) — 地基                   │║    │
+│║  │D1 底座基础层 (layer-infrastructure) — 地基                   │║    │
 │║  │   dependsOn:[] 最先加载 · 外部入口唯一收口（ingress）        │║    │
 │║  │   http-ingress / wecom-ingress / protocol-adapter            │║    │
 │║  │   config / logging / PgBusBridge                             │║    │
@@ -60,13 +60,13 @@
 │  ┌──────────────────────────────────────────────┐                      │
 │  │ py-bridge（独立包，只依赖 core）             │                      │
 │  │  声明式接入 Python 生态（aigility 等）；     │                      │
-│  │  能力 ID 由 py-plugins.json 声明，可挂任意层 │                      │
+│  │  能力 ID 由 py-plugins.json 声明，可挂任意域 │                      │
 │  └──────────────────────────────────────────────┘                      │
 │                                                                        │
-│外部接入: LLM 网关/LiteLLM ↔ L2 · TiMEM Engine ↔ timem 插件/@cognitive/*│
-│          HTTP/企业微信/IM ↔ L1 入口 · Python 生态 ↔ py-bridge          │
-│依赖方向: 每层只依赖比自己小的层号（L2→L1; L3,L4→L1+L2; L5→L1+L4）      │
-│调用时序: 外部信号 → L1 收口 → ①L3 → ②L4 → ③L2 → ④L5 → 响应             │
+│外部接入: LLM 网关/LiteLLM ↔ D2 · TiMEM Engine ↔ timem 插件/@cognitive/*│
+│          HTTP/企业微信/IM ↔ D1 入口 · Python 生态 ↔ py-bridge          │
+│依赖方向: 每域只依赖比自己小的域号（D2→D1; D3,D4→D1+D2; D5→D1+D4）      │
+│调用时序: 外部信号 → D1 收口 → ①L3 → ②L4 → ③L2 → ④L5 → 响应             │
 │          （调用流 ≠ 依赖流 — 运行时序见下方时序图，与上图解耦）        │
 └────────────────────────────────────────────────────────────────────────┘
 ```
@@ -74,28 +74,28 @@
 ### 运行时调用时序（与依赖序解耦）
 
 ```text
-外部信号 → L1 ingress 收口 → ① L3 人格 → ② L4 编排 → ③ L2 认知 → ④ L5 行动 → 响应
+外部信号 → D1 ingress 收口 → ① D3 人格 → ② D4 编排 → ③ D2 认知 → ④ D5 行动 → 响应
 ```
 
 ```mermaid
 sequenceDiagram
     participant EXT as 外部信号<br/>(HTTP/企微/Web)
-    participant L1 as L1 底座<br/>(ingress 收口)
-    participant L3 as L3 人格
-    participant L4 as L4 编排
-    participant L2 as L2 认知
-    participant L5 as L5 行动
-    EXT->>L1: 原始信号
-    L1->>L3: ① 标准化输入 (PersonaInput)
-    L3->>L4: ② ctx.call (@orchestration/*)
-    L4->>L2: ③ 推理/检索 (@cognitive/*)
-    L2-->>L4: 决策结果回传
-    L4->>L5: ④ 执行 (@action/*)
-    L5-->>L1: 多渠道输出
-    L1-->>EXT: 响应 (SSE / IM 回复)
+    participant D1 as D1 底座<br/>(ingress 收口)
+    participant D3 as D3 人格
+    participant D4 as D4 编排
+    participant D2 as D2 认知
+    participant D5 as D5 行动
+    EXT->>D1: 原始信号
+    D1->>D3: ① 标准化输入 (PersonaInput)
+    D3->>D4: ② ctx.call (@orchestration/*)
+    D4->>D2: ③ 推理/检索 (@cognitive/*)
+    D2-->>D4: 决策结果回传
+    D4->>D5: ④ 执行 (@action/*)
+    D5-->>D1: 多渠道输出
+    D1-->>EXT: 响应 (SSE / IM 回复)
 ```
 
-> 调用流（L3→L4→L2→L5）是 OSI 式 zigzag，与依赖序（每层只依赖更小层号）本就不同——
+> 调用流（D3→D4→D2→D5）是 OSI 式 zigzag，与依赖序（每域只依赖更小域号）本就不同——
 > 前者看纵轴时间，后者看堆叠位置，两张图各管一件事。
 
 ### 详细架构（Mermaid 依赖图）
@@ -104,23 +104,23 @@ sequenceDiagram
 flowchart TB
     subgraph KERNEL["内核 kernel-dsh (DSH-Cordis) — 五域以插件形态运行其上"]
         direction TB
-        L5["L5 行动执行层 layer-action<br/>text-to-speech / 工具执行"]
-        L4["L4 编排规划层 layer-orchestration<br/>workflow-engine / codex-agent"]
-        L3["L3 角色人格层 layer-persona<br/>sales-chat / coder / harness-guide / timem-support"]
-        L2["L2 认知算力层 layer-cognitive<br/>llm-inference / memory"]
-        L1["L1 底座基础层 layer-infrastructure<br/>http-ingress / wecom-ingress / protocol-adapter / PgBusBridge"]
-        L5 -->|依赖| L4
-        L4 -->|依赖| L2
-        L3 -->|依赖| L2
-        L2 -->|依赖| L1
-        L5 -.->|直接依赖| L1
+        D5["D5 行动执行层 layer-action<br/>text-to-speech / 工具执行"]
+        D4["D4 编排规划层 layer-orchestration<br/>workflow-engine / codex-agent"]
+        D3["D3 角色人格层 layer-persona<br/>sales-chat / coder / harness-guide / timem-support"]
+        D2["D2 认知算力层 layer-cognitive<br/>llm-inference / memory"]
+        D1["D1 底座基础层 layer-infrastructure<br/>http-ingress / wecom-ingress / protocol-adapter / PgBusBridge"]
+        D5 -->|依赖| D4
+        D4 -->|依赖| D2
+        D3 -->|依赖| D2
+        D2 -->|依赖| D1
+        D5 -.->|直接依赖| D1
     end
     PYB["py-bridge（独立包）<br/>只依赖 core · 能力可声明挂任意层"]
     PYB -.->|core 契约| KERNEL
 ```
 
-> 依赖边按真实 DAG 绘制（源码 `LAYER_DESCRIPTORS.dependsOn`）：L3 与 L4 平级互不依赖，
-> 两者都只依赖 L1+L2；L5 依赖 L4 与 L1；L1 无依赖、最先加载。
+> 依赖边按真实 DAG 绘制（源码 `LAYER_DESCRIPTORS.dependsOn`）：D3 与 D4 平级互不依赖，
+> 两者都只依赖 D1+D2；D5 依赖 D4 与 D1；D1 无依赖、最先加载。
 
 ---
 
@@ -137,7 +137,7 @@ flowchart TB
 | # | 创新点 | 说明 |
 |---|--------|------|
 | 1 | **五域模型** | 底座 / 认知 / 人格 / 编排 / 行动——逻辑归属、依赖单向；域随角色走，不随二进制走 |
-| 2 | **四种运行载体统一抽象** | 子线程 / 附属子进程 / 本机守护进程 / 独立端口网络服务，可逐层动态切换 |
+| 2 | **四种运行载体统一抽象** | 子线程 / 附属子进程 / 本机守护进程 / 独立端口网络服务，可逐域动态切换 |
 | 3 | **原型 ↔ 生产双形态** | 同一套代码，原型单体 ↔ 生产分布式，上层业务零改动 |
 | 4 | **Seam 契约自动热替换** | 基于 Capability Seam 能力接缝，健康探测 + 负载/显存/故障指标驱动运行时无感切换 |
 
@@ -167,7 +167,7 @@ flowchart TB
 | Tools 工具执行层 | 行动执行域（手脚） |
 | Environment 运行环境层 | 角色人格域（Persona）+ 底座基础域（地基） |
 
-**结论：本五域架构是标准 Harness 范式的工程落地增强版** —— 任务调度循环（Harness）本就是编排规划层的职责，而本架构把 Model / Tools / Environment 全部升级为可插拔契约。
+**结论：本五域架构是标准 Harness 范式的工程落地增强版** —— 任务调度循环（Harness）本就是编排规划域的职责，而本架构把 Model / Tools / Environment 全部升级为可插拔契约。
 
 ### 2.3 工程范式的独特性
 
@@ -185,26 +185,27 @@ flowchart TB
 
 | 域 | 名称 | 定位 | 典型模块 | 载体策略（原型 → 生产） |
 |----|------|------|---------|--------------------------|
-| L1 | **底座基础域**（地基） | 通信、契约、安全、观测基础设施 | 全局消息总线、统一消息契约、MCP/A2A 协议桥接、鉴权/限流/熔断、全链路追踪、自动切换控制器 | 全部独立网络服务，不属于 DSH 进程 |
-| L2 | **认知算力域**（电站） | 算力供应、稳定保障、兼容供给；不承载规划/验收等任何业务用法（见 3.3） | LLM 模型适配器、多模型算力路由、记忆引擎、会话/身份上下文 | DSH 进程内插件 → 算力路由 + 记忆抽离为独立网络服务 |
-| L3 | **角色人格域**（Persona） | 特性打包为可交互角色：性格 + 信息接收/表达方式 | 具名角色：销售客服（sales-chat）、插件安装助手（plugin-helper）、编码助手（coder）、就业顾问（advisory-chat）、框架介绍员（harness-guide）、TiMEM 客服（timem-support）；输入/输出形态（文本/语音，ASR/TTS）、按角色定制 | 附属子进程 → 本机独立守护进程 → 网络服务集群 |
-| L4 | **编排规划域**（小脑） | 任务调度、思考循环、多智能体协作 | Agent 主思考循环（ReAct/PlanExecute）、任务规划/复盘、SubAgent 调度、定时/长任务 | DSH 插件线程 → 复杂子 Agent 拆独立 Worker 进程/服务 |
-| L5 | **行动执行域**（手脚） | 产生真实外部副作用；含 agent 工人（见 3.2） | 代码沙箱、文档/文件操作、系统资源管控、IoT/机器人控制、Agent 工人（codex-executor 等） | 附属子进程 → 独立守护进程/远程隔离服务 |
+| D1 | **底座基础域**（地基） | 通信、契约、安全、观测基础设施 | 全局消息总线、统一消息契约、MCP/A2A 协议桥接、鉴权/限流/熔断、全链路追踪、自动切换控制器 | 全部独立网络服务，不属于 DSH 进程 |
+| D2 | **认知算力域**（电站） | 算力供应、稳定保障、兼容供给；不承载规划/验收等任何业务用法（见 3.3） | LLM 模型适配器、多模型算力路由、记忆引擎、会话/身份上下文 | DSH 进程内插件 → 算力路由 + 记忆抽离为独立网络服务 |
+| D3 | **角色人格域**（Persona） | 特性打包为可交互角色：性格 + 信息接收/表达方式 | 具名角色：销售客服（sales-chat）、插件安装助手（plugin-helper）、编码助手（coder）、就业顾问（advisory-chat）、框架介绍员（harness-guide）、TiMEM 客服（timem-support）；输入/输出形态（文本/语音，ASR/TTS）、按角色定制 | 附属子进程 → 本机独立守护进程 → 网络服务集群 |
+| D4 | **编排规划域**（小脑） | 任务调度、思考循环、多智能体协作 | Agent 主思考循环（ReAct/PlanExecute）、任务规划/复盘、SubAgent 调度、定时/长任务 | DSH 插件线程 → 复杂子 Agent 拆独立 Worker 进程/服务 |
+| D5 | **行动执行域**（手脚） | 产生真实外部副作用；含 agent 工人（见 3.2） | 代码沙箱、文档/文件操作、系统资源管控、IoT/机器人控制、Agent 工人（codex-executor 等） | 附属子进程 → 独立守护进程/远程隔离服务 |
 
 ### 各域运行特征
 
-- **L1 底座域**：全局唯一、所有模块依赖、完全与业务解耦。
-- **L2 认知域**：Always-On 核心常驻，强状态、强一致性、不可随意重启；只供算力，不载业务。
-- **L3 人格域**：延迟敏感、与用户直接交互；主人格唯一（见 3.2），纯信号转换与角色形象，无核心决策。
-- **L4 编排域**：流程驱动、状态机复杂、多分支多迭代，不直接操作硬件。
-- **L5 行动域**：高风险、高权限、崩溃影响外部环境，必须强隔离、强沙箱、强故障域；工人产出汇回主人格署名交付。
+- **D1 底座域**：全局唯一、所有模块依赖、完全与业务解耦。
+- **D2 认知域**：Always-On 核心常驻，强状态、强一致性、不可随意重启；只供算力，不载业务。
+- **D3 人格域**：延迟敏感、与用户直接交互；主人格唯一（见 3.2），纯信号转换与角色形象，无核心决策。
+- **D4 编排域**：流程驱动、状态机复杂、多分支多迭代，不直接操作硬件。
+- **D5 行动域**：高风险、高权限、崩溃影响外部环境，必须强隔离、强沙箱、强故障域；工人产出汇回主人格署名交付。
 
 ### 3.1 为什么叫「域」而不叫「层」
 
 五个域不是依次渐进的楼层，而是**你中有我、我中有你的逻辑归属**。「域」回答的是「这个能力属于哪类问题」——不预设顺序、不预设进程、不预设技术栈。任何工具（无论是否 dsh 插件、何种语言、独立进程还是库）都按它回答的问题归入五域之一。
 
-- 编号 L1–L5 仅保留**依赖序**语义（每域只依赖比自己小的域号），不表达重要性或叙事先后。
+- 编号 D1–D5 仅保留**依赖序**语义（每域只依赖比自己小的域号），不表达重要性或叙事先后。
 - 叙述信息流时讲「底座 → 认知 → 人格 → 编排 → 行动」没有问题——那是故事顺序，不是栈序。
+- 代码中 `layer-*` 目录名与配置字段 `layer` 属历史命名，与 D 编号一一对应（如 `layer-cognitive` = D2），不随文档改名。
 
 ### 3.2 域随角色走，不随二进制走
 
@@ -214,18 +215,18 @@ flowchart TB
 
 | codex 的帽子 | 归属 | 说明 |
 |---|---|---|
-| codex-executor / codex-agent | **L5 行动域** | agent 团队内的实际打工人，给主人格办事，不直接面对用户 |
-| codex 以独立主体向用户汇报 | **L3 人格域** | 需显式创建角色人格：实现为主人格名下的**子人格/分身**，会话仍走主人格，防止 N 个 agent 各开 DM 各自汇报 |
-| codex 内部的 LLM 调用 | 消费 L2 认知域 | 编排域与行动域都是认知域算力的**客户** |
+| codex-executor / codex-agent | **D5 行动域** | agent 团队内的实际打工人，给主人格办事，不直接面对用户 |
+| codex 以独立主体向用户汇报 | **D3 人格域** | 需显式创建角色人格：实现为主人格名下的**子人格/分身**，会话仍走主人格，防止 N 个 agent 各开 DM 各自汇报 |
+| codex 内部的 LLM 调用 | 消费 D2 认知域 | 编排域与行动域都是认知域算力的**客户** |
 
 - **工人契约**：harness 对行动域工人定义与实现无关的契约——**领活 → 执行 → 交产出 → 受验收判定**。codex、claude-code、opencode 或任何未来安装的 agent CLI 都是该契约的可替换实现，切换时主人格无感。
 - **主人格唯一**：与用户实际交互的 agent 形象是**主人格**——全系统唯一有名字、有记忆、有立场、对用户负责的存在，其余四域都是它的器官。工人产出一律汇回主人格，由主人格署名交付。
 
 ### 3.3 认知域口径：只管算力，不管业务
 
-L2 认知域只考虑三件事：**算力供应、稳定保障、给不同的算力需求供应兼容的算力**（模型适配、多模型路由、限流熔断、记忆检索等纯能力）。它不承载任何业务语义——任务规划、验收判定等是**消费算力的业务工人**，由编排域调度、在行动域执行，可随时替换实现而不惊动认知域。
+D2 认知域只考虑三件事：**算力供应、稳定保障、给不同的算力需求供应兼容的算力**（模型适配、多模型路由、限流熔断、记忆检索等纯能力）。它不承载任何业务语义——任务规划、验收判定等是**消费算力的业务工人**，由编排域调度、在行动域执行，可随时替换实现而不惊动认知域。
 
-> 隐喻随口径更新：L2 从「大脑」改为「**电站**」——大脑负责思考（业务），电站只负责稳定供电（算力）。
+> 隐喻随口径更新：D2 从「大脑」改为「**电站**」——大脑负责思考（业务），电站只负责稳定供电（算力）。
 
 ---
 
@@ -277,11 +278,11 @@ L2 认知域只考虑三件事：**算力供应、稳定保障、给不同的算
 
 | | 原型模式（极速开发） | 生产模式（企业级高可用） |
 |---|----------------------|--------------------------|
-| 认知层 | DSH 进程内插件、内存级 Provider | 重负载能力抽离网络服务 |
-| 人格层 | 附属子进程 | 全部改本机守护进程 |
-| 编排层 | DSH 插件线程 | 复杂工作流拆 Worker 集群 |
-| 执行层 | 附属子进程 | 硬件/沙箱独立进程强隔离 |
-| 底座层 | 进程内事件总线 | 全局 NATS 总线统一通信 |
+| 认知域 | DSH 进程内插件、内存级 Provider | 重负载能力抽离网络服务 |
+| 人格域 | 附属子进程 | 全部改本机守护进程 |
+| 编排域 | DSH 插件线程 | 复杂工作流拆 Worker 集群 |
+| 行动域 | 附属子进程 | 硬件/沙箱独立进程强隔离 |
+| 底座域 | 进程内事件总线 | 全局 NATS 总线统一通信 |
 
 **核心优势：同一套代码、两套运行形态、零业务改动。**
 
@@ -357,7 +358,7 @@ pnpm --filter wecom-coder start
 | 编码 Agent | `codex-agent`（codex CLI → localhost:4000） | 任意符合契约的 Agent Provider |
 | 协议适配 | `protocol-adapter`（api-router 协议翻译） | 任意协议桥接实现 |
 | HTTP 入口 + 流式 | `http-ingress` + `sse.ts`（`/v1/chat/completions` 支持 `stream:true` → SSE 帧流） | 任意传输实现（Hono 备件换装时 import 同款 sse helper） |
-| **角色对话** | `sales-chat`（销售客服角色, 由 chat-agent 正名而来） | 任意 L3 角色（特性打包为 persona 插件） |
+| **角色对话** | `sales-chat`（销售客服角色, 由 chat-agent 正名而来） | 任意 D3 角色（特性打包为 persona 插件） |
 | **开箱引导安装** | `plugin-helper` 角色 → `plugin-install` 工作流（扫描 py-plugins.json + packages → 契约匹配 → 接入指引） | 任意安装/引导工作流 |
 | **最小 Web UI** | http-ingress `GET /` / `/ui`（单文件 HTML, 双角色页签, 零依赖） | 任意前端 |
 | **企业微信入口（特色案例）** | `wecom-ingress`（aibot-node-sdk WebSocket 长连接 → 角色路由 → replyStream）+ 三个开箱案例：`wecom-coder`（@机器人 → coder → codex）/ `wecom-guide`（框架介绍员）/ `wecom-timem`（TiMEM 客服） | 任意 IM 通道（钉钉/飞书/微信，同构接入） |
@@ -416,13 +417,13 @@ harness (TS)                          Python (子进程)
 
 ### 8.3 已验证的 aigility 能力
 
-| Seam 能力 ID | 层 | aigility 模块 | 方法 | 端到端测试 |
+| Seam 能力 ID | 域 | aigility 模块 | 方法 | 端到端测试 |
 |-------------|-----|-------------|------|-----------|
-| `@orchestration/workflow-engine` | L4 | `aigility.workflow.WorkflowEngine` | `invoke` | ✅ YAML → LangGraph → 条件分支 |
-| `@cognitive/memory` | L2 | `aigility.memory.Memory` | `search` | ✅ 异步方法正确处理 |
-| `@cognitive/rag-retrieval` | L2 | `aigility.rag.RAGService` | `search` | ⚠️ 需 dashscope 包 |
-| `@orchestration/chat-flow` | L4 | `aigility.chatflow.ChatFlow` | `invoke` | ✅ 初始化成功 |
-| `@orchestration/workflow-engine-timem` | L4 | `aigility.workflow.WorkflowEngine` | `ainvoke` | ✅ 企微客服工作流（timem_support） |
+| `@orchestration/workflow-engine` | D4 | `aigility.workflow.WorkflowEngine` | `invoke` | ✅ YAML → LangGraph → 条件分支 |
+| `@cognitive/memory` | D2 | `aigility.memory.Memory` | `search` | ✅ 异步方法正确处理 |
+| `@cognitive/rag-retrieval` | D2 | `aigility.rag.RAGService` | `search` | ⚠️ 需 dashscope 包 |
+| `@orchestration/chat-flow` | D4 | `aigility.chatflow.ChatFlow` | `invoke` | ✅ 初始化成功 |
+| `@orchestration/workflow-engine-timem` | D4 | `aigility.workflow.WorkflowEngine` | `ainvoke` | ✅ 企微客服工作流（timem_support） |
 
 ### 8.4 编排工具 + 编排实例分离
 
@@ -448,7 +449,7 @@ harness (TS)                          Python (子进程)
 | **任务队列** | pgmq 扩展 或 `FOR UPDATE SKIP LOCKED` | `TaskQueue`（enqueue/dequeue/ack/nack/stats，租约式消费语义对齐 SQS/pgmq） | 🔶 契约就绪，实现后置 |
 | **向量检索** | pgvector（HNSW 索引） | `VectorStore`（upsert/search/remove/count，支持 metadata 过滤） | 🔶 契约就绪，实现后置 |
 
-**可更换原则**：三个契约（BusBridge / TaskQueue / VectorStore）全部"契约在 core、实现在层"——将来任何一职要换独立中间件（NATS / Redis Stream / Milvus），只动工厂一行，上层业务零改动。
+**可更换原则**：三个契约（BusBridge / TaskQueue / VectorStore）全部"契约在 core、实现在域"——将来任何一职要换独立中间件（NATS / Redis Stream / Milvus），只动工厂一行，上层业务零改动。
 
 ---
 
@@ -475,11 +476,11 @@ aigility-harness/
 │   │                              #   Provider / Consumer / LayerPlugin / KernelAdapter
 │   │                              #   LlmInference 契约（llm-contract.ts）/ BusBridge / TaskQueue / VectorStore
 │   ├── kernel-dsh/                # DSH-Cordis 内核适配器（Seam Registry / Effect Manager / Carrier Manager）
-│   ├── layer-cognitive/           # L2 认知算力层（LLM 推理：stub + litellm + timem-memory-provider）
-│   ├── layer-persona/            # L3 角色人格层（sales-chat / plugin-helper / coder / advisory-chat / harness-guide / timem-support / speech-to-text）
-│   ├── layer-orchestration/       # L4 编排规划层（任务规划 + plugin-install + codex-agent）
-│   ├── layer-action/              # L5 行动执行层（TTS）
-│   ├── layer-infrastructure/      # L1 底座基础层（config/logging/protocol-adapter/http-ingress/wecom-ingress/PgBusBridge）
+│   ├── layer-cognitive/           # D2 认知算力层（LLM 推理：stub + litellm + timem-memory-provider）
+│   ├── layer-persona/            # D3 角色人格层（sales-chat / plugin-helper / coder / advisory-chat / harness-guide / timem-support / speech-to-text）
+│   ├── layer-orchestration/       # D4 编排规划层（任务规划 + plugin-install + codex-agent）
+│   ├── layer-action/              # D5 行动执行层（TTS）
+│   ├── layer-infrastructure/      # D1 底座基础层（config/logging/protocol-adapter/http-ingress/wecom-ingress/PgBusBridge）
 │   │   └── src/
 │   │       ├── protocol-adapter.ts    # 协议翻译（Anthropic/OpenAI/Responses → 内部标准，类型取自 core 契约）
 │   │       ├── http-ingress.ts        # HTTP 唯一入口（dev/agent 双链路 + SSE 流式 + 最小 UI）
@@ -489,7 +490,7 @@ aigility-harness/
 │   │   ├── src/
 │   │   │   ├── types.ts           # 声明式配置 + 通信协议类型
 │   │   │   ├── py-worker.ts       # 子进程管理 + 请求队列 + 批量调用
-│   │   │   ├── py-bridge.ts       # Provider 工厂：配置 → Seam Provider（能力可声明到任意层）
+│   │   │   ├── py-bridge.ts       # Provider 工厂：配置 → Seam Provider（能力可声明到任意域）
 │   │   │   ├── config-loader.ts   # 配置加载 + 环境变量替换
 │   │   │   └── py-bridge.test.ts  # 端到端测试（7 例，真实 spawn Python worker）
 │   │   └── scripts/
@@ -517,10 +518,10 @@ aigility-harness/
 
 1. **五域模型**：底座、认知、人格、编排、行动 —— 逻辑归属、依赖单向；域随角色走，不随二进制走
 2. **四层运行内核**：DSH-Cordis 原生支撑（插件 / Seam / 运行时 / 传输）
-3. **四种运行载体**：线程 / 子进程 / 守护进程 / 网络服务 —— 逐层可切换
+3. **四种运行载体**：线程 / 子进程 / 守护进程 / 网络服务 —— 逐域可切换
 4. **核心机制**：Capability Seam 契约热替换 —— 接口不变，实现任意替换
 5. **形态双模式**：原型单体 / 生产分布式 —— 同一套代码零改动切换
-6. **最大亮点**：智能自动动态换层、换实现、换载体
+6. **最大亮点**：智能自动动态换域、换实现、换载体
 
 > 现阶段以 DSH 兼容适配为首要目标；未来若出现与 DSH 相似的产品，可通过统一 `KernelAdapter` 契约**一键替换迁移**到其他内核，业务层代码零改动。
 
