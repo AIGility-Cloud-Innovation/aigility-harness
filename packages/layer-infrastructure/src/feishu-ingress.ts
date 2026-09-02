@@ -43,8 +43,10 @@ import type {
   LarkChannel,
   LarkChannelOptions,
   NormalizedMessage,
+  ResourceDescriptor,
 } from "@larksuiteoapi/node-sdk";
 
+// ── 消费引用 ─────────────────────────────────────────────────────
 // ── 消费引用 ─────────────────────────────────────────────────────
 
 /** 消费项目任务助手人格（飞书「项目小助手」机器人默认角色） */
@@ -69,6 +71,16 @@ export interface FeishuIngressRequest {
   perceptionId?: string;
   /** 处理中占位文案（暂未启用流式占位，保留字段） */
   thinkingText?: string;
+
+  // ── 通用过滤配置（不含业务语义，纯消息层规则） ──
+  /** 白名单会话 ID 列表；空数组或未设=不限制 */
+  allowedConversationIds?: string[];
+  /** 黑名单会话 ID 列表；命中则直接丢弃 */
+  blockedConversationIds?: string[];
+  /** 黑名单发送者 ID 列表；命中则直接丢弃 */
+  blockedSenderIds?: string[];
+  /** 关键词黑名单；content 包含任一关键词则丢弃 */
+  keywordBlacklist?: string[];
 }
 
 export interface FeishuIngressResponse {
@@ -110,6 +122,119 @@ function messageText(msg: NormalizedMessage): string {
   // 事件归一化后 content 可能是纯文本（text 消息）或富文本内容
   return text.trim();
 }
+
+/** 通用过滤器：按黑白名单/关键词/mention 规则判定是否处理消息 */
+function shouldProcessMessage(
+  msg: NormalizedMessage,
+  config: FeishuIngressRequest,
+): boolean {
+  // 1. 会话白名单
+  if (
+    config.allowedConversationIds &&
+    config.allowedConversationIds.length > 0 &&
+    !config.allowedConversationIds.includes(msg.chatId)
+  ) {
+    return false;
+  }
+  // 2. 会话黑名单
+  if (
+    config.blockedConversationIds &&
+    config.blockedConversationIds.includes(msg.chatId)
+  ) {
+    return false;
+  }
+  // 3. 发送者黑名单
+  if (
+    config.blockedSenderIds &&
+    config.blockedSenderIds.includes(msg.senderId)
+  ) {
+    return false;
+  }
+  // 4. 关键词黑名单
+  if (config.keywordBlacklist && config.keywordBlacklist.length > 0) {
+    const content = msg.content?.toLowerCase() ?? "";
+    if (
+      config.keywordBlacklist.some((kw) =>
+        content.includes(kw.toLowerCase()),
+      )
+    ) {
+      return false;
+    }
+  }
+  // 5. Trigger 判定：仅 p2p 或 group+@bot 才处理
+  if (msg.chatType === "group" && !msg.mentionedBot) {
+    return false;
+  }
+  // chatType 为 p2p 时 always process（不要求 @bot）
+  // 其他 chatType（如 topic）静默丢弃
+  if (msg.chatType !== "p2p" && msg.chatType !== "group") {
+    return false;
+  }
+  return true;
+}
+
+/** 内存去重器：Map<messageId, timestamp> + TTL 5 分钟 */
+class MessageDeduper {
+  private seen = new Map<string, number>();
+  private readonly ttlMs = 5 * 60 * 1000; // 5 分钟
+
+  isDuplicate(messageId: string): boolean {
+    const now = Date.now();
+    const ts = this.seen.get(messageId);
+    if (ts !== undefined) {
+      if (now - ts < this.ttlMs) {
+        return true; // 仍在 TTL 内，重复
+      }
+      // TTL 过期，清理旧条目
+      this.seen.delete(messageId);
+    }
+    this.seen.set(messageId, now);
+    // 定期清理过期条目（简单策略：每次插入时清理 10%）
+    if (Math.random() < 0.1) {
+      this.cleanup(now);
+    }
+    return false;
+  }
+
+  private cleanup(now: number) {
+    for (const [id, ts] of this.seen.entries()) {
+      if (now - ts >= this.ttlMs) {
+        this.seen.delete(id);
+      }
+    }
+  }
+}
+
+/** 资源下载器：将 image 资源下载为 base64，失败不阻塞主流程 */
+async function downloadResources(
+  channel: LarkChannel,
+  resources: ResourceDescriptor[],
+): Promise<Array<{ type: string; data: string; fileName?: string }>> {
+  const results: Array<{ type: string; data: string; fileName?: string }> = [];
+  for (const res of resources) {
+    if (res.type === "image") {
+      try {
+        const buffer = await channel.downloadResource(res.fileKey, "image");
+        const base64 = buffer.toString("base64");
+        results.push({
+          type: "image",
+          data: `data:image/png;base64,${base64}`, // 默认 png，实际类型可后续扩展
+          fileName: res.fileName,
+        });
+      } catch (e) {
+        console.warn(
+          `[feishu-ingress] resource download failed: fileKey=${res.fileKey}`,
+          e,
+        );
+        // 下载失败不阻塞，跳过该资源
+      }
+    }
+    // 其他资源类型（file/audio/video）暂不处理，可按需扩展
+  }
+  return results;
+}
+
+const deduper = new MessageDeduper();
 
 export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngressResponse> = {
   service: feishuIngressService,
@@ -153,12 +278,31 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
     };
     const channel = createLarkChannel(options);
 
-    // 收消息 → 路由角色 → 回复
+    // 收消息 → 过滤/去重/资源下载 → 路由角色 → 回复
     activeUnsubscribe = channel.on({
       message: async (msg: NormalizedMessage) => {
+        // 1. 通用过滤（黑白名单/关键词/trigger 判定）
+        if (!shouldProcessMessage(msg, request)) {
+          console.log(
+            `[feishu-ingress] message filtered: chat=${msg.chatId} type=${msg.chatType} mentionedBot=${msg.mentionedBot}`,
+          );
+          return;
+        }
+
+        // 2. 去重：按 messageId 内存去重（TTL 5 分钟）
+        if (deduper.isDuplicate(msg.messageId)) {
+          console.log(
+            `[feishu-ingress] duplicate message skipped: messageId=${msg.messageId}`,
+          );
+          return;
+        }
+
         const text = messageText(msg);
         console.log(`[feishu-ingress] message received: chat=${msg.chatId} sender=${msg.senderId} text="${text}"`);
         if (!text) return;
+
+        // 3. 资源下载（image → base64，失败不阻塞）
+        const resources = await downloadResources(channel, msg.resources);
 
         // 路由：按会话来源 → 通配兜底
         const routeKey = msg.chatId || msg.senderId || "*";
@@ -173,11 +317,17 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
           });
           let finalText = "抱歉，处理失败，请稍后重试或查看服务日志。";
           try {
+            // ctx.call 人格请求：附带通用会话上下文字段
+            // 注意：conversation_id/chat_type/resources 是通用字段，
+            // 不含业务语义；persona 插件自行决定是否消费
             const result = await ctx.call(
               { id: roleId, versionRange: "^1.0.0" },
               {
                 user_input: text,
                 user_id: msg.senderId || "feishu-unknown",
+                conversation_id: msg.chatId,
+                chat_type: msg.chatType,
+                resources: resources.length > 0 ? resources : undefined,
               },
             );
             if (result.ok) {
