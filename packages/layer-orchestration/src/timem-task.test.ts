@@ -388,7 +388,7 @@ describe("git 校验(归仓后、派发前)", () => {
 });
 
 describe("dispatch 派发状态机", () => {
-  it("pending_project → confirm-project → run → 轮询 completed → type:task", async () => {
+  it("pending_project → 自动 confirm-project → 停 pending_confirm → type:confirm（不 run）", async () => {
     const { calls } = mockUds((c) => {
       if (c.path === "/v1/tasks/identify-project") {
         return {
@@ -403,13 +403,7 @@ describe("dispatch 派发状态机", () => {
         };
       }
       if (c.path === "/v1/tasks/t100/confirm-project") {
-        return { status: 200, body: JSON.stringify({ id: "t100", status: "confirmed" }) };
-      }
-      if (c.path === "/v1/tasks/t100/run") {
-        return { status: 200, body: JSON.stringify({ id: "t100", status: "running" }) };
-      }
-      if (c.path === "/v1/tasks/t100") {
-        return { status: 200, body: JSON.stringify({ id: "t100", status: "completed" }) };
+        return { status: 200, body: JSON.stringify({ id: "t100", status: "pending_confirm" }) };
       }
       return { status: 200, body: "{}" };
     });
@@ -424,18 +418,13 @@ describe("dispatch 派发状态机", () => {
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value).toMatchObject({
-      type: "task",
-      taskId: "t100",
-      status: "completed",
-    });
+    expect(result.value).toMatchObject({ type: "confirm", taskId: "t100" });
     const paths = calls.map((c) => c.path);
     expect(paths).toContain("/v1/tasks/t100/confirm-project");
-    expect(paths).toContain("/v1/tasks/t100/run");
-    expect(paths.filter((p) => p === "/v1/tasks/t100").length).toBeGreaterThanOrEqual(1);
+    expect(paths).not.toContain("/v1/tasks/t100/run");
   });
 
-  it("create-from-message 触发 contextGate → 仍 confirm 后执行", async () => {
+  it("create-from-message 返回 pending_confirm → 停在待确认（不 run）→ type:confirm", async () => {
     const { calls } = mockUds((c) => {
       if (c.path === "/v1/tasks/identify-project") {
         return {
@@ -448,19 +437,10 @@ describe("dispatch 派发状态机", () => {
           status: 200,
           body: JSON.stringify({
             id: "t99",
-            status: "context_gate",
-            contextGate: { name: "confirm_project", value: "standalone" },
+            status: "pending_confirm",
+            contextGate: { name: "confirm_prompt", value: "standalone" },
           }),
         };
-      }
-      if (c.path === "/v1/tasks/t99/confirm-project") {
-        return { status: 200, body: JSON.stringify({ id: "t99", status: "confirmed" }) };
-      }
-      if (c.path === "/v1/tasks/t99/run") {
-        return { status: 200, body: JSON.stringify({ id: "t99", status: "running" }) };
-      }
-      if (c.path === "/v1/tasks/t99") {
-        return { status: 200, body: JSON.stringify({ id: "t99", status: "completed" }) };
       }
       return { status: 200, body: "{}" };
     });
@@ -474,9 +454,8 @@ describe("dispatch 派发状态机", () => {
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value).toMatchObject({ type: "task", status: "completed" });
-    expect(calls.some((c) => c.path === "/v1/tasks/t99/confirm-project")).toBe(true);
-    expect(calls.some((c) => c.path === "/v1/tasks/t99/run")).toBe(true);
+    expect(result.value).toMatchObject({ type: "confirm", taskId: "t99" });
+    expect(calls.some((c) => c.path === "/v1/tasks/t99/run")).toBe(false);
   });
 });
 

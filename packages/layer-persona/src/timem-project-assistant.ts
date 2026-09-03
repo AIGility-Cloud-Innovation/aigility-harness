@@ -116,13 +116,26 @@ export const timemProjectAssistantProvider: Provider<
   ): Promise<Result<TimemProjectAssistantResponse>> {
     const agentName = "TiMEM Project 小助手";
     const userId = request.user_id ?? "feishu-unknown";
+    const input = (request.user_input ?? "").trim();
+
+    // 确认意图：用户在「新建任务待确认」后回复 确认/执行/同意/立即执行
+    const CONFIRM_RE = /^(确认|确认执行|执行|同意|好|好的|可以|立即执行|马上执行|马上跑|开始执行)/;
+    const pendingTaskId = ctx.getState<string>("timem_pending_task_id");
+    let confirmTaskId: string | undefined;
+    let promptOverride: string | undefined;
+    if (CONFIRM_RE.test(input) && pendingTaskId) {
+      confirmTaskId = pendingTaskId;
+      // 支持「确认并改提示词：<新提示词>」
+      const overrideMatch = input.match(/改提示词[:：]\s*([\s\S]+)/);
+      if (overrideMatch) promptOverride = overrideMatch[1].trim();
+    }
 
     // 委托 L4 编排：TIMEM_PROJECT 真实执行桥接（UDS → agentd → codex）
     // 注：装配时若 timem-task 不可用（agentd 未起）会降级报错提示
     const result = await ctx.call(
       { id: "@orchestration/timem-task", versionRange: "^1.0.0" },
       {
-        user_input: request.user_input,
+        user_input: input,
         user_id: userId,
         session_id: request.session_id ?? ctx.sessionId,
         source: request.source ?? "feishu",
@@ -131,13 +144,27 @@ export const timemProjectAssistantProvider: Provider<
         conversation_id: request.conversation_id,
         chat_type: request.chat_type,
         resources: request.resources,
+        ...(confirmTaskId ? { confirm_task_id: confirmTaskId } : {}),
+        ...(promptOverride ? { prompt_override: promptOverride } : {}),
       },
     );
 
     const value = (result as { ok: boolean; value?: unknown }).ok
       ? (result as { value?: TimemTaskResponseLike }).value
       : undefined;
-    // 适配三段式判别联合：chat/ask/error → text；task → response
+
+    // 记住待确认任务 ID（确认闸门：用户回复「确认」时用）
+    if (value?.type === "confirm" && value.taskId) {
+      ctx.setState("timem_pending_task_id", value.taskId);
+    } else if (
+      value?.type === "task" ||
+      value?.type === "error"
+    ) {
+      // 已确认/执行/出错 → 清掉待确认标记
+      ctx.setState("timem_pending_task_id", "");
+    }
+
+    // 适配三段式判别联合：chat/ask/summary/error → text；task/confirm → response
     const response =
       value?.text ??
       value?.response ??

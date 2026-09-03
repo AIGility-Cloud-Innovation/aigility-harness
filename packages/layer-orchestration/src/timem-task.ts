@@ -52,12 +52,18 @@ export interface TimemTaskRequest {
   chat_type?: string;
   /** 资源引用(图片等, 目前透传不消费) */
   resources?: Array<Record<string, unknown>>;
+  /** 显示确认：确认指定任务(待提示词确认)后执行 */
+  confirm_task_id?: string;
+  /** 确认时覆盖提示词(可空=用原提示词) */
+  prompt_override?: string;
 }
 
 export type TimemTaskResponse =
   | { type: "chat"; text: string }
   | { type: "ask"; text: string }
   | { type: "task"; taskId: string; status: string; response: string }
+  | { type: "confirm"; taskId: string; status: string; promptPreview: string; response: string }
+  | { type: "summary"; text: string }
   | { type: "error"; text: string };
 
 // ---- ① classify: 任务判定 ----
@@ -319,6 +325,73 @@ export const timemTaskProvider: Provider<TimemTaskRequest, TimemTaskResponse> = 
     }
 
     try {
+      // ⓪ 确认意图：确认待执行任务（提示词确认闸门）
+      if (request.confirm_task_id) {
+        const confirmed = await confirmTask(socketPath, token, request.confirm_task_id, request.prompt_override);
+        if (!confirmed) {
+          return ok({ type: "error", text: "确认任务失败：任务不存在或不在待确认状态" });
+        }
+        const s = confirmed.status ?? "queued";
+        return ok({
+          type: "task",
+          taskId: request.confirm_task_id,
+          status: s,
+          response:
+            s === "queued"
+              ? `已确认 ✅ 任务（ID: ${request.confirm_task_id}）将执行。确认后 1 小时自动运行，也可回复「立即执行」马上跑。`
+              : summarizeTask(confirmed, s),
+        });
+      }
+
+      // ⓪ 查进度意图：当前项目群任务进度
+      const PROGRESS_RE = /^(查看|看下|看看|查|查询|汇报|报告)?\s*(任务进度|任务状态|进度|状态|进行到哪|跑到哪)/;
+      if (PROGRESS_RE.test(request.user_input.trim())) {
+        const raw = await fetchTaskSummary(socketPath, token);
+        const sum = parseUdsJson<TaskSummary>(raw);
+        const lines = [`📊 当前项目群任务进度（共 ${sum.total ?? 0} 个）：`];
+        const statusNames: Record<string, string> = {
+          pending_confirm: "⏳ 待确认",
+          pending_project: "❓ 待归仓",
+          queued: "📥 排队中",
+          preparing: "🔧 准备中",
+          running: "🔄 运行中",
+          needs_review: "👀 待验收",
+          completed: "✅ 已完成",
+          failed: "❌ 失败",
+          blocked: "🚫 阻塞",
+        };
+        const st = sum.byStatus ?? {};
+        const statusLine = Object.entries(st)
+          .map(([k, v]) => `${statusNames[k] ?? k}: ${v}`)
+          .join("，");
+        if (statusLine) lines.push(`总览：${statusLine}`);
+        const projects = sum.projects ?? {};
+        const projEntries = Object.entries(projects)
+          .filter(([k]) => k !== "(未归属)")
+          .sort((a, b) => (b[1]?.total ?? 0) - (a[1]?.total ?? 0));
+        if (projEntries.length > 0) {
+          lines.push("");
+          lines.push("按项目：");
+          for (const [pid, p] of projEntries.slice(0, 8)) {
+            const running = p.running ?? 0;
+            const pending = p.pendingConfirm ?? 0;
+            const failed = p.failed ?? 0;
+            const mark = running > 0 ? " 🔄" : pending > 0 ? " ⏳" : failed > 0 ? " ❌" : "";
+            lines.push(`- ${pid}：共 ${p.total}（运行 ${running} / 待确认 ${pending} / 失败 ${failed}）${mark}`);
+          }
+        }
+        const recent = sum.recent ?? [];
+        if (recent.length > 0) {
+          lines.push("");
+          lines.push("最近任务：");
+          for (const t of recent.slice(0, 5)) {
+            const name = statusNames[t.status ?? ""] ?? t.status ?? "unknown";
+            lines.push(`- [${name}] ${t.title?.slice(0, 30) ?? "(无标题)"}（${t.projectId ?? "未归属"}）`);
+          }
+        }
+        return ok({ type: "summary", text: lines.join("\n") });
+      }
+
       // ① classify: 是否任务
       let verdict = classifyMessage(request.user_input);
       if (verdict.type === "unknown") {
@@ -380,6 +453,25 @@ export const timemTaskProvider: Provider<TimemTaskRequest, TimemTaskResponse> = 
         return ok({
           type: "error",
           text: `agentd 创建任务失败: ${created.lastError ?? "未知错误"}`,
+        });
+      }
+
+      // 确认闸门：任务是 pending_confirm → 返回确认预览（不执行）
+      if ((created.status ?? "") === "pending_confirm") {
+        const task: AgentdTask = { id: taskId, status: "pending_confirm", lastError: created.lastError };
+        return ok({
+          type: "confirm",
+          taskId,
+          status: "pending_confirm",
+          promptPreview: "（执行提示词预览，确认后派 codex 执行）",
+          response: `任务已创建 📋（ID: ${taskId}）
+\n将派 codex 执行此任务。请确认提示词：\n> ${request.user_input.slice(0, 200)}\n\n回复「确认执行」或「确认」即派发；回复「立即执行」则跳过 1 小时等待立即运行。`,
+        });
+      }
+      if ((created.status ?? "") === "pending_project") {
+        return ok({
+          type: "ask",
+          text: "这个任务我还没识别出要归到哪个项目/仓库，请告诉我项目名。",
         });
       }
 
@@ -467,12 +559,35 @@ async function validateProjectGit(
 
 // ---- dispatch: create-from-message → confirm-project → run → poll ----
 
+interface TaskSummary {
+  total?: number;
+  byStatus?: Record<string, number>;
+  projects?: Record<string, ProjectTaskSummary>;
+  recent?: Array<{
+    id?: string;
+    title?: string;
+    status?: string;
+    projectId?: string;
+    updatedAt?: string;
+  }>;
+}
+
+interface ProjectTaskSummary {
+  total?: number;
+  running?: number;
+  pendingConfirm?: number;
+  failed?: number;
+  completed?: number;
+  byStatus?: Record<string, number>;
+}
+
 interface CreateFromMessageResult {
   id?: string;
   status?: string;
   lastError?: string;
   contextGate?: AgentdContextGate | null;
   pending_project?: boolean;
+  scheduledRunAtMs?: number | null;
 }
 
 async function dispatch(
@@ -501,8 +616,11 @@ async function dispatch(
   const taskId = task.id ?? "";
   if (!taskId) return null;
 
-  // 若仍需项目确认或触发 contextGate → 确认后执行
-  if (task.pending_project || task.contextGate) {
+  // 确认闸门分两层：
+  // 1) 项目归属闸门（pending_project）：项目已被 identify 解析，自动确认归属（任务转 pending_confirm）
+  // 2) 提示词确认闸门（pending_confirm）：必须等用户确认提示词后才执行（由 confirmTask 触发）
+  // 任何情况下都不自动 run。
+  if (task.pending_project || task.status === "pending_project") {
     const confirm = await activeHooks.udsRequest(
       socketPath,
       token,
@@ -510,13 +628,38 @@ async function dispatch(
       `/v1/tasks/${taskId}/confirm-project`,
       { projectId },
     );
-    parseUdsJson<AgentdTask>(confirm);
+    const confirmed = parseUdsJson<CreateFromMessageResult>(confirm);
+    return { ...task, status: confirmed.status ?? "pending_confirm" };
   }
-
-  // 执行
-  const run = await activeHooks.udsRequest(socketPath, token, "POST", `/v1/tasks/${taskId}/run`, {});
-  parseUdsJson<AgentdTask>(run);
   return task;
+}
+
+// ---- 确认流程 ----
+
+async function confirmTask(
+  socketPath: string,
+  token: string,
+  taskId: string,
+  promptOverride?: string,
+): Promise<AgentdTask | null> {
+  // 若仍未归属项目(低置信)先补项目确认；高置信任务已带 projectId 无此步骤。
+  const body: Record<string, unknown> = {};
+  if (promptOverride && promptOverride.trim()) body.promptOverride = promptOverride.trim();
+  const confirm = await activeHooks.udsRequest(
+    socketPath,
+    token,
+    "POST",
+    `/v1/tasks/${taskId}/confirm-prompt`,
+    body,
+  );
+  return parseUdsJson<AgentdTask>(confirm);
+}
+
+// ---- 进度查询 ----
+
+async function fetchTaskSummary(socketPath: string, token: string): Promise<UdsResponse> {
+  const raw = await activeHooks.udsRequest(socketPath, token, "GET", "/v1/tasks/summary");
+  return raw;
 }
 
 // ---- 轮询 ----
