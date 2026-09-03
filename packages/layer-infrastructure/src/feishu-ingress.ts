@@ -275,6 +275,12 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
       appSecret,
       transport: "websocket",
       source: "aigility-harness-feishu-ingress",
+      // 长期治本：僵尸连接自愈
+      // pingTimeout=秒级 liveness watchdog——超过窗口无入站消息判定死连接自动重连
+      // （中间设备静默丢弃 WS 时 TCP 层不报错，此前只能靠人工重启）
+      // handshakeTimeoutMs=握手超时，防 DNS/NAT 卡死
+      wsConfig: { pingTimeout: 60 },
+      handshakeTimeoutMs: 15_000,
     };
     const channel = createLarkChannel(options);
 
