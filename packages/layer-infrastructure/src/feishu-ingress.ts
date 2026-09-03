@@ -326,6 +326,7 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
                 user_input: text,
                 user_id: msg.senderId || "feishu-unknown",
                 conversation_id: msg.chatId,
+                message_id: msg.messageId,
                 chat_type: msg.chatType,
                 resources: resources.length > 0 ? resources : undefined,
               },
@@ -346,10 +347,12 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
         } catch (e) {
           // 占位消息发送失败 → 直接发最终回复
           const errText = `处理异常: ${e instanceof Error ? e.message : String(e)}`;
+          console.log(`[feishu-ingress] placeholder send error: ${errText}`);
           try {
             await channel.send(msg.chatId || msg.senderId, { text: errText });
-          } catch {
+          } catch (e2) {
             /* 回复失败忽略 */
+            console.log(`[feishu-ingress] fallback send error: ${e2 instanceof Error ? e2.message : String(e2)}`);
           }
         }
       },

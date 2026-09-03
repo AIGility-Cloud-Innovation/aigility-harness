@@ -48,6 +48,8 @@ export interface TimemTaskRequest {
   project_id?: string;
   /** 会话 ID(identify-project 绑定查询用, 与 session_id 同源) */
   conversation_id?: string;
+  /** 消息 ID(幂等键: create-from-message 的 sourceMessageId) */
+  message_id?: string;
   /** 聊天类型: p2p | group */
   chat_type?: string;
   /** 资源引用(图片等, 目前透传不消费) */
@@ -56,6 +58,8 @@ export interface TimemTaskRequest {
   confirm_task_id?: string;
   /** 确认时覆盖提示词(可空=用原提示词) */
   prompt_override?: string;
+  /** 立即执行(跳过等待延迟，1 秒后自动运行) */
+  run_now?: boolean;
 }
 
 export type TimemTaskResponse =
@@ -138,10 +142,13 @@ async function classifyWithLlm(
       ],
       temperature: 0,
     };
+    console.log(`[timem-task] classifyWithLlm start: model=qwen2.5:7b input="${input.slice(0, 40)}"`);
+    const t0 = Date.now();
     const res = (await ctx.call<LlmInferenceRequest, LlmInferenceResponse>(
       llmInferenceRef,
       req,
     )) as Result<LlmInferenceResponse>;
+    console.log(`[timem-task] classifyWithLlm done: ${Date.now() - t0}ms ok=${res.ok}`);
     if (!res.ok) return { type: "unknown" };
     const parsed = parseLlmClassification(res.value.text);
     // 非任务或 JSON 解析失败 → 降级按非任务处理(unknown → chat)
@@ -198,7 +205,10 @@ function udsRequest(
       (res) => {
         let data = "";
         res.on("data", (c) => (data += c));
-        res.on("end", () => resolve({ status: res.statusCode ?? 0, body: data }));
+        res.on("end", () => {
+          console.log(`[timem-task] UDS ${method} ${path} → HTTP ${res.statusCode} body=${data.slice(0, 200)}`);
+          resolve({ status: res.statusCode ?? 0, body: data });
+        });
       },
     );
     req.on("timeout", () => {
@@ -327,7 +337,7 @@ export const timemTaskProvider: Provider<TimemTaskRequest, TimemTaskResponse> = 
     try {
       // ⓪ 确认意图：确认待执行任务（提示词确认闸门）
       if (request.confirm_task_id) {
-        const confirmed = await confirmTask(socketPath, token, request.confirm_task_id, request.prompt_override);
+        const confirmed = await confirmTask(socketPath, token, request.confirm_task_id, request.prompt_override, request.run_now);
         if (!confirmed) {
           return ok({ type: "error", text: "确认任务失败：任务不存在或不在待确认状态" });
         }
@@ -338,7 +348,9 @@ export const timemTaskProvider: Provider<TimemTaskRequest, TimemTaskResponse> = 
           status: s,
           response:
             s === "queued"
-              ? `已确认 ✅ 任务（ID: ${request.confirm_task_id}）将执行。确认后 1 小时自动运行，也可回复「立即执行」马上跑。`
+              ? request.run_now
+                ? `已确认 ✅ 任务（ID: ${request.confirm_task_id}）将立即执行。`
+                : `已确认 ✅ 任务（ID: ${request.confirm_task_id}）将执行。确认后 1 小时自动运行，也可回复「立即执行」马上跑。`
               : summarizeTask(confirmed, s),
         });
       }
@@ -392,6 +404,42 @@ export const timemTaskProvider: Provider<TimemTaskRequest, TimemTaskResponse> = 
         return ok({ type: "summary", text: lines.join("\n") });
       }
 
+      // ⓪b 取消意图：取消本会话的可取消任务（待确认/排队/运行中）
+      // 「取消该任务」→ 最近一个；「取消该任务:xxx」→ 按 xxx 匹配标题/描述
+      const CANCEL_RE = /^(取消|撤销|别执行|不做了|不要了|停下|停止|作废)\s*(该任务|这个任务|这任务|任务)?\s*[:：]?\s*(.*)/;
+      const cancelMatch = request.user_input.trim().match(CANCEL_RE);
+      if (cancelMatch) {
+        const keyword = (cancelMatch[2] ?? "").trim();
+        const listRaw = await activeHooks.udsRequest(socketPath, token, "GET", "/v1/tasks");
+        const tasks = parseUdsJson<Array<{ id?: string; title?: string; description?: string; status?: string; sourceConversationId?: string; createdAt?: string }>>(listRaw);
+        const mine = (Array.isArray(tasks) ? tasks : [])
+          .filter((t) => (t.sourceConversationId ?? "") === (request.conversation_id ?? request.session_id ?? ""))
+          .filter((t) => ["pending_confirm", "pending_project", "queued", "running"].includes(t.status ?? ""))
+          .sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")));
+        let cancelable = mine;
+        if (keyword) {
+          cancelable = mine.filter(
+            (t) => (t.title ?? "").includes(keyword) || (t.description ?? "").includes(keyword),
+          );
+        }
+        console.log(`[timem-task] cancel: keyword="${keyword}" mine=${mine.length} cancelable=${cancelable.length} conv=${request.conversation_id ?? request.session_id ?? ""}`);
+        if (cancelable.length === 0) {
+          const hint = keyword ? `（未找到描述包含「${keyword}」的可取消任务）` : "";
+          return ok({ type: "chat", text: `当前没有可取消的任务${hint}。` });
+        }
+        const target = cancelable[0];
+        await activeHooks.udsRequest(socketPath, token, "DELETE", `/v1/tasks/${target.id}`);
+        return ok({
+          type: "task",
+          taskId: target.id ?? "",
+          status: "cancelled",
+          response:
+            keyword && cancelable.length === 1
+              ? `已取消任务 ✅「${target.title?.slice(0, 40) ?? "(无标题)"}」`
+              : `已取消任务 ✅「${target.title?.slice(0, 40) ?? "(无标题)"}」（匹配 ${cancelable.length} 个，取消了最近 1 个）`,
+        });
+      }
+
       // ① classify: 是否任务
       let verdict = classifyMessage(request.user_input);
       if (verdict.type === "unknown") {
@@ -408,12 +456,14 @@ export const timemTaskProvider: Provider<TimemTaskRequest, TimemTaskResponse> = 
       }
 
       // ② identify: 归仓(显式 project_id 优先; 仍调 identify-project 以取 rootPaths 供 git 校验)
+      console.log(`[timem-task] identify start: ${request.user_input.slice(0, 30)}`);
       const identifyBody = {
         text: request.user_input,
         conversationId: request.conversation_id ?? request.session_id ?? ctx.sessionId,
         senderId: request.user_id ?? "",
         ...(request.project_id ? { projectId: request.project_id } : {}),
       };
+      console.log(`[timem-task] identify body: ${JSON.stringify(identifyBody).slice(0, 300)}`);
       const identified = await activeHooks.udsRequest(
         socketPath,
         token,
@@ -448,7 +498,7 @@ export const timemTaskProvider: Provider<TimemTaskRequest, TimemTaskResponse> = 
       if (!created) {
         return ok({ type: "error", text: "agentd 创建任务失败" });
       }
-      const taskId = created.id ?? "";
+      const taskId = created.id ?? created.taskId ?? "";
       if (!taskId) {
         return ok({
           type: "error",
@@ -497,6 +547,7 @@ export const timemTaskProvider: Provider<TimemTaskRequest, TimemTaskResponse> = 
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      console.log(`[timem-task] 处理异常: ${msg} (type=${typeof e}, ctor=${(e as any)?.constructor?.name})`);
       if (
         msg.includes("ECONNREFUSED") ||
         msg.includes("ENOENT") ||
@@ -583,6 +634,7 @@ interface ProjectTaskSummary {
 
 interface CreateFromMessageResult {
   id?: string;
+  taskId?: string;
   status?: string;
   lastError?: string;
   contextGate?: AgentdContextGate | null;
@@ -599,12 +651,14 @@ async function dispatch(
 ): Promise<CreateFromMessageResult | null> {
   const createBody = {
     source,
-    sourceMessageId: request.session_id ?? "",
+    sourceMessageId: request.message_id ?? request.session_id ?? "",
     sourceConversationId: request.conversation_id ?? request.session_id ?? "",
     title: request.title ?? request.user_input.slice(0, 80),
     description: request.user_input,
+    text: request.user_input,
     projectId,
   };
+  console.log(`[timem-task] dispatch createBody.sourceMessageId=${createBody.sourceMessageId} message_id=${request.message_id ?? "(undefined)"} session_id=${request.session_id ?? "(undefined)"}`);
   const created = await activeHooks.udsRequest(
     socketPath,
     token,
@@ -613,7 +667,7 @@ async function dispatch(
     createBody,
   );
   const task = parseUdsJson<CreateFromMessageResult>(created);
-  const taskId = task.id ?? "";
+  const taskId = task.id ?? task.taskId ?? "";
   if (!taskId) return null;
 
   // 确认闸门分两层：
@@ -641,10 +695,12 @@ async function confirmTask(
   token: string,
   taskId: string,
   promptOverride?: string,
+  runNow?: boolean,
 ): Promise<AgentdTask | null> {
   // 若仍未归属项目(低置信)先补项目确认；高置信任务已带 projectId 无此步骤。
   const body: Record<string, unknown> = {};
   if (promptOverride && promptOverride.trim()) body.promptOverride = promptOverride.trim();
+  if (runNow) body.delayMs = 1000; // 立即执行：1 秒后自动运行
   const confirm = await activeHooks.udsRequest(
     socketPath,
     token,

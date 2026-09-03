@@ -44,6 +44,8 @@ export interface TimemProjectAssistantRequest {
   project_id?: string;
   /** 会话 ID（identify 绑定查询用） */
   conversation_id?: string;
+  /** 消息 ID（幂等键：create-from-message 的 sourceMessageId） */
+  message_id?: string;
   /** 聊天类型: p2p | group */
   chat_type?: string;
   /** 资源引用（图片等，透传给编排层） */
@@ -120,11 +122,14 @@ export const timemProjectAssistantProvider: Provider<
 
     // 确认意图：用户在「新建任务待确认」后回复 确认/执行/同意/立即执行
     const CONFIRM_RE = /^(确认|确认执行|执行|同意|好|好的|可以|立即执行|马上执行|马上跑|开始执行)/;
+    const RUN_NOW_RE = /^(立即执行|马上执行|马上跑|开始执行)/;
     const pendingTaskId = ctx.getState<string>("timem_pending_task_id");
     let confirmTaskId: string | undefined;
     let promptOverride: string | undefined;
+    let runNow = false;
     if (CONFIRM_RE.test(input) && pendingTaskId) {
       confirmTaskId = pendingTaskId;
+      if (RUN_NOW_RE.test(input)) runNow = true;
       // 支持「确认并改提示词：<新提示词>」
       const overrideMatch = input.match(/改提示词[:：]\s*([\s\S]+)/);
       if (overrideMatch) promptOverride = overrideMatch[1].trim();
@@ -142,10 +147,12 @@ export const timemProjectAssistantProvider: Provider<
         title: request.title,
         project_id: request.project_id,
         conversation_id: request.conversation_id,
+        message_id: request.message_id,
         chat_type: request.chat_type,
         resources: request.resources,
         ...(confirmTaskId ? { confirm_task_id: confirmTaskId } : {}),
         ...(promptOverride ? { prompt_override: promptOverride } : {}),
+        ...(runNow ? { run_now: true } : {}),
       },
     );
 
