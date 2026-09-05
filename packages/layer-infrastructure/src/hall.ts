@@ -42,8 +42,10 @@ export interface HallRole {
 }
 
 export interface HallRequest {
-  /** 监听端口 */
+  /** 监听端口 (未注入 server 时使用) */
   port: number;
+  /** 外部注入的 HTTP server (与后端 API 同端口, 同源) */
+  server?: Server;
   /** 角色列表 (页面页签 + 路由映射) */
   roles?: HallRole[];
   /** 对话厅页面路径 (默认 /hall) */
@@ -58,6 +60,8 @@ export interface HallResponse {
   uiPath: string;
   chatPath: string;
   roles: string[];
+  /** 注入 server 模式时的 hall 路由 handler (装配方挂载到自己 server 上) */
+  handler?: (req: IncomingMessage, res: ServerResponse) => Promise<void>;
 }
 
 export const hallService: ServiceDefinition<HallRequest, HallResponse> = {
@@ -101,7 +105,8 @@ const hallProvider: Provider<HallRequest, HallResponse> = {
     // 读对话厅页面 (内嵌在 provider)
     const hallHtml = getHallHtml(roles, chatPath);
 
-    server = createServer(async (req, res) => {
+    // hall 路由 handler (可被外部 server 复用, 同源)
+    const hallHandler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
       const url = new URL(req.url ?? "/", "http://x");
       const path = url.pathname;
 
@@ -127,9 +132,16 @@ const hallProvider: Provider<HallRequest, HallResponse> = {
 
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "hall: not found", hint: `${uiPath} ${chatPath}` }));
-    });
+    };
 
-    await new Promise<void>((resolve) => server!.listen(port, "0.0.0.0", () => resolve()));
+    // 注入的外部 server → 由装配方负责挂载 hallHandler, 这里只存引用
+    if (request.server) {
+      server = request.server;
+    } else {
+      const hallServer = createServer(hallHandler);
+      await new Promise<void>((resolve) => hallServer.listen(port, "0.0.0.0", () => resolve()));
+      server = hallServer;
+    }
 
     return ok({
       started: true,
@@ -137,6 +149,7 @@ const hallProvider: Provider<HallRequest, HallResponse> = {
       uiPath,
       chatPath,
       roles: roles.map((r) => r.id),
+      ...(request.server ? { handler: hallHandler } : {}),
     });
   },
   async health(): Promise<HealthStatus> {

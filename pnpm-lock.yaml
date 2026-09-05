@@ -21,7 +21,7 @@ importers:
         specifier: ^2.0.0
         version: 2.0.0(@types/node@20.19.43)
 
-  examples/appbase-demo:
+  examples/appbase:
     dependencies:
       '@aigility-harness/core':
         specifier: workspace:*
@@ -38,6 +38,9 @@ importers:
       '@aigility-harness/layer-persona':
         specifier: workspace:*
         version: link:../../packages/layer-persona
+      pg:
+        specifier: ^8.23.0
+        version: 8.23.0
       prototype-mode:
         specifier: workspace:*
         version: link:../../packages/prototype-mode
@@ -45,6 +48,9 @@ importers:
       '@types/node':
         specifier: ^20.14.0
         version: 20.19.43
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
       tsx:
         specifier: ^4.23.12
         version: 4.23.12

@@ -1,8 +1,8 @@
 {
-  "name": "@aigility-harness/example-appbase-demo",
+  "name": "@aigility-harness/appbase",
   "version": "0.1.0",
   "private": true,
-  "description": "AppBase 演示装配：多功能对话厅（codex-chat/sales/plugin/coder）+ AI 网关",
+  "description": "AppBase 产品装配：多功能对话厅 + Codex 网页应用生成器 + AI 网关",
   "type": "module",
   "main": "./src/index.ts",
   "scripts": {
@@ -16,10 +16,12 @@
     "@aigility-harness/layer-infrastructure": "workspace:*",
     "@aigility-harness/layer-orchestration": "workspace:*",
     "@aigility-harness/layer-persona": "workspace:*",
+    "pg": "^8.23.0",
     "prototype-mode": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
+    "@types/pg": "^8.23.1",
     "tsx": "^4.23.12",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"
