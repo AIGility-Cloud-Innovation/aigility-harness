@@ -131,7 +131,7 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [loggingProvider, configProvider, createProtocolAdapterProvider(), httpIngressProvider];
+    return [loggingProvider, configProvider, createProtocolAdapterProvider(), httpIngressProvider, hallProvider];
   },
   getState(): PluginState {
     return pluginState;
@@ -201,3 +201,16 @@ export type {
   FeishuIngressRequest,
   FeishuIngressResponse,
 } from "./feishu-ingress.js";
+
+// 多功能对话厅（框架自带基本前端，多角色对话入口）
+export {
+  hallService,
+  hallProvider,
+  manifest as hallManifest,
+} from "./hall.js";
+export type {
+  HallRequest,
+  HallResponse,
+  HallRole,
+} from "./hall.js";
+import { hallService, hallProvider } from "./hall.js";

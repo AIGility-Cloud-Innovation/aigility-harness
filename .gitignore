@@ -9,5 +9,7 @@ coverage/
 
 # 运行时缓存/索引 (可重建, 不入库)
 examples/wecom-timem/kb_index/
+# AppBase: codex 生成器产物目录 (运行时可重建, 不入库)
+examples/apps/
 __pycache__/
 *.pyc

@@ -114,6 +114,17 @@ export type {
   CoderResponse,
 } from "./coder.js";
 import { coderService, coderProvider } from "./coder.js";
+import { codexChatService, codexChatProvider } from "./codex-chat.js";
+export {
+  codexChatService,
+  codexChatProvider,
+  getAllowedCwd,
+  ensureSandboxRoot,
+} from "./codex-chat.js";
+export type {
+  CodexChatRequest,
+  CodexChatResponse,
+} from "./codex-chat.js";
 
 // ── 服务定义 ─────────────────────────────────────────────────────
 
@@ -175,7 +186,7 @@ export const manifest: PluginManifest = {
   layer: LayerId.Persona,
   description: "角色人格层：感知（文本/语音）+ 角色形象（sales-chat/plugin-helper/coder/advisory-chat/harness-guide/timem-support/timem-project-assistant）",
   version: "0.3.0",
-  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, coderService, advisoryChatService, harnessGuideService, timemSupportService, timemProjectAssistantService],
+  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, coderService, codexChatService, advisoryChatService, harnessGuideService, timemSupportService, timemProjectAssistantService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
 };
@@ -200,6 +211,7 @@ export const plugin: LayerPlugin = {
       salesChatProvider,
       pluginHelperProvider,
       coderProvider,
+      codexChatProvider,
       advisoryChatProvider,
       harnessGuideProvider,
       timemSupportProvider,
