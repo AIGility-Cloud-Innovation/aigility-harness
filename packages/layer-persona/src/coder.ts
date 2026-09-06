@@ -109,93 +109,55 @@ const coderProvider: Provider<CoderRequest, CoderResponse> = {
     request: CoderRequest,
     ctx: SeamContext,
   ): Promise<Result<CoderResponse>> {
-    // 1. 角色形象: harness 编码助手 (咨询 / 编辑 双模式)
-    const agentName = "编码助手";
-    const mode = request.mode === "edit" ? "edit" : "consult";
+    // 1. 角色形象: 编码教练 (教学模式, 只教不改)
+    const agentName = "编码教练";
 
-    // 2. 咨询模式: 汇聚 harness 知识 (实时插件扫描) + LLM 解答, 不动任何代码
-    if (mode === "consult") {
-      const scan = await ctx.call(
-        { id: "@orchestration/plugin-install", versionRange: "^1.0.0" },
-        { user_input: request.user_input, session_id: request.session_id ?? ctx.sessionId },
-      );
-      const scanText = (scan as { ok: boolean; value?: { result?: string; available?: string[] } }).ok
-        ? [
-            "扫描结果: " + ((scan as { value?: { result?: string } }).value?.result ?? ""),
-            "可用插件/包: " + ((scan as { value?: { available?: string[] } }).value?.available ?? []).join(", "),
-          ].join("\n")
-        : "(扫描不可用)";
+    // 2. 汇聚教学素材: 实时扫描插件/包 + 可选讲解目标应用
+    const scan = await ctx.call(
+      { id: "@orchestration/plugin-install", versionRange: "^1.0.0" },
+      { user_input: request.user_input, session_id: request.session_id ?? ctx.sessionId },
+    );
+    const scanText = (scan as { ok: boolean; value?: { result?: string; available?: string[] } }).ok
+      ? [
+          "实时扫描: " + ((scan as { value?: { result?: string } }).value?.result ?? ""),
+          "可用插件/包: " + ((scan as { value?: { available?: string[] } }).value?.available ?? []).join(", "),
+        ].join("\n")
+      : "(扫描不可用)";
 
-      const llm = await ctx.call<LlmInferenceRequest, LlmInferenceResponse>(
-        llmInferenceRef,
-        {
-          model: process.env.LLM_MODEL ?? "glm-4.6",
-          messages: [
-            {
-              role: "system",
-              content: [
-                "你是「harness 编码助手」(咨询模式)。解答关于本 harness 架构、插件、编码任务的任何问题。",
-                "规则: 咨询模式下你不修改任何代码文件, 只给分析和建议; 涉及真实改动时, 引导用户切换到「编辑模式」。",
-                "以下是实时扫描到的本仓库插件信息, 回答时优先引用:",
-                scanText,
-              ].join("\n"),
-            },
-            ...(request.history?.length ? request.history.map((m) => ({ role: m.role, content: m.content })) : []),
-            { role: "user", content: request.user_input },
-          ],
-          temperature: 0.5,
-        },
-      ) as Result<LlmInferenceResponse>;
-      const text = llm.ok ? (llm.value?.text || "（空回复）") : `咨询不可用: ${llm.error}`;
-      return ok({
-        response: text,
-        agent_name: agentName,
-        mode: "consult",
-        session_id: ctx.sessionId,
-        trace_id: ctx.traceId,
-        ...(llm.ok ? {} : { degraded: true }),
-      });
-    }
+    // 3. 教学系统提示词
+    const teachPrompt = [
+      "你是「编码教练」, 教学模式: 只讲解, 绝不修改任何代码文件。",
+      "职责: 教用户理解本 harness 的架构与使用方法 —— 五层架构(底座/认知/感知/编排)、应用大厅、编码工作台、插件体系、以及各演示应用的实现思路。",
+      "用户问某个应用怎么实现/怎么用: 给出结构讲解与关键实现要点(可用伪代码/片段示意), 但不落盘。",
+      "用户想让 AI 真实改代码: 引导他去「网页应用生成器」或编码工作台的编辑模式。",
+      "回答基于以下实时扫描信息, 结论先行, 教学语气:",
+      scanText,
+    ].join("\n");
 
-    // 3. 编辑模式: 构建带角色知识的编码任务 (委托 L4 编码代理)
-    const task = {
-      prompt: `${CODER_SYSTEM_PROMPT}
-
-用户任务:
-${request.user_input}`,
-      ...(request.cwd ? { cwd: request.cwd } : {}),
-    };
-
-    // 4. 委托 L4 编码 Agent (请求级 driver: codex / zcode / claude, 默认 codex)
-    const driverRefs: Record<string, CapabilityRef> = {
-      zcode: { id: "@orchestration/zcode-agent", versionRange: "^1.0.0" },
-      claude: { id: "@orchestration/claude-agent", versionRange: "^1.0.0" },
-    };
-    const drv = request.driver ?? process.env.AGENT_DRIVER ?? "codex";
-    const result = await ctx.call(driverRefs[drv] ?? codexAgentRef, task);
-
-    // 4. 由同一角色形象反馈
-    if (!result.ok) {
-      return ok({
-        response: `编码任务未完成：${result.error}`,
-        agent_name: agentName,
-        session_id: ctx.sessionId,
-        trace_id: ctx.traceId,
-      });
-    }
-    const raw = result.value as { text?: string; plan?: string };
-    const response =
-      raw?.text && raw.text.length > 0
-        ? raw.text
-        : "编码任务已完成，但未返回可展示的文本结果。";
+    // 4. 委托认知层生成教学内容
+    const llm = await ctx.call<LlmInferenceRequest, LlmInferenceResponse>(
+      llmInferenceRef,
+      {
+        model: process.env.LLM_MODEL ?? "glm-4.6",
+        messages: [
+          { role: "system", content: teachPrompt },
+          ...(request.history?.length ? request.history.map((m) => ({ role: m.role, content: m.content })) : []),
+          { role: "user", content: request.user_input },
+        ],
+        temperature: 0.5,
+      },
+    ) as Result<LlmInferenceResponse>;
+    const text = llm.ok ? (llm.value?.text || "（空回复）") : `教学服务暂不可用: ${llm.error}`;
 
     return ok({
-      response,
-      ...(result.value ? { raw: result.value } : {}),
+      response: text,
       agent_name: agentName,
+      mode: "consult",
       session_id: ctx.sessionId,
       trace_id: ctx.traceId,
+      ...(llm.ok ? {} : { degraded: true }),
     });
+
   },
   async health(): Promise<HealthStatus> {
     return {

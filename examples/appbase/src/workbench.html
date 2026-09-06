@@ -41,11 +41,8 @@ main { flex:1; display:flex; flex-direction:column; max-width:980px; width:100%;
     <option value="@persona/codex-chat">🪶 网页应用生成器</option>
     <option value="@persona/coder">👨‍💻 编码助手</option>
   </select>
-  <label>模式</label>
-  <button id="modeConsult" onclick="setMode('consult')">💬 咨询</button>
-  <button id="modeEdit" onclick="setMode('edit')">✏ 编辑</button>
   <label>目标应用</label>
-  <select id="appSel"></select>
+  <select id="appSel" onchange="onAppChange()"></select>
   <label id="toolLabel">编码工具</label>
   <select id="toolSel"></select>
   <button onclick="clearHistory()">清空记录</button>
@@ -66,32 +63,42 @@ var roleSel = document.getElementById('roleSel');
 var appSel = document.getElementById('appSel');
 var toolSel = document.getElementById('toolSel');
 var chatHistory = [];
-var wbMode = localStorage.getItem('wb_mode') || 'consult';
+var NEW_APP = "__new__";
 
 function currentRoleName() {
   return roleSel.options[roleSel.selectedIndex] ? roleSel.options[roleSel.selectedIndex].text : '';
 }
+function isCoach() { return roleSel.value === '@persona/coder'; }
 function histKey() {
-  return 'wb_chat_' + roleSel.value + '_' + wbMode + '_' + (appSel.value||'-') + '_' + (toolSel.value||'-');
+  return 'wb_chat_' + roleSel.value + '_' + (appSel.value||'-');
+}
+function onAppChange() {
+  if (appSel.value === NEW_APP) createApp();
+  else { localStorage.setItem('wb_app', appSel.value); loadHistory(); }
+}
+function createApp() {
+  var name = prompt('新应用名称（中文或英文，不用带 .html）:');
+  if (!name) { appSel.value = appSel.options.length > 1 ? appSel.options[1].value : ''; loadHistory(); return; }
+  var file = name + '.html';
+  fetch('/app/hall/apps', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ name: file, content: '<!DOCTYPE html>\n<html lang="zh-CN"\n><head><meta charset="UTF-8"\n><title>' + name + '</title></head><body><h1>' + name + '</h1><p>placeholder</p></body></html>' }) })
+    .then(function(r){ return r.json(); }).then(function(d) {
+      if (d.error) { alert('创建失败: ' + d.error); loadApps(); return; }
+      localStorage.setItem('wb_app', file);
+      loadApps();
+      alert('应用「' + name + '」已创建，现在可以直接向生成器描述需求。');
+    });
 }
 
 // ── 模式 ──
-function setMode(m) {
-  wbMode = m;
-  localStorage.setItem('wb_mode', m);
-  renderMode();
-  loadHistory();
-}
 function renderMode() {
-  var c = document.getElementById('modeConsult'), e = document.getElementById('modeEdit');
-  c.className = wbMode === 'consult' ? 'on' : '';
-  e.className = wbMode === 'edit' ? 'on' : '';
-  var needTool = wbMode === 'edit';
-  toolSel.style.display = needTool ? '' : 'none';
-  document.getElementById('toolLabel').style.display = needTool ? '' : 'none';
-  document.getElementById('tip').textContent = wbMode === 'edit'
-    ? '💡 编辑模式：AI 会真实修改「目标应用」的代码文件（改动前自动备份到 .backups）。工具: ' + (toolSel.value || '未选择')
-    : '💡 咨询模式（默认）：解答 harness 架构 / 插件 / 编码问题，不修改任何文件。切到「✏ 编辑」才会真实改代码。';
+  var coach = isCoach();
+  // 编码教练: 教学模式, 无工具/无需目标应用
+  toolSel.parentElement && (document.getElementById('toolLabel').style.display = coach ? 'none' : '');
+  toolSel.style.display = coach ? 'none' : '';
+  document.getElementById('tip').textContent = coach
+    ? '💡 教学模式：编码教练只讲解架构与用法，不会修改任何代码。想让 AI 真实改代码请切到「网页应用生成器」。'
+    : '💡 编辑模式：AI 会真实修改「目标应用」的代码文件（改动前自动备份）。可选择「新建应用」从零开始。';
 }
 
 // ── 选择器 ──
@@ -129,8 +136,9 @@ function loadHistory() {
   box.innerHTML = '';
   chatHistory.forEach(function(m){ addMsg(m.role, m.content, true); });
   if (!chatHistory.length) {
-    addMsg('bot', currentRoleName() + '（' + (wbMode === 'edit' ? '编辑模式' : '咨询模式') + '）。' +
-      (wbMode === 'edit' ? '选择目标应用后描述改动。' : '有问题直接问，我不会动任何代码。'));
+    addMsg('bot', currentRoleName() + '。' + (isCoach()
+      ? '我可以讲解系统架构、插件体系和应用的实现思路。'
+      : '选择目标应用后，描述要做的改动。'));
   }
   box.scrollTop = 1e9;
 }
@@ -165,8 +173,8 @@ function sendChat() {
   var input = document.getElementById('chatInput');
   var text = input.value.trim();
   if (!text) return;
-  if (wbMode === 'edit' && !appSel.value) { alert('编辑模式需要先选择目标应用'); return; }
-  if (wbMode === 'edit' && !toolSel.value) { alert('当前电脑没有可用的编码工具'); return; }
+  if (!isCoach() && !appSel.value) { alert('请先选择目标应用（或新建一个）'); return; }
+  if (!isCoach() && !toolSel.value) { alert('当前电脑没有可用的编码工具'); return; }
   addMsg('user', text);
   input.value = '';
   var btn = document.getElementById('sendBtn');
@@ -181,10 +189,9 @@ function sendChat() {
       role: roleSel.value,
       message: message,
       history: hp,
-      session_id: 'wb-' + roleSel.value + '-' + wbMode + '-' + appSel.value + '-' + toolSel.value,
+      session_id: 'wb-' + roleSel.value + '-' + appSel.value + '-' + toolSel.value,
       driver: toolSel.value,
-      app: appSel.value,
-      mode: wbMode
+      app: appSel.value
     }) })
     .then(function(r){ return r.json(); }).then(function(d) {
       var box = document.getElementById('msgs');
@@ -202,13 +209,16 @@ function sendChat() {
 document.getElementById('chatInput').addEventListener('keydown', function(e){
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
 });
-[roleSel, appSel, toolSel].forEach(function(sel) {
+[appSel, toolSel].forEach(function(sel) {
   sel.addEventListener('change', function() {
     localStorage.setItem('wb_app', appSel.value);
     localStorage.setItem('wb_tool', toolSel.value);
-    renderMode();
     loadHistory();
   });
+});
+roleSel.addEventListener('change', function() {
+  renderMode();
+  loadHistory();
 });
 
 initRole();

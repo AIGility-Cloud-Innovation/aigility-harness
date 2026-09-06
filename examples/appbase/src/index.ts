@@ -275,6 +275,19 @@ async function hallAppsHandler(req: any, res: any): Promise<void> {
     return json(200, { apps });
   }
 
+  // 创建新应用 (空模板)
+  if (method === "POST" && path === "/app/hall/apps") {
+    let body = "";
+    for await (const c of req) body += c;
+    const parsed = JSON.parse(body || "{}");
+    const name = safeAppName(String(parsed.name ?? ""));
+    if (!name) return json(400, { error: "非法应用名 (需为 xxx.html)" });
+    const filePath = join(SANDBOX_ROOT, name);
+    if (existsSync(filePath)) return json(409, { error: "同名应用已存在" });
+    writeFileSync(filePath, String(parsed.content ?? ""));
+    return json(201, { ok: true, name });
+  }
+
   const fileMatch = path.match(/^\/app\/hall\/apps\/([^/]+)$/);
   if (fileMatch) {
     const name = safeAppName(decodeURIComponent(fileMatch[1]));
