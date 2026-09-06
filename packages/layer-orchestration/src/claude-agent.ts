@@ -25,6 +25,7 @@ import type {
   CapabilityRef,
 } from "@aigility-harness/core";
 import { spawn } from "node:child_process";
+import { backupHtmlFiles } from "./sandbox-backup.js";
 
 // ── 服务定义 ─────────────────────────────────────────────────────
 
@@ -93,6 +94,7 @@ const claudeAgentProvider: Provider<ClaudeAgentRequest, ClaudeAgentResponse> = {
       "acceptEdits",
     ];
 
+    backupHtmlFiles(request.cwd ?? process.cwd(), "claude");
     return new Promise<Result<ClaudeAgentResponse>>((resolve) => {
       const child = spawn("claude", args, {
         stdio: ["ignore", "pipe", "pipe"],

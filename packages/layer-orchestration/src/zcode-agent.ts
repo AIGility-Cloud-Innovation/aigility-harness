@@ -28,6 +28,7 @@ import type {
   CapabilityRef,
 } from "@aigility-harness/core";
 import { spawn } from "node:child_process";
+import { backupHtmlFiles } from "./sandbox-backup.js";
 
 // ── 服务定义 ─────────────────────────────────────────────────────
 
@@ -114,6 +115,7 @@ const zcodeAgentProvider: Provider<ZcodeAgentRequest, ZcodeAgentResponse> = {
       mode,
     ];
 
+    backupHtmlFiles(request.cwd ?? process.cwd(), "zcode");
     return new Promise<Result<ZcodeAgentResponse>>((resolve) => {
       const child = spawn(process.env.ZCODE_NODE_BIN ?? "node", args, {
         stdio: ["ignore", "pipe", "pipe"],

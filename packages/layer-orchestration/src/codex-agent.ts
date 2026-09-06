@@ -21,6 +21,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { backupHtmlFiles } from "./sandbox-backup.js";
 import { LayerId, PluginState, ok, err } from "@aigility-harness/core";
 import type {
   ServiceDefinition,
@@ -280,6 +281,7 @@ const codexAgentProviderImpl: Provider<
 
     const timeoutMs = request.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const bin = codexBin();
+    backupHtmlFiles(request.cwd ?? process.cwd(), "codex");
     const args = buildArgs(request);
 
     // ── 框架内闭环：先经认知层 litellmProvider 规划 ──
