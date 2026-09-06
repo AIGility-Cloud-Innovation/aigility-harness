@@ -102,7 +102,7 @@ async function main(): Promise<void> {
         } catch { return { ok: false, version: "" }; }
       };
       const codex = detect("codex", ["--version"], true);
-      const zcode = detect(process.env.ZCODE_NODE_BIN ?? "node", [process.env.ZCODE_CLI_PATH ?? "C:\Program Files\ZCode\resources\glm\zcode.cjs", "--version"]);
+      const zcode = detect(process.env.ZCODE_NODE_BIN ?? "node", [process.env.ZCODE_CLI_PATH ?? "C:/Program Files/ZCode/resources/glm/zcode.cjs", "--version"]);
       const claude = detect("claude", ["--version"], true);
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
       res.end(JSON.stringify({ tools: [
