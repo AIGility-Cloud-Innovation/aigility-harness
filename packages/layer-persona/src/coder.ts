@@ -13,13 +13,15 @@
  *   - 认知层供能: 由 http-ingress 的 dev 链路暴露的兼容网关统一供模型
  */
 
-import {
+import { llmInferenceRef,
   LayerId,
   CarrierKind,
   PluginState,
   ok,
 } from "@aigility-harness/core";
 import type {
+  LlmInferenceRequest,
+  LlmInferenceResponse,
   ServiceDefinition,
   Provider,
   SeamContext,
@@ -41,6 +43,10 @@ export interface CoderRequest {
   session_id?: string;
   /** 编码驱动 (codex / zcode / claude) */
   driver?: string;
+  /** 工作模式: consult=咨询(默认,不改代码) / edit=编辑(真实修改代码) */
+  mode?: 'consult' | 'edit';
+  /** 会话历史 */
+  history?: Array<{ role: 'user' | 'assistant'; content: string }>;
 }
 
 export interface CoderResponse {
@@ -54,6 +60,10 @@ export interface CoderResponse {
   session_id: string;
   /** 追踪 ID */
   trace_id: string;
+  /** 本次工作模式 */
+  mode?: 'consult' | 'edit';
+  /** true = 降级回复 */
+  degraded?: boolean;
 }
 
 export const coderService: ServiceDefinition<CoderRequest, CoderResponse> = {
@@ -99,16 +109,64 @@ const coderProvider: Provider<CoderRequest, CoderResponse> = {
     request: CoderRequest,
     ctx: SeamContext,
   ): Promise<Result<CoderResponse>> {
-    // 1. 角色形象: 编码助手
+    // 1. 角色形象: harness 编码助手 (咨询 / 编辑 双模式)
     const agentName = "编码助手";
+    const mode = request.mode === "edit" ? "edit" : "consult";
 
-    // 2. 构建带角色知识的编码任务 (委托 L4 codex-agent)
+    // 2. 咨询模式: 汇聚 harness 知识 (实时插件扫描) + LLM 解答, 不动任何代码
+    if (mode === "consult") {
+      const scan = await ctx.call(
+        { id: "@orchestration/plugin-install", versionRange: "^1.0.0" },
+        { user_input: request.user_input, session_id: request.session_id ?? ctx.sessionId },
+      );
+      const scanText = (scan as { ok: boolean; value?: { result?: string; available?: string[] } }).ok
+        ? [
+            "扫描结果: " + ((scan as { value?: { result?: string } }).value?.result ?? ""),
+            "可用插件/包: " + ((scan as { value?: { available?: string[] } }).value?.available ?? []).join(", "),
+          ].join("\n")
+        : "(扫描不可用)";
+
+      const llm = await ctx.call<LlmInferenceRequest, LlmInferenceResponse>(
+        llmInferenceRef,
+        {
+          model: process.env.LLM_MODEL ?? "glm-4.6",
+          messages: [
+            {
+              role: "system",
+              content: [
+                "你是「harness 编码助手」(咨询模式)。解答关于本 harness 架构、插件、编码任务的任何问题。",
+                "规则: 咨询模式下你不修改任何代码文件, 只给分析和建议; 涉及真实改动时, 引导用户切换到「编辑模式」。",
+                "以下是实时扫描到的本仓库插件信息, 回答时优先引用:",
+                scanText,
+              ].join("\n"),
+            },
+            ...(request.history?.length ? request.history.map((m) => ({ role: m.role, content: m.content })) : []),
+            { role: "user", content: request.user_input },
+          ],
+          temperature: 0.5,
+        },
+      ) as Result<LlmInferenceResponse>;
+      const text = llm.ok ? (llm.value?.text || "（空回复）") : `咨询不可用: ${llm.error}`;
+      return ok({
+        response: text,
+        agent_name: agentName,
+        mode: "consult",
+        session_id: ctx.sessionId,
+        trace_id: ctx.traceId,
+        ...(llm.ok ? {} : { degraded: true }),
+      });
+    }
+
+    // 3. 编辑模式: 构建带角色知识的编码任务 (委托 L4 编码代理)
     const task = {
-      prompt: `${CODER_SYSTEM_PROMPT}\n\n用户任务:\n${request.user_input}`,
+      prompt: `${CODER_SYSTEM_PROMPT}
+
+用户任务:
+${request.user_input}`,
       ...(request.cwd ? { cwd: request.cwd } : {}),
     };
 
-    // 3. 委托 L4 编码 Agent (请求级 driver: codex / zcode / claude, 默认 codex)
+    // 4. 委托 L4 编码 Agent (请求级 driver: codex / zcode / claude, 默认 codex)
     const driverRefs: Record<string, CapabilityRef> = {
       zcode: { id: "@orchestration/zcode-agent", versionRange: "^1.0.0" },
       claude: { id: "@orchestration/claude-agent", versionRange: "^1.0.0" },

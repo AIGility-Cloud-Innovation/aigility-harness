@@ -6,45 +6,53 @@
 <title>AppBase · 编码工作台</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
-:root { --ink:#1e293b; --ink2:#64748b; --line:#e8ecf4; --accent:#4f46e5; --soft:#eef0fe; --rose:#f43f5e; --rose-soft:#fde9ed; }
+:root { --ink:#1e293b; --ink2:#64748b; --line:#e8ecf4; --accent:#4f46e5; --soft:#eef0fe; }
 body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; background:#f4f6fb; color:var(--ink); height:100vh; display:flex; flex-direction:column; -webkit-font-smoothing:antialiased; }
-header { background:linear-gradient(120deg,#312e81,#4f46e5 55%,#7c3aed); color:#fff; padding:14px 22px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
-header h1 { font-size:16px; font-weight:700; margin-right:6px; }
+header { background:linear-gradient(120deg,#312e81,#4f46e5 55%,#7c3aed); color:#fff; padding:14px 22px; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+header h1 { font-size:16px; font-weight:700; margin-right:4px; }
 header label { font-size:12px; opacity:.85; }
 header select, header button { font-family:inherit; font-size:12.5px; border:none; border-radius:8px; padding:7px 10px; cursor:pointer; }
 header select { background:rgba(255,255,255,.16); color:#fff; outline:none; }
 header select option { color:var(--ink); }
 header button { background:rgba(255,255,255,.2); color:#fff; font-weight:600; }
 header button:hover { background:rgba(255,255,255,.32); }
+header button.on { background:#fff; color:var(--accent); }
 .back { text-decoration:none; color:#fff; font-size:12.5px; opacity:.85; }
 .back:hover { opacity:1; }
 main { flex:1; display:flex; flex-direction:column; max-width:980px; width:100%; margin:0 auto; padding:16px 20px 0; overflow:hidden; }
+.tip { font-size:11.5px; color:var(--ink2); padding:0 2px 8px; }
 .msgs { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding:6px 2px 14px; }
 .msg { max-width:80%; padding:10px 14px; border-radius:12px; font-size:13.5px; line-height:1.65; white-space:pre-wrap; word-break:break-word; box-shadow:0 1px 2px rgba(15,23,42,.05); }
 .msg.user { align-self:flex-end; background:var(--accent); color:#fff; }
 .msg.bot { align-self:flex-start; background:#fff; border:1px solid var(--line); }
-.msg.sys { align-self:center; background:transparent; color:var(--ink2); font-size:12px; }
 .inputbar { display:flex; gap:10px; padding:14px 0 18px; }
 .inputbar textarea { flex:1; border:1.5px solid var(--line); border-radius:12px; padding:11px 14px; font-family:inherit; font-size:13.5px; resize:none; height:64px; outline:none; }
 .inputbar textarea:focus { border-color:var(--accent); box-shadow:0 0 0 3.5px rgba(99,102,241,.12); }
 .send { border:none; background:var(--accent); color:#fff; border-radius:12px; padding:0 24px; font-weight:700; cursor:pointer; font-family:inherit; font-size:13.5px; }
 .send:disabled { opacity:.55; cursor:wait; }
-.tip { font-size:11.5px; color:var(--ink2); padding:0 2px 8px; }
-.hist-btn { background:rgba(255,255,255,.2); }
 </style>
 </head>
 <body>
 <header>
   <a class="back" href="/hall">← 大厅</a>
   <h1>🛠 编码工作台</h1>
-  <label>角色</label><select id="roleSel"></select>
-  <label>目标应用</label><select id="appSel"></select>
-  <label>编码工具</label><select id="toolSel"></select>
-  <button class="hist-btn" onclick="clearHistory()">清空记录</button>
+  <label>角色</label>
+  <select id="roleSel">
+    <option value="@persona/codex-chat">🪶 网页应用生成器</option>
+    <option value="@persona/coder">👨‍💻 编码助手</option>
+  </select>
+  <label>模式</label>
+  <button id="modeConsult" onclick="setMode('consult')">💬 咨询</button>
+  <button id="modeEdit" onclick="setMode('edit')">✏ 编辑</button>
+  <label>目标应用</label>
+  <select id="appSel"></select>
+  <label id="toolLabel">编码工具</label>
+  <select id="toolSel"></select>
+  <button onclick="clearHistory()">清空记录</button>
   <button onclick="openTarget()">打开应用</button>
 </header>
 <main>
-  <div class="tip">💡 选择目标应用与编码工具后描述改动；AI 会直接修改该应用文件。聊天记录按「角色 + 应用 + 工具」自动保存。</div>
+  <div class="tip" id="tip"></div>
   <div class="msgs" id="msgs"></div>
   <div class="inputbar">
     <textarea id="chatInput" placeholder="描述要做的改动，如：把标题颜色改成深蓝，并加一个重置按钮"></textarea>
@@ -53,20 +61,42 @@ main { flex:1; display:flex; flex-direction:column; max-width:980px; width:100%;
 </main>
 
 <script>
-var ROLES = [
-  { id:'@persona/codex-chat', icon:'🪶', name:'网页应用生成器' },
-  { id:'@persona/coder', icon:'👨‍💻', name:'编码助手' }
-];
 var qs = new URLSearchParams(location.search);
 var roleSel = document.getElementById('roleSel');
 var appSel = document.getElementById('appSel');
 var toolSel = document.getElementById('toolSel');
 var chatHistory = [];
+var wbMode = localStorage.getItem('wb_mode') || 'consult';
 
-// ── 初始化选择器 ──
+function currentRoleName() {
+  return roleSel.options[roleSel.selectedIndex] ? roleSel.options[roleSel.selectedIndex].text : '';
+}
+function histKey() {
+  return 'wb_chat_' + roleSel.value + '_' + wbMode + '_' + (appSel.value||'-') + '_' + (toolSel.value||'-');
+}
+
+// ── 模式 ──
+function setMode(m) {
+  wbMode = m;
+  localStorage.setItem('wb_mode', m);
+  renderMode();
+  loadHistory();
+}
+function renderMode() {
+  var c = document.getElementById('modeConsult'), e = document.getElementById('modeEdit');
+  c.className = wbMode === 'consult' ? 'on' : '';
+  e.className = wbMode === 'edit' ? 'on' : '';
+  var needTool = wbMode === 'edit';
+  toolSel.style.display = needTool ? '' : 'none';
+  document.getElementById('toolLabel').style.display = needTool ? '' : 'none';
+  document.getElementById('tip').textContent = wbMode === 'edit'
+    ? '💡 编辑模式：AI 会真实修改「目标应用」的代码文件（改动前自动备份到 .backups）。工具: ' + (toolSel.value || '未选择')
+    : '💡 咨询模式（默认）：解答 harness 架构 / 插件 / 编码问题，不修改任何文件。切到「✏ 编辑」才会真实改代码。';
+}
+
+// ── 选择器 ──
 function initRole() {
-  var wanted = qs.get('role') || ROLES[0].id;
-  roleSel.innerHTML = ROLES.map(function(r){ return '<option value="'+r.id+'">'+r.icon+' '+r.name+'</option>'; }).join('');
+  var wanted = qs.get('role') || '@persona/codex-chat';
   roleSel.value = wanted;
   if (roleSel.selectedIndex < 0) roleSel.selectedIndex = 0;
 }
@@ -89,24 +119,18 @@ function loadTools() {
     if (wanted && avail.some(function(t){ return t.id === wanted; })) toolSel.value = wanted;
   });
 }
-function histKey() {
-  return 'wb_chat_' + roleSel.value + '_' + (appSel.value||'-') + '_' + (toolSel.value||'-');
-}
-function currentRole() {
-  return ROLES.find(function(r){ return r.id === roleSel.value; }) || ROLES[0];
-}
 
-// ── 聊天记录持久化 ──
+// ── 聊天记录持久化 (按 角色+模式+应用+工具) ──
 function loadHistory() {
   var raw = localStorage.getItem(histKey());
-  var box = document.getElementById('msgs');
-  box.innerHTML = '';
   chatHistory = [];
   try { chatHistory = JSON.parse(raw || '[]') || []; } catch (e) { chatHistory = []; }
+  var box = document.getElementById('msgs');
+  box.innerHTML = '';
   chatHistory.forEach(function(m){ addMsg(m.role, m.content, true); });
   if (!chatHistory.length) {
-    var r = currentRole();
-    addMsg('bot', '我是' + r.name + '。选择好目标应用和编码工具后，直接描述要做的改动。');
+    addMsg('bot', currentRoleName() + '（' + (wbMode === 'edit' ? '编辑模式' : '咨询模式') + '）。' +
+      (wbMode === 'edit' ? '选择目标应用后描述改动。' : '有问题直接问，我不会动任何代码。'));
   }
   box.scrollTop = 1e9;
 }
@@ -114,7 +138,7 @@ function saveHistory() {
   localStorage.setItem(histKey(), JSON.stringify(chatHistory.slice(-60)));
 }
 function clearHistory() {
-  if (!confirm('清空当前「角色 + 应用 + 工具」组合的聊天记录？')) return;
+  if (!confirm('清空当前组合的聊天记录？')) return;
   chatHistory = [];
   localStorage.removeItem(histKey());
   loadHistory();
@@ -131,28 +155,36 @@ function addMsg(role, text, skipSave) {
     saveHistory();
   }
 }
+function openTarget() {
+  if (!appSel.value) { alert('请先选择目标应用'); return; }
+  window.open('/apps/' + encodeURIComponent(appSel.value), '_blank');
+}
 
 // ── 发送 ──
 function sendChat() {
   var input = document.getElementById('chatInput');
   var text = input.value.trim();
   if (!text) return;
-  if (!appSel.value) { alert('请先选择目标应用'); return; }
-  if (!toolSel.value) { alert('当前电脑没有可用的编码工具'); return; }
+  if (wbMode === 'edit' && !appSel.value) { alert('编辑模式需要先选择目标应用'); return; }
+  if (wbMode === 'edit' && !toolSel.value) { alert('当前电脑没有可用的编码工具'); return; }
   addMsg('user', text);
   input.value = '';
   var btn = document.getElementById('sendBtn');
   btn.disabled = true;
   var hp = chatHistory.slice(-10);
-  addMsg('bot', '工作中…（' + toolSel.options[toolSel.selectedIndex].text + '，可能需要 1-3 分钟）');
+  addMsg('bot', wbMode === 'edit'
+    ? '工作中…（' + (toolSel.options[toolSel.selectedIndex]||{text:''}).text + '，可能需要 1-3 分钟）'
+    : '思考中…');
+  var message = wbMode === 'edit' ? ('目标应用文件: ' + appSel.value + '\n\n' + text) : text;
   fetch('/hall/chat', { method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({
       role: roleSel.value,
-      message: '目标应用文件: ' + appSel.value + '\n\n' + text,
+      message: message,
       history: hp,
-      session_id: 'wb-' + roleSel.value + '-' + appSel.value + '-' + toolSel.value,
+      session_id: 'wb-' + roleSel.value + '-' + wbMode + '-' + appSel.value + '-' + toolSel.value,
       driver: toolSel.value,
-      app: appSel.value
+      app: appSel.value,
+      mode: wbMode
     }) })
     .then(function(r){ return r.json(); }).then(function(d) {
       var box = document.getElementById('msgs');
@@ -167,10 +199,6 @@ function sendChat() {
     })
     .finally(function(){ btn.disabled = false; input.focus(); });
 }
-function openTarget() {
-  if (!appSel.value) { alert('请先选择目标应用'); return; }
-  window.open('/apps/' + encodeURIComponent(appSel.value), '_blank');
-}
 document.getElementById('chatInput').addEventListener('keydown', function(e){
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
 });
@@ -178,6 +206,7 @@ document.getElementById('chatInput').addEventListener('keydown', function(e){
   sel.addEventListener('change', function() {
     localStorage.setItem('wb_app', appSel.value);
     localStorage.setItem('wb_tool', toolSel.value);
+    renderMode();
     loadHistory();
   });
 });
@@ -185,6 +214,7 @@ document.getElementById('chatInput').addEventListener('keydown', function(e){
 initRole();
 loadApps();
 loadTools();
+renderMode();
 loadHistory();
 </script>
 </body>

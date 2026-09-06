@@ -56,7 +56,7 @@ export const DEFAULT_ZCODE_TIMEOUT_MS = 600_000; // 10 min
 function zcodeCliPath(): string {
   return (
     process.env.ZCODE_CLI_PATH ??
-    "C:\\Program Files\\ZCode\\resources\\glm\\zcode.cjs"
+    "C:/Program Files/ZCode/resources/glm/zcode.cjs"
   );
 }
 
