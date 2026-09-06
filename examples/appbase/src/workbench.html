@@ -110,7 +110,7 @@ function initRole() {
 function loadApps() {
   fetch('/app/hall/apps').then(function(r){ return r.json(); }).then(function(d) {
     var wanted = qs.get('app') || localStorage.getItem('wb_app');
-    appSel.innerHTML = '<option value="">-- 选择应用 --</option>' + (d.apps||[]).map(function(a){
+    appSel.innerHTML = '<option value="">-- 选择应用 --</option><option value="__new__">➕ 新建应用</option>' + (d.apps||[]).map(function(a){
       return '<option value="'+a.name+'">'+a.name.replace('.html','')+'</option>';
     }).join('');
     if (wanted && (d.apps||[]).some(function(a){ return a.name === wanted; })) appSel.value = wanted;
