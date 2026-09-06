@@ -125,7 +125,10 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
 <!-- AI 对话抽屉 -->
 <div class="drawer" id="chatDrawer">
   <div class="panel chatpanel" style="display:flex;flex-direction:column">
-    <div class="phead"><b id="chatTitle">对话</b><button class="btn-x" onclick="closeChat()">✕</button></div>
+    <div class="phead"><b id="chatTitle">对话</b>
+      <span style="flex:1"></span>
+      <button class="btn-x" onclick="clearChatHistory()" title="清空当前角色聊天记录">🗑</button>
+      <button class="btn-x" onclick="closeChat()">✕</button></div>
     <div class="msgs" id="msgs"></div>
     <div class="inputbar">
       <textarea id="chatInput" placeholder="输入内容…"></textarea>
@@ -325,20 +328,38 @@ function openWorkbench(i) {
 }
 function openChat(i) {
   currentRole = chatRoles[i];
+  chatStoreKey = 'hall_chat_' + currentRole.id;
   document.getElementById('chatTitle').textContent = currentRole.icon + ' ' + currentRole.name;
   document.getElementById('chatDrawer').classList.add('show');
   document.getElementById('msgs').innerHTML = '';
   chatHistory.length = 0;
+  try { chatHistory = JSON.parse(localStorage.getItem(chatStoreKey) || '[]') || []; } catch (e) { chatHistory = []; }
+  if (chatHistory.length) {
+    chatHistory.forEach(function(m) { addMsg(m.role, m.content, true); });
+  } else {
+    addMsg('bot', currentRole.greet);
+  }
+}
+function clearChatHistory() {
+  if (!currentRole) return;
+  if (!confirm('清空「' + currentRole.name + '」的聊天记录？')) return;
+  chatHistory.length = 0;
+  localStorage.removeItem(chatStoreKey);
+  document.getElementById('msgs').innerHTML = '';
   addMsg('bot', currentRole.greet);
 }
 function closeChat() { document.getElementById('chatDrawer').classList.remove('show'); loadApps(); }
-function addMsg(role, text) {
+function addMsg(role, text, skipSave) {
   var el = document.createElement('div');
   el.className = 'msg ' + role;
   el.textContent = text;
   var box = document.getElementById('msgs');
   box.appendChild(el);
   box.scrollTop = 1e9;
+  if (!skipSave && currentRole && (role === 'user' || role === 'bot')) {
+    chatHistory.push({ role: role, content: text });
+    try { localStorage.setItem(chatStoreKey, JSON.stringify(chatHistory.slice(-60))); } catch (e) {}
+  }
 }
 function sendChat() {
   var input = document.getElementById('chatInput');
