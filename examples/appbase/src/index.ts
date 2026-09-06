@@ -182,7 +182,7 @@ async function main(): Promise<void> {
     server,  // 注入统一 server
     roles: [
       { id: "@persona/codex-chat", name: `网页应用生成器 (${process.env.AGENT_DRIVER === "zcode" ? "ZCode" : "Codex"} 驱动)`, emoji: "🪶" },
-      { id: "@persona/sales-chat", name: "销售客服", emoji: "💼" },
+      { id: "@persona/sales-chat", name: "AppBase 客服", emoji: "🎧" },
       { id: "@persona/plugin-helper", name: "插件助手", emoji: "🧩" },
       { id: "@persona/coder", name: "编码助手", emoji: "👨💻" },
     ],

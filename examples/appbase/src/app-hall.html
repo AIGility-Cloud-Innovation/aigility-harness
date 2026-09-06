@@ -145,7 +145,7 @@ function loadApps() {
   fetch('/app/hall/apps').then(function(r){ return r.json(); }).then(function(d) {
     chatRoles = [
       { id:'@persona/codex-chat', icon:'🪶', name:'网页应用生成器', ds:'动作：描述需求，生成 HTML 应用放进大厅', gen:true, greet:'描述你想要的网页应用，我会生成单文件 HTML 并放入大厅。例如：做一个班级值日表，可以按星期切换。' },
-      { id:'@persona/sales-chat', icon:'💼', name:'销售客服', ds:'聊天：产品咨询、答疑互动', greet:'你好，我是销售客服。想了解我们的产品，或有什么问题，直接说就行。' },
+      { id:'@persona/sales-chat', icon:'🎧', name:'AppBase 客服', ds:'聊天：解答 AppBase 系统的一切使用问题', greet:'你好，我是 AppBase 客服。关于这套系统的任何问题——功能、配置、常见故障——直接问。' },
       { id:'@persona/plugin-helper', icon:'🧩', name:'插件助手', ds:'动作：插件安装扫描与指引', greet:'你好，我是插件助手。告诉我你想装的插件，我来帮你扫描和指引。' },
       { id:'@persona/coder', icon:'👨‍💻', name:'编码助手', ds:'动作：写代码 / 改代码 / 跑任务', gen:true, greet:'你好，我是编码助手。把编码任务交给我，我直接在工作目录里干活。' }
     ];

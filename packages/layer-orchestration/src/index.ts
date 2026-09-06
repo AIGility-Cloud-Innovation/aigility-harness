@@ -130,6 +130,8 @@ export interface WorkflowEngineRequest {
   customer_id?: string;
   session_id?: string;
   agent_name?: string;
+  /** 角色专属系统提示词 (persona 注入) */
+  system_prompt?: string;
   /** 会话历史 (来自调用方/前端; 未提供时用服务端 session 记忆兜底) */
   history?: Array<{ role: "user" | "assistant"; content: string }>;
 }
@@ -189,11 +191,13 @@ const workflowEngineProvider: Provider<
       {
         role: "system",
         content:
+          request.system_prompt ||
           `你是「${request.agent_name ?? "智能助理"}」。请用简体中文简洁、专业地回复用户。`,
       },
       ...history.map((m) => ({ role: m.role, content: m.content })),
       { role: "user" as const, content: request.user_input },
     ];
+    console.log('[workflow-engine] system_prompt len:', request.system_prompt?.length ?? 0, '| agent:', request.agent_name);
     let degraded = false;
     let replyText = "";
     try {
