@@ -343,9 +343,14 @@ const codexAgentProviderImpl: Provider<
     let stderr = "";
 
     return new Promise<Result<CodexAgentResponse>>((resolve) => {
-      const child = spawn(bin, args, {
+      // Windows: codex 是 .cmd/.ps1 包装, Node 禁止无 shell 直接 spawn (.bat/.cmd),
+      // 必须走 shell; 此时参数按原样拼接, 含空格的参数需自行加引号。
+      const useShell = process.platform === "win32";
+      const spawnArgs = useShell ? args.map((a) => (a.includes(" ") ? `"${a}"` : a)) : args;
+      const child = spawn(bin, spawnArgs, {
         stdio: ["pipe", "pipe", "pipe"],
         env: { ...process.env },
+        shell: useShell,
       });
 
       let resolved = false;
@@ -450,6 +455,7 @@ const codexAgentProviderImpl: Provider<
       const result = spawnSync(bin, ["--version"], {
         timeout: 5000,
         stdio: "pipe",
+        shell: process.platform === "win32",
       });
       const healthy = result.status === 0;
       return {

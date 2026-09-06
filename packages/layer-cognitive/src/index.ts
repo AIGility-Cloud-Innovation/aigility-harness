@@ -122,6 +122,43 @@ const fileCfg = readFileConfig();
 const LITELLM_URL = process.env.LITELLM_URL ?? fileCfg.url ?? DEFAULT_LITELLM_URL;
 const LITELLM_KEY = process.env.LITELLM_KEY ?? fileCfg.key ?? DEFAULT_LITELLM_KEY;
 
+// ── LLM 端点解析 ─────────────────────────────────────────────────
+// 内部调用不经过任何 HTTP 网关：由 LLM_PROVIDER 选择认知层直连的供应商
+// 适配器（进程内决策，出站仅访问模型 API 本身）。
+//   - litellm (默认): OpenAI 兼容网关 → {LITELLM_URL}/v1/chat/completions
+//   - bigmodel: 智谱开放平台直连 → {BASE}/chat/completions
+// LLM_THINKING=disabled 可关闭 glm 深度思考（省 reasoning token）。
+
+interface LlmEndpoint {
+  name: string;
+  completionsUrl: string;
+  key: string;
+  thinking?: "enabled" | "disabled";
+}
+
+function resolveEndpoint(): LlmEndpoint {
+  const provider = process.env.LLM_PROVIDER ?? "litellm";
+  const thinking =
+    process.env.LLM_THINKING === "disabled" || process.env.LLM_THINKING === "enabled"
+      ? (process.env.LLM_THINKING as "enabled" | "disabled")
+      : undefined;
+  if (provider === "bigmodel") {
+    const base = process.env.BIGMODEL_BASE_URL ?? "https://open.bigmodel.cn/api/paas/v4";
+    return {
+      name: "bigmodel",
+      completionsUrl: `${base}/chat/completions`,
+      key: process.env.BIGMODEL_API_KEY ?? process.env.LITELLM_KEY ?? "",
+      thinking,
+    };
+  }
+  return {
+    name: "litellm",
+    completionsUrl: `${LITELLM_URL}/v1/chat/completions`,
+    key: LITELLM_KEY,
+    thinking,
+  };
+}
+
 const litellmProvider: Provider<LlmInferenceRequest, LlmInferenceResponse> = {
   service: llmInferenceService,
   name: "cognitive-llm-inference-litellm",
@@ -145,6 +182,8 @@ const litellmProvider: Provider<LlmInferenceRequest, LlmInferenceResponse> = {
     ] as const) {
       if (request[k] !== undefined) payload[k] = request[k] as unknown;
     }
+    const endpoint = resolveEndpoint();
+    if (endpoint.thinking) payload["thinking"] = { type: endpoint.thinking };
     const body = JSON.stringify(payload);
 
     ctx.emit({
@@ -156,22 +195,22 @@ const litellmProvider: Provider<LlmInferenceRequest, LlmInferenceResponse> = {
 
     let resp: Response;
     try {
-      resp = await fetch(`${LITELLM_URL}/v1/chat/completions`, {
+      resp = await fetch(endpoint.completionsUrl, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${LITELLM_KEY}`,
+          Authorization: `Bearer ${endpoint.key}`,
           "Content-Type": "application/json",
         },
         body,
         signal: AbortSignal.timeout(120_000),
       });
     } catch (e) {
-      return err(`LiteLLM fetch failed: ${String(e)}`);
+      return err(`LLM(${endpoint.name}) fetch failed: ${String(e)}`);
     }
 
     if (!resp.ok) {
       const errText = await resp.text().catch(() => "(body unreadable)");
-      return err(`LiteLLM HTTP ${resp.status}: ${errText}`);
+      return err(`LLM(${endpoint.name}) HTTP ${resp.status}: ${errText}`);
     }
 
     const raw = (await resp.json()) as {
@@ -200,6 +239,15 @@ const litellmProvider: Provider<LlmInferenceRequest, LlmInferenceResponse> = {
     });
   },
   async health(): Promise<HealthStatus> {
+    const endpoint = resolveEndpoint();
+    if (endpoint.name !== "litellm") {
+      // 直连供应商无统一 health 端点, 以"已配置"为健康判据
+      return {
+        healthy: Boolean(endpoint.key),
+        detail: `${endpoint.name} endpoint configured${endpoint.key ? "" : " (缺少 API Key)"}`,
+        checkedAt: new Date().toISOString(),
+      };
+    }
     try {
       const resp = await fetch(`${LITELLM_URL}/health/liveliness`, {
         signal: AbortSignal.timeout(5_000),

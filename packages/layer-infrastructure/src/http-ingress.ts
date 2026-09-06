@@ -55,6 +55,14 @@ export interface HttpIngressRequest {
   perceptionId?: string;
   /** 能力版本范围 */
   perceptionVersion?: string;
+  /** Bearer 鉴权: 设置后 POST 路由要求 Authorization: Bearer <token> (GET UI 不受限制) */
+  bearerToken?: string;
+  /** 动态 token 校验: 提供 MASTER key + 校验函数时, master 或校验通过均可放行 */
+  tokenVerifier?: (token: string) => Promise<boolean>;
+  /** LLM 用量上报地址: 每次 dev 链路 LLM 调用成功后 fire-and-forget POST */
+  usageReportUrl?: string;
+  /** GET /v1/models 透传的上游 (base url + key), 未配置则返回 501 */
+  modelsUpstream?: { url: string; key: string };
 }
 
 export interface HttpIngressResponse {
@@ -169,6 +177,10 @@ const httpIngressProvider: Provider<HttpIngressRequest, HttpIngressResponse> = {
     const agentRoutes = request.agentRoutes ?? DEFAULT_AGENT_ROUTES;
     const perceptionId = request.perceptionId ?? "@persona/sales-chat";
     const perceptionVersion = request.perceptionVersion ?? "^1.0.0";
+    const bearerToken = request.bearerToken;
+    const tokenVerifier = request.tokenVerifier;
+    const usageReportUrl = request.usageReportUrl;
+    const modelsUpstream = request.modelsUpstream;
 
     if (server) {
       server.close();
@@ -177,6 +189,18 @@ const httpIngressProvider: Provider<HttpIngressRequest, HttpIngressResponse> = {
     server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
       const path = (req.url ?? "").split("?")[0];
 
+      // CORS: 允许生成的网页应用 (不同端口/源) 从浏览器直接调用网关
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+      res.setHeader("Access-Control-Max-Age", "86400");
+
+      if (req.method === "OPTIONS") {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+
       // 最小 Web UI: GET / 与 GET /ui 返回内嵌单文件页面
       if (req.method === "GET" && (path === "/" || path === "/ui")) {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -184,10 +208,48 @@ const httpIngressProvider: Provider<HttpIngressRequest, HttpIngressResponse> = {
         return;
       }
 
+      // 模型列表透传: GET /v1/models → {modelsUpstream.url}/models
+      if (req.method === "GET" && path === "/v1/models") {
+        if (!modelsUpstream) {
+          res.writeHead(501, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "models upstream not configured" }));
+          return;
+        }
+        try {
+          const upstream = await fetch(modelsUpstream.url.replace(/\/$/, "") + "/models", {
+            headers: { Authorization: "Bearer " + modelsUpstream.key },
+            signal: AbortSignal.timeout(20_000),
+          });
+          const text = await upstream.text();
+          res.writeHead(upstream.status, { "Content-Type": "application/json" });
+          res.end(text);
+        } catch (e) {
+          res.writeHead(502, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "models fetch failed: " + String(e) }));
+        }
+        return;
+      }
+
       if (req.method !== "POST") {
         res.writeHead(405, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Method not allowed", hint: "GET / 或 /ui 打开浏览器界面" }));
         return;
+      }
+
+      let callerKey = "";
+      if (bearerToken) {
+        const auth = req.headers.authorization ?? "";
+        callerKey = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+        const isMaster = callerKey === bearerToken;
+        let verified = isMaster;
+        if (!verified && tokenVerifier && callerKey) {
+          try { verified = await tokenVerifier(callerKey); } catch { verified = false; }
+        }
+        if (!verified) {
+          res.writeHead(401, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "未授权: 需要 Authorization: Bearer <token>" }));
+          return;
+        }
       }
 
       const route = routeRequest(req.url, devPaths, agentPaths);
@@ -240,6 +302,26 @@ const httpIngressProvider: Provider<HttpIngressRequest, HttpIngressResponse> = {
             },
           );
 
+
+          // LLM 用量上报 (fire-and-forget): 所有协议/流式与否均按 callerKey 归集
+          if (usageReportUrl && callResult.ok) {
+            const v = callResult.value as
+              | { protocol?: string; response?: { model?: string; usage?: Record<string, unknown>; message?: { content?: string | null } } }
+              | ChatLikeShape;
+            const resp = (v as { response?: { model?: string; usage?: Record<string, unknown> } }).response;
+            const usage = resp?.usage ?? (v as { usage?: Record<string, unknown> }).usage;
+            const model = resp?.model ?? String(payload["model"] ?? "unknown");
+            if (usage) {
+              fetch(usageReportUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.APPBASE_GATEWAY_KEY ?? ""}` },
+                body: JSON.stringify({ key: callerKey, model, usage }),
+              })
+                .then(r => { if (!r.ok) console.error("[usage-report] HTTP", r.status); })
+                .catch(e => console.error("[usage-report] failed:", String(e)));
+            }
+          }
+
           if (wantStream) {
             writeSseHeaders(res);
             if (!callResult.ok) {
@@ -256,19 +338,15 @@ const httpIngressProvider: Provider<HttpIngressRequest, HttpIngressResponse> = {
                 id?: string;
                 created_at?: number;
                 model?: string;
-                output?: Array<{
-                  content?: Array<{ type?: string; text?: string }>;
-                }>;
+                output?: Array<Record<string, unknown>>;
                 usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
               };
-              const content =
-                r.output?.[0]?.content?.map((c) => c.text ?? "").join("") ?? "";
               const model = r.model ?? String(payload["model"] ?? "unknown");
               const frames = encodeResponsesStream({
                 responseId: r.id ?? `resp_${randomUUID().replace(/-/g, "").slice(0, 24)}`,
                 model,
                 created: r.created_at,
-                content,
+                output: r.output ?? [],
                 usage: r.usage
                   ? {
                       input_tokens: r.usage.input_tokens ?? 0,
@@ -293,6 +371,7 @@ const httpIngressProvider: Provider<HttpIngressRequest, HttpIngressResponse> = {
               id: `chatcmpl-${randomUUID().replace(/-/g, "").slice(0, 24)}`,
               model,
               content: String(text),
+              toolCalls: (chatRes.message as { tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }> } | undefined)?.tool_calls,
               finishReason: chatRes.finish_reason ?? "stop",
               usage: chatRes.usage ?? {
                 prompt_tokens: 0,

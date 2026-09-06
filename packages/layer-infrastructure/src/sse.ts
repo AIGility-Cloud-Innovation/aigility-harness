@@ -96,10 +96,12 @@ export function encodeChatCompletionStream(opts: {
   id: string;
   model: string;
   content: string;
+  /** assistant 消息携带的工具调用 (编码为 delta.tool_calls 流式帧) */
+  toolCalls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
   finishReason?: string | null;
   usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
 }): string[] {
-  const { id, model, content, finishReason = "stop", usage } = opts;
+  const { id, model, content, toolCalls, finishReason = "stop", usage } = opts;
   const frames: string[] = [];
 
   // 首帧：声明 assistant 角色 + 首个内容片（空内容也发 role 帧，OpenAI 同款）
@@ -107,6 +109,28 @@ export function encodeChatCompletionStream(opts: {
 
   // 内容分块（单块发出；如需 token 级流式，后续在 litellm provider 侧切分）
   frames.push(encodeSseFrame(buildChatChunk({ id, model, delta: { content } })));
+
+  // 工具调用帧：每个 tool_call 一帧 delta (OpenAI 流式工具调用格式, index 对应顺序)
+  (toolCalls ?? []).forEach((tc, index) => {
+    frames.push(
+      encodeSseFrame(
+        buildChatChunk({
+          id,
+          model,
+          delta: {
+            tool_calls: [
+              {
+                index,
+                id: tc.id,
+                type: "function",
+                function: { name: tc.function.name, arguments: tc.function.arguments },
+              },
+            ],
+          },
+        }),
+      ),
+    );
+  });
 
   // 收尾帧：finish_reason + usage
   frames.push(encodeSseFrame(buildChatChunk({ id, model, delta: {}, finishReason, usage })));
@@ -149,21 +173,23 @@ function responseBase(opts: {
   };
 }
 
-/** 把一条 ResponsesResponse 编码为 Responses SSE 帧数组（含终结帧）. */
+/** 把一条 ResponsesResponse 编码为 Responses SSE 帧数组（含终结帧）.
+ * 支持全部 output item 类型: message (text) 与 function_call (工具调用).
+ * function_call 事件序列: output_item.added → function_call_arguments.delta
+ *   → function_call_arguments.done → output_item.done (codex 依赖此序列捕获工具调用). */
 export function encodeResponsesStream(opts: {
   responseId: string;
   model: string;
   created?: number;
-  content: string;
-  outputTextId?: string;
+  /** 完整 output 数组 (chatToResponses 的产物), 含 message 与 function_call */
+  output: Array<Record<string, unknown>>;
   usage?: { input_tokens: number; output_tokens: number; total_tokens: number };
 }): string[] {
   const {
     responseId,
     model,
     created = Math.floor(Date.now() / 1000),
-    content,
-    outputTextId = `msg_${Math.random().toString(36).slice(2, 12)}`,
+    output,
     usage,
   } = opts;
 
@@ -177,47 +203,76 @@ export function encodeResponsesStream(opts: {
     }),
   );
 
-  // 2. response.output_item.added — 声明输出消息
-  frames.push(
-    encodeResponsesEvent("response.output_item.added", {
-      type: "response.output_item.added",
-      output_index: 0,
-      item: {
-        id: outputTextId,
-        type: "message",
-        role: "assistant",
-        status: "in_progress",
-        content: [],
-      },
-    }),
-  );
+  // 2. 逐个 output item 编码
+  output.forEach((item, outputIndex) => {
+    const itemType = String(item["type"] ?? "message");
+    if (itemType === "function_call") {
+      const args = String(item["arguments"] ?? "{}");
+      frames.push(
+        encodeResponsesEvent("response.output_item.added", {
+          type: "response.output_item.added",
+          output_index: outputIndex,
+          item: { ...item, status: "in_progress" },
+        }),
+      );
+      frames.push(
+        encodeResponsesEvent("response.function_call_arguments.delta", {
+          type: "response.function_call_arguments.delta",
+          item_id: item["id"],
+          output_index: outputIndex,
+          delta: args,
+        }),
+      );
+      frames.push(
+        encodeResponsesEvent("response.function_call_arguments.done", {
+          type: "response.function_call_arguments.done",
+          item_id: item["id"],
+          output_index: outputIndex,
+          arguments: args,
+        }),
+      );
+      frames.push(
+        encodeResponsesEvent("response.output_item.done", {
+          type: "response.output_item.done",
+          output_index: outputIndex,
+          item: { ...item, status: "completed" },
+        }),
+      );
+      return;
+    }
+    // message item: 文本增量
+    const content = Array.isArray(item["content"]) ? item["content"] : [];
+    const text = content
+      .filter((c) => typeof c === "object" && c !== null)
+      .map((c) => String((c as Record<string, unknown>)["text"] ?? ""))
+      .join("");
+    const itemId = String(item["id"] ?? `msg_${outputIndex}`);
+    frames.push(
+      encodeResponsesEvent("response.output_item.added", {
+        type: "response.output_item.added",
+        output_index: outputIndex,
+        item: { ...item, status: "in_progress", content: [] },
+      }),
+    );
+    frames.push(
+      encodeResponsesEvent("response.output_text.delta", {
+        type: "response.output_text.delta",
+        item_id: itemId,
+        output_index: outputIndex,
+        content_index: 0,
+        delta: text,
+      }),
+    );
+    frames.push(
+      encodeResponsesEvent("response.output_item.done", {
+        type: "response.output_item.done",
+        output_index: outputIndex,
+        item: { ...item, status: "completed" },
+      }),
+    );
+  });
 
-  // 3. response.output_text.delta — 内容增量 (单块发出)
-  frames.push(
-    encodeResponsesEvent("response.output_text.delta", {
-      type: "response.output_text.delta",
-      output_index: 0,
-      content_index: 0,
-      delta: content,
-    }),
-  );
-
-  // 4. response.output_item.done — 消息完成
-  frames.push(
-    encodeResponsesEvent("response.output_item.done", {
-      type: "response.output_item.done",
-      output_index: 0,
-      item: {
-        id: outputTextId,
-        type: "message",
-        role: "assistant",
-        status: "completed",
-        content: [{ type: "output_text", text: content }],
-      },
-    }),
-  );
-
-  // 5. response.completed — 结束 (带 usage, response 包裹整体)
+  // 3. response.completed — 结束 (带 usage + 完整 output, response 包裹整体)
   const completedResponse: Record<string, unknown> = {
     ...responseBase({ responseId, model, created, status: "completed" }),
     ...(usage
@@ -229,15 +284,7 @@ export function encodeResponsesStream(opts: {
           },
         }
       : {}),
-    output: [
-      {
-        id: outputTextId,
-        type: "message",
-        role: "assistant",
-        status: "completed",
-        content: [{ type: "output_text", text: content }],
-      },
-    ],
+    output,
   };
   frames.push(
     encodeResponsesEvent("response.completed", {
@@ -246,7 +293,7 @@ export function encodeResponsesStream(opts: {
     }),
   );
 
-  // 6. 流结束标记
+  // 4. 流结束标记
   frames.push(SSE_DONE);
   return frames;
 }

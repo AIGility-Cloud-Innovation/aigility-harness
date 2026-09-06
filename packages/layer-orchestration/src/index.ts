@@ -20,6 +20,8 @@ import type {
   Result,
   HealthStatus,
   CapabilityRef,
+  LlmInferenceRequest,
+  LlmInferenceResponse,
 } from "@aigility-harness/core";
 import {
   codexAgentService,
@@ -52,6 +54,28 @@ export type {
   TimemTaskRequest,
   TimemTaskResponse,
 } from "./timem-task.js";
+
+import {
+  zcodeAgentService,
+  zcodeAgentProvider,
+  zcodeAgentRef,
+} from "./zcode-agent.js";
+export { zcodeAgentService, zcodeAgentProvider, zcodeAgentRef };
+export type {
+  ZcodeAgentRequest,
+  ZcodeAgentResponse,
+} from "./zcode-agent.js";
+
+import {
+  claudeAgentService,
+  claudeAgentProvider,
+  claudeAgentRef,
+} from "./claude-agent.js";
+export { claudeAgentService, claudeAgentProvider, claudeAgentRef };
+export type {
+  ClaudeAgentRequest,
+  ClaudeAgentResponse,
+} from "./claude-agent.js";
 
 import {
   pluginInstallService,
@@ -106,12 +130,34 @@ export interface WorkflowEngineRequest {
   customer_id?: string;
   session_id?: string;
   agent_name?: string;
+  /** 会话历史 (来自调用方/前端; 未提供时用服务端 session 记忆兜底) */
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
 }
 
 export interface WorkflowEngineResponse {
   result: string;
   workflow: string;
   session_id: string;
+  /** true = LLM 不可用, 本次回复来自降级 stub */
+  degraded?: boolean;
+}
+
+// 服务端会话记忆: session_id → 最近消息 (上限 20 条, 兜底用;
+// 调用方显式传 history 时以传入为准)
+const SESSION_MEMORY = new Map<string, Array<{ role: "user" | "assistant"; content: string }>>();
+const MAX_SESSION_MSGS = 20;
+
+function loadHistory(sessionId: string | undefined): Array<{ role: "user" | "assistant"; content: string }> {
+  if (!sessionId) return [];
+  return SESSION_MEMORY.get(sessionId) ?? [];
+}
+
+function saveHistory(
+  sessionId: string | undefined,
+  history: Array<{ role: "user" | "assistant"; content: string }>,
+): void {
+  if (!sessionId) return;
+  SESSION_MEMORY.set(sessionId, history.slice(-MAX_SESSION_MSGS));
 }
 
 export const workflowEngineService: ServiceDefinition<
@@ -133,13 +179,60 @@ const workflowEngineProvider: Provider<
   state: PluginState.Active,
   async execute(
     request: WorkflowEngineRequest,
-    _ctx: SeamContext,
+    ctx: SeamContext,
   ): Promise<Result<WorkflowEngineResponse>> {
-    // 占位执行：确定性回复（不回显用户输入），附带 workflow 标识
+    // 原型执行：委托认知层 LLM 推理（py-bridge 接入后热切换为 LangGraph）。
+    // LLM 不可用时降级为确定性 stub 回复（degraded=true 显式标记），保证链路不断。
+    const sessionId = request.session_id;
+    const history = request.history?.length ? request.history.slice(-MAX_SESSION_MSGS) : loadHistory(sessionId);
+    const messages: LlmInferenceRequest["messages"] = [
+      {
+        role: "system",
+        content:
+          `你是「${request.agent_name ?? "智能助理"}」。请用简体中文简洁、专业地回复用户。`,
+      },
+      ...history.map((m) => ({ role: m.role, content: m.content })),
+      { role: "user" as const, content: request.user_input },
+    ];
+    let degraded = false;
+    let replyText = "";
+    try {
+      const llmRes = (await ctx.call<LlmInferenceRequest, LlmInferenceResponse>(
+        llmInferenceRef,
+        {
+          model: process.env.LLM_MODEL ?? "glm-4.6",
+          messages,
+          temperature: 0.7,
+        },
+      )) as Result<LlmInferenceResponse>;
+      if (llmRes.ok && llmRes.value?.text) {
+        replyText = llmRes.value.text;
+      } else {
+        degraded = true;
+        console.error("[workflow-engine] LLM 调用失败，降级 stub:", llmRes.ok ? "空回复" : llmRes.error);
+      }
+    } catch (e) {
+      degraded = true;
+      console.error("[workflow-engine] LLM 调用异常，降级 stub:", e);
+    }
+    // 成功与否都更新会话记忆 (降级回复也入历史, 保持上下文连续)
+    saveHistory(sessionId, [
+      ...history,
+      { role: "user", content: request.user_input },
+      { role: "assistant", content: replyText || "(degraded)" },
+    ]);
+    if (!degraded) {
+      return ok({
+        result: replyText,
+        workflow: "stub-workflow@0.1.0",
+        session_id: sessionId ?? "unknown",
+      });
+    }
     return ok({
-      result: `（原型 stub 工作流）已收到您的消息，回复角色「${request.agent_name ?? "客服"}」`,
+      result: `【服务降级】LLM 暂不可用，这是占位回复。请稍后重试或检查 LLM 服务配置。`,
       workflow: "stub-workflow@0.1.0",
-      session_id: request.session_id ?? "unknown",
+      session_id: sessionId ?? "unknown",
+      degraded: true,
     });
   },
   async health(): Promise<HealthStatus> {
@@ -192,7 +285,7 @@ export const manifest: PluginManifest = {
   layer: LayerId.Orchestration,
   description: "编排规划层：任务规划占位 + 工作流引擎占位 + 插件安装工作流 + Codex 编码代理，消费认知层 LLM",
   version: "0.2.0",
-  provides: [taskPlanningService, workflowEngineService, pluginInstallService, codexAgentService],
+  provides: [taskPlanningService, workflowEngineService, pluginInstallService, codexAgentService, zcodeAgentService, claudeAgentService],
   consumes: [llmInferenceRef],
   preferredCarrier: CarrierKind.Thread,
   dependsOn: ["@cognitive/llm-inference"],
@@ -211,7 +304,7 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [taskPlanningProvider, workflowEngineProvider, pluginInstallProvider, codexAgentProvider];
+    return [taskPlanningProvider, workflowEngineProvider, pluginInstallProvider, codexAgentProvider, zcodeAgentProvider, claudeAgentProvider];
   },
   getState(): PluginState {
     return pluginState;

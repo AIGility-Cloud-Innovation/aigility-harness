@@ -188,9 +188,13 @@ async function handleChat(
   const role = roleById.get(roleId);
   if (!role) { send(404, { error: `未知角色: ${roleId}` }); return; }
 
-  // 调对应角色能力 (persona 层), 带人设覆盖
+  // 调对应角色能力 (persona 层), 带人设覆盖; 透传前端会话记忆 / 驱动 / 目标应用
   const payload = {
     user_input: message,
+    session_id: typeof body.session_id === "string" && body.session_id ? body.session_id : undefined,
+    history: Array.isArray(body.history) ? body.history.slice(-20) : [],
+    ...(typeof body.driver === "string" && body.driver ? { driver: body.driver } : {}),
+    ...(typeof body.app === "string" && body.app ? { cwd: body.app } : {}),
     ...(role.system ? { system: role.system } : {}),
   };
   try {
@@ -199,8 +203,13 @@ async function handleChat(
       send(500, { error: `角色 ${role.name} 调用失败: ${result.error}` });
       return;
     }
-    const value = result.value as { response?: string; agent_name?: string };
-    send(200, { response: value?.response ?? "（无回复）", agent_name: value?.agent_name ?? role.name, role: roleId });
+    const value = result.value as { response?: string; agent_name?: string; degraded?: boolean };
+    send(200, {
+      response: value?.response ?? "（无回复）",
+      agent_name: value?.agent_name ?? role.name,
+      role: roleId,
+      ...(value?.degraded ? { degraded: true } : {}),
+    });
   } catch (e: any) {
     send(500, { error: `对话失败: ${String(e?.message ?? e)}` });
   }

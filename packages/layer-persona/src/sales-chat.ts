@@ -32,6 +32,8 @@ export interface SalesChatRequest {
   customer_id?: string;
   /** 会话 ID (可选) */
   session_id?: string;
+  /** 会话历史 (前端维护, 透传给编排层做上下文) */
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
 }
 
 export interface SalesChatResponse {
@@ -43,6 +45,8 @@ export interface SalesChatResponse {
   session_id: string;
   /** 追踪 ID */
   trace_id: string;
+  /** true = LLM 不可用, 本次回复来自降级 stub */
+  degraded?: boolean;
 }
 
 export const salesChatService: ServiceDefinition<SalesChatRequest, SalesChatResponse> = {
@@ -65,13 +69,14 @@ const salesChatProvider: Provider<SalesChatRequest, SalesChatResponse> = {
     // 1. 角色形象: "我是销售客服AI"
     const agentName = "销售客服AI";
 
-    // 2. 构建 ChatRequest (带角色身份)
+    // 2. 构建 ChatRequest (带角色身份 + 会话记忆透传)
     const chatRequest = {
       user_input: request.user_input,
       merchant_id: request.merchant_id ?? "default",
       customer_id: request.customer_id ?? "anonymous",
       session_id: request.session_id ?? ctx.sessionId,
       agent_name: agentName,
+      ...(request.history?.length ? { history: request.history } : {}),
     };
 
     // 3. 委托 L4 编排 (L4 决定调什么工具、走什么流程)
@@ -81,10 +86,10 @@ const salesChatProvider: Provider<SalesChatRequest, SalesChatResponse> = {
     );
 
     // 4. 由同一个角色形象反馈
-    const response = (result as { ok: boolean; value?: unknown }).ok
-      ? ((result as { value: { result?: string; response?: string } }).value?.result ??
-        (result as { value: { response?: string } }).value?.response ??
-        "抱歉，我没有理解您的意思。")
+    const wfValue = (result as { ok: boolean; value?: { result?: string; response?: string; degraded?: boolean } })
+      .value;
+    const response = (result as { ok: boolean }).ok
+      ? (wfValue?.result ?? wfValue?.response ?? "抱歉，我没有理解您的意思。")
       : "抱歉，智能助理暂时无法响应，请稍后重试。";
 
     return ok({
@@ -92,6 +97,7 @@ const salesChatProvider: Provider<SalesChatRequest, SalesChatResponse> = {
       agent_name: agentName,
       session_id: ctx.sessionId,
       trace_id: ctx.traceId,
+      ...(wfValue?.degraded ? { degraded: true } : {}),
     });
   },
   async health(): Promise<HealthStatus> {

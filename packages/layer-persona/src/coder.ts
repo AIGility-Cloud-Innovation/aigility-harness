@@ -39,6 +39,8 @@ export interface CoderRequest {
   cwd?: string;
   /** 可选: 会话 ID */
   session_id?: string;
+  /** 编码驱动 (codex / zcode / claude) */
+  driver?: string;
 }
 
 export interface CoderResponse {
@@ -106,8 +108,13 @@ const coderProvider: Provider<CoderRequest, CoderResponse> = {
       ...(request.cwd ? { cwd: request.cwd } : {}),
     };
 
-    // 3. 委托 L4: codex-agent 负责 规划(经认知层 LLM) + spawn Codex 执行
-    const result = await ctx.call(codexAgentRef, task);
+    // 3. 委托 L4 编码 Agent (请求级 driver: codex / zcode / claude, 默认 codex)
+    const driverRefs: Record<string, CapabilityRef> = {
+      zcode: { id: "@orchestration/zcode-agent", versionRange: "^1.0.0" },
+      claude: { id: "@orchestration/claude-agent", versionRange: "^1.0.0" },
+    };
+    const drv = request.driver ?? process.env.AGENT_DRIVER ?? "codex";
+    const result = await ctx.call(driverRefs[drv] ?? codexAgentRef, task);
 
     // 4. 由同一角色形象反馈
     if (!result.ok) {

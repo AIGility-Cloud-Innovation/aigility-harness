@@ -42,6 +42,8 @@ export interface CodexChatRequest {
   cwd?: string;
   /** 可选: 会话 ID */
   session_id?: string;
+  /** 编码驱动 (codex / zcode / claude), 不传用 AGENT_DRIVER 环境变量 */
+  driver?: string;
 }
 
 export interface CodexChatResponse {
@@ -69,6 +71,18 @@ export const codexAgentRef: CapabilityRef = {
   id: "@orchestration/codex-agent",
   versionRange: "^1.0.0",
 };
+
+/** 各编码 Agent */
+const agentRefs: Record<string, CapabilityRef> = {
+  zcode: { id: "@orchestration/zcode-agent", versionRange: "^1.0.0" },
+  claude: { id: "@orchestration/claude-agent", versionRange: "^1.0.0" },
+};
+
+/** 驱动选择: 请求级 driver > 环境变量 AGENT_DRIVER > 默认 codex */
+function agentDriverRef(requestDriver?: string): CapabilityRef {
+  const drv = requestDriver ?? process.env.AGENT_DRIVER ?? "codex";
+  return agentRefs[drv] ?? codexAgentRef;
+}
 
 // ── 可操作目录白名单 ──────────────────────────────────────────────
 // codex-chat 委托 codex-agent 时, 工作目录必须落在允许的沙箱目录内,
@@ -107,7 +121,7 @@ export function getAllowedCwd(cwd?: string): string {
 
 // ── 角色人设提示词 ────────────────────────────────────────────────
 
-const CODEX_CHAT_SYSTEM_PROMPT = `你是「Codex 网页应用生成器」，一位专注的网页应用生成专家。你的核心能力是：根据用户的描述，生成可直接运行的网页应用。
+const CODEX_CHAT_SYSTEM_PROMPT = `你是「网页应用生成器」，一位专注的网页应用生成专家。你的核心能力是：根据用户的描述，生成可直接运行的网页应用。
 
 你能帮用户做的事:
 1. 创建小型网页应用 (记账本 / TODO 清单 / 班主任小本本 等): 生成自包含、可直接打开的单 HTML 页面
@@ -143,8 +157,9 @@ const codexChatProvider: Provider<CodexChatRequest, CodexChatResponse> = {
     request: CodexChatRequest,
     ctx: SeamContext,
   ): Promise<Result<CodexChatResponse>> {
-    // 1. 角色形象: Codex 网页应用生成器
-    const agentName = "Codex 网页应用生成器";
+    // 1. 角色形象: 网页应用生成器 (驱动可切换: codex / zcode, 按 AGENT_DRIVER 标注)
+    const driverName = process.env.AGENT_DRIVER === "zcode" ? "ZCode" : "Codex";
+    const agentName = `网页应用生成器 (${driverName} 驱动)`;
 
     // 2. 校验工作目录在沙箱白名单内 (防任意目录写文件/执行命令)
     let cwd: string;
@@ -163,12 +178,12 @@ const codexChatProvider: Provider<CodexChatRequest, CodexChatResponse> = {
     const task = {
       prompt: `${CODEX_CHAT_SYSTEM_PROMPT}\n\n用户任务:\n${request.user_input}\n\n工作目录: ${cwd}\n`,
       cwd,
-      // 规划阶段模型: 默认 deepseek-v4-pro 在本网关不存在 → 用 qwen-turbo
-      planningModel: "qwen-turbo",
+      // 规划阶段模型: 跟随 LLM_MODEL (与认知层一致), 避免硬编码不存在的模型
+      planningModel: process.env.LLM_MODEL ?? "glm-4.6",
     };
 
-    // 4. 委托 L4: codex-agent 负责 规划(经认知层 LLM) + spawn Codex 执行
-    const result = await ctx.call(codexAgentRef, task);
+    // 4. 委托 L4 编码 Agent (请求级 driver: codex / zcode / claude)
+    const result = await ctx.call(agentDriverRef(request.driver), task);
 
     // 5. 由同一角色形象反馈
     if (!result.ok) {

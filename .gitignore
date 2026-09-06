@@ -13,3 +13,4 @@ examples/wecom-timem/kb_index/
 examples/apps/
 __pycache__/
 *.pyc
+examples/appbase/src/.token-secret

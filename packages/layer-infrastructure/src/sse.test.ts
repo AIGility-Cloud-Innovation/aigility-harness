@@ -116,8 +116,15 @@ describe("encodeResponsesStream", () => {
       responseId: "resp_test123",
       model: "qwen-turbo",
       created: 1000,
-      content: "你好",
-      outputTextId: "msg_abc",
+      output: [
+        {
+          id: "msg_abc",
+          type: "message",
+          role: "assistant",
+          status: "completed",
+          content: [{ type: "output_text", text: "你好" }],
+        },
+      ],
     });
     const events = frames
       .slice(0, -1) // 排除 [DONE] 收尾帧
@@ -138,7 +145,15 @@ describe("encodeResponsesStream", () => {
       responseId: "resp_1",
       model: "m",
       created: 1,
-      content: "hi",
+      output: [
+        {
+          id: "msg_1",
+          type: "message",
+          role: "assistant",
+          status: "completed",
+          content: [{ type: "output_text", text: "hi" }],
+        },
+      ],
       usage: { input_tokens: 3, output_tokens: 5, total_tokens: 8 },
     });
     const completed = JSON.parse(frames[4].split("\n")[1].slice("data: ".length).trim());
@@ -146,5 +161,30 @@ describe("encodeResponsesStream", () => {
     expect(completed.response.status).toBe("completed");
     expect(completed.response.usage.total_tokens).toBe(8);
     expect(completed.response.output[0].content[0].text).toBe("hi");
+  });
+
+  it("function_call item 编码为 added → arguments.delta → arguments.done → done", () => {
+    const frames = encodeResponsesStream({
+      responseId: "resp_fc",
+      model: "m",
+      output: [
+        { id: "fc_1", type: "function_call", call_id: "call_1", name: "shell", arguments: "{\"command\":\"ls\"}" },
+      ],
+    });
+    const events = frames
+      .slice(0, -1)
+      .map((f) => f.split("\n")[0].replace("event: ", ""));
+    expect(events).toEqual([
+      "response.created",
+      "response.output_item.added",
+      "response.function_call_arguments.delta",
+      "response.function_call_arguments.done",
+      "response.output_item.done",
+      "response.completed",
+    ]);
+    // completed 帧的 output 必须原样携带 function_call
+    const completed = JSON.parse(frames[5].split("\n")[1].slice("data: ".length).trim());
+    expect(completed.response.output[0].type).toBe("function_call");
+    expect(completed.response.output[0].name).toBe("shell");
   });
 });
