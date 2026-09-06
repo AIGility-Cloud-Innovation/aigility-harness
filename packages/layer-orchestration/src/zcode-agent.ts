@@ -28,6 +28,8 @@ import type {
   CapabilityRef,
 } from "@aigility-harness/core";
 import { spawn } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
+import { dirname } from "node:path";
 import { backupHtmlFiles } from "./sandbox-backup.js";
 
 // ── 服务定义 ─────────────────────────────────────────────────────
@@ -58,6 +60,15 @@ function zcodeCliPath(): string {
     process.env.ZCODE_CLI_PATH ??
     "C:/Program Files/ZCode/resources/glm/zcode.cjs"
   );
+}
+
+/** spawn cwd 必须是目录: 传入的是 .html 文件时取其所在目录 */
+function resolveAgentCwd(cwd?: string): string {
+  const target = cwd ?? process.cwd();
+  try {
+    if (existsSync(target) && statSync(target).isFile()) return dirname(target);
+  } catch { /* ignore */ }
+  return target;
 }
 
 export const zcodeAgentService: ServiceDefinition<
@@ -100,7 +111,7 @@ const zcodeAgentProvider: Provider<ZcodeAgentRequest, ZcodeAgentResponse> = {
     ctx.emit({
       type: "zcode-agent.spawn",
       layer: LayerId.Orchestration,
-      payload: { cwd: request.cwd, mode },
+      payload: { cwd: resolveAgentCwd(request.cwd), mode },
       traceId: ctx.traceId,
     });
 
@@ -110,7 +121,7 @@ const zcodeAgentProvider: Provider<ZcodeAgentRequest, ZcodeAgentResponse> = {
       "-p",
       prompt,
       "--cwd",
-      request.cwd ?? process.cwd(),
+      resolveAgentCwd(request.cwd),
       "--mode",
       mode,
     ];
@@ -120,7 +131,7 @@ const zcodeAgentProvider: Provider<ZcodeAgentRequest, ZcodeAgentResponse> = {
       const child = spawn(process.env.ZCODE_NODE_BIN ?? "node", args, {
         stdio: ["ignore", "pipe", "pipe"],
         env: { ...process.env },
-        cwd: request.cwd,
+        cwd: resolveAgentCwd(request.cwd),
       });
 
       let resolved = false;

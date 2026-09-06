@@ -25,6 +25,8 @@ import type {
   CapabilityRef,
 } from "@aigility-harness/core";
 import { spawn } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
+import { dirname } from "node:path";
 import { backupHtmlFiles } from "./sandbox-backup.js";
 
 // ── 服务定义 ─────────────────────────────────────────────────────
@@ -46,6 +48,15 @@ export interface ClaudeAgentResponse {
 }
 
 export const DEFAULT_CLAUDE_TIMEOUT_MS = 600_000; // 10 min
+
+/** spawn cwd 必须是目录: 传入的是 .html 文件时取其所在目录 */
+function resolveAgentCwd(cwd?: string): string {
+  const target = cwd ?? process.cwd();
+  try {
+    if (existsSync(target) && statSync(target).isFile()) return dirname(target);
+  } catch { /* ignore */ }
+  return target;
+}
 
 export const claudeAgentService: ServiceDefinition<
   ClaudeAgentRequest,
@@ -89,7 +100,7 @@ const claudeAgentProvider: Provider<ClaudeAgentRequest, ClaudeAgentResponse> = {
       "-p",
       useShell && prompt.includes(" ") ? `"${prompt}"` : prompt,
       "--cwd",
-      request.cwd ?? process.cwd(),
+      resolveAgentCwd(request.cwd),
       "--permission-mode",
       "acceptEdits",
     ];
@@ -99,7 +110,7 @@ const claudeAgentProvider: Provider<ClaudeAgentRequest, ClaudeAgentResponse> = {
       const child = spawn("claude", args, {
         stdio: ["ignore", "pipe", "pipe"],
         env: { ...process.env },
-        cwd: request.cwd,
+        cwd: resolveAgentCwd(request.cwd),
         shell: useShell,
       });
 
