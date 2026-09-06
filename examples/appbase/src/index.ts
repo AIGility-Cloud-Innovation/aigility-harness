@@ -93,6 +93,25 @@ async function main(): Promise<void> {
       res.end();
       return;
     }
+    // 可用编码工具检测 (codex / zcode / claude)
+    if (req.method === "GET" && req.url?.startsWith("/app/hall/tools")) {
+      const detect = (cmd: string, args: string[], useShell = false) => {
+        try {
+          const r = spawnSync(cmd, args, { shell: useShell, timeout: 8000, encoding: "utf-8" });
+          return { ok: r.status === 0, version: (r.stdout || "").trim().split("\n")[0].slice(0, 60) };
+        } catch { return { ok: false, version: "" }; }
+      };
+      const codex = detect("codex", ["--version"], true);
+      const zcode = detect(process.env.ZCODE_NODE_BIN ?? "node", [process.env.ZCODE_CLI_PATH ?? "C:\Program Files\ZCode\resources\glm\zcode.cjs", "--version"]);
+      const claude = detect("claude", ["--version"], true);
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ tools: [
+        { id: "codex", name: "Codex CLI", available: codex.ok, version: codex.version },
+        { id: "zcode", name: "ZCode CLI", available: zcode.ok, version: zcode.version },
+        { id: "claude", name: "Claude Code", available: claude.ok, version: claude.version },
+      ] }));
+      return;
+    }
     // 应用大厅的文件管理 API: /app/hall/apps (读写 examples/apps 沙箱)
     if (req.url?.startsWith("/app/hall/apps")) {
       await hallAppsHandler(req, res);
@@ -119,25 +138,6 @@ async function main(): Promise<void> {
     // 后端 API 优先 (业务路由), 其余交给 hall
     if (req.url?.startsWith("/app/")) {
       await appBackendHandler(req, res);
-      return;
-    }
-    // 可用编码工具检测 (codex / zcode / claude)
-    if (req.method === "GET" && req.url?.startsWith("/app/hall/tools")) {
-      const detect = (cmd: string, args: string[]) => {
-        try {
-          const r = spawnSync(cmd, args, { shell: process.platform === "win32", timeout: 8000, encoding: "utf-8" });
-          return { ok: r.status === 0, version: (r.stdout || "").trim().split("\n")[0].slice(0, 60) };
-        } catch { return { ok: false, version: "" }; }
-      };
-      const codex = detect("codex", ["--version"]);
-      const zcode = detect(process.env.ZCODE_NODE_BIN ?? "node", [process.env.ZCODE_CLI_PATH ?? "C:\Program Files\ZCode\resources\glm\zcode.cjs", "--version"]);
-      const claude = detect("claude", ["--version"]);
-      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ tools: [
-        { id: "codex", name: "Codex CLI", available: codex.ok, version: codex.version },
-        { id: "zcode", name: "ZCode CLI", available: zcode.ok, version: zcode.version },
-        { id: "claude", name: "Claude Code", available: claude.ok, version: claude.version },
-      ] }));
       return;
     }
     // 编码工作台页
