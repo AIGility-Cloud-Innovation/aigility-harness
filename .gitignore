@@ -10,7 +10,9 @@ coverage/
 # 运行时缓存/索引 (可重建, 不入库)
 examples/wecom-timem/kb_index/
 # AppBase: codex 生成器产物目录 (运行时可重建, 不入库)
-examples/apps/
+# 例外: teacher-notebook.html 作为示例应用保留入库
+examples/apps/*
+!examples/apps/teacher-notebook.html
 __pycache__/
 *.pyc
 examples/appbase/src/.token-secret

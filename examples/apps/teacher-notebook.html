@@ -1,0 +1,1384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>班主任小本本 · 原生 AI 班级管理</title>
+<style>
+:root {
+    --bg: #f4f6fb;
+    --card: #ffffff;
+    --ink: #1e293b;
+    --ink-2: #475569;
+    --ink-3: #94a3b8;
+    --line: #e8ecf4;
+    --accent: #6366f1;
+    --accent-deep: #4f46e5;
+    --accent-soft: #eef0fe;
+    --green: #10b981;  --green-soft: #e7f8f1;
+    --amber: #f59e0b;  --amber-soft: #fdf3e0;
+    --sky: #0ea5e9;    --sky-soft: #e6f5fd;
+    --violet: #8b5cf6; --violet-soft: #f1ebfe;
+    --rose: #f43f5e;   --rose-soft: #fde9ed;
+    --radius: 16px;
+    --shadow-sm: 0 1px 2px rgba(15,23,42,.05);
+    --shadow-md: 0 2px 4px rgba(15,23,42,.04), 0 12px 32px rgba(15,23,42,.07);
+    --shadow-lg: 0 8px 40px rgba(30,41,59,.18);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    min-height: 100vh;
+    padding: 24px 20px 60px;
+    -webkit-font-smoothing: antialiased;
+}
+.shell { max-width: 1180px; margin: 0 auto; }
+
+/* ── 顶栏 ─────────────────────────────── */
+.hero {
+    background: linear-gradient(120deg, #312e81 0%, #4f46e5 55%, #7c3aed 100%);
+    border-radius: 24px;
+    padding: 34px 38px 30px;
+    color: #fff;
+    position: relative;
+    overflow: hidden;
+    box-shadow: var(--shadow-lg);
+}
+.hero::after {
+    content: '';
+    pointer-events: none;
+    position: absolute; right: -80px; top: -120px;
+    width: 380px; height: 380px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,255,255,.14), transparent 65%);
+}
+.hero h1 { font-size: 26px; font-weight: 700; letter-spacing: .5px; }
+.hero .sub { margin-top: 6px; font-size: 13.5px; color: rgba(255,255,255,.75); }
+.hero .meta { margin-top: 18px; display: flex; gap: 24px; flex-wrap: wrap; }
+.hero .meta div { font-size: 13px; color: rgba(255,255,255,.85); }
+.hero .meta b { display: block; font-size: 22px; font-weight: 700; color: #fff; }
+
+/* ── 导航 ─────────────────────────────── */
+.nav {
+    display: flex; gap: 6px; margin: 18px 0 22px;
+    background: var(--card); padding: 6px; border-radius: 14px;
+    box-shadow: var(--shadow-sm); border: 1px solid var(--line);
+    overflow-x: auto;
+}
+.nav button {
+    flex: 1; min-width: 100px; padding: 11px 14px; border: none; border-radius: 10px;
+    background: transparent; font-size: 14px; font-weight: 600; color: var(--ink-2);
+    cursor: pointer; transition: all .2s; white-space: nowrap; font-family: inherit;
+}
+.nav button:hover { background: var(--accent-soft); color: var(--accent-deep); }
+.nav button.active { background: var(--accent-deep); color: #fff; box-shadow: 0 4px 12px rgba(79,70,229,.35); }
+
+.view { display: none; animation: fadein .25s ease; }
+.view.active { display: block; }
+@keyframes fadein { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* ── 卡片与通用 ───────────────────────── */
+.card {
+    background: var(--card); border-radius: var(--radius);
+    box-shadow: var(--shadow-md); border: 1px solid var(--line);
+    padding: 24px; margin-bottom: 20px;
+}
+.card h2 { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+.card .hint { font-size: 12.5px; color: var(--ink-3); margin-bottom: 16px; }
+.section-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.section-title h2 { font-size: 16px; }
+
+.btn {
+    padding: 9px 18px; border: none; border-radius: 10px; font-size: 13.5px; font-weight: 600;
+    cursor: pointer; transition: all .18s; display: inline-flex; align-items: center; gap: 6px;
+    font-family: inherit; line-height: 1.2;
+}
+.btn:active { transform: scale(.97); }
+.btn-primary { background: var(--accent-deep); color: #fff; }
+.btn-primary:hover { background: #4338ca; box-shadow: 0 4px 14px rgba(79,70,229,.35); }
+.btn-ghost { background: var(--accent-soft); color: var(--accent-deep); }
+.btn-ghost:hover { background: #e2e6fd; }
+.btn-danger-soft { background: var(--rose-soft); color: var(--rose); }
+.btn-sm { padding: 5px 11px; font-size: 12px; border-radius: 8px; }
+
+input, select, textarea {
+    font-family: inherit; font-size: 14px; color: var(--ink);
+    border: 1.5px solid var(--line); border-radius: 10px;
+    padding: 10px 13px; background: #fbfcfe; transition: all .2s; outline: none;
+}
+input:focus, select:focus, textarea:focus {
+    border-color: var(--accent); background: #fff;
+    box-shadow: 0 0 0 3.5px rgba(99,102,241,.12);
+}
+textarea { resize: vertical; min-height: 84px; }
+label.fl { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-2); margin: 14px 0 7px; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; }
+.row > * { flex: 1; min-width: 140px; }
+
+/* 表格 */
+table { width: 100%; border-collapse: collapse; }
+th {
+    text-align: left; font-size: 11.5px; font-weight: 700; color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: .8px; padding: 10px 14px;
+    border-bottom: 1.5px solid var(--line);
+}
+td { padding: 12px 14px; border-bottom: 1px solid #f1f4f9; font-size: 14px; }
+tbody tr { transition: background .15s; }
+tbody tr:hover { background: #f8f9fe; }
+tbody tr:last-child td { border-bottom: none; }
+
+/* 统计卡 */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 20px; }
+.stat {
+    background: var(--card); border-radius: 14px; padding: 18px 20px;
+    box-shadow: var(--shadow-sm); border: 1px solid var(--line);
+    transition: transform .2s, box-shadow .2s;
+}
+.stat:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
+.stat .k { font-size: 12px; color: var(--ink-3); font-weight: 600; }
+.stat .v { font-size: 26px; font-weight: 700; margin-top: 6px; }
+.stat .d { font-size: 11.5px; margin-top: 3px; color: var(--ink-3); }
+
+/* 分类色 */
+.cat-behavior  { --c: var(--green);  --c-soft: var(--green-soft); }
+.cat-discipline{ --c: var(--amber);  --c-soft: var(--amber-soft); }
+.cat-exam      { --c: var(--sky);    --c-soft: var(--sky-soft); }
+.cat-social    { --c: var(--violet); --c-soft: var(--violet-soft); }
+.cat-score     { --c: var(--accent); --c-soft: var(--accent-soft); }
+
+.chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 11px; border-radius: 20px; font-size: 12px; font-weight: 600;
+    background: var(--c-soft, #eef1f6); color: var(--c, var(--ink-2));
+}
+.tag {
+    display: inline-block; padding: 2.5px 9px; border-radius: 6px;
+    font-size: 11.5px; background: #f1f4f9; color: var(--ink-2); margin-right: 5px;
+}
+
+/* 记忆时间线 */
+.tl { position: relative; padding-left: 26px; }
+.tl::before {
+    content: ''; position: absolute; left: 8px; top: 6px; bottom: 6px;
+    width: 2px; background: linear-gradient(var(--line), transparent);
+}
+.tl-item { position: relative; padding: 0 0 20px 12px; }
+.tl-item::before {
+    content: ''; position: absolute; left: -23px; top: 6px;
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--c, var(--accent)); box-shadow: 0 0 0 3.5px var(--c-soft, var(--accent-soft));
+}
+.tl-item .head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.tl-item .head b { font-size: 14px; }
+.tl-item .head .date { font-size: 11.5px; color: var(--ink-3); }
+.tl-item .body { margin-top: 6px; font-size: 13.5px; color: var(--ink-2); line-height: 1.65; white-space: pre-wrap; }
+
+/* 画像 */
+.profile-head {
+    display: flex; gap: 20px; align-items: center; flex-wrap: wrap;
+}
+.avatar {
+    width: 64px; height: 64px; border-radius: 20px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px; font-weight: 700; color: #fff;
+    background: linear-gradient(135deg, var(--accent), #8b5cf6);
+    box-shadow: 0 6px 18px rgba(99,102,241,.4);
+}
+.dim { margin: 10px 0 16px; }
+.dim .lbl { display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 6px; }
+.dim .lbl b { font-weight: 600; }
+.dim .bar { height: 8px; border-radius: 6px; background: #eef1f6; overflow: hidden; }
+.dim .bar i {
+    display: block; height: 100%; border-radius: 6px;
+    background: linear-gradient(90deg, var(--accent), #8b5cf6);
+    transition: width .5s ease;
+}
+.mini-stat { text-align: center; padding: 12px 6px; background: #f8f9fe; border-radius: 12px; }
+.mini-stat .v { font-size: 20px; font-weight: 700; }
+.mini-stat .k { font-size: 11px; color: var(--ink-3); margin-top: 3px; }
+
+/* 空状态 */
+.empty { text-align: center; padding: 48px 20px; color: var(--ink-3); }
+.empty .icon { font-size: 42px; margin-bottom: 14px; opacity: .55; }
+.empty h3 { font-size: 15px; color: var(--ink-2); margin-bottom: 6px; }
+.empty p { font-size: 13px; }
+
+/* 模态框 */
+.modal {
+    display: none; position: fixed; inset: 0;
+    background: rgba(15,23,42,.45); backdrop-filter: blur(3px);
+    z-index: 100; justify-content: center; align-items: center; padding: 20px;
+}
+.modal.show { display: flex; }
+.modal-box {
+    background: #fff; border-radius: 20px; width: 100%; max-width: 560px;
+    max-height: 90vh; overflow-y: auto; padding: 28px;
+    box-shadow: var(--shadow-lg); animation: pop .22s ease;
+}
+@keyframes pop { from { opacity: 0; transform: scale(.96) translateY(10px); } to { opacity: 1; transform: none; } }
+.modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.modal-head h3 { font-size: 17px; }
+.modal-x { background: #f1f4f9; border: none; width: 32px; height: 32px; border-radius: 10px; font-size: 17px; cursor: pointer; color: var(--ink-2); }
+
+/* 分类选择 chips */
+.cat-pick { display: flex; gap: 8px; flex-wrap: wrap; }
+.cat-pick button {
+    padding: 8px 16px; border-radius: 11px; border: 1.5px solid var(--line);
+    background: #fbfcfe; font-size: 13px; font-weight: 600; color: var(--ink-2);
+    cursor: pointer; transition: all .18s; font-family: inherit;
+}
+.cat-pick button.on { background: var(--c-soft); border-color: var(--c); color: var(--c); }
+
+/* 情感选择 */
+.senti-pick { display: flex; gap: 8px; }
+.senti-pick button {
+    flex: 1; padding: 9px; border-radius: 10px; border: 1.5px solid var(--line);
+    background: #fbfcfe; font-size: 13px; font-weight: 600; cursor: pointer;
+    color: var(--ink-2); font-family: inherit; transition: all .18s;
+}
+.senti-pick button.on.pos { background: var(--green-soft); border-color: var(--green); color: var(--green); }
+.senti-pick button.on.neu { background: #eef1f6; border-color: var(--ink-3); color: var(--ink-2); }
+.senti-pick button.on.neg { background: var(--rose-soft); border-color: var(--rose); color: var(--rose); }
+
+/* 点名 */
+.draw-stage { text-align: center; padding: 30px 10px 40px; }
+.draw-card {
+    max-width: 380px; margin: 26px auto; padding: 44px 30px; border-radius: 24px;
+    background: linear-gradient(135deg, #4f46e5, #7c3aed);
+    color: #fff; box-shadow: 0 16px 44px rgba(79,70,229,.4);
+}
+.draw-card .name { font-size: 34px; font-weight: 700; margin: 10px 0 6px; }
+.draw-card .meta { font-size: 13.5px; opacity: .85; }
+.draw-card.rolling { animation: pulse .4s ease-in-out infinite; }
+@keyframes pulse { 50% { transform: scale(1.04); } }
+
+.toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 18px; }
+.toolbar .grow { flex: 1; min-width: 200px; }
+
+.cloud-chip {
+    position: absolute; right: 30px; top: 30px;
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 8px 16px; border-radius: 20px; border: 1px solid rgba(255,255,255,.35);
+    background: rgba(255,255,255,.14); color: #fff;
+    font-size: 12.5px; font-weight: 600; cursor: pointer; font-family: inherit;
+    backdrop-filter: blur(4px); transition: background .18s; z-index: 2;
+}
+.cloud-chip:hover { background: rgba(255,255,255,.25); }
+.cloud-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: #fca5a5; }
+.cloud-chip.ok .dot { background: #6ee7b7; }
+
+.fab {
+    position: fixed; right: 26px; bottom: 30px; z-index: 90;
+    display: flex; align-items: center; gap: 8px;
+    padding: 14px 22px; border: none; border-radius: 30px;
+    background: linear-gradient(135deg, #4f46e5, #7c3aed);
+    color: #fff; font-size: 14.5px; font-weight: 700; font-family: inherit;
+    cursor: pointer; box-shadow: 0 8px 28px rgba(79,70,229,.45);
+    transition: transform .18s, box-shadow .18s;
+}
+.fab:hover { transform: translateY(-3px) scale(1.03); box-shadow: 0 12px 34px rgba(79,70,229,.55); }
+.fab:active { transform: scale(.96); }
+
+.stu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+.stu-card {
+    background: #fbfcfe; border: 1.5px solid var(--line); border-radius: 16px;
+    padding: 20px 14px; text-align: center; cursor: pointer;
+    transition: transform .18s, box-shadow .18s, border-color .18s;
+}
+.stu-card:hover {
+    transform: translateY(-4px); border-color: var(--accent);
+    box-shadow: 0 10px 26px rgba(99,102,241,.16); background: #fff;
+}
+.stu-card .avatar { width: 52px; height: 52px; font-size: 21px; border-radius: 16px; margin: 0 auto 10px; }
+.stu-card .nm { font-size: 15px; font-weight: 700; }
+.stu-card .no { font-size: 11.5px; color: var(--ink-3); margin-top: 3px; }
+.stu-card .mt { margin-top: 9px; display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; }
+
+@media (max-width: 720px) {
+    body { padding: 12px 10px 40px; }
+    .hero { padding: 24px; }
+    .card { padding: 18px; }
+    .nav button { min-width: 84px; font-size: 13px; }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+
+    <div class="hero">
+        <button class="cloud-chip" id="cloudChip" onclick="openCloudModal()"><span class="dot"></span><span id="cloudText">未登录 · 点击登录</span></button>
+        <h1>📚 班主任小本本</h1>
+        <div class="sub">原生 AI 班级管理 —— 每一次观察，都沉淀为学生的成长记忆</div>
+        <div class="meta">
+            <div><b id="mStudents">0</b>学生</div>
+            <div><b id="mMemories">0</b>记忆条目</div>
+            <div><b id="mToday">-</b>今日出勤</div>
+            <div><b id="mAvg">0</b>平均积分</div>
+        </div>
+    </div>
+
+    <div class="nav">
+        <button class="active" data-view="roster" onclick="switchView('roster', this)">👥 名册</button>
+        <button data-view="attendance" onclick="switchView('attendance', this)">📅 考勤</button>
+        <button data-view="memory" onclick="switchView('memory', this)">🧠 记忆本</button>
+        <button data-view="profile" onclick="switchView('profile', this)">📊 学生画像</button>
+        <button data-view="random" onclick="switchView('random', this)">🎲 点名</button>
+        <button data-view="scores" onclick="switchView('scores', this)">⭐ 积分</button>
+    </div>
+
+    <!-- ═══ 名册 ═══ -->
+    <div id="view-roster" class="view active">
+        <div class="card">
+            <div class="toolbar">
+                <button class="btn btn-primary" onclick="openStudentModal()">＋ 添加学生</button>
+                <button class="btn btn-ghost" onclick="openImportModal()">📥 批量导入名册</button>
+                <div class="grow"><input id="studentSearch" placeholder="搜索姓名 / 学号…" style="width:100%" oninput="filterStudents()"></div>
+            </div>
+            <div id="studentList"></div>
+        </div>
+    </div>
+
+    <!-- ═══ 考勤 ═══ -->
+    <div id="view-attendance" class="view">
+        <div class="card">
+            <div class="toolbar">
+                <input type="date" id="attendanceDate" onchange="loadAttendance()" style="width:auto">
+                <button class="btn btn-ghost" onclick="markAll('present')">✓ 全员出勤</button>
+                <button class="btn btn-ghost" onclick="markAll('leave')">⏱ 全员请假</button>
+            </div>
+            <div class="stat-grid">
+                <div class="stat"><div class="k">出勤</div><div class="v" style="color:var(--green)" id="presentCount">0</div></div>
+                <div class="stat"><div class="k">迟到</div><div class="v" style="color:#f97316" id="lateCount">0</div></div>
+                <div class="stat"><div class="k">请假</div><div class="v" style="color:var(--amber)" id="leaveCount">0</div></div>
+                <div class="stat"><div class="k">缺勤</div><div class="v" style="color:var(--rose)" id="absentCount">0</div></div>
+            </div>
+            <div id="attendanceList"></div>
+        </div>
+    </div>
+
+    <!-- ═══ 记忆库 ═══ -->
+    <div id="view-memory" class="view">
+        <div class="card">
+            <div class="section-title">
+                <div><h2>🧠 记忆本</h2><div class="hint" style="margin:4px 0 0">日常行为 · 课堂纪律 · 考试成绩 · 交际事件 —— AI 自动结构化，随时抽取做画像分析</div></div>
+                <button class="btn btn-primary" onclick="openMemoryModal()">✨ AI 记一笔</button>
+            </div>
+            <div class="toolbar" style="margin-bottom:14px">
+                <select id="memFilterStudent" style="flex:1;min-width:150px" onchange="renderMemories()"></select>
+                <select id="memFilterCat" style="flex:0 0 150px" onchange="renderMemories()">
+                    <option value="">全部分类</option>
+                    <option value="behavior">日常行为</option>
+                    <option value="discipline">课堂纪律</option>
+                    <option value="exam">考试成绩</option>
+                    <option value="social">交际事件</option>
+                    <option value="score">积分事件</option>
+                </select>
+                <input id="memFilterText" placeholder="搜索内容 / 标签…" style="flex:1;min-width:150px" oninput="renderMemories()">
+            </div>
+            <div id="memoryList"></div>
+        </div>
+    </div>
+
+    <!-- ═══ 学生画像 ═══ -->
+    <div id="view-profile" class="view">
+        <div class="card">
+            <div class="toolbar" id="profileToolbar" style="display:none">
+                <button class="btn btn-ghost" onclick="backToCards()">← 返回名卡</button>
+                <span style="flex:1"></span>
+                <button class="btn btn-ghost" onclick="copyProfilePrompt()">🤖 复制 AI 画像提示词</button>
+            </div>
+            <select id="profileStudent" style="display:none" onchange="renderProfile()"></select>
+            <div id="profileBody"></div>
+        </div>
+    </div>
+
+    <!-- ═══ 点名 ═══ -->
+    <div id="view-random" class="view">
+        <div class="card">
+            <div class="draw-stage">
+                <div class="draw-card" id="luckyCard">
+                    <div class="meta" id="luckyId">准备好点名了吗？</div>
+                    <div class="name" id="luckyName">🎯 开始点名</div>
+                </div>
+                <button class="btn btn-primary" style="font-size:15px;padding:13px 38px" onclick="startLuckyDraw()">🎲 随机点名</button>
+                <div style="margin-top:18px;font-size:12.5px;color:var(--ink-3)">💡 点名后如需加减分，请通过「记一笔」记录事件时关联积分</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ 积分 ═══ -->
+    <div id="view-scores" class="view">
+        <div class="card">
+            <div class="toolbar" style="margin-bottom:6px">
+                <span style="font-size:12.5px;color:var(--ink-3)">🔑 积分不直接加减 —— 必须先在记忆本里记录事件，关联积分后才会生效，保证每一分都有据可查。</span>
+            </div>
+            <div id="scoreList"></div>
+        </div>
+    </div>
+</div>
+
+<!-- 全局悬浮按钮: 记一笔 -->
+<button class="fab" onclick="openMemoryModal()" title="AI 记一笔">🧠<span>记一笔</span></button>
+
+<!-- 学生模态框 -->
+<div class="modal" id="studentModal">
+    <div class="modal-box">
+        <div class="modal-head"><h3 id="studentModalTitle">添加学生</h3><button class="modal-x" onclick="closeModal('studentModal')">✕</button></div>
+        <input type="hidden" id="studentId">
+        <label class="fl">学号</label><input id="studentNumber" style="width:100%" placeholder="如 20240101">
+        <label class="fl">姓名</label><input id="studentName" style="width:100%" placeholder="学生姓名">
+        <label class="fl">座位号</label><input id="studentSeat" style="width:100%" placeholder="如 3 排 5 号">
+        <div style="display:flex;gap:10px;margin-top:22px">
+            <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="saveStudent()">保存</button>
+            <button class="btn btn-ghost" style="flex:1;justify-content:center" onclick="closeModal('studentModal')">取消</button>
+        </div>
+    </div>
+</div>
+
+<!-- 批量导入模态框 -->
+<div class="modal" id="importModal">
+    <div class="modal-box">
+        <div class="modal-head"><h3>批量导入名册</h3><button class="modal-x" onclick="closeModal('importModal')">✕</button></div>
+        <div class="hint" style="font-size:12.5px;color:var(--ink-3);margin:6px 0 10px">
+            每行一名学生，支持「学号,姓名,座位号」（逗号或 Tab 分隔，座位可省略）。也支持只有姓名、每行一个的简单格式。
+        </div>
+        <textarea id="importText" style="width:100%;min-height:180px" placeholder="20240101,张三,1排1号&#10;20240102,李四,1排2号&#10;王五"></textarea>
+        <label class="fl"><input type="checkbox" id="importDedupe" checked style="width:auto;margin-right:6px">跳过已存在的学号/姓名</label>
+        <div style="display:flex;gap:10px;margin-top:18px">
+            <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="doImport()">导入</button>
+            <button class="btn btn-ghost" style="flex:1;justify-content:center" onclick="closeModal('importModal')">取消</button>
+        </div>
+    </div>
+</div>
+
+<!-- 云账号模态框 -->
+<div class="modal" id="cloudModal">
+    <div class="modal-box">
+        <div class="modal-head"><h3>☁ 云端同步</h3><button class="modal-x" onclick="closeModal('cloudModal')">✕</button></div>
+        <div id="cloudInfo" style="font-size:13px;color:var(--ink-2);line-height:1.7"></div>
+        <div id="cloudForm">
+            <label class="fl">用户名</label>
+            <input id="cloudEmail" style="width:100%" placeholder="管理员分配的用户名">
+            <label class="fl">密码</label>
+            <input id="cloudPassword" type="password" style="width:100%" placeholder="密码">
+            <div style="display:flex;gap:10px;margin-top:18px">
+                <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="cloudLogin(false)">登录</button>
+            </div>
+            <div style="margin-top:14px">
+                <button class="btn btn-ghost btn-sm" onclick="toggleChangePwd()">修改密码</button>
+            </div>
+            <div id="chgPwdBox" style="display:none">
+                <label class="fl">旧密码</label>
+                <input id="chgOld" type="password" style="width:100%">
+                <label class="fl">新密码（至少 4 位）</label>
+                <input id="chgNew" type="password" style="width:100%">
+                <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="doChangePwd()">确认修改</button>
+            </div>
+            <div id="cloudMsg" style="font-size:12.5px;color:var(--ink-3);margin-top:12px"></div>
+        </div>
+        <div id="cloudActions" style="display:none">
+            <label class="fl">教师姓名</label>
+            <input id="teacherName" style="width:100%" placeholder="如：王老师" oninput="saveTeacherInfo()">
+            <label class="fl">学科</label>
+            <input id="teacherSubject" style="width:100%" placeholder="如：数学" oninput="saveTeacherInfo()">
+            <div style="margin-top:16px;padding:12px 14px;border-radius:12px;background:var(--green-soft);font-size:12.5px;color:#065f46;display:flex;align-items:center;gap:8px">
+                🟢 实时同步已开启 —— 所有改动自动保存到云端，无需手动上传下载
+            </div>
+            <div style="display:flex;gap:10px;margin-top:16px">
+                <button class="btn btn-danger-soft" style="flex:1;justify-content:center" onclick="cloudLogout()">退出登录</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- AI 记一笔模态框 -->
+<div class="modal" id="memoryModal">
+    <div class="modal-box">
+        <div class="modal-head"><h3>✨ AI 记一笔</h3><button class="modal-x" onclick="closeModal('memoryModal')">✕</button></div>
+        <div class="hint" style="font-size:12.5px;color:var(--ink-3);margin:4px 0 10px">把观察到的情况写成一段话（可含多名学生、多件事），AI 自动识别学生并结构化为条目，确认后入库。</div>
+        <textarea id="aiText" style="width:100%;min-height:110px" placeholder="例：今天数学课上张三和同桌讲话，提醒后改正；午休时张三主动帮王五讲错题；李四这次月考进步了10名。"></textarea>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
+            <button class="btn btn-primary" onclick="aiStructure()">✨ AI 结构化</button>
+            <span id="aiStatus" style="font-size:12.5px;color:var(--ink-3)"></span>
+            <span style="flex:1"></span>
+        </div>
+        <div id="aiPreview"></div>
+        <div id="aiSaveBar" style="display:none;margin-top:16px">
+            <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="saveAiDraft()">保存所选到记忆本</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// ═══════════════ 数据层 ═══════════════
+const KEYS = {
+    STUDENTS: 'teacherNotebook_students',
+    ATTENDANCE: 'teacherNotebook_attendance',
+    SCORES: 'teacherNotebook_scores',
+    MEMORIES: 'teacherNotebook_memories'
+};
+let students  = JSON.parse(localStorage.getItem(KEYS.STUDENTS)  || '[]');
+let attendance = JSON.parse(localStorage.getItem(KEYS.ATTENDANCE) || '{}');
+let scores    = JSON.parse(localStorage.getItem(KEYS.SCORES)   || '[]');
+let memories  = JSON.parse(localStorage.getItem(KEYS.MEMORIES)  || '[]');
+
+const CATS = {
+    behavior:   { label: '日常行为', icon: '🌱' },
+    discipline: { label: '课堂纪律', icon: '📢' },
+    exam:       { label: '考试成绩', icon: '📝' },
+    social:     { label: '交际事件', icon: '🤝' },
+    score:      { label: '积分事件', icon: '⭐' }
+};
+const SENTI = { pos: '积极', neu: '中性', neg: '消极' };
+
+let currentLuckyStudent = null;
+let pickedCat = 'behavior';
+let pickedSenti = 'neu';
+let profileStudentId = '';
+
+// ═══════════════ 云端同步 (AppBase PG 后端) ═══════════════
+// 四个集合各存为 /app/data/notebook 下的一行; localStorage 为离线缓存。
+const CLOUD = {
+    base: (localStorage.getItem('teacherNotebook_apiBase') || 'http://127.0.0.1:3419'),
+    get token() { return localStorage.getItem('teacherNotebook_token') || ''; },
+    set token(v) { v ? localStorage.setItem('teacherNotebook_token', v) : localStorage.removeItem('teacherNotebook_token'); },
+    get rowIds() { return JSON.parse(localStorage.getItem('teacherNotebook_rowIds') || '{}'); },
+    set rowIds(v) { localStorage.setItem('teacherNotebook_rowIds', JSON.stringify(v)); }
+};
+const COLLECTIONS = ['students', 'attendance', 'scores', 'memories'];
+
+async function apiCall(method, path, body) {
+    const resp = await fetch(CLOUD.base + path, {
+        method,
+        headers: {
+            'Content-Type': 'application/json',
+            ...(CLOUD.token ? { 'Authorization': 'Bearer ' + CLOUD.token } : {})
+        },
+        body: body ? JSON.stringify(body) : undefined
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+    return data;
+}
+
+function cloudRenderChip(state, text) {
+    const chip = document.getElementById('cloudChip');
+    document.getElementById('cloudText').textContent = text;
+    chip.classList.toggle('ok', state === 'ok');
+}
+
+const TEACHER_KEY = 'teacherNotebook_teacher';
+function teacherInfo() {
+    return JSON.parse(localStorage.getItem(TEACHER_KEY) || '{}');
+}
+function saveTeacherInfo() {
+    localStorage.setItem(TEACHER_KEY, JSON.stringify({
+        name: document.getElementById('teacherName').value.trim(),
+        subject: document.getElementById('teacherSubject').value.trim()
+    }));
+    cloudRefreshUI();
+}
+function cloudRefreshUI() {
+    const t = teacherInfo();
+    const teacherLabel = [t.name, t.subject].filter(Boolean).join(' · ');
+    if (CLOUD.token) {
+        // 显示当前登录者姓名; 未填写姓名时回退到登录用户名
+        const displayName = teacherLabel || localStorage.getItem('teacherNotebook_username') || '已登录';
+        cloudRenderChip('ok', `👩‍🏫 ${displayName}`);
+        document.getElementById('cloudForm').style.display = 'none';
+        document.getElementById('cloudActions').style.display = 'block';
+        const email = localStorage.getItem('teacherNotebook_username') || localStorage.getItem('teacherNotebook_email') || '';
+        document.getElementById('cloudInfo').innerHTML =
+            `已登录 <b>${esc(email)}</b> · 数据实时保存到云端 PostgreSQL，换设备登录同一账号即可恢复。`;
+        if (document.getElementById('teacherName')) {
+            document.getElementById('teacherName').value = t.name || '';
+            document.getElementById('teacherSubject').value = t.subject || '';
+        }
+    } else {
+        cloudRenderChip('off', '☁ 未登录 · 点击登录');
+        document.getElementById('cloudForm').style.display = 'block';
+        document.getElementById('cloudActions').style.display = 'none';
+        document.getElementById('cloudInfo').textContent = '登录后数据实时保存到云端，换设备不丢失。';
+    }
+}
+
+function openCloudModal() {
+    cloudRefreshUI();
+    document.getElementById('cloudModal').classList.add('show');
+}
+
+async function cloudLogin(register) {
+    // register 参数保留兼容, 应用账号由管理员在大厅创建, 这里只登录
+    const username = document.getElementById('cloudEmail').value.trim();
+    const password = document.getElementById('cloudPassword').value;
+    const msg = document.getElementById('cloudMsg');
+    if (!username || !password) { msg.textContent = '请填写用户名和密码'; return; }
+    msg.textContent = '登录中…';
+    try {
+        const data = await apiCall('POST', '/app/hall/appauth/login',
+            { app: 'teacher-notebook.html', username, password });
+        CLOUD.token = data.token;
+        localStorage.setItem('teacherNotebook_email', username);
+        localStorage.setItem('teacherNotebook_username', username);
+        msg.textContent = '';
+        cloudRefreshUI();
+        closeModal('cloudModal');
+        const rows = await apiCall('GET', '/app/data/notebook');
+        if (rows.rows.length) {
+            await cloudPull();
+            alert('已从云端恢复数据');
+        } else {
+            await cloudPush();
+            alert('本地数据已推送到云端');
+        }
+        loadAppEnv();
+    } catch (e) {
+        msg.textContent = '失败：' + e.message + '（账号由管理员在大厅「账号/Key」中添加）';
+    }
+}
+
+function toggleChangePwd() {
+    const box = document.getElementById('chgPwdBox');
+    box.style.display = box.style.display === 'none' || !box.style.display ? 'block' : 'none';
+}
+async function doChangePwd() {
+    const username = document.getElementById('cloudEmail').value.trim();
+    const msg = document.getElementById('cloudMsg');
+    try {
+        await apiCall('POST', '/app/hall/appauth/password', {
+            app: 'teacher-notebook.html',
+            username,
+            oldPassword: document.getElementById('chgOld').value,
+            newPassword: document.getElementById('chgNew').value
+        });
+        msg.textContent = '✓ 密码已修改';
+        document.getElementById('chgPwdBox').style.display = 'none';
+    } catch (e) {
+        msg.textContent = '✗ ' + e.message;
+    }
+}
+
+async function cloudPull() {
+    const data = await apiCall('GET', '/app/data/notebook');
+    const rowIds = {};
+    for (const row of data.rows) {
+        const key = row.data.collection;
+        if (!COLLECTIONS.includes(key)) continue;
+        rowIds[key] = row.id;
+        const val = row.data.payload;
+        // 空负载 (云端行存在但无数据) 不覆盖本地, 稍后本地数据会推送上去
+        if (val === null || val === undefined || (Array.isArray(val) && !val.length) ||
+            (typeof val === 'object' && !Array.isArray(val) && !Object.keys(val).length)) continue;
+        if (key === 'students') students = Array.isArray(val) ? val : [];
+        else if (key === 'attendance') attendance = val && typeof val === 'object' ? val : {};
+        else if (key === 'scores') scores = Array.isArray(val) ? val : [];
+        else if (key === 'memories') memories = Array.isArray(val) ? val : [];
+    }
+    CLOUD.rowIds = rowIds;
+    saveLocal(); renderAll();
+}
+
+async function cloudPush() {
+    if (!CLOUD.token) return;
+    const rowIds = CLOUD.rowIds;
+    for (const key of COLLECTIONS) {
+        const payload = key === 'attendance' ? attendance : ({ students, scores, memories })[key];
+        const body = { data: { collection: key, payload } };
+        try {
+            if (rowIds[key]) await apiCall('PUT', '/app/data/notebook/' + rowIds[key], body);
+            else {
+                const created = await apiCall('POST', '/app/data/notebook', body);
+                rowIds[key] = created.id;
+            }
+        } catch (e) {
+            console.warn('cloud push failed:', key, e.message);
+        }
+    }
+    CLOUD.rowIds = rowIds;
+    cloudRenderChip('ok', '☁ 已同步');
+}
+
+function cloudLogout() {
+    CLOUD.token = '';
+    cloudRefreshUI();
+}
+
+function saveLocal() {
+    localStorage.setItem(KEYS.STUDENTS, JSON.stringify(students));
+    localStorage.setItem(KEYS.ATTENDANCE, JSON.stringify(attendance));
+    localStorage.setItem(KEYS.SCORES, JSON.stringify(scores));
+    localStorage.setItem(KEYS.MEMORIES, JSON.stringify(memories));
+    renderHeroStats();
+}
+
+function saveData() {
+    saveLocal();
+    if (CLOUD.token) cloudPush(); // 静默推送, 失败不影响本地使用
+}
+const todayStr = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const fmtDate = s => new Date(s).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const studentById = id => students.find(s => s.id === id);
+
+// ═══════════════ 导航 ═══════════════
+function switchView(id, btn) {
+    btn = btn || document.querySelector(`.nav button[data-view="${id}"]`);
+    document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.getElementById('view-' + id).classList.add('active');
+    if (id === 'memory') { fillStudentFilter('memFilterStudent', true); renderMemories(); }
+    if (id === 'profile') {
+        fillStudentFilter('profileStudent', false);
+        if (!profileStudentId) document.getElementById('profileStudent').value = ''; // 无指定学生 → 先看名卡
+        renderProfile();
+    }
+    if (id === 'scores') renderScoreList();
+    if (id === 'attendance') loadAttendance();
+    if (id === 'roster') renderStudentList();
+}
+
+function renderHeroStats() {
+    document.getElementById('mStudents').textContent = students.length;
+    document.getElementById('mMemories').textContent = memories.length;
+    const t = attendance[todayStr()] || {};
+    document.getElementById('mToday').textContent = students.length ? Object.values(t).filter(s => s === 'present').length : '-';
+    const avg = students.length ? Math.round(students.reduce((a, s) => a + (s.score || 0), 0) / students.length * 10) / 10 : 0;
+    document.getElementById('mAvg').textContent = avg;
+}
+
+// ═══════════════ 学生管理 ═══════════════
+function renderStudentList() {
+    const box = document.getElementById('studentList');
+    if (!students.length) {
+        box.innerHTML = `<div class="empty"><div class="icon">👨‍🎓</div><h3>名册还是空的</h3><p>点击「添加学生」或「批量导入名册」开始</p></div>`;
+        return;
+    }
+    box.innerHTML = `<table><thead><tr>
+        <th>学号</th><th>姓名</th><th>座位</th><th>积分</th><th>记忆</th><th style="width:190px">操作</th>
+    </tr></thead><tbody id="studentTableBody"></tbody></table>`;
+    const tbody = document.getElementById('studentTableBody');
+    students.forEach(st => {
+        const memCount = memories.filter(m => m.studentId === st.id).length;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td style="color:var(--ink-3)">${esc(st.number)}</td>
+            <td><b>${esc(st.name)}</b></td>
+            <td>${esc(st.seat || '-')}</td>
+            <td><b style="color:${(st.score||0) >= 0 ? 'var(--green)' : 'var(--rose)'}">${st.score || 0}</b></td>
+            <td><span class="tag">${memCount} 条</span></td>
+            <td>
+                <button class="btn btn-ghost btn-sm" onclick="viewProfile('${st.id}')">画像</button>
+                <button class="btn btn-ghost btn-sm" onclick="editStudent('${st.id}')">编辑</button>
+                <button class="btn btn-danger-soft btn-sm" onclick="deleteStudent('${st.id}')">删除</button>
+            </td>`;
+        tbody.appendChild(tr);
+    });
+}
+function filterStudents() {
+    const q = document.getElementById('studentSearch').value.toLowerCase();
+    document.querySelectorAll('#studentTableBody tr').forEach(r => {
+        r.style.display = r.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+}
+function openStudentModal(id = null) {
+    const m = document.getElementById('studentModal');
+    document.getElementById('studentModalTitle').textContent = id ? '编辑学生' : '添加学生';
+    const st = id ? students.find(s => s.id === id) : {};
+    document.getElementById('studentId').value = id || '';
+    document.getElementById('studentNumber').value = st.number || '';
+    document.getElementById('studentName').value = st.name || '';
+    document.getElementById('studentSeat').value = st.seat || '';
+    m.classList.add('show');
+}
+function editStudent(id) { openStudentModal(id); }
+function saveStudent() {
+    const id = document.getElementById('studentId').value;
+    const number = document.getElementById('studentNumber').value.trim();
+    const name = document.getElementById('studentName').value.trim();
+    const seat = document.getElementById('studentSeat').value.trim();
+    if (!number || !name) return alert('请填写学号和姓名');
+    if (id) {
+        const i = students.findIndex(s => s.id === id);
+        if (i !== -1) students[i] = { ...students[i], number, name, seat };
+    } else {
+        students.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), number, name, seat, score: 0 });
+    }
+    saveData(); renderStudentList(); closeModal('studentModal');
+}
+function deleteStudent(id) {
+    if (!confirm('删除该学生？其记忆与积分记录将保留在库中。')) return;
+    students = students.filter(s => s.id !== id);
+    saveData(); renderStudentList();
+}
+function viewProfile(id) {
+    profileStudentId = id;
+    document.querySelector('.nav button[data-view="profile"]').click();
+}
+
+// ── 批量导入 ──
+function openImportModal() {
+    document.getElementById('importText').value = '';
+    document.getElementById('importModal').classList.add('show');
+}
+function doImport() {
+    const lines = document.getElementById('importText').value.split('\n').map(l => l.trim()).filter(Boolean);
+    const dedupe = document.getElementById('importDedupe').checked;
+    let added = 0, skipped = 0;
+    for (const line of lines) {
+        const parts = line.split(/[,，\t]/).map(p => p.trim());
+        let number = '', name = '', seat = '';
+        if (parts.length >= 2) { number = parts[0]; name = parts[1]; seat = parts[2] || ''; }
+        else { name = parts[0]; number = String(students.length + 1 + added); }
+        if (!name) { skipped++; continue; }
+        if (dedupe && students.some(s => s.number === number && number) || students.some(s => s.name === name)) { skipped++; continue; }
+        students.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), number, name, seat, score: 0 });
+        added++;
+    }
+    saveData(); renderStudentList(); closeModal('importModal');
+    alert(`导入完成：新增 ${added} 名学生${skipped ? `，跳过 ${skipped} 行` : ''}`);
+}
+
+// ═══════════════ 考勤 ═══════════════
+function loadAttendance() {
+    const box = document.getElementById('attendanceList');
+    if (!document.getElementById('attendanceDate').value)
+        document.getElementById('attendanceDate').value = todayStr();
+    const date = document.getElementById('attendanceDate').value;
+    const day = attendance[date] || {};
+    let present = 0, late = 0, leave = 0, absent = 0;
+    if (!students.length) {
+        box.innerHTML = `<div class="empty"><div class="icon">📅</div><h3>请先创建名册</h3></div>`;
+        document.getElementById('presentCount').textContent = 0;
+        document.getElementById('lateCount').textContent = 0;
+        document.getElementById('leaveCount').textContent = 0;
+        document.getElementById('absentCount').textContent = 0;
+        return;
+    }
+    box.innerHTML = `<table><thead><tr><th>学号</th><th>姓名</th><th>状态</th><th>操作</th></tr></thead><tbody></tbody></table>`;
+    const tbody = box.querySelector('tbody');
+    students.forEach(st => {
+        const status = day[st.id] || 'absent';
+        if (status === 'present') present++; else if (status === 'late') late++; else if (status === 'leave') leave++; else absent++;
+        const styleMap = { present:['var(--green)','var(--green-soft)','出勤'], late:['#f97316','#ffedd5','迟到'], leave:['var(--amber)','var(--amber-soft)','请假'], absent:['var(--rose)','var(--rose-soft)','缺勤'] };
+        const [c, cs, txt] = styleMap[status] || styleMap.absent;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td style="color:var(--ink-3)">${esc(st.number)}</td>
+            <td><b>${esc(st.name)}</b></td>
+            <td><span class="chip" style="--c:${c};--c-soft:${cs}">${txt}</span></td>
+            <td>
+                <button class="btn btn-ghost btn-sm" onclick="markAttendance('${st.id}','present')">出勤</button>
+                <button class="btn btn-ghost btn-sm" onclick="markAttendance('${st.id}','late')">迟到</button>
+                <button class="btn btn-ghost btn-sm" onclick="markAttendance('${st.id}','leave')">请假</button>
+                <button class="btn btn-danger-soft btn-sm" onclick="markAttendance('${st.id}','absent')">缺勤</button>
+            </td>`;
+        tbody.appendChild(tr);
+    });
+    document.getElementById('presentCount').textContent = present;
+    document.getElementById('lateCount').textContent = late;
+    document.getElementById('leaveCount').textContent = leave;
+    document.getElementById('absentCount').textContent = absent;
+}
+function markAttendance(studentId, status) {
+    const date = document.getElementById('attendanceDate').value;
+    (attendance[date] = attendance[date] || {})[studentId] = status;
+    saveData(); loadAttendance();
+}
+function markAll(status) {
+    if (!students.length) return;
+    const date = document.getElementById('attendanceDate').value;
+    attendance[date] = {};
+    students.forEach(st => attendance[date][st.id] = status);
+    saveData(); loadAttendance();
+}
+
+// ═══════════════ 记忆本 (AI 结构化录入) ═══════════════
+const AI_CFG_KEY = 'teacherNotebook_aiCfg';
+let aiDraft = [];
+
+function aiCfg() {
+    const c = JSON.parse(localStorage.getItem(AI_CFG_KEY) || '{}');
+    return {
+        endpoint: c.endpoint || 'http://127.0.0.1:3418/v1/chat/completions',
+        key: c.key || '',
+        model: c.model || 'glm-4.6'
+    };
+}
+function fillStudentFilter(selectId, withAll) {
+    const sel = document.getElementById(selectId);
+    const prev = sel.value;
+    sel.innerHTML = (withAll ? '<option value="">全部学生</option>' : '') +
+        students.map(s => `<option value="${s.id}">${esc(s.number)} · ${esc(s.name)}</option>`).join('');
+    if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+}
+function openMemoryModal() {
+    if (!students.length) return alert('请先添加学生');
+    document.getElementById('aiText').value = '';
+    document.getElementById('aiPreview').innerHTML = '';
+    document.getElementById('aiSaveBar').style.display = 'none';
+    document.getElementById('aiStatus').textContent = '';
+    document.getElementById('memoryModal').classList.add('show');
+}
+
+async function aiStructure() {
+    const text = document.getElementById('aiText').value.trim();
+    if (!text) return alert('请先输入一段观察记录');
+    // 设置面板展开时, 以输入框当前值保存
+    const statusEl = document.getElementById('aiStatus');
+    if (!CLOUD.token) return alert('请先登录（右上角），LLM 由管理员统一配置');
+    statusEl.textContent = 'AI 正在结构化…';
+    const roster = students.map(s => s.name).join('、');
+    const sys = `你是班主任的班级记录助手。把用户描述的班级日常整理为结构化记忆条目。
+只输出 JSON 数组，不要输出任何其他内容。每条格式:
+{"studentName":"学生姓名","category":"behavior|discipline|exam|social","senti":"pos|neu|neg","title":"不超过12字的概括","content":"详细客观的记录","tags":["标签"],"date":"YYYY-MM-DD","score":0,"attendance":null}
+规则:
+- 学生名必须取自名册: ${roster}。简称/音近名字请匹配最可能的人; 无法对应任何学生的内容直接丢弃。
+- category 四选一: behavior=日常行为, discipline=课堂纪律, exam=考试成绩, social=交际事件。
+- senti 三选一: pos=积极, neu=中性, neg=消极。根据事件性质判断。
+- 一段话含多名学生/多件事时拆成多条; 没有提到日期默认 "${todayStr()}"。
+- score: 该事件应关联的积分变化 (整数, 正=加负=减), 描述未提到奖惩时为 0; 常见: 表扬+1~+5, 违纪-1~-5, 大型进步+5~+10。
+- attendance: 若描述涉及到勤情况 (迟到/早退/请假/缺勤), 填 "late"|"present"|"leave"|"absent", 保存时会写入该生当天考勤; 未提到则填 null。`;
+
+    try {
+        // 走服务端 LLM 代理: 上游 url/key/model 由管理员在大厅配置, 前端不接触凭证
+        const resp = await fetch('/app/hall/llm?app=teacher-notebook.html', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CLOUD.token },
+            body: JSON.stringify({
+                temperature: 0.2,
+                messages: [{ role: 'system', content: sys }, { role: 'user', content: text }]
+            })
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + (await resp.text()).slice(0, 200));
+        const data = await resp.json();
+        // 兼容两种返回: 标准 OpenAI (choices[0].message) 与 AppBase 网关包装 (response.message)
+        const msg = data.choices?.[0]?.message ?? data.response?.message ?? {};
+        let raw = String(msg.content ?? '').replace(/```json|```/g, '').trim();
+        const m = raw.match(/\[[\s\S]*\]/);
+        if (!m) throw new Error('AI 未返回 JSON 数组');
+        const arr = JSON.parse(m[0]);
+        aiDraft = arr
+            .filter(e => e && e.studentName && students.some(s => s.name === e.studentName))
+            .map(e => ({
+                studentId: students.find(s => s.name === e.studentName).id,
+                studentName: e.studentName,
+                category: ['behavior','discipline','exam','social'].includes(e.category) ? e.category : 'behavior',
+                senti: ['pos','neu','neg'].includes(e.senti) ? e.senti : 'neu',
+                title: String(e.title || '').slice(0, 30),
+                content: String(e.content || ''),
+                tags: Array.isArray(e.tags) ? e.tags.map(String).slice(0, 6) : [],
+                date: /^\d{4}-\d{2}-\d{2}$/.test(e.date || '') ? e.date : todayStr(),
+                score: parseInt(e.score) || 0,
+                attendance: ['present','late','leave','absent'].includes(e.attendance) ? e.attendance : null,
+                _keep: true
+            }));
+        statusEl.textContent = `解析出 ${aiDraft.length} 条记忆，请确认后保存`;
+        renderAiPreview();
+    } catch (e) {
+        statusEl.textContent = '';
+        alert('AI 结构化失败：' + e.message);
+    }
+}
+
+function renderAiPreview() {
+    const box = document.getElementById('aiPreview');
+    if (!aiDraft.length) {
+        box.innerHTML = `<div class="empty" style="padding:20px"><p>没有可识别的条目，试试写明学生姓名</p></div>`;
+        document.getElementById('aiSaveBar').style.display = 'none';
+        return;
+    }
+    box.innerHTML = aiDraft.map((e, i) => {
+        const cat = CATS[e.category];
+        const sentiLabel = SENTI[e.senti];
+        return `<div class="tl-item cat-${e.category}" style="margin-top:14px;padding-bottom:0">
+            <div class="head" style="align-items:flex-start">
+                <input type="checkbox" ${e._keep ? 'checked' : ''} onchange="aiDraft[${i}]._keep=this.checked" style="width:auto;margin-top:3px">
+                <select onchange="aiDraft[${i}].studentId=this.value" style="width:auto;font-size:12.5px;padding:5px 8px">
+                    ${students.map(s => `<option value="${s.id}" ${s.id === e.studentId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
+                </select>
+                <span class="chip">${cat.icon} ${cat.label}</span>
+                <span class="chip" style="--c:${e.senti==='pos'?'var(--green)':e.senti==='neg'?'var(--rose)':'var(--ink-3)'};--c-soft:${e.senti==='pos'?'var(--green-soft)':e.senti==='neg'?'var(--rose-soft)':'#eef1f6'}">${sentiLabel}</span>
+            </div>
+            <input value="${esc(e.title)}" oninput="aiDraft[${i}].title=this.value" style="width:100%;margin-top:8px;font-size:13.5px;font-weight:600">
+            <textarea oninput="aiDraft[${i}].content=this.value" style="width:100%;margin-top:6px;min-height:56px;font-size:13px">${esc(e.content)}</textarea>
+            <div style="margin-top:8px;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-3);flex-wrap:wrap">
+                关联积分 <input type="number" value="${e.score || 0}" oninput="aiDraft[${i}].score=parseInt(this.value)||0" style="width:80px;padding:5px 8px;font-size:12.5px">（正加负减, 0 不加分）
+                ${e.attendance ? `<span class="chip" style="--c:#f97316;--c-soft:#ffedd5">📅 考勤: ${{present:'出勤',late:'迟到',leave:'请假',absent:'缺勤'}[e.attendance]}</span>` : ''}
+            </div>
+            <div style="margin-top:6px;font-size:11.5px;color:var(--ink-3)">${e.tags.map(t => '#' + esc(t)).join(' ')} · ${esc(e.date)}</div>
+        </div>`;
+    }).join('');
+    document.getElementById('aiSaveBar').style.display = 'block';
+}
+
+function saveAiDraft() {
+    const picked = aiDraft.filter(e => e._keep);
+    if (!picked.length) return alert('请至少勾选一条');
+    picked.forEach(e => {
+        memories.push({
+            id: Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+            studentId: e.studentId, studentName: e.studentName,
+            category: e.category, senti: e.senti,
+            title: e.title, content: e.content, tags: e.tags, date: e.date,
+            createdAt: new Date().toISOString()
+        });
+        if (e.score) applyScore(e.studentId, e.score, e.title || e.content.slice(0, 20), true, e.category, 'AI 记一笔');
+        if (e.attendance) {
+            const d = e.date || todayStr();
+            (attendance[d] = attendance[d] || {})[e.studentId] = e.attendance;
+        }
+    });
+    saveData(); renderMemories(); renderScoreList(); loadAttendance();
+    closeModal('memoryModal');
+    aiDraft = [];
+    alert(`已保存 ${picked.length} 条记忆到记忆本`);
+}
+function deleteMemory(id) {
+    if (!confirm('删除这条记忆？')) return;
+    memories = memories.filter(m => m.id !== id);
+    saveData(); renderMemories();
+}
+function renderMemories() {
+    const box = document.getElementById('memoryList');
+    const fs = document.getElementById('memFilterStudent').value;
+    const fc = document.getElementById('memFilterCat').value;
+    const q = document.getElementById('memFilterText').value.toLowerCase();
+    let list = memories.slice().sort((a, b) => (b.date + b.createdAt).localeCompare(a.date + a.createdAt));
+    if (fs) list = list.filter(m => m.studentId === fs);
+    if (fc) list = list.filter(m => m.category === fc);
+    if (q) list = list.filter(m =>
+        (m.title + m.content + m.tags.join(',') + m.studentName).toLowerCase().includes(q));
+
+    if (!list.length) {
+        box.innerHTML = `<div class="empty"><div class="icon">🧠</div><h3>${memories.length ? '没有匹配的记录' : '记忆本还是空的'}</h3><p>${memories.length ? '调整筛选条件试试' : '点击「记一笔」，把学生的表现沉淀下来'}</p></div>`;
+        return;
+    }
+    box.innerHTML = `<div class="tl">` + list.map(m => {
+        const cat = CATS[m.category] || CATS.behavior;
+        const st = studentById(m.studentId);
+        const sentiBadge = m.senti === 'pos' ? '<span class="chip" style="--c:var(--green);--c-soft:var(--green-soft)">积极</span>'
+            : m.senti === 'neg' ? '<span class="chip" style="--c:var(--rose);--c-soft:var(--rose-soft)">消极</span>' : '';
+        return `<div class="tl-item cat-${m.category}">
+            <div class="head">
+                <b>${esc(m.title || cat.label)}</b>
+                <span class="chip">${cat.icon} ${cat.label}</span>
+                ${sentiBadge}
+                <span class="date">${esc(st ? st.name : m.studentName || '')} · ${esc(m.date)}</span>
+                <span style="flex:1"></span>
+                <button class="btn btn-danger-soft btn-sm" onclick="deleteMemory('${m.id}')">删除</button>
+            </div>
+            ${m.content ? `<div class="body">${esc(m.content)}</div>` : ''}
+            ${m.tags.length ? `<div style="margin-top:6px">${m.tags.map(t => `<span class="tag">#${esc(t)}</span>`).join('')}</div>` : ''}
+        </div>`;
+    }).join('') + `</div>`;
+}
+
+// ═══════════════ 学生画像 ═══════════════
+function renderStudentCards() {
+    const box = document.getElementById('profileBody');
+    if (!students.length) {
+        box.innerHTML = `<div class="empty"><div class="icon">📊</div><h3>名册还是空的</h3><p>先到「名册」添加学生, 再来看画像</p></div>`;
+        return;
+    }
+    box.innerHTML = `
+        <div style="font-size:15px;font-weight:700;margin-bottom:4px">👥 点击学生卡片查看画像</div>
+        <div class="hint" style="font-size:12.5px;color:var(--ink-3);margin-bottom:16px">画像由记忆本记录自动聚合: 行为 / 纪律 / 成绩 / 交际四维 + 时间线</div>
+        <div class="stu-grid">` + students.map(st => {
+            const n = memories.filter(m => m.studentId === st.id).length;
+            return `<div class="stu-card" onclick="openProfile('${st.id}')">
+                <div class="avatar">${esc(st.name.slice(0,1))}</div>
+                <div class="nm">${esc(st.name)}</div>
+                <div class="no">${esc(st.number)}</div>
+                <div class="mt">
+                    <span class="tag">${st.score || 0} 分</span>
+                    <span class="tag">${n} 条记忆</span>
+                </div>
+            </div>`;
+        }).join('') + `</div>`;
+}
+function openProfile(id) {
+    document.getElementById('profileStudent').value = id;
+    renderProfile();
+}
+function backToCards() {
+    document.getElementById('profileStudent').value = '';
+    renderProfile();
+}
+function renderProfile() {
+    const box = document.getElementById('profileBody');
+    const sel = document.getElementById('profileStudent');
+    const toolbar = document.getElementById('profileToolbar');
+    // viewProfile 指定的学生优先 (名册点"画像"/名卡点进来), 其次用当前选中值
+    const wanted = profileStudentId && studentById(profileStudentId) ? profileStudentId : '';
+    const id = wanted || sel.value;
+    if (wanted) sel.value = wanted;
+    profileStudentId = '';
+    const st = studentById(id);
+    if (!st) {
+        // 未选中 → 全班名卡
+        toolbar.style.display = 'none';
+        renderStudentCards();
+        return;
+    }
+    toolbar.style.display = 'flex';
+    const mems = memories.filter(m => m.studentId === id);
+    const cnt = c => mems.filter(m => m.category === c).length;
+    const posN = mems.filter(m => m.senti === 'pos').length;
+    const negN = mems.filter(m => m.senti === 'neg').length;
+    const neuN = mems.length - posN - negN;
+
+    // 考勤率 (近 30 个有记录的日期)
+    const dates = Object.keys(attendance).sort();
+    let attTotal = 0, attPresent = 0;
+    for (const d of dates.slice(-30)) {
+        const s = attendance[d][id];
+        if (s) { attTotal++; if (s === 'present') attPresent++; }
+    }
+    const attRate = attTotal ? Math.round(attPresent / attTotal * 100) : null;
+
+    // 四维得分: 每类 积极=1 中性=0 消极=-1 归一到 0-100
+    const dims = ['behavior', 'discipline', 'exam', 'social'].map(c => {
+        const items = mems.filter(m => m.category === c);
+        const s = items.reduce((a, m) => a + (m.senti === 'pos' ? 1 : m.senti === 'neg' ? -1 : 0), 0);
+        const score = items.length ? Math.round((s + items.length) / (2 * items.length) * 100) : null;
+        return { cat: c, n: items.length, score };
+    });
+
+    const tagCount = {};
+    mems.forEach(m => m.tags.forEach(t => tagCount[t] = (tagCount[t] || 0) + 1));
+    const topTags = Object.entries(tagCount).sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+    const timeline = mems.slice().sort((a, b) => (b.date + b.createdAt).localeCompare(a.date + a.createdAt));
+    const labelOf = c => CATS[c].label;
+
+    box.innerHTML = `
+        <div class="profile-head" style="margin-bottom:20px">
+            <div class="avatar">${esc(st.name.slice(0,1))}</div>
+            <div style="flex:1;min-width:200px">
+                <div style="font-size:20px;font-weight:700">${esc(st.name)} <span style="font-size:13px;color:var(--ink-3);font-weight:500">· ${esc(st.number)} · 座位 ${esc(st.seat||'-')}</span></div>
+                <div style="margin-top:8px;display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--ink-2)">
+                    <span>积分 <b style="color:${(st.score||0)>=0?'var(--green)':'var(--rose)'}">${st.score||0}</b></span>
+                    <span>记忆 <b>${mems.length}</b> 条</span>
+                    <span>出勤率 <b>${attRate === null ? '—' : attRate + '%'}</b></span>
+                    <span>积极/消极 <b style="color:var(--green)">${posN}</b>/<b style="color:var(--rose)">${negN}</b></span>
+                </div>
+            </div>
+            <button class="btn btn-primary" onclick="openMemoryModal('${st.id}')">＋ 为 TA AI 记一笔</button>
+        </div>
+
+        <div class="dim" style="margin-top:6px">
+            ${dims.map(d => `
+                <div class="lbl"><b>${CATS[d.cat].icon} ${labelOf(d.cat)}</b><span style="color:var(--ink-3)">${d.n ? d.score + ' 分 · ' + d.n + ' 条' : '暂无记录'}</span></div>
+                <div class="bar"><i style="width:${d.score ?? 0}%"></i></div>`).join('')}
+        </div>
+
+        <div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(110px,1fr));margin:18px 0">
+            <div class="mini-stat"><div class="v" style="color:var(--green)">${CATS.behavior.icon} ${cnt('behavior')}</div><div class="k">日常行为</div></div>
+            <div class="mini-stat"><div class="v" style="color:var(--amber)">${CATS.discipline.icon} ${cnt('discipline')}</div><div class="k">课堂纪律</div></div>
+            <div class="mini-stat"><div class="v" style="color:var(--sky)">${CATS.exam.icon} ${cnt('exam')}</div><div class="k">考试成绩</div></div>
+            <div class="mini-stat"><div class="v" style="color:var(--violet)">${CATS.social.icon} ${cnt('social')}</div><div class="k">交际事件</div></div>
+            <div class="mini-stat"><div class="v" style="color:var(--ink-3)">${neuN}</div><div class="k">中性记录</div></div>
+        </div>
+
+        ${topTags.length ? `<div style="margin-bottom:18px"><div class="lbl" style="font-size:12.5px;font-weight:600;margin-bottom:8px">高频标签</div>
+            ${topTags.map(([t, n]) => `<span class="tag" style="font-size:12.5px;padding:5px 12px">#${esc(t)} × ${n}</span>`).join('')}</div>` : ''}
+
+        <div style="font-size:14px;font-weight:700;margin:20px 0 12px">🕰 记忆时间线</div>
+        ${timeline.length ? `<div class="tl">` + timeline.map(m => {
+            const cat = CATS[m.category];
+            const sentiBadge = m.senti === 'pos' ? '<span class="chip" style="--c:var(--green);--c-soft:var(--green-soft)">积极</span>'
+                : m.senti === 'neg' ? '<span class="chip" style="--c:var(--rose);--c-soft:var(--rose-soft)">消极</span>' : '';
+            return `<div class="tl-item cat-${m.category}">
+                <div class="head"><b>${esc(m.title || cat.label)}</b><span class="chip">${cat.icon} ${cat.label}</span>${sentiBadge}<span class="date">${esc(m.date)}</span></div>
+                ${m.content ? `<div class="body">${esc(m.content)}</div>` : ''}
+                ${m.tags.length ? `<div style="margin-top:6px">${m.tags.map(t => `<span class="tag">#${esc(t)}</span>`).join('')}</div>` : ''}
+            </div>`;
+        }).join('') + `</div>` : `<div class="empty" style="padding:24px"><p>还没有记录，点击右上角「为 TA AI 记一笔」</p></div>`}`;
+}
+
+/** 生成结构化画像提示词 (复制到剪贴板, 可直接喂给任意 LLM 做画像分析) */
+function copyProfilePrompt() {
+    const id = document.getElementById('profileStudent').value || profileStudentId;
+    const st = studentById(id);
+    if (!st) return alert('请先选择学生');
+    const mems = memories.filter(m => m.studentId === id)
+        .sort((a, b) => a.date.localeCompare(b.date));
+    const lines = mems.map(m =>
+        `- [${m.date}] [${(CATS[m.category]||{}).label||m.category}] [${SENTI[m.senti]||m.senti}] ${m.title}${m.content ? '：' + m.content : ''}${m.tags.length ? '（标签: ' + m.tags.join('/') + '）' : ''}`);
+    const scoresOf = scores.filter(s => s.studentId === id)
+        .map(s => `- [${fmtDate(s.date)}] ${s.score > 0 ? '+' : ''}${s.score} 分：${s.reason}`);
+    const att = Object.keys(attendance).sort().map(d => attendance[d][id]).filter(Boolean);
+    const attRate = att.length ? Math.round(att.filter(s => s === 'present').length / att.length * 100) : null;
+
+    const prompt = `请基于以下结构化记录，为这名学生生成一份学生画像分析，包括：性格特质、优势与亮点、需要关注的方面、发展趋势、给班主任的具体建议（如沟通方式、激励策略、家校沟通要点）。
+
+【学生】${st.name}（学号 ${st.number}，座位 ${st.seat || '-'}，当前积分 ${st.score || 0}，出勤率 ${attRate === null ? '无记录' : attRate + '%'}）
+
+【成长记忆（按时间排序）】
+${lines.length ? lines.join('\n') : '（暂无）'}
+
+【积分事件】
+${scoresOf.length ? scoresOf.join('\n') : '（暂无）'}
+
+请用中文回答，结论先行，具体到可执行的建议。`;
+
+    navigator.clipboard.writeText(prompt).then(
+        () => alert('AI 画像提示词已复制到剪贴板，可粘贴给任意 AI 助手分析'),
+        () => {
+            // 剪贴板不可用时降级: 弹出可复制的文本框
+            const w = window.open('', '_blank');
+            if (w) { w.document.write(`<pre style="white-space:pre-wrap;font-size:14px;padding:20px">${prompt.replace(/</g,'&lt;')}</pre>`); w.document.close(); }
+        }
+    );
+}
+
+// ═══════════════ 随机点名 ═══════════════
+function startLuckyDraw() {
+    if (!students.length) return alert('请先添加学生');
+    const card = document.getElementById('luckyCard');
+    const nameEl = document.getElementById('luckyName');
+    const idEl = document.getElementById('luckyId');
+    card.classList.add('rolling');
+    let count = 0;
+    const timer = setInterval(() => {
+        const st = students[Math.floor(Math.random() * students.length)];
+        nameEl.textContent = st.name;
+        idEl.textContent = `学号 ${st.number}`;
+        if (++count >= 22) {
+            clearInterval(timer);
+            card.classList.remove('rolling');
+            currentLuckyStudent = st;
+            nameEl.textContent = '🎉 ' + st.name;
+            idEl.textContent = `学号 ${st.number} · 座位 ${st.seat || '-'} · 积分 ${st.score || 0}`;
+            // 自动弹出记一笔, 预填点名场景
+            setTimeout(() => {
+                openMemoryModal();
+                document.getElementById('aiText').value = `随机点名抽到 ${st.name}，这节课的表现：`;
+                document.getElementById('aiText').focus();
+            }, 350);
+        }
+    }, 90);
+}
+// quickScore 已移除: 加减分必须经由记忆本记录
+function applyScore(studentId, change, reason, silent, category, source) {
+    const st = studentById(studentId);
+    if (!st) return;
+    st.score = (st.score || 0) + change;
+    scores.push({
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+        studentId, studentName: st.name, score: change, reason,
+        category: category || 'score',
+        source: source || 'AI 记一笔',
+        date: new Date().toISOString()
+    });
+    // 同步沉淀为记忆本积分事件
+    memories.push({
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+        studentId, studentName: st.name,
+        category: 'score', senti: change > 0 ? 'pos' : 'neg',
+        title: `${change > 0 ? '加分' : '减分'} ${Math.abs(change)} 分`,
+        content: `${source || 'AI 记一笔'} · ${reason}`,
+        tags: [], date: todayStr(),
+        createdAt: new Date().toISOString()
+    });
+    if (!silent) alert(`已为 ${st.name} ${change > 0 ? '加' : '减'} ${Math.abs(change)} 分`);
+}
+
+// ═══════════════ 积分管理 ═══════════════
+function renderScoreList() {
+    const box = document.getElementById('scoreList');
+    if (!students.length) {
+        box.innerHTML = `<div class="empty"><div class="icon">⭐</div><h3>请先创建名册</h3></div>`;
+        return;
+    }
+    const sorted = [...students].sort((a, b) => (b.score || 0) - (a.score || 0));
+    let html = `<table><thead><tr><th>排名</th><th>学号</th><th>姓名</th><th>积分</th></tr></thead><tbody>`;
+    sorted.forEach((st, i) => {
+        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : String(i + 1);
+        html += `<tr>
+            <td style="font-size:16px">${medal}</td>
+            <td style="color:var(--ink-3)">${esc(st.number)}</td>
+            <td><b>${esc(st.name)}</b></td>
+            <td><b style="color:${(st.score||0)>=0?'var(--green)':'var(--rose)'};font-size:15px">${st.score || 0}</b></td>
+            </td></tr>`;
+    });
+    html += `</tbody></table>`;
+    if (scores.length) {
+        html += `<div style="margin-top:26px"><div style="font-size:14px;font-weight:700;margin-bottom:12px">📜 积分流水</div><div style="max-height:320px;overflow-y:auto">`;
+        html += scores.slice().reverse().map(r => {
+            const catKey = (r.category && CATS[r.category]) ? r.category : 'score';
+            const cat = CATS[catKey];
+            const src = r.source || '手动';
+            return `<div class="tl-item cat-${catKey}" style="display:flex;align-items:flex-start;gap:10px;padding:10px 0 14px 12px">
+                <div style="flex:1">
+                    <b style="font-size:13.5px">${esc(r.studentName)}</b>
+                    <span class="chip" style="margin-left:8px">${cat.icon} ${cat.label}</span>
+                    <span class="tag" style="margin-left:6px">${esc(src)}</span>
+                    <div style="font-size:12.5px;color:var(--ink-3);margin-top:4px">${esc(r.reason || '')} · ${fmtDate(r.date)}</div>
+                </div>
+                <b style="color:${r.score>0?'var(--green)':'var(--rose)'};font-size:15px">${r.score>0?'+':''}${r.score}</b>
+            </div>`;}).join('');
+        html += `</div></div>`;
+    }
+    box.innerHTML = html;
+}
+// openScoreModal 已移除: 加减分必须经由记忆本记录
+// saveScore 已移除: 加减分必须经由记忆本记录
+
+// ═══════════════ 通用 ═══════════════
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+window.onclick = e => {
+    if (e.target.classList && e.target.classList.contains('modal'))
+        e.target.classList.remove('show');
+};
+
+function renderAll() {
+    renderStudentList(); loadAttendance(); renderScoreList(); renderHeroStats();
+    fillStudentFilter('memFilterStudent', true);
+    fillStudentFilter('profileStudent', false);
+    document.getElementById('profileStudent').value = ''; // 默认展示名卡
+    renderMemories(); renderProfile();
+}
+
+// 读取大厅为该应用配置的 .env (window.APP_ENV 供功能使用)
+async function loadAppEnv() {
+    try {
+        const resp = await fetch('/app/hall/appauth/env?app=teacher-notebook.html', {
+            headers: { Authorization: 'Bearer ' + CLOUD.token }
+        });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        window.APP_ENV = data.env || {};
+    } catch { /* 离线忽略 */ }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    // 大厅打开时通过 hash 自动注入网关 Key (应用内无需手动配置)
+    if (location.hash.startsWith('#gw=')) {
+        try {
+            const gwKey = decodeURIComponent(location.hash.slice(4));
+            const cfg = JSON.parse(localStorage.getItem('teacherNotebook_aiCfg') || '{}');
+            cfg.key = gwKey;
+            cfg.endpoint = cfg.endpoint || 'http://127.0.0.1:3418/v1/chat/completions';
+            cfg.model = cfg.model || 'glm-4.6';
+            localStorage.setItem('teacherNotebook_aiCfg', JSON.stringify(cfg));
+        } catch {}
+        history.replaceState(null, '', location.pathname);
+    }
+    document.getElementById('attendanceDate').value = todayStr();
+    renderStudentList(); loadAttendance(); renderScoreList(); renderHeroStats();
+    cloudRefreshUI();
+    // 已登录则后台拉取云端数据 (云端优先)
+    if (CLOUD.token) {
+        cloudPull().then(() => loadAppEnv()).catch(() => cloudRenderChip('off', '☁ 离线 · 本地模式'));
+    }
+    loadAppEnv();
+});
+</script>
+</body>
+</html>
