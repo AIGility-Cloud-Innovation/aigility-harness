@@ -604,6 +604,12 @@ export async function appBackendHandler(
           await pool.query(
             "UPDATE dsh_plugins SET enabled = $2, config = $3::jsonb, updated_at = now() WHERE name = $1",
             [name, enabled, JSON.stringify(config)]);
+          // timem 配置热生效: 原地更新认知层读取的环境变量 (无需重启)
+          if (name === "timem") {
+            if (config.apiKey) process.env.TIMEM_API_KEY = String(config.apiKey);
+            if (config.baseUrl) process.env.TIMEM_BASE_URL = String(config.baseUrl);
+            if (config.defaultDomain) process.env.TIMEM_DEFAULT_DOMAIN = String(config.defaultDomain);
+          }
           void writeAudit(adminEmail, "dsh.plugin_config", name,
             [body.enabled !== undefined ? `enabled=${enabled}` : null, body.configText !== undefined ? "配置已保存" : null]
               .filter(Boolean).join(", "));

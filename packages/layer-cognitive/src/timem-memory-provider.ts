@@ -82,8 +82,14 @@ export const timemMemoryWriteService: ServiceDefinition<
 
 // ── Provider 工厂 ────────────────────────────────────────────────
 
+/** 最小客户端契约 (结构化类型, 便于装配方注入带兼容层/热更新能力的客户端实现) */
+export interface TimemMemoryClientLike {
+  searchMemory(req: TimemMemorySearchRequest): Promise<unknown>;
+  addMemory(req: TimemMemoryWriteRequest & { layer?: number }): Promise<unknown>;
+}
+
 export function createTimemMemoryProvider(
-  client: TimemClient,
+  client: TimemMemoryClientLike,
 ): Provider<TimemMemorySearchRequest, TimemMemorySearchResponse> {
   return {
     service: timemMemoryService,
@@ -136,7 +142,7 @@ export function createTimemMemoryProvider(
 }
 
 export function createTimemMemoryWriteProvider(
-  client: TimemClient,
+  client: TimemMemoryClientLike,
 ): Provider<TimemMemoryWriteRequest, TimemMemoryWriteResponse> {
   return {
     service: timemMemoryWriteService,

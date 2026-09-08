@@ -30,6 +30,8 @@ import {
   timemMemoryWriteService,
   createTimemMemoryProvider,
   createTimemMemoryWriteProvider,
+  type TimemMemoryClientLike,
+  type TimemMemorySearchRequest,
 } from "./timem-memory-provider.js";
 
 // ── LLM Inference 契约（类型下沉 core，此包只做 re-export 保持兼容）─
@@ -286,6 +288,68 @@ export const manifest: PluginManifest = {
   preferredCarrier: CarrierKind.Thread,
 };
 
+// 环境变量指纹客户端: /dsh 页面保存配置后 env 会被原地更新,
+// 这里检测指纹变化自动重建 TimemClient, 实现「保存配置即热生效」(无需重启)。
+// searchMemory 带云端契约兼容: Gitea 插件 0.1.0 发 query 字段, 而 api.timem.cloud
+// 要求 query_text —— 客户端调用失败时自动用 query_text 兼容重试一次。
+class EnvTimemClient implements TimemMemoryClientLike {
+  private inner: TimemClient | null = null;
+  private fp = "";
+
+  private ensure(): TimemClient {
+    const fp = `${process.env.TIMEM_API_KEY ?? ""}|${process.env.TIMEM_BASE_URL ?? ""}`;
+    if (!this.inner || this.fp !== fp) {
+      this.inner = new TimemClient({
+        apiKey: process.env.TIMEM_API_KEY ?? "",
+        baseUrl: process.env.TIMEM_BASE_URL,
+      });
+      this.fp = fp;
+    }
+    return this.inner;
+  }
+
+  async searchMemory(req: TimemMemorySearchRequest): Promise<unknown> {
+    const client = this.ensure();
+    try {
+      return await client.searchMemory({
+        query: req.query,
+        user_id: req.user_id ?? "anonymous",
+        agent_id: req.agent_id,
+        limit: req.limit ?? 5,
+      });
+    } catch (primaryErr) {
+      // 兼容重试: 直接发 query_text 字段 (云端契约)
+      const base = (process.env.TIMEM_BASE_URL ?? "http://localhost:8001").replace(/\/$/, "");
+      const resp = await fetch(`${base}/api/v1/memory/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-API-Key": process.env.TIMEM_API_KEY ?? "" },
+        body: JSON.stringify({
+          user_id: req.user_id,
+          agent_id: req.agent_id,
+          query_text: req.query,
+          limit: req.limit ?? 5,
+        }),
+        signal: AbortSignal.timeout(20_000),
+      });
+      const text = await resp.text();
+      if (!resp.ok) {
+        // 兼容重试也失败 → 抛出主路径错误 (更接近真实原因)
+        void text;
+        throw primaryErr;
+      }
+      try {
+        return JSON.parse(text);
+      } catch {
+        throw primaryErr;
+      }
+    }
+  }
+
+  addMemory(opts: Parameters<TimemClient["addMemory"]>[0]) {
+    return this.ensure().addMemory(opts);
+  }
+}
+
 let pluginState: PluginState = PluginState.Registered;
 
 export const plugin: LayerPlugin = {
@@ -300,12 +364,9 @@ export const plugin: LayerPlugin = {
   },
   getProviders(): Provider[] {
     // timem 客户端按环境变量构造 (装配方须在 bootstrap 前注入 TIMEM_API_KEY/BASE_URL,
-    // appbase 在 initAppBackend 里从 dsh_plugins 表桥接); 未配置 key 时构造不报错,
-    // 调用期失败由 provider 内部捕获并以 ok:false 降级
-    const timemClient = new TimemClient({
-      apiKey: process.env.TIMEM_API_KEY ?? "",
-      baseUrl: process.env.TIMEM_BASE_URL,
-    });
+    // appbase 在 initAppBackend 里从 dsh_plugins 表桥接, 且保存配置时原地更新 env);
+    // 未配置 key 时构造不报错, 调用期失败由 provider 内部捕获并以 ok:false 降级
+    const timemClient = new EnvTimemClient();
     return [litellmProvider, stubProvider, createTimemMemoryProvider(timemClient), createTimemMemoryWriteProvider(timemClient)]; // litellm 先注册 = resolve 优先选它
   },
   getState(): PluginState {

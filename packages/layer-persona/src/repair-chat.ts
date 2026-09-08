@@ -128,8 +128,9 @@ const repairChatProvider: Provider<RepairChatRequest, RepairChatResponse> = {
       ? (wfValue?.result ?? wfValue?.response ?? "抱歉，我没有理解您的意思。")
       : "抱歉，智能助理暂时无法响应，请稍后重试。";
 
-    // 记忆沉淀 (尽力而为): 把本次报修交互存入 TiMEM, 下次同类问题可召回
-    if ((result as { ok: boolean }).ok) {
+    // 记忆沉淀 (尽力而为): 把本次报修交互存入 TiMEM, 下次同类问题可召回。
+    // 降级占位回复 (LLM 不可用) 不写入, 避免污染长期记忆。
+    if ((result as { ok: boolean }).ok && !wfValue?.degraded) {
       try {
         const w = await ctx.call(
           { id: "@cognitive/timem-memory-write", versionRange: "^1.0.0" },
