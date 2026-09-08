@@ -434,6 +434,16 @@ export async function appBackendHandler(
         return json(res, 200, { entries: rows });
       }
 
+      // 全部应用内账号 (跨应用统一视图, 用户管理页使用)
+      if (method === "GET" && path === "/app/admin/app-accounts") {
+        const { rows } = await pool.query(
+          `SELECT a.id, a.app_id, a.username, a.note, a.created_at,
+                  COALESCE((SELECT count(*)::int FROM app_keys k
+                            WHERE k.app_id = a.app_id AND k.revoked = false), 0) AS key_count
+           FROM app_accounts a ORDER BY a.app_id, a.created_at`);
+        return json(res, 200, { accounts: rows });
+      }
+
       const adminUserMatch = path.match(/^\/app\/admin\/users\/([^/]+)(?:\/([a-z]+))?$/);
       if (adminUserMatch) {
         const targetId = decodeURIComponent(adminUserMatch[1]);
@@ -747,12 +757,17 @@ export async function appBackendHandler(
           if (String(e?.code) === "23505") return json(res, 409, { error: "用户名已存在" });
           throw e;
         }
+        void writeAudit(await emailOf(userId), "appaccount.add", appId, username);
         return json(res, 201, { id });
       }
       const delAcc = path.match(/^\/app\/hall\/manage\/account\/([^/]+)$/);
       if (method === "DELETE" && delAcc) {
+        const { rows: accRow } = await pool.query(
+          "SELECT username FROM app_accounts WHERE id = $1 AND app_id = $2",
+          [decodeURIComponent(delAcc[1]), appId]);
         await pool.query("DELETE FROM app_accounts WHERE id = $1 AND app_id = $2",
           [decodeURIComponent(delAcc[1]), appId]);
+        if (accRow[0]) void writeAudit(await emailOf(userId), "appaccount.delete", appId, accRow[0].username);
         return json(res, 200, { ok: true });
       }
       if (method === "POST" && path === "/app/hall/manage/key") {
@@ -838,6 +853,10 @@ export async function appBackendHandler(
           "UPDATE app_accounts SET password_hash = $1 WHERE id = $2 AND app_id = $3",
           [hash, decodeURIComponent(resetPwd[1]), appId]);
         if (rowCount === 0) return json(res, 404, { error: "账号不存在" });
+        const { rows: accRow2 } = await pool.query(
+          "SELECT username FROM app_accounts WHERE id = $1",
+          [decodeURIComponent(resetPwd[1])]);
+        void writeAudit(await emailOf(userId), "appaccount.reset", appId, accRow2[0]?.username ?? "");
         return json(res, 200, { ok: true });
       }
       return json(res, 404, { error: "manage: not found" });

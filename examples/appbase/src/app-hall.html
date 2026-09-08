@@ -363,6 +363,37 @@ function openMg(enc) {
 function closeMg() { document.getElementById('mgDrawer').classList.remove('show'); }
 function jheaders() { return { 'Content-Type': 'application/json', Authorization: 'Bearer ' + mgToken }; }
 
+// ── 通用反馈 (内嵌浏览器可能禁用 alert/confirm/prompt, 一律用内联交互替代) ──
+function toast(t) {
+  var el = document.getElementById('toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toast';
+    el.style.cssText = 'position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--ink);color:#fff;font-size:12.5px;padding:9px 18px;border-radius:10px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:99;max-width:80vw';
+    document.body.appendChild(el);
+  }
+  el.textContent = t; el.style.opacity = 1;
+  clearTimeout(el._t); el._t = setTimeout(function(){ el.style.opacity = 0; }, 2600);
+}
+// 两击确认: 第一次点变「确认?」, 3 秒内再点才执行 (替代 confirm)
+function armConfirm(btn, fn) {
+  if (btn.getAttribute('data-armed') === '1') {
+    btn.removeAttribute('data-armed');
+    btn.textContent = btn.getAttribute('data-label');
+    fn();
+    return;
+  }
+  btn.setAttribute('data-armed', '1');
+  btn.setAttribute('data-label', btn.textContent);
+  btn.textContent = '确认?';
+  setTimeout(function() {
+    if (btn.getAttribute('data-armed') === '1') {
+      btn.removeAttribute('data-armed');
+      btn.textContent = btn.getAttribute('data-label');
+    }
+  }, 3000);
+}
+
 // ── 版本历史 (复用编码代理 .backups 快照) ──
 function loadVersions() {
   fetchJSON('/app/hall/apps/' + encodeURIComponent(mgApp) + '/versions', { headers: jheaders() })
@@ -397,16 +428,11 @@ function loadManage() {
     var memHtml = (d.members||[]).map(function(m) {
       return '<div class="rowline"><div class="grow"><b>' + m.email + '</b>'
         + '<div class="sub">添加于 ' + new Date(m.added_at).toLocaleDateString() + '</div></div>'
-        + '<button onclick="delMember(\'' + m.user_id + '\')">移出</button></div>';
+        + '<button onclick="armConfirm(this, function(){ delMember(\'' + m.user_id + '\') })">移出</button></div>';
     }).join('') || '<div class="sub" style="font-size:12px;color:var(--ink2)">暂无成员（管理员默认可见）</div>';
     document.getElementById('memList').innerHTML = memHtml;
-    var accHtml = (d.accounts||[]).map(function(a) {
-      return '<div class="rowline"><div class="grow"><b>' + a.username + '</b>'
-        + (a.note ? '<div class="sub">' + a.note + '</div>' : '')
-        + '</div><button onclick="resetPwd(\'' + a.id + '\',\'' + a.username + '\')">重置密码</button>'
-        + '<button onclick="delAccount(\'' + a.id + '\')">删除</button></div>';
-    }).join('') || '<div class="sub" style="font-size:12px;color:var(--ink2)">暂无账号</div>';
-    document.getElementById('accList').innerHTML = accHtml;
+    accData = d.accounts || [];
+    renderAccList();
     var keyListEl = document.getElementById('keyList'); // 元素可能不存在, 判空防中断后面渲染
     if (keyListEl) {
       keyListEl.innerHTML = (d.keys||[]).map(function(k) {
@@ -429,6 +455,43 @@ function loadManage() {
     }
   }).catch(function(e) { alert('加载管理信息失败: ' + e.message); });
 }
+// ── 应用内账号 (内联交互: 重置=行内输入, 删除=两击确认) ──
+var accData = [];
+var accEditingId = null;
+function renderAccList() {
+  var html = accData.map(function(a) {
+    var right;
+    if (accEditingId === a.id) {
+      right = '<input class="minput" id="accNewPwd" type="password" placeholder="新密码(至少4位)" style="margin:0;width:130px">'
+        + '<button class="mbtn s" onclick="confirmAccReset(\'' + a.id + '\')">确定</button>'
+        + '<button class="mbtn g s" onclick="accEditingId=null;renderAccList()">取消</button>';
+    } else {
+      right = '<button onclick="accEditingId=\'' + a.id + '\';renderAccList()">重置密码</button>'
+        + '<button onclick="armConfirm(this, function(){ delAcc(\'' + a.id + '\') })">删除</button>';
+    }
+    return '<div class="rowline"><div class="grow"><b>' + esc(a.username) + '</b>'
+      + (a.note ? '<div class="sub">' + esc(a.note) + '</div>' : '')
+      + '</div>' + right + '</div>';
+  }).join('') || '<div class="sub" style="font-size:12px;color:var(--ink2)">暂无账号</div>';
+  document.getElementById('accList').innerHTML = html;
+}
+function confirmAccReset(id) {
+  var np = document.getElementById('accNewPwd').value;
+  if (np.length < 4) return toast('✗ 新密码至少 4 位');
+  fetchJSON('/app/hall/manage/account/' + id + '/reset?app=' + encodeURIComponent(mgApp), {
+    method: 'POST', headers: jheaders(), body: JSON.stringify({ newPassword: np })
+  }).then(function() {
+    accEditingId = null;
+    toast('✓ 密码已重置');
+    renderAccList();
+  }).catch(function(e) { toast('✗ ' + e.message); });
+}
+function delAcc(id) {
+  fetchJSON('/app/hall/manage/account/' + id + '?app=' + encodeURIComponent(mgApp), {
+    method: 'DELETE', headers: jheaders()
+  }).then(function() { toast('✓ 账号已删除'); loadManage(); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
 function addMember() {
   var email = document.getElementById('memEmail').value.trim();
   if (!email) return;
@@ -442,26 +505,21 @@ function addMember() {
 function delMember(userId) {
   fetchJSON('/app/hall/manage/member/' + userId + '?app=' + encodeURIComponent(mgApp), {
     method: 'DELETE', headers: jheaders()
-  }).then(function() { loadManage(); })
-    .catch(function(e) { alert('移出失败: ' + e.message); });
+  }).then(function() { toast('✓ 已移出'); loadManage(); })
+    .catch(function(e) { toast('✗ 移出失败: ' + e.message); });
 }
 function addAccount() {
+  var un = document.getElementById('accUser').value.trim();
+  var pw = document.getElementById('accPass').value;
   fetchJSON('/app/hall/manage/account?app=' + encodeURIComponent(mgApp), {
     method:'POST', headers:jheaders(),
-    body: JSON.stringify({ username: document.getElementById('accUser').value.trim(), password: document.getElementById('accPass').value })
-  }).then(function(){ document.getElementById('accUser').value=''; document.getElementById('accPass').value=''; loadManage(); });
+    body: JSON.stringify({ username: un, password: pw })
+  }).then(function(){ document.getElementById('accUser').value=''; document.getElementById('accPass').value=''; toast('✓ 账号已添加'); loadManage(); })
+    .catch(function(e){ toast('✗ 添加失败: ' + e.message); });
 }
 function delAccount(id) {
   fetchJSON('/app/hall/manage/account/' + id + '?app=' + encodeURIComponent(mgApp), { method:'DELETE', headers:jheaders() })
     .then(function(){ loadManage(); });
-}
-function resetPwd(id, username) {
-  var np = prompt('为「' + username + '」设置新密码（至少 4 位）：');
-  if (np === null) return;
-  fetchJSON('/app/hall/manage/account/' + id + '/reset?app=' + encodeURIComponent(mgApp), {
-    method:'POST', headers:jheaders(), body: JSON.stringify({ newPassword: np })
-  }).then(function(d){ alert(d.ok ? '✓ 密码已重置' : '✗ ' + (d.error||'')); })
-    .catch(function(e){ alert('✗ ' + e.message); });
 }
 function saveLlm() {
   fetchJSON('/app/hall/manage/llm?app=' + encodeURIComponent(mgApp), {

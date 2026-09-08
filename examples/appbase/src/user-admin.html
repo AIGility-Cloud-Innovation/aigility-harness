@@ -52,6 +52,27 @@ td button { border:none; border-radius:8px; padding:5px 10px; font-size:11.5px; 
   </div>
   <div class="card">
     <div style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)">
+      <b style="font-size:14px;flex:1">🔑 应用内账号</b>
+      <span class="sub" style="margin-right:10px">各应用自己的登录账号（用户名+密码），跨应用统一管理</span>
+      <button class="b-pwd" onclick="loadAppAccounts()">⟳ 刷新</button>
+      <button class="b-admin" style="margin-left:8px" onclick="openAccAdd()">➕ 添加账号</button>
+    </div>
+    <div id="accAddBar" style="display:none;padding:12px 14px;background:#fafbfe;border-bottom:1px solid var(--line)">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <select id="naApp" class="b-mem" style="padding:6px 9px;border:1.5px solid var(--line);border-radius:8px;font-size:12.5px;background:#fff;outline:none"></select>
+        <input id="naUser" placeholder="用户名" style="width:130px;padding:6px 9px;border:1.5px solid var(--line);border-radius:8px;font-size:12.5px;outline:none">
+        <input id="naPass" type="password" placeholder="密码(至少4位)" style="width:130px;padding:6px 9px;border:1.5px solid var(--line);border-radius:8px;font-size:12.5px;outline:none">
+        <button class="b-admin" onclick="addAppAccount()">添加</button>
+        <button class="b-mem" onclick="document.getElementById('accAddBar').style.display='none'">收起</button>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>所属应用</th><th>用户名</th><th>备注</th><th>创建时间</th><th>操作</th></tr></thead>
+      <tbody id="accTbody"><tr><td colspan="5" class="empty">加载中…</td></tr></tbody>
+    </table>
+  </div>
+  <div class="card">
+    <div style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)">
       <b style="font-size:14px;flex:1">📜 审计日志</b>
       <span class="sub" style="margin-right:10px">敏感操作留痕：登录 / 改密 / 提权 / 删除 / 应用变更（最近 100 条）</span>
       <button class="b-pwd" onclick="loadAudit()">⟳ 刷新</button>
@@ -116,12 +137,30 @@ function render() {
       + (u.is_admin
           ? '<button class="b-demote" onclick="setAdmin(\'' + u.id + '\', false)">取消管理员</button>'
           : '<button class="b-admin" onclick="setAdmin(\'' + u.id + '\', true)">设为管理员</button>')
-      + '<button class="b-pwd" onclick="resetPwd(\'' + u.id + '\')">重置密码</button>'
+      + '<button class="b-pwd" onclick="resetPwd(this, \'' + u.id + '\')">重置密码</button>'
       + '<button class="b-mem" onclick="toggleMem(\'' + u.id + '\')">成员关系</button>'
-      + '<button class="b-del" onclick="delUser(\'' + u.id + '\')">删除</button>'
+      + '<button class="b-del" onclick="armConfirm(this, function(){ delUser(\'' + u.id + '\') })">删除</button>'
       + '</td></tr>'
       + '<tr class="memrow" id="mem-' + u.id + '" style="display:none"><td colspan="6" style="padding:0"><div class="membar" id="membar-' + u.id + '">加载中…</div></td></tr>';
   }).join('');
+}
+// 两击确认 (内嵌浏览器可能禁用 confirm/prompt, 全部改内联交互)
+function armConfirm(btn, fn) {
+  if (btn.getAttribute('data-armed') === '1') {
+    btn.removeAttribute('data-armed');
+    btn.textContent = btn.getAttribute('data-label');
+    fn();
+    return;
+  }
+  btn.setAttribute('data-armed', '1');
+  btn.setAttribute('data-label', btn.textContent);
+  btn.textContent = '确认?';
+  setTimeout(function() {
+    if (btn.getAttribute('data-armed') === '1') {
+      btn.removeAttribute('data-armed');
+      btn.textContent = btn.getAttribute('data-label');
+    }
+  }, 3000);
 }
 function setAdmin(id, val) {
   var u = users.find(function(x){ return x.id === id; });
@@ -132,14 +171,29 @@ function setAdmin(id, val) {
   }).then(function() { toast(val ? '✓ 已设为管理员' : '✓ 已取消管理员'); load(); })
     .catch(function(e) { toast('✗ ' + e.message); });
 }
-function resetPwd(id) {
+// 内联重置密码: 点击后按钮区域原地变成 密码输入 + 确定/取消 (替代 prompt)
+function resetPwd(btn, id) {
   var u = users.find(function(x){ return x.id === id; });
-  var np = prompt('为「' + u.email + '」设置新密码（至少 6 位）：');
-  if (np === null) return;
+  var cell = btn.parentNode;
+  cell.innerHTML = '<input id="np-' + id + '" type="password" placeholder="新密码(至少6位)" '
+    + 'style="width:130px;padding:4px 7px;border:1.5px solid var(--line);border-radius:7px;font-size:11.5px;outline:none;margin-right:5px">'
+    + '<button class="b-admin" onclick="confirmUserPwd(\'' + id + '\')">确定</button>'
+    + '<button class="b-mem" onclick="render()">取消</button>';
+  var input = document.getElementById('np-' + id);
+  input.focus();
+  input.addEventListener('keydown', function(e) {
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === 'Enter') confirmUserPwd(id);
+  });
+  void u;
+}
+function confirmUserPwd(id) {
+  var np = document.getElementById('np-' + id).value;
+  if (np.length < 6) return toast('✗ 新密码至少 6 位');
   fetchJSON('/app/admin/users/' + id + '/password', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ newPassword: np })
-  }).then(function() { toast('✓ 密码已重置'); })
+  }).then(function() { toast('✓ 密码已重置'); render(); })
     .catch(function(e) { toast('✗ ' + e.message); });
 }
 function toggleMem(id) {
@@ -167,10 +221,8 @@ function delMem(id, appId) {
 }
 function delUser(id) {
   var u = users.find(function(x){ return x.id === id; });
-  if (!confirm('确定删除账号「' + u.email + '」？其成员关系将被清除，此操作不可恢复。')) return;
-  if (!confirm('再次确认：删除 ' + u.email + ' ？')) return;
   fetchJSON('/app/admin/users/' + id, { method: 'DELETE' })
-    .then(function() { toast('✓ 已删除'); load(); })
+    .then(function() { toast('✓ 已删除 ' + u.email); load(); })
     .catch(function(e) { toast('✗ ' + e.message); });
 }
 function loadAudit() {
@@ -191,8 +243,94 @@ function loadAudit() {
       '<tr><td colspan="4" class="empty">加载失败: ' + esc(e.message) + '</td></tr>';
   });
 }
+// ── 应用内账号 (全部应用统一管理; 数据来自各应用的 app_accounts) ──
+var appAccounts = [];
+var accAppOptions = [];   // 可选应用列表
+var accEditId = null;     // 内联重置中的账号 id
+function loadAppAccounts() {
+  fetchJSON('/app/admin/app-accounts').then(function(d) {
+    appAccounts = d.accounts || [];
+    renderAppAccounts();
+  }).catch(function(e) { toast('✗ 应用账号加载失败: ' + e.message); });
+}
+function ensureAppOptions(cb) {
+  if (accAppOptions.length) return cb();
+  fetchJSON('/app/hall/apps', { headers: ah() }).then(function(d) {
+    accAppOptions = (d.apps || []).map(function(a) { return a.name; });
+    cb();
+  }).catch(function() { cb(); });
+}
+function renderAppAccounts() {
+  var tb = document.getElementById('accTbody');
+  if (!tb) return;
+  if (!appAccounts.length) {
+    tb.innerHTML = '<tr><td colspan="5" class="empty">暂无应用内账号</td></tr>';
+    return;
+  }
+  tb.innerHTML = appAccounts.map(function(a) {
+    var ops;
+    if (accEditId === a.id) {
+      ops = '<input id="ap-' + a.id + '" type="password" placeholder="新密码(至少4位)" '
+        + 'style="width:120px;padding:4px 7px;border:1.5px solid var(--line);border-radius:7px;font-size:11.5px;outline:none;margin-right:5px">'
+        + '<button class="b-admin" onclick="confirmAccPwd(\'' + a.id + '\')">确定</button>'
+        + '<button class="b-mem" onclick="accEditId=null;renderAppAccounts()">取消</button>';
+    } else {
+      ops = '<button class="b-pwd" onclick="accEditId=\'' + a.id + '\';renderAppAccounts()">重置密码</button>'
+        + '<button class="b-del" onclick="armConfirm(this, function(){ delAppAcc(\'' + a.id + '\') })">删除</button>';
+    }
+    return '<tr>'
+      + '<td class="sub" style="font-family:Consolas,monospace">' + esc(a.app_id) + '</td>'
+      + '<td><b>' + esc(a.username) + '</b></td>'
+      + '<td class="sub">' + esc(a.note || '') + '</td>'
+      + '<td class="sub">' + new Date(a.created_at).toLocaleDateString() + '</td>'
+      + '<td>' + ops + '</td></tr>';
+  }).join('');
+}
+function confirmAccPwd(id) {
+  var acc = appAccounts.find(function(x){ return x.id === id; });
+  if (!acc) return;
+  var np = document.getElementById('ap-' + id).value;
+  if (np.length < 4) return toast('✗ 新密码至少 4 位');
+  fetchJSON('/app/hall/manage/account/' + id + '/reset?app=' + encodeURIComponent(acc.app_id), {
+    method: 'POST', headers: ah(),
+    body: JSON.stringify({ newPassword: np })
+  }).then(function() { toast('✓ 已重置 ' + acc.username); accEditId = null; renderAppAccounts(); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function delAppAcc(id) {
+  var acc = appAccounts.find(function(x){ return x.id === id; });
+  if (!acc) return;
+  fetchJSON('/app/hall/manage/account/' + id + '?app=' + encodeURIComponent(acc.app_id), {
+    method: 'DELETE', headers: ah()
+  }).then(function() { toast('✓ 已删除 ' + acc.username); loadAppAccounts(); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function addAppAccount() {
+  var app = document.getElementById('naApp').value;
+  var un = document.getElementById('naUser').value.trim();
+  var pw = document.getElementById('naPass').value;
+  if (!app || !un) return toast('✗ 请选择应用并填写用户名');
+  if (pw.length < 4) return toast('✗ 密码至少 4 位');
+  fetchJSON('/app/hall/manage/account?app=' + encodeURIComponent(app), {
+    method: 'POST', headers: ah(),
+    body: JSON.stringify({ username: un, password: pw })
+  }).then(function() {
+    toast('✓ 已添加 ' + un);
+    document.getElementById('naUser').value = ''; document.getElementById('naPass').value = '';
+    loadAppAccounts();
+  }).catch(function(e) { toast('✗ ' + e.message); });
+}
+function openAccAdd() {
+  ensureAppOptions(function() {
+    document.getElementById('naApp').innerHTML = accAppOptions.map(function(n) {
+      return '<option value="' + esc(n) + '">' + esc(n.replace('.html','')) + '</option>';
+    }).join('');
+    document.getElementById('accAddBar').style.display = 'block';
+  });
+}
 load();
 loadAudit();
+loadAppAccounts();
 </script>
 </body>
 </html>
