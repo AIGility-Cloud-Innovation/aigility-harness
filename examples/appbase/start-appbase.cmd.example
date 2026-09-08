@@ -1,0 +1,36 @@
+@echo off
+chcp 65001 >nul
+rem ============================================================
+rem  AppBase 一键启动 (模板)
+rem  复制为 start-appbase.cmd (该文件已被 .gitignore 忽略, 可放心填密钥)
+rem  并把下面所有【填】项填好
+rem ============================================================
+
+rem ---- PostgreSQL (Docker: 容器 appbase-pg, 宿主 5433, 与代码默认端口对齐) ----
+set APPBASE_PG_PASSWORD=【填:容器 POSTGRES_PASSWORD】
+rem 首次在新机器: 容器不存在时自动创建 (named volume appbase_pg_data 持久化数据)
+docker start appbase-pg 2>nul
+if errorlevel 1 (
+  docker run -d --name appbase-pg --restart unless-stopped ^
+    -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=%APPBASE_PG_PASSWORD% ^
+    -e POSTGRES_DB=appbase -p 5433:5432 ^
+    -v appbase_pg_data:/var/lib/postgresql/data postgres:16-alpine
+)
+
+rem ---- LLM 上游 (必填; 不填则页面能开, 对话/AI 报"该应用尚未配置 LLM") ----
+set BIGMODEL_API_KEY=【填:智谱开放平台 API Key】
+
+rem ---- 编码代理驱动: zcode / codex (默认 codex) ----
+set AGENT_DRIVER=zcode
+rem 可选, 一般无需设置 (默认 node + C:/Program Files/ZCode/resources/glm/zcode.cjs):
+rem set ZCODE_NODE_BIN=D:\Program Files\nodejs\node.exe
+rem set ZCODE_CLI_PATH=C:\Program Files\ZCode\resources\glm\zcode.cjs
+
+rem ---- 固定网关密钥 (不设则每次启动随机生成并打印在控制台, 外部调用方要跟着换) ----
+set APPBASE_GATEWAY_KEY=【填:随机长串, 如 openssl rand -hex 24 的输出】
+
+rem ---- 登录 token 签名: 默认用 src\.token-secret 文件持久化, 重启不失效, 无需设置 ----
+rem set APPBASE_TOKEN_SECRET=
+
+cd /d %~dp0
+pnpm start

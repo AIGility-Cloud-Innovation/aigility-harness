@@ -539,8 +539,10 @@ let profileStudentId = '';
 
 // ═══════════════ 云端同步 (AppBase PG 后端) ═══════════════
 // 四个集合各存为 /app/data/notebook 下的一行; localStorage 为离线缓存。
+// API 基址用同源相对路径 (本页由 AppBase 伺服); 历史 localStorage 存的 127.0.0.1 一律视为过期忽略。
+const savedApiBase = localStorage.getItem('teacherNotebook_apiBase');
 const CLOUD = {
-    base: (localStorage.getItem('teacherNotebook_apiBase') || 'http://127.0.0.1:3419'),
+    base: (savedApiBase && !/127\.0\.0\.1|localhost/.test(savedApiBase)) ? savedApiBase : '',
     get token() { return localStorage.getItem('teacherNotebook_token') || ''; },
     set token(v) { v ? localStorage.setItem('teacherNotebook_token', v) : localStorage.removeItem('teacherNotebook_token'); },
     get rowIds() { return JSON.parse(localStorage.getItem('teacherNotebook_rowIds') || '{}'); },
@@ -901,10 +903,15 @@ function markAll(status) {
 const AI_CFG_KEY = 'teacherNotebook_aiCfg';
 let aiDraft = [];
 
+// 网关端口 (3418) 与本页伺服端口 (3419) 不同, 用 location.hostname 动态推导, 不写死主机名;
+// 历史 localStorage 存的 127.0.0.1/localhost 地址同样视为过期忽略。
+function gatewayEndpoint() {
+    return location.protocol + '//' + location.hostname + ':3418/v1/chat/completions';
+}
 function aiCfg() {
     const c = JSON.parse(localStorage.getItem(AI_CFG_KEY) || '{}');
     return {
-        endpoint: c.endpoint || 'http://127.0.0.1:3418/v1/chat/completions',
+        endpoint: (c.endpoint && !/127\.0\.0\.1|localhost/.test(c.endpoint)) ? c.endpoint : gatewayEndpoint(),
         key: c.key || '',
         model: c.model || 'glm-4.6'
     };
@@ -1364,7 +1371,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const gwKey = decodeURIComponent(location.hash.slice(4));
             const cfg = JSON.parse(localStorage.getItem('teacherNotebook_aiCfg') || '{}');
             cfg.key = gwKey;
-            cfg.endpoint = cfg.endpoint || 'http://127.0.0.1:3418/v1/chat/completions';
+            cfg.endpoint = (cfg.endpoint && !/127\.0\.0\.1|localhost/.test(cfg.endpoint)) ? cfg.endpoint : gatewayEndpoint();
             cfg.model = cfg.model || 'glm-4.6';
             localStorage.setItem('teacherNotebook_aiCfg', JSON.stringify(cfg));
         } catch {}

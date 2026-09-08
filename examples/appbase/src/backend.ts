@@ -29,8 +29,10 @@ const scryptAsync = promisify(scrypt) as (
 ) => Promise<Buffer>;
 
 // ── PG 连接 ──────────────────────────────────────────────────────
-// 连接信息来自环境变量 (APPBASE_PG_*) 或默认本机独立 PG 5433 appbase 库。
-// 密码不硬编码: 读 PGPASSWORD / APPBASE_PG_PASSWORD。
+// 连接信息来自环境变量 (APPBASE_PG_*) 或默认 127.0.0.1:5433 appbase 库。
+// 端口约定: 本机用 Docker 容器 appbase-pg (宿主 5433 → 容器 5432), 与此默认值对齐,
+//           无需设 APPBASE_PG_PORT; 原生 PG 跑在默认 5432 的机器需设 APPBASE_PG_PORT=5432。
+// 密码不硬编码: 读 APPBASE_PG_PASSWORD / PGPASSWORD (本机容器密码见 start-appbase.cmd)。
 
 const PG_CONFIG = {
   host: process.env.APPBASE_PG_HOST ?? "127.0.0.1",

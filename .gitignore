@@ -16,3 +16,5 @@ examples/apps/*
 __pycache__/
 *.pyc
 examples/appbase/src/.token-secret
+# AppBase 本机一键启动脚本 (含密钥, 不入库); 模板: start-appbase.cmd.example
+examples/appbase/start-appbase.cmd
