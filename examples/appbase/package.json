@@ -16,6 +16,8 @@
     "@aigility-harness/layer-infrastructure": "workspace:*",
     "@aigility-harness/layer-orchestration": "workspace:*",
     "@aigility-harness/layer-persona": "workspace:*",
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@timem/dsh-plugin-timem": "git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git",
     "pg": "^8.23.0",
     "prototype-mode": "workspace:*"
   },

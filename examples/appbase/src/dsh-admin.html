@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AppBase · DSH 插件管理</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root { --ink:#1e293b; --ink2:#64748b; --line:#e8ecf4; --accent:#4f46e5; --soft:#eef0fe; --rose:#f43f5e; --rose-soft:#fde9ed; --green:#10b981; --green-soft:#e7f8f1; }
+body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; background:#f4f6fb; color:var(--ink); min-height:100vh; padding:28px 22px 70px; -webkit-font-smoothing:antialiased; }
+.shell { max-width:1000px; margin:0 auto; }
+.hero { background:linear-gradient(120deg,#0f172a,#1e3a8a 60%,#4f46e5); border-radius:22px; padding:26px 32px; color:#fff; box-shadow:0 10px 36px rgba(15,23,42,.35); display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.hero h1 { font-size:22px; }
+.hero p { font-size:12.5px; color:rgba(255,255,255,.75); flex:1; min-width:220px; }
+.hero button { border:none; background:rgba(255,255,255,.2); color:#fff; border-radius:10px; padding:7px 16px; font-size:12.5px; cursor:pointer; font-weight:600; font-family:inherit; }
+.hero button:hover { background:rgba(255,255,255,.32); }
+.card { background:#fff; border:1px solid var(--line); border-radius:16px; margin-top:18px; padding:18px 20px; }
+.card .chead { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.card .chead b.nm { font-size:15px; }
+.card .pkg { font-family:Consolas,monospace; font-size:11.5px; color:var(--ink2); background:#f1f4f9; padding:2px 7px; border-radius:6px; }
+.card .ds { font-size:12px; color:var(--ink2); margin-top:4px; }
+.chip { display:inline-block; padding:2px 9px; border-radius:10px; font-size:11px; font-weight:600; }
+.chip.on { background:var(--green-soft); color:var(--green); }
+.chip.off { background:#f1f4f9; color:var(--ink2); }
+.chip.ok { background:var(--green-soft); color:var(--green); }
+.chip.err { background:var(--rose-soft); color:var(--rose); }
+.ops { margin-left:auto; display:flex; gap:7px; flex-wrap:wrap; }
+.ops button, .regbar button { border:none; border-radius:8px; padding:5px 11px; font-size:11.5px; cursor:pointer; font-weight:600; font-family:inherit; }
+.b-load { background:var(--green-soft); color:var(--green); }
+.b-unload { background:#fff3e6; color:#d97706; }
+.b-save { background:var(--soft); color:var(--accent); }
+.b-del { background:var(--rose-soft); color:var(--rose); }
+.b-en { background:var(--soft); color:var(--accent); }
+textarea.minput, input.minput { width:100%; border:1.5px solid var(--line); border-radius:9px; padding:8px 11px; font-size:12.5px; outline:none; font-family:inherit; margin-top:8px; }
+textarea.minput { min-height:96px; font-family:Consolas,monospace; }
+textarea.minput:focus, input.minput:focus { border-color:var(--accent); }
+.cbody { margin-top:4px; }
+.hint { font-size:11.5px; color:var(--ink2); margin-top:6px; }
+.status { font-size:11.5px; color:var(--ink2); margin-top:6px; }
+.regbar { display:none; margin-top:10px; background:#fafbfe; border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+.regbar.show { display:block; }
+.regbar input { margin:0 0 8px; }
+.regbar .row2 { display:flex; gap:8px; }
+.regbar .row2 > * { flex:1; }
+#msg { position:fixed; left:50%; bottom:26px; transform:translateX(-50%); background:var(--ink); color:#fff; font-size:12.5px; padding:9px 18px; border-radius:10px; opacity:0; transition:opacity .25s; pointer-events:none; z-index:99; max-width:80vw; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="hero">
+    <h1>🧩 DSH 插件管理</h1>
+    <p>管理 DeepSeek Harness (cordis) 插件：注册 / 配置（apikey 等，服务端掩码保存）/ 启用 / 加载到运行时</p>
+    <button onclick="location.href='/hall'">← 返回大厅</button>
+  </div>
+  <div class="card">
+    <div class="chead">
+      <b class="nm">运行时状态</b>
+      <span id="hostChip" class="chip off">未启动</span>
+      <span class="hint" id="hostInfo"></span>
+      <div class="ops"><button class="b-save" onclick="loadPlugins()">⟳ 刷新</button></div>
+    </div>
+    <div class="hint">插件包在本机需已安装（node_modules 可解析）。加载即把插件插入服务进程内的 cordis 运行时；保存配置后需重新加载生效。</div>
+  </div>
+
+  <div id="pluginList"></div>
+
+  <div class="card">
+    <div class="chead">
+      <b class="nm">➕ 注册插件</b>
+      <div class="ops"><button class="b-en" onclick="document.getElementById('regBar').classList.toggle('show')">展开/收起</button></div>
+    </div>
+    <div class="regbar" id="regBar">
+      <input class="minput" id="rgName" placeholder="名称（唯一标识，如 timem）">
+      <input class="minput" id="rgPkg" placeholder="npm 包名或可 import 的标识（如 @timem/dsh-plugin-timem）">
+      <div class="row2">
+        <input class="minput" id="rgExport" placeholder="插件导出名（可选，默认 default/首个函数导出）">
+        <input class="minput" id="rgDesc" placeholder="描述（可选）">
+      </div>
+      <div style="margin-top:8px"><button class="b-load" onclick="registerPlugin()">注册</button></div>
+    </div>
+  </div>
+</div>
+<div id="msg"></div>
+
+<script>
+function ah() {
+  var t = sessionStorage.getItem('hall_token') || '';
+  return t ? { Authorization: 'Bearer ' + t } : {};
+}
+function toast(t) {
+  var el = document.getElementById('msg');
+  el.textContent = t; el.style.opacity = 1;
+  clearTimeout(el._t); el._t = setTimeout(function(){ el.style.opacity = 0; }, 3000);
+}
+function fetchJSON(url, opts, timeoutMs) {
+  var ctl = new AbortController();
+  var timer = setTimeout(function() { ctl.abort(); }, timeoutMs || 30000);
+  opts = Object.assign({}, opts);
+  opts.headers = Object.assign({}, ah(), opts.headers || {});
+  return fetch(url, Object.assign(opts, { signal: ctl.signal }))
+    .then(function(r) {
+      return r.json().catch(function() { return {}; }).then(function(d) {
+        if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+        return d;
+      });
+    })
+    .finally(function() { clearTimeout(timer); });
+}
+function esc(s) {
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function armConfirm(btn, fn) {
+  if (btn.getAttribute('data-armed') === '1') {
+    btn.removeAttribute('data-armed');
+    btn.textContent = btn.getAttribute('data-label');
+    fn();
+    return;
+  }
+  btn.setAttribute('data-armed', '1');
+  btn.setAttribute('data-label', btn.textContent);
+  btn.textContent = '确认?';
+  setTimeout(function() {
+    if (btn.getAttribute('data-armed') === '1') {
+      btn.removeAttribute('data-armed');
+      btn.textContent = btn.getAttribute('data-label');
+    }
+  }, 3000);
+}
+
+function loadPlugins() {
+  fetchJSON('/app/dsh/plugins').then(function(d) {
+    renderHost(d.runtime || {});
+    var rtAll = (d.runtime && d.runtime.plugins) || {};
+    renderPlugins((d.plugins || []).map(function(p) {
+      var lines = Object.keys(p.config || {}).map(function(k) { return k + '=' + p.config[k]; });
+      return Object.assign({}, p, { configText: lines.join('\n'), rt: rtAll[p.name] || {} });
+    }));
+  }).catch(function(e) { toast('✗ ' + e.message); });
+}
+function renderHost(rt) {
+  var chip = document.getElementById('hostChip');
+  chip.textContent = rt.hostAlive ? '运行中' : '未启动';
+  chip.className = 'chip ' + (rt.hostAlive ? 'on' : 'off');
+  document.getElementById('hostInfo').textContent = rt.hostAlive
+    ? ('启动于 ' + new Date(rt.startedAt).toLocaleString('zh-CN')) : '';
+}
+function renderPlugins(plugins) {
+  var box = document.getElementById('pluginList');
+  if (!plugins.length) {
+    box.innerHTML = '<div class="card"><div class="hint">还没有注册插件，用下方「注册插件」添加。</div></div>';
+    return;
+  }
+  box.innerHTML = plugins.map(function(p) {
+    return '<div class="card">'
+      + '<div class="chead">'
+      + '<b class="nm">' + esc(p.name) + '</b>'
+      + '<span class="pkg">' + esc(p.package) + '</span>'
+      + '<span class="chip ' + (p.enabled ? 'on' : 'off') + '">' + (p.enabled ? '已启用' : '未启用') + '</span>'
+      + '<span id="st-' + esc(p.name) + '"></span>'
+      + '<div class="ops">'
+      + '<button class="b-en" onclick="toggleEnabled(\'' + esc(p.name) + '\', ' + (!p.enabled) + ')">' + (p.enabled ? '停用' : '启用') + '</button>'
+      + '<button class="b-load" onclick="loadOne(\'' + esc(p.name) + '\')">▶ 加载</button>'
+      + '<button class="b-unload" onclick="unloadOne(\'' + esc(p.name) + '\')">⏹ 停用运行</button>'
+      + '<button class="b-del" onclick="armConfirm(this, function(){ delPlugin(\'' + esc(p.name) + '\') })">删除</button>'
+      + '</div></div>'
+      + (p.description ? '<div class="ds">' + esc(p.description) + '</div>' : '')
+      + '<div class="cbody">'
+      + '<textarea class="minput" id="cfg-' + esc(p.name) + '" placeholder="KEY=VALUE 每行一条">' + esc(p.configText || '') + '</textarea>'
+      + '<div class="hint">机密项（含 key/token/secret 的键）服务端已掩码为 ••••；保存时保持 •••• 开头不变即可更新其他项。</div>'
+      + '</div>'
+      + '<div style="margin-top:8px"><button class="b-save" onclick="saveConfig(\'' + esc(p.name) + '\')">💾 保存配置</button></div>'
+      + '</div>';
+  }).join('');
+  // 渲染每个插件的运行时状态
+  plugins.forEach(function(p) {
+    var el = document.getElementById('st-' + p.name);
+    var rt = p.rt || {};
+    if (!el) return;
+    if (rt.error) el.innerHTML = '<span class="chip err">加载失败</span> <span class="hint">' + esc(rt.error).slice(0, 80) + '</span>';
+    else if (rt.at) el.innerHTML = '<span class="chip ok">已加载</span> <span class="hint">' + new Date(rt.at).toLocaleString('zh-CN') + '</span>';
+    else el.innerHTML = '<span class="chip off">未加载</span>';
+  });
+}
+function toggleEnabled(name, val) {
+  fetchJSON('/app/dsh/plugins/' + encodeURIComponent(name), {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: val })
+  }).then(function() { toast(val ? '✓ 已启用（记得加载）' : '✓ 已停用'); loadPlugins(); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function saveConfig(name) {
+  var ta = document.getElementById('cfg-' + name);
+  fetchJSON('/app/dsh/plugins/' + encodeURIComponent(name), {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ configText: ta.value })
+  }).then(function() { toast('✓ 配置已保存（重新加载后生效）'); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function loadOne(name) {
+  toast('加载中…');
+  fetchJSON('/app/dsh/plugins/' + encodeURIComponent(name) + '/load', { method: 'POST' }, 60000)
+    .then(function(d) {
+      if (d.ok) toast('✓ 已加载到 DSH 运行时');
+      else toast('✗ 加载失败: ' + (d.error || '未知错误'));
+      loadPlugins();
+    })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function unloadOne(name) {
+  fetchJSON('/app/dsh/plugins/' + encodeURIComponent(name) + '/unload', { method: 'POST' })
+    .then(function() { toast('✓ 已停用运行（其余启用插件已重载）'); loadPlugins(); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function delPlugin(name) {
+  fetchJSON('/app/dsh/plugins/' + encodeURIComponent(name), { method: 'DELETE' })
+    .then(function() { toast('✓ 已删除'); loadPlugins(); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function registerPlugin() {
+  var name = document.getElementById('rgName').value.trim();
+  var pkg = document.getElementById('rgPkg').value.trim();
+  if (!name || !pkg) return toast('✗ 名称和包名必填');
+  fetchJSON('/app/dsh/plugins', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: name, package: pkg,
+      exportName: document.getElementById('rgExport').value.trim(),
+      description: document.getElementById('rgDesc').value.trim()
+    })
+  }).then(function() {
+    toast('✓ 已注册 ' + name);
+    document.getElementById('rgName').value = ''; document.getElementById('rgPkg').value = '';
+    document.getElementById('rgExport').value = ''; document.getElementById('rgDesc').value = '';
+    loadPlugins();
+  }).catch(function(e) { toast('✗ ' + e.message); });
+}
+loadPlugins();
+</script>
+</body>
+</html>

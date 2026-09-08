@@ -38,6 +38,12 @@ importers:
       '@aigility-harness/layer-persona':
         specifier: workspace:*
         version: link:../../packages/layer-persona
+      '@deepseek-ai/cordis':
+        specifier: ^4.0.1
+        version: 4.0.1
+      '@timem/dsh-plugin-timem':
+        specifier: git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git
+        version: git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git#7eaed2e3a78217d99a81e1ad88961bb11bf3c0e4(@deepseek-ai/cordis@4.0.1)
       pg:
         specifier: ^8.23.0
         version: 8.23.0
@@ -102,7 +108,7 @@ importers:
         version: link:../../packages/layer-persona
       '@larksuiteoapi/node-sdk':
         specifier: ^1.73.1
-        version: 1.73.1(debug@4.4.3)
+        version: 1.73.1
       prototype-mode:
         specifier: workspace:*
         version: link:../../packages/prototype-mode
@@ -204,7 +210,7 @@ importers:
         version: link:../../packages/py-bridge
       '@wecom/aibot-node-sdk':
         specifier: ^1.0.7
-        version: 1.0.7(debug@4.4.3)
+        version: 1.0.7
       prototype-mode:
         specifier: workspace:*
         version: link:../../packages/prototype-mode
@@ -247,7 +253,7 @@ importers:
         version: git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git#7eaed2e3a78217d99a81e1ad88961bb11bf3c0e4(@deepseek-ai/cordis@4.0.1)
       '@wecom/aibot-node-sdk':
         specifier: ^1.0.7
-        version: 1.0.7(debug@4.4.3)
+        version: 1.0.7
       prototype-mode:
         specifier: workspace:*
         version: link:../../packages/prototype-mode
@@ -303,7 +309,7 @@ importers:
         version: link:../core
       msedge-tts:
         specifier: ^2.0.7
-        version: 2.0.7(debug@4.4.3)
+        version: 2.0.7
     devDependencies:
       '@types/node':
         specifier: ^20.14.0
@@ -341,10 +347,10 @@ importers:
         version: link:../core
       '@larksuiteoapi/node-sdk':
         specifier: ^1.73.1
-        version: 1.73.1(debug@4.4.3)
+        version: 1.73.1
       '@wecom/aibot-node-sdk':
         specifier: ^1.0.7
-        version: 1.0.7(debug@4.4.3)
+        version: 1.0.7
       pg:
         specifier: ^8.23.0
         version: 8.23.0
@@ -383,6 +389,13 @@ importers:
       '@aigility-harness/core':
         specifier: workspace:*
         version: link:../core
+    optionalDependencies:
+      '@huggingface/transformers':
+        specifier: ^4.2.0
+        version: 4.2.0
+      vosk:
+        specifier: ^0.3.39
+        version: 0.3.39
     devDependencies:
       '@types/node':
         specifier: ^20.14.0
@@ -393,13 +406,6 @@ importers:
       vitest:
         specifier: ^2.0.0
         version: 2.0.0(@types/node@20.19.43)
-    optionalDependencies:
-      '@huggingface/transformers':
-        specifier: ^4.2.0
-        version: 4.2.0
-      vosk:
-        specifier: ^0.3.39
-        version: 0.3.39
 
   packages/prototype-mode:
     dependencies:
@@ -2176,9 +2182,9 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.4.14
 
-  '@larksuiteoapi/node-sdk@1.73.1(debug@4.4.3)':
+  '@larksuiteoapi/node-sdk@1.73.1':
     dependencies:
-      axios: 1.19.0(debug@4.4.3)
+      axios: 1.19.0
       lodash.identity: 3.0.0
       lodash.merge: 4.6.2
       lodash.pickby: 4.6.0
@@ -2337,9 +2343,9 @@ snapshots:
       loupe: 3.2.1
       pretty-format: 29.7.0
 
-  '@wecom/aibot-node-sdk@1.0.7(debug@4.4.3)':
+  '@wecom/aibot-node-sdk@1.0.7':
     dependencies:
-      axios: 1.19.0(debug@4.4.3)
+      axios: 1.19.0
       eventemitter3: 5.0.4
       ws: 8.21.3
     transitivePeerDependencies:
@@ -2366,9 +2372,9 @@ snapshots:
 
   asynckit@0.4.0: {}
 
-  axios@1.19.0(debug@4.4.3):
+  axios@1.19.0:
     dependencies:
-      follow-redirects: 1.16.0(debug@4.4.3)
+      follow-redirects: 1.16.0
       form-data: 4.0.6
       https-proxy-agent: 5.0.1
       proxy-from-env: 2.1.0
@@ -2590,9 +2596,7 @@ snapshots:
   flatbuffers@25.9.23:
     optional: true
 
-  follow-redirects@1.16.0(debug@4.4.3):
-    optionalDependencies:
-      debug: 4.4.3
+  follow-redirects@1.16.0: {}
 
   form-data@4.0.6:
     dependencies:
@@ -2737,9 +2741,9 @@ snapshots:
 
   ms@2.1.3: {}
 
-  msedge-tts@2.0.7(debug@4.4.3):
+  msedge-tts@2.0.7:
     dependencies:
-      axios: 1.19.0(debug@4.4.3)
+      axios: 1.19.0
       buffer: 6.0.3
       isomorphic-ws: 5.0.0(ws@8.21.3)
       stream-browserify: 3.0.0

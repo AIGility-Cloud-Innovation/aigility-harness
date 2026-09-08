@@ -178,6 +178,19 @@ async function main(): Promise<void> {
       res.end(APP_HALL_HTML);
       return;
     }
+    // DSH 插件管理页 (管理员专用; 非管理员跳回大厅; 浏览器导航靠 httpOnly cookie 识别)
+    if (req.method === "GET" && (req.url === "/dsh" || req.url?.startsWith("/dsh?"))) {
+      const backend = await import("./backend.js");
+      const uid = backend.pageUserId(req);
+      if (!uid || !(await backend.isAdminUser(uid))) {
+        res.writeHead(302, { Location: "/hall" });
+        res.end();
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(DSH_ADMIN_HTML);
+      return;
+    }
     // hall 路由 (由 hall 返回的 handler 处理); 对话 API 同样需要先登录
     if (hallHandler) {
       if (req.method === "POST" && (req.url ?? "").split("?")[0] === "/hall/chat") {
@@ -438,6 +451,8 @@ const APP_HALL_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)),
 const WORKBENCH_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "workbench.html"), "utf-8");
 // 用户管理页 (管理员专用)
 const USER_ADMIN_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "user-admin.html"), "utf-8");
+// DSH 插件管理页 (管理员专用)
+const DSH_ADMIN_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "dsh-admin.html"), "utf-8");
 
 // 首页 (跳转对话厅 + 产品简介)
 const INDEX_HTML = `<!DOCTYPE html>
