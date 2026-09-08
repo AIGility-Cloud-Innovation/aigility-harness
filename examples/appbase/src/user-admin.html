@@ -50,6 +50,17 @@ td button { border:none; border-radius:8px; padding:5px 10px; font-size:11.5px; 
       <tbody id="tbody"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody>
     </table>
   </div>
+  <div class="card">
+    <div style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)">
+      <b style="font-size:14px;flex:1">📜 审计日志</b>
+      <span class="sub" style="margin-right:10px">敏感操作留痕：登录 / 改密 / 提权 / 删除 / 应用变更（最近 100 条）</span>
+      <button class="b-pwd" onclick="loadAudit()">⟳ 刷新</button>
+    </div>
+    <table>
+      <thead><tr><th style="width:130px">时间</th><th style="width:190px">操作者</th><th style="width:150px">动作</th><th>对象 / 说明</th></tr></thead>
+      <tbody id="auditBody"><tr><td colspan="4" class="empty">点「刷新」加载</td></tr></tbody>
+    </table>
+  </div>
 </div>
 <div id="msg"></div>
 
@@ -162,7 +173,26 @@ function delUser(id) {
     .then(function() { toast('✓ 已删除'); load(); })
     .catch(function(e) { toast('✗ ' + e.message); });
 }
+function loadAudit() {
+  fetchJSON('/app/admin/audit?limit=100').then(function(d) {
+    var rows = d.entries || [];
+    document.getElementById('auditBody').innerHTML = rows.length
+      ? rows.map(function(e) {
+          return '<tr>'
+            + '<td class="sub">' + new Date(e.created_at).toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) + '</td>'
+            + '<td>' + esc(e.actor) + '</td>'
+            + '<td><span class="chip user" style="font-family:Consolas,monospace">' + esc(e.action) + '</span></td>'
+            + '<td class="sub">' + esc(e.target || '') + (e.detail ? ' · ' + esc(e.detail) : '') + '</td>'
+            + '</tr>';
+        }).join('')
+      : '<tr><td colspan="4" class="empty">暂无记录</td></tr>';
+  }).catch(function(e) {
+    document.getElementById('auditBody').innerHTML =
+      '<tr><td colspan="4" class="empty">加载失败: ' + esc(e.message) + '</td></tr>';
+  });
+}
 load();
+loadAudit();
 </script>
 </body>
 </html>

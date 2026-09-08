@@ -326,3 +326,5 @@ export const plugin: LayerPlugin = {
     return pluginState;
   },
 };
+// 沙箱快照备份工具（编码代理改文件前自动快照；版本回滚 UI 复用）
+export { backupHtmlFiles } from "./sandbox-backup.js";

@@ -25,6 +25,8 @@ import {
   createProtocolAdapterProvider,
   llmInferenceRef,
 } from "./protocol-adapter.js";
+import { rateLimitService, rateLimitProvider } from "./rate-limit.js";
+import { auditService, auditProvider } from "./audit.js";
 
 // ── 服务定义 ─────────────────────────────────────────────────────
 
@@ -111,9 +113,9 @@ const configProvider: Provider<ConfigRequest, ConfigResponse> = {
 export const manifest: PluginManifest = {
   name: "@infrastructure/logging-config",
   layer: LayerId.Infrastructure,
-  description: "底座基础层：控制台日志 + 内存配置 + 协议适配",
-  version: "0.2.0",
-  provides: [loggingService, configService, protocolAdapterService],
+  description: "底座基础层：控制台日志 + 内存配置 + 协议适配 + 限流 + 审计",
+  version: "0.3.0",
+  provides: [loggingService, configService, protocolAdapterService, rateLimitService, auditService],
   consumes: [llmInferenceRef],
   preferredCarrier: CarrierKind.Thread,
 };
@@ -131,7 +133,7 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [loggingProvider, configProvider, createProtocolAdapterProvider(), httpIngressProvider, hallProvider];
+    return [loggingProvider, configProvider, createProtocolAdapterProvider(), httpIngressProvider, hallProvider, rateLimitProvider, auditProvider];
   },
   getState(): PluginState {
     return pluginState;
@@ -201,6 +203,36 @@ export type {
   FeishuIngressRequest,
   FeishuIngressResponse,
 } from "./feishu-ingress.js";
+
+// 内存限流器（登录防暴力破解等；工厂供直接 import，插件供 ctx.call）
+export {
+  rateLimitService,
+  rateLimitProvider,
+  createMemoryRateLimiter,
+  rateLimitManifest,
+} from "./rate-limit.js";
+export type {
+  RateLimitRequest,
+  RateLimitResponse,
+  RateLimiterOptions,
+  RateLimitState,
+  MemoryRateLimiter,
+} from "./rate-limit.js";
+
+// 审计日志（敏感操作留痕；内存环形缓冲，装配可镜像持久化）
+export {
+  auditService,
+  auditProvider,
+  createMemoryAuditLog,
+  auditManifest,
+} from "./audit.js";
+export type {
+  AuditEntry,
+  AuditQuery,
+  AuditRequest,
+  AuditResponse,
+  MemoryAuditLog,
+} from "./audit.js";
 
 // 多功能对话厅（框架自带基本前端，多角色对话入口）
 export {

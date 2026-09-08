@@ -120,6 +120,11 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
     <div class="phead"><b>⚙ 应用管理 — <span id="mgAppName"></span></b><button class="btn-x" onclick="closeMg()">✕</button></div>
     <div class="pbody">
       <div class="sec">
+        <h3>🕘 版本历史</h3>
+        <div class="sh">编码代理每次改动前自动快照；可恢复到任一版本（恢复前会自动再快照当前状态，误恢复可回退）</div>
+        <div id="verList"><div class="sub" style="font-size:12px;color:var(--ink2)">加载中…</div></div>
+      </div>
+      <div class="sec">
         <h3>👥 大厅成员</h3>
         <div class="sh">被添加的账号在主页可见并打开该应用；管理员始终可见全部应用</div>
         <div id="memList"></div>
@@ -352,10 +357,40 @@ function openMg(enc) {
   mgApp = decodeURIComponent(enc);
   document.getElementById('mgAppName').textContent = mgApp.replace('.html','');
   loadManage();
+  loadVersions();
   document.getElementById('mgDrawer').classList.add('show');
 }
 function closeMg() { document.getElementById('mgDrawer').classList.remove('show'); }
 function jheaders() { return { 'Content-Type': 'application/json', Authorization: 'Bearer ' + mgToken }; }
+
+// ── 版本历史 (复用编码代理 .backups 快照) ──
+function loadVersions() {
+  fetchJSON('/app/hall/apps/' + encodeURIComponent(mgApp) + '/versions', { headers: jheaders() })
+    .then(function(d) {
+      var list = d.versions || [];
+      document.getElementById('verList').innerHTML = list.length
+        ? list.map(function(v, i) {
+            return '<div class="rowline"><div class="grow"><b style="font-size:12px">' + esc(v) + '</b>'
+              + (i === 0 ? ' <span class="okchip">最新快照</span>' : '') + '</div>'
+              + '<button class="t-reopen" onclick="restoreVersion(\'' + esc(v) + '\')">恢复此版本</button></div>';
+          }).join('')
+        : '<div class="sub" style="font-size:12px;color:var(--ink2)">还没有快照——编码代理第一次改动此应用后会自动生成</div>';
+    })
+    .catch(function(e) {
+      document.getElementById('verList').innerHTML =
+        '<div class="sub" style="font-size:12px;color:var(--rose)">加载失败: ' + esc(e.message) + '</div>';
+    });
+}
+function restoreVersion(ver) {
+  if (!confirm('把「' + mgApp.replace('.html','') + '」恢复到快照 ' + ver + ' ？\n当前状态会先自动快照，可再恢复回来。')) return;
+  fetchJSON('/app/hall/apps/' + encodeURIComponent(mgApp) + '/versions/' + encodeURIComponent(ver) + '/restore',
+    { method: 'POST', headers: jheaders() })
+    .then(function() {
+      alert('✓ 已恢复到 ' + ver + '（已打开的应用刷新页面即可看到）');
+      loadVersions();
+    })
+    .catch(function(e) { alert('恢复失败: ' + e.message); });
+}
 
 function loadManage() {
   fetchJSON('/app/hall/manage?app=' + encodeURIComponent(mgApp), { headers: jheaders() }).then(function(d) {

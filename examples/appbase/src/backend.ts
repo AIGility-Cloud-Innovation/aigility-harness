@@ -21,6 +21,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { createMemoryRateLimiter, createMemoryAuditLog } from "@aigility-harness/layer-infrastructure";
 
 const scryptAsync = promisify(scrypt) as (
   password: string,
@@ -76,6 +77,16 @@ async function ensureSchema(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_repair_tickets_user ON repair_tickets(user_id);
+    -- 审计日志 (持久层; 内存环形由框架 audit 插件持有)
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id         BIGSERIAL PRIMARY KEY,
+      actor      TEXT NOT NULL,
+      action     TEXT NOT NULL,
+      target     TEXT NOT NULL DEFAULT '',
+      detail     TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_log_time ON audit_log(created_at);
     CREATE TABLE IF NOT EXISTS app_tables (
       id         TEXT PRIMARY KEY,
       owner_id   TEXT NOT NULL,
@@ -268,33 +279,33 @@ export function setAuthCookie(res: ServerResponse, token: string): void {
     `hall_token=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 24 * 3600}`);
 }
 
-/** ── 登录失败限流 (内存): 同 IP+邮箱 5 次失败锁 15 分钟 ── */
-const LOGIN_FAILS = new Map<string, { n: number; until: number }>();
-const LOGIN_MAX_FAILS = 5;
-const LOGIN_LOCK_MS = 15 * 60 * 1000;
+// ── 登录限流 / 审计 (框架插件能力: @infrastructure/rate-limit + audit) ──
+const loginLimiter = createMemoryRateLimiter({ maxFails: 5, lockMs: 15 * 60 * 1000 });
+const auditRing = createMemoryAuditLog();
 
 export function loginLockKey(req: { socket?: { remoteAddress?: string } }, email: string): string {
   return `${req.socket?.remoteAddress ?? "unknown"}|${email.toLowerCase()}`;
 }
-export function isLoginLocked(key: string): number {
-  const rec = LOGIN_FAILS.get(key);
-  if (!rec) return 0;
-  if (rec.until > Date.now()) return Math.ceil((rec.until - Date.now()) / 60000);
-  if (rec.until !== 0 && rec.until <= Date.now()) LOGIN_FAILS.delete(key);
-  return 0;
-}
-export function recordLoginFail(key: string): number {
-  const rec = LOGIN_FAILS.get(key) ?? { n: 0, until: 0 };
-  rec.n += 1;
-  if (rec.n >= LOGIN_MAX_FAILS) {
-    rec.until = Date.now() + LOGIN_LOCK_MS;
-    rec.n = 0;
+
+/**
+ * 审计留痕: 敏感操作双写 —— 框架内存环形 (供 ctx.call 消费) + PG audit_log 表 (持久, 重启不丢)。
+ * 写 PG 失败不阻塞业务。
+ */
+export async function writeAudit(actor: string, action: string, target?: string, detail?: string): Promise<void> {
+  auditRing.append({ actor, action, target, detail });
+  try {
+    await pool.query(
+      "INSERT INTO audit_log (actor, action, target, detail) VALUES ($1,$2,$3,$4)",
+      [actor, action, target ?? "", detail ?? ""]);
+  } catch (e) {
+    console.error("[audit] pg write failed:", e);
   }
-  LOGIN_FAILS.set(key, rec);
-  return LOGIN_MAX_FAILS - rec.n;
 }
-export function clearLoginFails(key: string): void {
-  LOGIN_FAILS.delete(key);
+
+/** 用户 id → 邮箱 (审计显示用; 查不到原样返回) */
+export async function emailOf(userId: string): Promise<string> {
+  const { rows } = await pool.query("SELECT email FROM users WHERE id = $1", [userId]);
+  return rows[0]?.email ?? userId;
 }
 
 /** 用户可见的大厅沙箱应用: 管理员=全部; 普通用户=被添加的应用 ∪ 自己名下注册的应用 */
@@ -349,6 +360,7 @@ export async function appBackendHandler(
       }
       const token = signToken(id);
       setAuthCookie(res, token);
+      void writeAudit(email, "register", email, makeAdmin ? "(首个用户, 自动管理员)" : "");
       return json(res, 201, { token, user: { id, email, isAdmin: makeAdmin } });
     }
 
@@ -356,24 +368,29 @@ export async function appBackendHandler(
       const body = await readBody(req);
       const email = String(body.email ?? "").trim().toLowerCase();
       const password = String(body.password ?? "");
-      // 限流: 同 IP+邮箱 5 次失败锁 15 分钟 (防暴力试密码)
+      const ip = req.socket?.remoteAddress ?? "unknown";
+      // 限流 (框架 @infrastructure/rate-limit): 同 IP+邮箱 5 次失败锁 15 分钟
       const lockKey = loginLockKey(req, email);
-      const lockMin = isLoginLocked(lockKey);
-      if (lockMin > 0) {
-        return json(res, 429, { error: `失败次数过多, 账号已锁定, 约 ${lockMin} 分钟后再试` });
+      const lock = loginLimiter.check(lockKey);
+      if (lock.locked) {
+        void writeAudit(email, "login.locked", email, `ip=${ip} 剩余约 ${lock.retryAfterMin} 分钟`);
+        return json(res, 429, { error: `失败次数过多, 账号已锁定, 约 ${lock.retryAfterMin} 分钟后再试` });
       }
       const { rows } = await pool.query(
         "SELECT id, email, password_hash, is_admin FROM users WHERE email = $1",
         [email],
       );
       if (rows.length === 0 || !(await verifyPassword(password, rows[0].password_hash))) {
-        const left = recordLoginFail(lockKey);
-        return json(res, 401, { error: left > 0 ? `邮箱或密码错误 (还可尝试 ${left} 次)` : "邮箱或密码错误" });
+        const after = loginLimiter.fail(lockKey);
+        void writeAudit(email, "login.fail", email,
+          `ip=${ip}` + (after.remaining > 0 ? ` 还可尝试 ${after.remaining} 次` : " (触发锁定)"));
+        return json(res, 401, { error: after.remaining > 0 ? `邮箱或密码错误 (还可尝试 ${after.remaining} 次)` : "邮箱或密码错误" });
       }
-      clearLoginFails(lockKey);
+      loginLimiter.reset(lockKey);
       const token = signToken(rows[0].id);
       const isAdmin = Boolean(rows[0].is_admin) || adminEmails().includes(email);
       setAuthCookie(res, token);
+      void writeAudit(email, "login", email, `ip=${ip}${isAdmin ? " (管理员)" : ""}`);
       return json(res, 200, { token, user: { id: rows[0].id, email: rows[0].email, isAdmin } });
     }
 
@@ -394,8 +411,8 @@ export async function appBackendHandler(
       });
     }
 
-    // ── 管理员: 用户管理 (专门的用户管理应用使用) ──
-    if (path.startsWith("/app/admin/users")) {
+    // ── 管理员: 用户管理 + 审计查询 (专门的用户管理应用使用) ──
+    if (path.startsWith("/app/admin/")) {
       const adminId = bearerUser(req);
       if (!adminId) return json(res, 401, { error: "未授权: 请先登录" });
       if (!(await isAdminUser(adminId))) return json(res, 403, { error: "需要管理员权限" });
@@ -409,10 +426,19 @@ export async function appBackendHandler(
         return json(res, 200, { users: rows });
       }
 
+      if (method === "GET" && path === "/app/admin/audit") {
+        const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit") ?? 100)));
+        const { rows } = await pool.query(
+          "SELECT actor, action, target, detail, created_at FROM audit_log ORDER BY created_at DESC LIMIT $1",
+          [limit]);
+        return json(res, 200, { entries: rows });
+      }
+
       const adminUserMatch = path.match(/^\/app\/admin\/users\/([^/]+)(?:\/([a-z]+))?$/);
       if (adminUserMatch) {
         const targetId = decodeURIComponent(adminUserMatch[1]);
         const sub = adminUserMatch[2] ?? "";
+        const adminEmail = await emailOf(adminId);
 
         if (method === "GET" && sub === "memberships") {
           const { rows } = await pool.query(
@@ -435,6 +461,8 @@ export async function appBackendHandler(
             return json(res, body.is_admin ? 404 : 400,
               body.is_admin ? { error: "用户不存在" } : { error: "至少要保留一名管理员" });
           }
+          void writeAudit(adminEmail, "user.set_admin", await emailOf(targetId),
+            body.is_admin ? "设为管理员" : "取消管理员");
           return json(res, 200, { ok: true });
         }
 
@@ -446,6 +474,7 @@ export async function appBackendHandler(
           const { rowCount } = await pool.query(
             "UPDATE users SET password_hash = $2 WHERE id = $1", [targetId, hash]);
           if (rowCount === 0) return json(res, 404, { error: "用户不存在" });
+          void writeAudit(adminEmail, "user.reset_password", await emailOf(targetId));
           return json(res, 200, { ok: true });
         }
 
@@ -454,6 +483,7 @@ export async function appBackendHandler(
           if (!appId) return json(res, 400, { error: "缺少 app 参数" });
           await pool.query("DELETE FROM app_members WHERE user_id = $1 AND app_id = $2",
             [targetId, appId]);
+          void writeAudit(adminEmail, "app.member_remove", appId, `移出 ${await emailOf(targetId)}`);
           return json(res, 200, { ok: true });
         }
 
@@ -467,10 +497,11 @@ export async function appBackendHandler(
           await pool.query("DELETE FROM app_members WHERE user_id = $1", [targetId]);
           const { rowCount } = await pool.query("DELETE FROM users WHERE id = $1", [targetId]);
           if (rowCount === 0) return json(res, 404, { error: "用户不存在" });
+          void writeAudit(adminEmail, "user.delete", await emailOf(targetId));
           return json(res, 200, { ok: true });
         }
       }
-      return json(res, 404, { error: "admin users: not found" });
+      return json(res, 404, { error: "admin: not found" });
     }
 
     // ── 报修工单 (登录用户: 自己的工单; 管理员: 全部) ──
@@ -788,6 +819,10 @@ export async function appBackendHandler(
            VALUES ($1,$2,$3,$4,$5::jsonb, now())
            ON CONFLICT (app_id) DO UPDATE SET url=$2, key=$3, model=$4, env=$5::jsonb, updated_at=now()`,
           [appId, url, key, model, env]);
+        void writeAudit(await emailOf(userId), "app.llm_save", appId,
+          [body.url !== undefined ? "url" : null, body.key !== undefined && body.key !== "" ? "key" : null,
+           body.model !== undefined ? "model" : null, body.envText !== undefined ? "env" : null]
+            .filter(Boolean).join("/") || "(空保存)");
         return json(res, 200, { ok: true });
       }
 

@@ -25,10 +25,11 @@ import type { KernelConfig } from "@aigility-harness/core";
 import { InMemoryKernelAdapter } from "prototype-mode/in-memory-kernel";
 import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync, unlinkSync, statSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, unlinkSync, statSync, readdirSync, copyFileSync, mkdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve, join, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { backupHtmlFiles } from "@aigility-harness/layer-orchestration";
 import { plugin as infrastructurePlugin } from "@aigility-harness/layer-infrastructure";
 import { plugin as cognitivePlugin } from "@aigility-harness/layer-cognitive";
 import { plugin as personaPlugin } from "@aigility-harness/layer-persona";
@@ -321,7 +322,47 @@ async function hallAppsHandler(req: any, res: any): Promise<void> {
     const filePath = join(SANDBOX_ROOT, name);
     if (existsSync(filePath)) return json(409, { error: "同名应用已存在" });
     writeFileSync(filePath, String(parsed.content ?? ""));
+    void backend0.writeAudit(await backend0.emailOf(uid0), "app.create", name);
     return json(201, { ok: true, name });
+  }
+
+  // 版本历史 (复用编码代理的 .backups 快照, 仅管理员): 某应用可用的快照列表
+  const verListMatch = path.match(/^\/app\/hall\/apps\/([^/]+)\/versions$/);
+  if (method === "GET" && verListMatch) {
+    const be = await import("./backend.js");
+    const uid = be.bearerUser(req);
+    if (!uid || !(await be.isAdminUser(uid))) return json(403, { error: "仅管理员可查看版本" });
+    const name = safeAppName(decodeURIComponent(verListMatch[1]));
+    if (!name) return json(400, { error: "非法应用文件名" });
+    const backupsRoot = join(SANDBOX_ROOT, ".backups");
+    const versions: string[] = [];
+    try {
+      for (const d of readdirSync(backupsRoot).sort().reverse()) {
+        try {
+          if (statSync(join(backupsRoot, d)).isDirectory() && existsSync(join(backupsRoot, d, name))) {
+            versions.push(d);
+          }
+        } catch { /* 跳过异常项 */ }
+      }
+    } catch { /* .backups 尚不存在 */ }
+    return json(200, { versions });
+  }
+
+  // 恢复到某快照 (仅管理员): 恢复前自动对当前状态再做一次快照, 误恢复可回退
+  const restoreMatch = path.match(/^\/app\/hall\/apps\/([^/]+)\/versions\/([^/]+)\/restore$/);
+  if (method === "POST" && restoreMatch) {
+    const be = await import("./backend.js");
+    const uid = be.bearerUser(req);
+    if (!uid || !(await be.isAdminUser(uid))) return json(403, { error: "仅管理员可恢复版本" });
+    const name = safeAppName(decodeURIComponent(restoreMatch[1]));
+    const ver = decodeURIComponent(restoreMatch[2]);
+    if (!name || !/^[\w.-]+$/.test(ver) || ver.includes("..")) return json(400, { error: "非法参数" });
+    const src = join(SANDBOX_ROOT, ".backups", ver, name);
+    if (!existsSync(src)) return json(404, { error: "该版本快照不存在" });
+    backupHtmlFiles(SANDBOX_ROOT, "restore");
+    copyFileSync(src, join(SANDBOX_ROOT, name));
+    void be.writeAudit(await be.emailOf(uid), "app.restore", name, `恢复到快照 ${ver}`);
+    return json(200, { ok: true });
   }
 
   const fileMatch = path.match(/^\/app\/hall\/apps\/([^/]+)$/);
@@ -352,16 +393,20 @@ async function hallAppsHandler(req: any, res: any): Promise<void> {
       for await (const c of req) body += c;
       const parsed = JSON.parse(body || "{}");
       const renameTo = url.searchParams.get("rename");
+      const be = await import("./backend.js");
+      const who = await be.emailOf(be.bearerUser(req) ?? "");
       if (renameTo) {
         const target = safeAppName(decodeURIComponent(renameTo));
         if (!target) return json(400, { error: "非法新名称" });
         if (!existsSync(filePath)) return json(404, { error: "应用不存在" });
         writeFileSync(join(SANDBOX_ROOT, target), readFileSync(filePath));
         unlinkSync(filePath);
+        void be.writeAudit(who, "app.rename", name, `改名为 ${target}`);
         return json(200, { ok: true, name: target });
       }
       if (typeof parsed.content !== "string") return json(400, { error: "content 必填" });
       writeFileSync(filePath, parsed.content);
+      void be.writeAudit(who, "app.overwrite", name, `${(parsed.content as string).length} 字节`);
       return json(200, { ok: true });
     }
     if (method === "POST") {
@@ -372,11 +417,15 @@ async function hallAppsHandler(req: any, res: any): Promise<void> {
       const filePath2 = join(SANDBOX_ROOT, parsed.name);
       if (existsSync(filePath2)) return json(409, { error: "同名应用已存在" });
       writeFileSync(filePath2, parsed.content ?? "");
+      const be = await import("./backend.js");
+      void be.writeAudit(await be.emailOf(be.bearerUser(req) ?? ""), "app.create", String(parsed.name));
       return json(201, { ok: true, name: parsed.name });
     }
     if (method === "DELETE") {
       if (!existsSync(filePath)) return json(404, { error: "应用不存在" });
       unlinkSync(filePath);
+      const be = await import("./backend.js");
+      void be.writeAudit(await be.emailOf(be.bearerUser(req) ?? ""), "app.delete", name);
       return json(200, { ok: true });
     }
   }
