@@ -28,10 +28,6 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
 .app-card .ops button { padding:5px 11px; font-size:12px; border-radius:8px; border:none; background:var(--soft); color:var(--accent); cursor:pointer; font-weight:600; font-family:inherit; }
 .app-card .ops button.mg { background:#fff3e6; color:#d97706; }
 .app-card .ops button:hover { filter:brightness(.95); }
-.sec-head { grid-column: 1 / -1; padding: 8px 4px 0; }
-.sec-head .st { font-size:14px; font-weight:700; }
-.sec-head .ss { font-size:12px; color:var(--ink2); margin-top:2px; }
-
 .empty { text-align:center; padding:50px; color:var(--ink2); background:#fff; border-radius:16px; border:1px dashed var(--line); grid-column:1/-1; }
 .drawer { position:fixed; inset:0; background:rgba(15,23,42,.45); display:none; justify-content:flex-end; z-index:50; }
 .drawer.show { display:flex; }
@@ -51,20 +47,35 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
 .minput:focus { border-color:var(--accent); }
 .mbtn { border:none; background:var(--accent); color:#fff; border-radius:9px; padding:8px 16px; font-weight:600; cursor:pointer; font-size:12.5px; font-family:inherit; }
 .mbtn.g { background:var(--soft); color:var(--accent); }
-.keyval { font-family:Consolas,monospace; font-size:11.5px; background:#f1f4f9; padding:2px 6px; border-radius:5px; cursor:pointer; }
+.mbtn.s { padding:4px 10px; font-size:11.5px; }
 .okchip { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; background:var(--green-soft); color:var(--green); }
+.openchip { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; background:#fff3e6; color:#d97706; }
 .offchip { background:#f1f4f9; color:var(--ink2); }
 .chatpanel .msgs { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:10px; background:#fafbfe; }
 .msg { max-width:85%; padding:9px 13px; border-radius:12px; font-size:13.5px; line-height:1.6; white-space:pre-wrap; word-break:break-word; }
 .msg.user { align-self:flex-end; background:var(--accent); color:#fff; }
 .msg.bot { align-self:flex-start; background:#eef1f6; }
+.msg-act { align-self:flex-start; }
+.msg-act button { border:none; background:var(--soft); color:var(--accent); border-radius:8px; padding:4px 10px; font-size:11.5px; cursor:pointer; font-weight:600; font-family:inherit; }
 .inputbar { padding:14px; border-top:1px solid var(--line); display:flex; gap:8px; }
 .inputbar textarea { flex:1; border:1.5px solid var(--line); border-radius:10px; padding:9px 11px; font-family:inherit; font-size:13.5px; resize:none; height:52px; outline:none; }
 .inputbar textarea:focus { border-color:var(--accent); }
 .send { border:none; background:var(--accent); color:#fff; border-radius:10px; padding:0 18px; font-weight:600; cursor:pointer; font-family:inherit; }
 .send:disabled { opacity:.55; cursor:wait; }
-
-/* ── 登录门 (先登录再进大厅) ── */
+/* 工单面板 (报修客服抽屉顶部) */
+#ticketPanel { display:none; max-height:46%; overflow-y:auto; border-bottom:1px solid var(--line); padding:12px 16px; background:#fff; }
+#ticketPanel .tphead { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+#ticketPanel .tphead b { font-size:13px; flex:1; }
+.ticket { border:1px solid var(--line); border-radius:10px; padding:8px 10px; margin-bottom:7px; font-size:12.5px; }
+.ticket .t1 { display:flex; align-items:center; gap:7px; }
+.ticket .t1 .tt { flex:1; min-width:0; font-weight:600; word-break:break-all; }
+.ticket .sub { font-size:11px; color:var(--ink2); margin-top:3px; }
+.ticket .tops { margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; }
+.ticket .tops button { border:none; border-radius:7px; padding:3px 9px; font-size:11px; cursor:pointer; font-weight:600; font-family:inherit; }
+.t-assist { background:var(--soft); color:var(--accent); }
+.t-resolve { background:var(--green-soft); color:var(--green); }
+.t-reopen { background:#fff3e6; color:#d97706; }
+/* 登录门 */
 .login-view { position:fixed; inset:0; background:linear-gradient(135deg,#1e1b4b,#4f46e5 60%,#7c3aed); display:flex; align-items:center; justify-content:center; z-index:100; padding:20px; }
 .login-card { background:#fff; border-radius:20px; padding:34px 30px; width:380px; max-width:94vw; box-shadow:0 24px 70px rgba(0,0,0,.4); }
 .login-card h2 { font-size:20px; }
@@ -153,13 +164,15 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
   </div>
 </div>
 
-<!-- AI 对话抽屉 -->
+<!-- AI 对话抽屉 (对话角色 / 报修客服共用; 报修时顶部出工单面板) -->
 <div class="drawer" id="chatDrawer">
   <div class="panel chatpanel" style="display:flex;flex-direction:column">
     <div class="phead"><b id="chatTitle">对话</b>
       <span style="flex:1"></span>
+      <button class="btn-x" id="ticketToggleBtn" onclick="toggleTicketPanel()" title="工单列表" style="display:none">📋</button>
       <button class="btn-x" onclick="clearChatHistory()" title="清空当前角色聊天记录">🗑</button>
       <button class="btn-x" onclick="closeChat()">✕</button></div>
+    <div id="ticketPanel"></div>
     <div class="msgs" id="msgs"></div>
     <div class="inputbar">
       <textarea id="chatInput" placeholder="输入内容…"></textarea>
@@ -174,10 +187,12 @@ var mgToken = localStorage.getItem('hall_token') || '';
 var userEmail = '';
 var isAdmin = false;
 var chatRoles = [];
+var hallApps = [];      // 当前可见应用 (工单表单下拉用)
 var currentRole = null;
 var chatHistory = [];
 var chatStoreKey = '';
 var inFlight = false;
+var repairAssistTicketId = null; // 生成器协助中的工单 id
 
 // ── 通用: 带超时与错误透传的 fetchJSON ──
 function fetchJSON(url, opts, timeoutMs) {
@@ -248,47 +263,26 @@ document.getElementById('lgPassword').addEventListener('keydown', function(e) {
   }).catch(function() { forceRelogin('登录已过期，请重新登录'); });
 })();
 
-// ── 应用列表 (管理员=全部功能; 普通用户=仅被添加到的应用) ──
+// ── 应用列表 (平面网格: 客服/工具卡 + 应用卡, 不再分类) ──
 function loadApps() {
   fetchJSON('/app/hall/apps', { headers: authHeaders() }).then(function(d) {
-    chatRoles = [
-      { id:'@persona/codex-chat', icon:'🪶', name:'网页应用生成器', ds:'动作：描述需求，生成 HTML 应用放进大厅', gen:true, greet:'描述你想要的网页应用，我会生成单文件 HTML 并放入大厅。例如：做一个班级值日表，可以按星期切换。' },
-      { id:'@persona/sales-chat', icon:'🎧', name:'AppBase 客服', ds:'聊天：解答 AppBase 系统的一切使用问题', greet:'你好，我是 AppBase 客服。关于这套系统的任何问题——功能、配置、常见故障——直接问。' },
-      { id:'@persona/coder', icon:'🎓', name:'编码教练', ds:'教学模式：讲解系统架构与用法（不修改代码）', greet:'你好，我是编码教练。我可以讲解系统架构、插件体系和应用的实现思路。' }
-    ];
-    var secCard = function(title, sub) {
-      return '<div class="sec-head"><div><div class="st">' + title + '</div><div class="ss">' + sub + '</div></div></div>';
-    };
-    var chatCard = function(r, i) {
-      return '<div class="app-card" onclick="openChat(' + i + ')">'
-        + '<div class="icon">' + r.icon + '</div>'
-        + '<div class="nm">' + r.name + '</div>'
-        + '<div class="ds">' + r.ds + '</div>'
-        + '<div class="ops"><button>开始对话 →</button></div></div>';
-    };
-    var codeCard = function(r, i) {
-      return '<div class="app-card gen" onclick="openWorkbench(' + i + ')">'
-        + '<div class="icon">' + r.icon + '</div>'
-        + '<div class="nm">' + r.name + '</div>'
-        + '<div class="ds">' + r.ds + '</div>'
-        + '<div class="ops"><button>打开工作台 →</button></div></div>';
-    };
+    isAdmin = !!d.isAdmin || isAdmin;
+    hallApps = d.apps || [];
     var html = '';
+    // 服务/对话卡 (所有人可见)
+    html += chatCardHtml({ key:'repair', icon:'🔧', name:'应用报修客服', ds:'报修：描述问题 → 记录工单 → 生成器协助判断处理' });
+    html += chatCardHtml({ key:'sales', icon:'🎧', name:'AppBase 客服', ds:'解答 AppBase 系统的一切使用问题' });
+    // 工具/管理卡 (仅管理员)
     if (isAdmin) {
-      html += secCard('💬 对话角色', '纯聊天互动，点开即聊');
-      chatRoles.forEach(function(r, i) {
-        if (r.id !== '@persona/codex-chat' && r.id !== '@persona/coder') html += chatCard(r, i);
-      });
-      html += secCard('🛠 编码工作台', '能修改项目代码：选择目标应用与编码工具（Codex / ZCode / Claude）');
-      chatRoles.forEach(function(r, i) {
-        if (r.id === '@persona/codex-chat' || r.id === '@persona/coder') html += codeCard(r, i);
-      });
-      html += secCard('📱 全部应用', '管理员可见并管理所有应用');
-    } else {
-      html += secCard('📱 我的应用', '被添加到的应用');
+      html += workbenchCardHtml('codex', '🪶', '网页应用生成器', '描述需求，生成/修改 HTML 应用');
+      html += workbenchCardHtml('coder', '🎓', '编码教练', '教学模式：讲解架构与用法，不修改代码');
+      html += '<div class="app-card" onclick="location.href=\'/admin/users\'">'
+        + '<div class="icon">👥</div><div class="nm">用户管理</div>'
+        + '<div class="ds">管理全部账号：管理员身份 / 密码重置 / 成员关系 / 删除</div>'
+        + '<div class="ops"><button>打开 →</button></div></div>';
     }
-    var apps = d.apps || [];
-    apps.forEach(function(a) {
+    // 应用卡
+    hallApps.forEach(function(a) {
       var icon = a.name.indexOf('teacher') >= 0 ? '📚' : '📄';
       html += '<div class="app-card" onclick="openApp(\'' + encodeURIComponent(a.name) + '\')">'
         + '<div class="icon">' + icon + '</div>'
@@ -299,13 +293,27 @@ function loadApps() {
         + (isAdmin ? '<button class="mg" onclick="event.stopPropagation();openMg(\'' + encodeURIComponent(a.name) + '\')">设置</button>' : '')
         + '</div></div>';
     });
-    if (!apps.length && !isAdmin) {
+    if (!hallApps.length && !isAdmin) {
       html += '<div class="empty"><h3>还没有可用的应用</h3><p>请联系管理员把你添加到应用成员里</p></div>';
     }
     document.getElementById('grid').innerHTML = html;
   }).catch(function(e) {
     if (/未授权|401/.test(e.message)) forceRelogin('登录已过期，请重新登录');
   });
+}
+function chatCardHtml(r) {
+  return '<div class="app-card" onclick="openRoleChat(\'' + r.key + '\')">'
+    + '<div class="icon">' + r.icon + '</div>'
+    + '<div class="nm">' + r.name + '</div>'
+    + '<div class="ds">' + r.ds + '</div>'
+    + '<div class="ops"><button>开始对话 →</button></div></div>';
+}
+function workbenchCardHtml(key, icon, name, ds) {
+  return '<div class="app-card gen" onclick="openWorkbench(\'' + key + '\')">'
+    + '<div class="icon">' + icon + '</div>'
+    + '<div class="nm">' + name + '</div>'
+    + '<div class="ds">' + ds + '</div>'
+    + '<div class="ops"><button>打开工作台 →</button></div></div>';
 }
 
 function openApp(enc) {
@@ -442,16 +450,26 @@ function revokeKey(id) {
     .then(function(){ loadManage(); });
 }
 
-// ── AI 对话抽屉 ──
-function openWorkbench(i) {
-  var r = chatRoles[i];
-  location.href = '/hall/workbench?role=' + encodeURIComponent(r.id);
+// ── 对话抽屉 (角色定义 + 报修工单面板) ──
+var ROLE_DEFS = {
+  repair: { id:'@persona/repair-chat', icon:'🔧', name:'应用报修客服', repair:true,
+    greet:'你好，我是应用报修客服。\n请描述你遇到的问题：哪个应用、什么现象、怎么复现、有无报错信息。\n信息足够后我会帮你整理成工单，之后可以让网页应用生成器协助判断处理。' },
+  sales: { id:'@persona/sales-chat', icon:'🎧', name:'AppBase 客服',
+    greet:'你好，我是 AppBase 客服。关于这套系统的任何问题——功能、配置、常见故障——直接问。' },
+  gen: { id:'@persona/codex-chat', icon:'🪶', name:'网页应用生成器',
+    greet:'描述你想要的网页应用，我会生成单文件 HTML 并放入大厅。' }
+};
+function openWorkbench(key) {
+  location.href = '/hall/workbench?role=@persona/' + (key === 'coder' ? 'coder' : 'codex-chat');
 }
-function openChat(i) {
-  if (!isAdmin) return; // 对话角色是管理功能
-  currentRole = chatRoles[i];
+function openRoleChat(key) {
+  currentRole = ROLE_DEFS[key];
   chatStoreKey = 'hall_chat_' + currentRole.id;
+  repairAssistTicketId = null;
   document.getElementById('chatTitle').textContent = currentRole.icon + ' ' + currentRole.name;
+  document.getElementById('ticketToggleBtn').style.display = currentRole.repair ? '' : 'none';
+  var tp = document.getElementById('ticketPanel');
+  tp.style.display = 'none';
   document.getElementById('chatDrawer').classList.add('show');
   document.getElementById('msgs').innerHTML = '';
   chatHistory.length = 0;
@@ -462,16 +480,105 @@ function openChat(i) {
     addMsg('bot', currentRole.greet, true); // 欢迎语不写入历史
   }
 }
+function toggleTicketPanel() {
+  var tp = document.getElementById('ticketPanel');
+  var show = tp.style.display !== 'block';
+  tp.style.display = show ? 'block' : 'none';
+  if (show) loadTickets();
+}
+function loadTickets() {
+  var tp = document.getElementById('ticketPanel');
+  fetchJSON('/app/tickets', { headers: authHeaders() }).then(function(d) {
+    var rows = (d.tickets||[]).map(function(t) {
+      return '<div class="ticket">'
+        + '<div class="t1">'
+        + (t.status === 'resolved' ? '<span class="okchip">已解决</span>' : '<span class="openchip">待处理</span>')
+        + '<span class="tt">' + esc(t.title) + '</span></div>'
+        + '<div class="sub">' + esc(t.app || '未指定应用') + ' · ' + new Date(t.created_at).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})
+        + (d.isAdmin ? ' · ' + esc(t.owner_email || '') : '') + '</div>'
+        + (t.solution ? '<div class="sub" style="margin-top:3px">💡 ' + esc(t.solution).slice(0, 120) + (t.solution.length > 120 ? '…' : '') + '</div>' : '')
+        + '<div class="tops">'
+        + '<button class="t-assist" onclick="assistTicket(\'' + t.id + '\')">🛠 生成器协助</button>'
+        + (t.status === 'resolved'
+            ? '<button class="t-reopen" onclick="setTicketStatus(\'' + t.id + '\',\'open\')">重新打开</button>'
+            : '<button class="t-resolve" onclick="setTicketStatus(\'' + t.id + '\',\'resolved\')">✓ 标记已解决</button>')
+        + '</div></div>';
+    }).join('');
+    tp.innerHTML = '<div class="tphead"><b>📋 ' + (d.isAdmin ? '全部工单' : '我的工单') + '</b>'
+      + '<button class="mbtn g s" onclick="toggleTicketForm()">➕ 新建工单</button>'
+      + '<button class="mbtn g s" onclick="loadTickets()">⟳</button></div>'
+      + '<div id="ticketForm" style="display:none;margin-bottom:10px;border:1px solid var(--line);border-radius:10px;padding:10px">'
+      + '<select class="minput" id="tkApp"><option value="">应用（可留空）</option>'
+      + hallApps.map(function(a){ return '<option value="' + esc(a.name) + '">' + esc(a.name.replace('.html','')) + '</option>'; }).join('')
+      + '</select>'
+      + '<input class="minput" id="tkTitle" placeholder="问题标题（必填）">'
+      + '<textarea class="minput" id="tkDetail" style="min-height:56px" placeholder="现象 / 复现步骤 / 报错信息"></textarea>'
+      + '<button class="mbtn s" onclick="createTicket()">提交工单</button></div>'
+      + (rows || '<div class="sub" style="font-size:12px;color:var(--ink2)">还没有工单。对话描述问题，或在客服回复后点「创建工单」。</div>');
+  }).catch(function(e) {
+    if (/未授权|401/.test(e.message)) return forceRelogin('登录已过期，请重新登录');
+    tp.innerHTML = '<div class="sub" style="font-size:12px;color:var(--rose)">工单加载失败: ' + esc(e.message) + '</div>';
+  });
+}
+function toggleTicketForm() {
+  var f = document.getElementById('ticketForm');
+  if (f) f.style.display = f.style.display === 'none' ? 'block' : 'none';
+}
+function createTicket() {
+  var title = document.getElementById('tkTitle').value.trim();
+  if (!title) return alert('请填写问题标题');
+  fetchJSON('/app/tickets', {
+    method: 'POST', headers: jheaders(),
+    body: JSON.stringify({
+      title: title,
+      app: document.getElementById('tkApp').value,
+      detail: document.getElementById('tkDetail').value.trim()
+    })
+  }).then(function() { loadTickets(); })
+    .catch(function(e) { alert('建单失败: ' + e.message); });
+}
+function setTicketStatus(id, status) {
+  fetchJSON('/app/tickets/' + id, {
+    method: 'PUT', headers: jheaders(), body: JSON.stringify({ status: status })
+  }).then(function() { loadTickets(); })
+    .catch(function(e) { alert('操作失败: ' + e.message); });
+}
+// 生成器协助: 切到生成器对话, 自动带上工单上下文
+function assistTicket(ticketId) {
+  var t = null;
+  fetchJSON('/app/tickets', { headers: authHeaders() }).then(function(d) {
+    t = (d.tickets||[]).find(function(x){ return x.id === ticketId; });
+    if (!t) return alert('工单不存在');
+    currentRole = ROLE_DEFS.gen;
+    chatStoreKey = 'hall_chat_gen_assist_' + ticketId;
+    repairAssistTicketId = ticketId;
+    document.getElementById('chatTitle').textContent = '🪶 生成器 · 工单协助';
+    document.getElementById('ticketPanel').style.display = 'none';
+    document.getElementById('msgs').innerHTML = '';
+    chatHistory = [];
+    var msg = '请协助处理这个报修工单：\n'
+      + '工单: ' + t.title + '\n'
+      + '应用: ' + (t.app || '未指定') + '\n'
+      + '详情: ' + (t.detail || '(无)') + '\n\n'
+      + '请判断问题原因并给出处理方案；如需修改应用代码，先说明要改什么再动手。';
+    document.getElementById('chatDrawer').classList.add('show');
+    addMsg('user', msg);
+    sendText(msg);
+  }).catch(function(e) { alert('加载工单失败: ' + e.message); });
+}
 function clearChatHistory() {
   if (!currentRole) return;
   if (inFlight) { alert('当前有请求进行中，等回复完成后再清空'); return; }
-  if (!confirm('清空「' + currentRole.name + '」的聊天记录？')) return;
+  if (!confirm('清空「' + document.getElementById('chatTitle').textContent + '」的聊天记录？')) return;
   chatHistory.length = 0;
   localStorage.removeItem(chatStoreKey);
   document.getElementById('msgs').innerHTML = '';
   addMsg('bot', currentRole.greet, true);
 }
 function closeChat() { document.getElementById('chatDrawer').classList.remove('show'); loadApps(); }
+function esc(s) {
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 function addMsg(role, text, skipSave) {
   var el = document.createElement('div');
   el.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
@@ -486,16 +593,39 @@ function addMsg(role, text, skipSave) {
   }
   return el;
 }
+function appendAction(text, fn) {
+  var box = document.getElementById('msgs');
+  var bar = document.createElement('div');
+  bar.className = 'msg-act';
+  var b = document.createElement('button');
+  b.textContent = text;
+  b.onclick = function() { b.disabled = true; fn(); };
+  bar.appendChild(b);
+  box.appendChild(bar);
+  box.scrollTop = 1e9;
+}
+// 从客服回复里提取 ```ticket {...}``` 块; 返回 {reply 去块后文本, ticket 对象或 null}
+function extractTicketBlock(text) {
+  var m = /```ticket\s*([\s\S]*?)```/.exec(text);
+  if (!m) return { reply: text, ticket: null };
+  var t = null;
+  try { t = JSON.parse(m[1].trim()); } catch (e) { t = null; }
+  return { reply: text.replace(m[0], '').trim(), ticket: t };
+}
 function sendChat() {
   if (inFlight) return; // 回车不经过按钮, 入口统一拦并发
   var input = document.getElementById('chatInput');
   var text = input.value.trim();
   if (!text || !currentRole) return;
-  inFlight = true;
-  document.getElementById('chatSendBtn').disabled = true;
   addMsg('user', text);
   input.value = '';
-  var hp = chatHistory.slice(-10); // addMsg 已入历史, 这里不再重复 push
+  sendText(text);
+}
+function sendText(text) {
+  if (inFlight) return;
+  inFlight = true;
+  document.getElementById('chatSendBtn').disabled = true;
+  var hp = chatHistory.slice(-10); // addMsg 已入历史, 这里截取即可
   var statusEl = addMsg('bot', '⏳ 正在思考…', true); // 状态气泡不写入历史/上下文
   fetchJSON('/hall/chat', { method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ role: currentRole.id, message:text, history:hp, session_id:'hall-'+currentRole.id+'-'+Date.now() }) },
@@ -504,8 +634,39 @@ function sendChat() {
       statusEl.remove();
       var reply = d.response || '(无回复)';
       if (d.degraded) reply += '\n\n（⚠ 降级回复：编码工具不可用，以上内容未经真实执行，请勿视为已完成）';
+      // 报修客服: 识别 ticket 块 → 展示建单按钮
+      if (currentRole && currentRole.repair) {
+        var ex = extractTicketBlock(reply);
+        addMsg('bot', ex.reply || '(客服未返回内容)');
+        if (ex.ticket && ex.ticket.title) {
+          appendAction('📋 创建工单：' + ex.ticket.title, function() {
+            fetchJSON('/app/tickets', {
+              method: 'POST', headers: jheaders(),
+              body: JSON.stringify({
+                title: String(ex.ticket.title || '未命名工单'),
+                app: String(ex.ticket.app || ''),
+                detail: String(ex.ticket.detail || '')
+              })
+            }).then(function() {
+              appendActionResult('✓ 工单已创建，可点顶部 📋 查看');
+              loadTickets();
+            }).catch(function(e) { appendActionResult('✗ 建单失败: ' + e.message); });
+          });
+        }
+        return;
+      }
+      // 生成器协助模式: 回复后给「记为解决方案」
       addMsg('bot', reply);
-      loadApps();
+      if (repairAssistTicketId) {
+        var tid = repairAssistTicketId;
+        appendAction('💡 把这条回复记为工单解决方案', function() {
+          fetchJSON('/app/tickets/' + tid, {
+            method: 'PUT', headers: jheaders(),
+            body: JSON.stringify({ solution: reply })
+          }).then(function() { appendActionResult('✓ 已记为解决方案'); })
+            .catch(function(e) { appendActionResult('✗ 保存失败: ' + e.message); });
+        });
+      }
     })
     .catch(function(e) {
       statusEl.remove();
@@ -515,6 +676,16 @@ function sendChat() {
       inFlight = false;
       document.getElementById('chatSendBtn').disabled = false;
     });
+}
+function appendActionResult(text) {
+  var box = document.getElementById('msgs');
+  var bar = document.createElement('div');
+  bar.className = 'msg-act';
+  bar.textContent = text;
+  bar.style.fontSize = '11.5px';
+  bar.style.color = 'var(--ink2)';
+  box.appendChild(bar);
+  box.scrollTop = 1e9;
 }
 document.getElementById('chatInput').addEventListener('keydown', function(e){
   // 中文输入法选词的回车 (isComposing/keyCode 229) 不当作发送

@@ -63,6 +63,19 @@ async function ensureSchema(): Promise<void> {
       added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       UNIQUE (app_id, user_id)
     );
+    -- 应用报修工单
+    CREATE TABLE IF NOT EXISTS repair_tickets (
+      id         TEXT PRIMARY KEY,
+      user_id    TEXT NOT NULL REFERENCES users(id),
+      app        TEXT NOT NULL DEFAULT '',
+      title      TEXT NOT NULL,
+      detail     TEXT NOT NULL DEFAULT '',
+      status     TEXT NOT NULL DEFAULT 'open',
+      solution   TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_repair_tickets_user ON repair_tickets(user_id);
     CREATE TABLE IF NOT EXISTS app_tables (
       id         TEXT PRIMARY KEY,
       owner_id   TEXT NOT NULL,
@@ -311,6 +324,137 @@ export async function appBackendHandler(
       return json(res, 200, {
         user: { id: rows[0].id, email: rows[0].email, isAdmin: await isAdminUser(userId) },
       });
+    }
+
+    // ── 管理员: 用户管理 (专门的用户管理应用使用) ──
+    if (path.startsWith("/app/admin/users")) {
+      const adminId = bearerUser(req);
+      if (!adminId) return json(res, 401, { error: "未授权: 请先登录" });
+      if (!(await isAdminUser(adminId))) return json(res, 403, { error: "需要管理员权限" });
+
+      if (method === "GET" && path === "/app/admin/users") {
+        const { rows } = await pool.query(
+          `SELECT u.id, u.email, u.is_admin, u.created_at,
+                  (SELECT count(*)::int FROM app_members m WHERE m.user_id = u.id) AS member_count,
+                  (SELECT count(*)::int FROM apps a WHERE a.owner_id = u.id) AS app_count
+           FROM users u ORDER BY u.created_at`);
+        return json(res, 200, { users: rows });
+      }
+
+      const adminUserMatch = path.match(/^\/app\/admin\/users\/([^/]+)(?:\/([a-z]+))?$/);
+      if (adminUserMatch) {
+        const targetId = decodeURIComponent(adminUserMatch[1]);
+        const sub = adminUserMatch[2] ?? "";
+
+        if (method === "GET" && sub === "memberships") {
+          const { rows } = await pool.query(
+            "SELECT app_id, added_at FROM app_members WHERE user_id = $1 ORDER BY added_at",
+            [targetId]);
+          return json(res, 200, { memberships: rows });
+        }
+
+        if (method === "PUT" && sub === "admin") {
+          const body = await readBody(req);
+          if (targetId === adminId && body.is_admin !== true) {
+            return json(res, 400, { error: "不能撤销自己的管理员身份" });
+          }
+          // 撤销管理员时, 必须还存在其他管理员
+          const { rowCount } = await pool.query(
+            `UPDATE users SET is_admin = $2 WHERE id = $1
+             AND ($2 = true OR (SELECT count(*) FROM users WHERE is_admin AND id <> $1) > 0)`,
+            [targetId, Boolean(body.is_admin)]);
+          if (rowCount === 0) {
+            return json(res, body.is_admin ? 404 : 400,
+              body.is_admin ? { error: "用户不存在" } : { error: "至少要保留一名管理员" });
+          }
+          return json(res, 200, { ok: true });
+        }
+
+        if (method === "PUT" && sub === "password") {
+          const body = await readBody(req);
+          const newPassword = String(body.newPassword ?? "");
+          if (newPassword.length < 6) return json(res, 400, { error: "新密码至少 6 位" });
+          const hash = await hashPassword(newPassword);
+          const { rowCount } = await pool.query(
+            "UPDATE users SET password_hash = $2 WHERE id = $1", [targetId, hash]);
+          if (rowCount === 0) return json(res, 404, { error: "用户不存在" });
+          return json(res, 200, { ok: true });
+        }
+
+        if (method === "DELETE" && sub === "member") {
+          const appId = String(new URL(req.url ?? "/", "http://x").searchParams.get("app") ?? "");
+          if (!appId) return json(res, 400, { error: "缺少 app 参数" });
+          await pool.query("DELETE FROM app_members WHERE user_id = $1 AND app_id = $2",
+            [targetId, appId]);
+          return json(res, 200, { ok: true });
+        }
+
+        if (method === "DELETE" && sub === "") {
+          if (targetId === adminId) return json(res, 400, { error: "不能删除自己的账号" });
+          const { rows: owned } = await pool.query(
+            "SELECT count(*)::int AS n FROM apps WHERE owner_id = $1", [targetId]);
+          if (owned[0].n > 0) {
+            return json(res, 409, { error: `该用户名下还有 ${owned[0].n} 个应用, 请先处理应用归属再删除` });
+          }
+          await pool.query("DELETE FROM app_members WHERE user_id = $1", [targetId]);
+          const { rowCount } = await pool.query("DELETE FROM users WHERE id = $1", [targetId]);
+          if (rowCount === 0) return json(res, 404, { error: "用户不存在" });
+          return json(res, 200, { ok: true });
+        }
+      }
+      return json(res, 404, { error: "admin users: not found" });
+    }
+
+    // ── 报修工单 (登录用户: 自己的工单; 管理员: 全部) ──
+    if (path === "/app/tickets" || path.startsWith("/app/tickets/")) {
+      const ticketUserId = bearerUser(req);
+      if (!ticketUserId) return json(res, 401, { error: "未授权: 请先登录" });
+      const ticketAdmin = await isAdminUser(ticketUserId);
+
+      if (method === "GET" && path === "/app/tickets") {
+        const { rows } = await pool.query(
+          `SELECT t.*, u.email AS owner_email FROM repair_tickets t
+           JOIN users u ON u.id = t.user_id
+           ${ticketAdmin ? "" : "WHERE t.user_id = $1"}
+           ORDER BY t.created_at DESC LIMIT 200`,
+          ticketAdmin ? [] : [ticketUserId]);
+        return json(res, 200, { tickets: rows, isAdmin: ticketAdmin });
+      }
+
+      if (method === "POST" && path === "/app/tickets") {
+        const body = await readBody(req);
+        const title = String(body.title ?? "").trim();
+        if (!title) return json(res, 400, { error: "title 必填" });
+        const id = randomUUID();
+        await pool.query(
+          "INSERT INTO repair_tickets (id, user_id, app, title, detail) VALUES ($1,$2,$3,$4,$5)",
+          [id, ticketUserId, String(body.app ?? "").trim(), title, String(body.detail ?? "").trim()]);
+        return json(res, 201, { id });
+      }
+
+      const ticketMatch = path.match(/^\/app\/tickets\/([^/]+)$/);
+      if (ticketMatch && method === "PUT") {
+        const ticketId = decodeURIComponent(ticketMatch[1]);
+        const { rows: own } = await pool.query(
+          "SELECT user_id FROM repair_tickets WHERE id = $1", [ticketId]);
+        if (own.length === 0) return json(res, 404, { error: "工单不存在" });
+        if (own[0].user_id !== ticketUserId && !ticketAdmin) {
+          return json(res, 403, { error: "只能操作自己的工单" });
+        }
+        const body = await readBody(req);
+        const status = ["open", "resolved"].includes(String(body.status))
+          ? String(body.status) : undefined;
+        const solution = body.solution !== undefined ? String(body.solution) : undefined;
+        const { rowCount } = await pool.query(
+          `UPDATE repair_tickets SET
+             status = COALESCE($2, status),
+             solution = COALESCE($3, solution),
+             updated_at = now()
+           WHERE id = $1`,
+          [ticketId, status ?? null, solution ?? null]);
+        if (rowCount === 0) return json(res, 404, { error: "工单不存在" });
+        return json(res, 200, { ok: true });
+      }
     }
 
     // ── 应用账号登录 (用户名+密码, 与 AppBase 主账号体系无关) ──

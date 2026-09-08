@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AppBase · 用户管理</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root { --ink:#1e293b; --ink2:#64748b; --line:#e8ecf4; --accent:#4f46e5; --soft:#eef0fe; --rose:#f43f5e; --rose-soft:#fde9ed; --green:#10b981; --green-soft:#e7f8f1; }
+body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; background:#f4f6fb; color:var(--ink); min-height:100vh; padding:28px 22px 70px; -webkit-font-smoothing:antialiased; }
+.shell { max-width:1080px; margin:0 auto; }
+.hero { background:linear-gradient(120deg,#312e81,#4f46e5 55%,#7c3aed); border-radius:22px; padding:26px 32px; color:#fff; box-shadow:0 10px 36px rgba(49,46,129,.35); display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.hero h1 { font-size:22px; }
+.hero p { font-size:12.5px; color:rgba(255,255,255,.75); flex:1; min-width:200px; }
+.hero button { border:none; background:rgba(255,255,255,.2); color:#fff; border-radius:10px; padding:7px 16px; font-size:12.5px; cursor:pointer; font-weight:600; font-family:inherit; }
+.hero button:hover { background:rgba(255,255,255,.32); }
+.card { background:#fff; border:1px solid var(--line); border-radius:16px; margin-top:18px; overflow:hidden; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th { text-align:left; padding:11px 14px; font-size:12px; color:var(--ink2); border-bottom:1px solid var(--line); background:#fafbfe; }
+td { padding:11px 14px; border-bottom:1px solid #f0f2f8; vertical-align:middle; }
+tr:last-child td { border-bottom:none; }
+.chip { display:inline-block; padding:2px 9px; border-radius:10px; font-size:11px; font-weight:600; }
+.chip.admin { background:var(--green-soft); color:var(--green); }
+.chip.user { background:#f1f4f9; color:var(--ink2); }
+td button { border:none; border-radius:8px; padding:5px 10px; font-size:11.5px; cursor:pointer; font-weight:600; font-family:inherit; margin-right:5px; }
+.b-admin { background:var(--green-soft); color:var(--green); }
+.b-demote { background:#fff3e6; color:#d97706; }
+.b-pwd { background:var(--soft); color:var(--accent); }
+.b-mem { background:var(--soft); color:var(--accent); }
+.b-del { background:var(--rose-soft); color:var(--rose); }
+.sub { font-size:11.5px; color:var(--ink2); }
+.membar { display:none; padding:12px 14px; background:#fafbfe; border-bottom:1px solid var(--line); }
+.membar.show { display:block; }
+.membar .mrow { display:inline-flex; align-items:center; gap:7px; background:#fff; border:1px solid var(--line); border-radius:9px; padding:5px 10px; font-size:12px; margin:3px 6px 3px 0; }
+.membar .mrow button { border:none; background:var(--rose-soft); color:var(--rose); border-radius:6px; padding:2px 7px; font-size:11px; cursor:pointer; font-family:inherit; }
+.empty { text-align:center; padding:40px; color:var(--ink2); }
+#msg { position:fixed; left:50%; bottom:26px; transform:translateX(-50%); background:var(--ink); color:#fff; font-size:12.5px; padding:9px 18px; border-radius:10px; opacity:0; transition:opacity .25s; pointer-events:none; z-index:99; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="hero">
+    <h1>👥 用户管理</h1>
+    <p>管理 AppBase 全部登录账号：管理员身份、密码重置、应用成员关系、删除账号</p>
+    <button onclick="location.href='/hall'">← 返回大厅</button>
+  </div>
+  <div class="card">
+    <table>
+      <thead><tr><th>邮箱</th><th>身份</th><th>注册时间</th><th>应用归属</th><th>成员关系</th><th>操作</th></tr></thead>
+      <tbody id="tbody"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+<div id="msg"></div>
+
+<script>
+var users = [];
+function toast(t) {
+  var el = document.getElementById('msg');
+  el.textContent = t; el.style.opacity = 1;
+  clearTimeout(el._t); el._t = setTimeout(function(){ el.style.opacity = 0; }, 2600);
+}
+function fetchJSON(url, opts, timeoutMs) {
+  var ctl = new AbortController();
+  var timer = setTimeout(function() { ctl.abort(); }, timeoutMs || 30000);
+  return fetch(url, Object.assign({}, opts, { signal: ctl.signal }))
+    .then(function(r) {
+      return r.json().catch(function() { return {}; }).then(function(d) {
+        if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+        return d;
+      });
+    })
+    .finally(function() { clearTimeout(timer); });
+}
+function load() {
+  fetchJSON('/app/admin/users').then(function(d) {
+    users = d.users || [];
+    render();
+  }).catch(function(e) {
+    document.getElementById('tbody').innerHTML =
+      '<tr><td colspan="6" class="empty">' + esc(e.message) + ' · <a href="/hall">回大厅重新登录</a></td></tr>';
+  });
+}
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function render() {
+  var tb = document.getElementById('tbody');
+  if (!users.length) { tb.innerHTML = '<tr><td colspan="6" class="empty">暂无用户</td></tr>'; return; }
+  tb.innerHTML = users.map(function(u) {
+    return '<tr id="row-' + u.id + '">'
+      + '<td><b>' + esc(u.email) + '</b></td>'
+      + '<td><span class="chip ' + (u.is_admin ? 'admin' : 'user') + '">' + (u.is_admin ? '管理员' : '普通用户') + '</span></td>'
+      + '<td class="sub">' + new Date(u.created_at).toLocaleString('zh-CN', {year:'2-digit',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) + '</td>'
+      + '<td>' + u.app_count + ' 个</td>'
+      + '<td><span class="sub">' + u.member_count + ' 个应用 <a href="javascript:void(0)" onclick="toggleMem(\'' + u.id + '\')">查看</a></span></td>'
+      + '<td>'
+      + (u.is_admin
+          ? '<button class="b-demote" onclick="setAdmin(\'' + u.id + '\', false)">取消管理员</button>'
+          : '<button class="b-admin" onclick="setAdmin(\'' + u.id + '\', true)">设为管理员</button>')
+      + '<button class="b-pwd" onclick="resetPwd(\'' + u.id + '\')">重置密码</button>'
+      + '<button class="b-mem" onclick="toggleMem(\'' + u.id + '\')">成员关系</button>'
+      + '<button class="b-del" onclick="delUser(\'' + u.id + '\')">删除</button>'
+      + '</td></tr>'
+      + '<tr class="memrow" id="mem-' + u.id + '" style="display:none"><td colspan="6" style="padding:0"><div class="membar" id="membar-' + u.id + '">加载中…</div></td></tr>';
+  }).join('');
+}
+function setAdmin(id, val) {
+  var u = users.find(function(x){ return x.id === id; });
+  if (!val && !confirm('确定取消「' + u.email + '」的管理员身份？')) return;
+  fetchJSON('/app/admin/users/' + id + '/admin', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ is_admin: val })
+  }).then(function() { toast(val ? '✓ 已设为管理员' : '✓ 已取消管理员'); load(); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function resetPwd(id) {
+  var u = users.find(function(x){ return x.id === id; });
+  var np = prompt('为「' + u.email + '」设置新密码（至少 6 位）：');
+  if (np === null) return;
+  fetchJSON('/app/admin/users/' + id + '/password', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ newPassword: np })
+  }).then(function() { toast('✓ 密码已重置'); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function toggleMem(id) {
+  var tr = document.getElementById('mem-' + id);
+  var show = tr.style.display === 'none';
+  tr.style.display = show ? '' : 'none';
+  if (show) loadMem(id);
+}
+function loadMem(id) {
+  var bar = document.getElementById('membar-' + id);
+  fetchJSON('/app/admin/users/' + id + '/memberships').then(function(d) {
+    var ms = d.memberships || [];
+    bar.innerHTML = ms.length
+      ? '被添加到的应用：' + ms.map(function(m) {
+          return '<span class="mrow">' + esc(m.app_id)
+            + '<button onclick="delMem(\'' + id + '\',\'' + esc(m.app_id) + '\')">移出</button></span>';
+        }).join('')
+      : '<span class="sub">没有被添加到任何应用（若为普通用户则看不到应用）</span>';
+  }).catch(function(e) { bar.textContent = '加载失败: ' + e.message; });
+}
+function delMem(id, appId) {
+  fetchJSON('/app/admin/users/' + id + '/member?app=' + encodeURIComponent(appId), { method: 'DELETE' })
+    .then(function() { toast('✓ 已移出'); loadMem(id); load(); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function delUser(id) {
+  var u = users.find(function(x){ return x.id === id; });
+  if (!confirm('确定删除账号「' + u.email + '」？其成员关系将被清除，此操作不可恢复。')) return;
+  if (!confirm('再次确认：删除 ' + u.email + ' ？')) return;
+  fetchJSON('/app/admin/users/' + id, { method: 'DELETE' })
+    .then(function() { toast('✓ 已删除'); load(); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+load();
+</script>
+</body>
+</html>

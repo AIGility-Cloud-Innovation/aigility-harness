@@ -152,6 +152,19 @@ async function main(): Promise<void> {
       res.end(WORKBENCH_HTML);
       return;
     }
+    // 用户管理页 (管理员专用; 非管理员跳回大厅)
+    if (req.method === "GET" && (req.url === "/admin/users" || req.url?.startsWith("/admin/users?"))) {
+      const backend = await import("./backend.js");
+      const uid = backend.bearerUser(req);
+      if (!uid || !(await backend.isAdminUser(uid))) {
+        res.writeHead(302, { Location: "/hall" });
+        res.end();
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(USER_ADMIN_HTML);
+      return;
+    }
     // 应用大厅页 (替代原对话厅首页; 对话 API /hall/chat 不受影响)
     if (req.method === "GET" && (req.url === "/hall" || req.url === "/hall/")) {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -198,6 +211,7 @@ async function main(): Promise<void> {
     roles: [
       { id: "@persona/codex-chat", name: `网页应用生成器 (${process.env.AGENT_DRIVER === "zcode" ? "ZCode" : "Codex"} 驱动)`, emoji: "🪶" },
       { id: "@persona/sales-chat", name: "AppBase 客服", emoji: "🎧" },
+      { id: "@persona/repair-chat", name: "应用报修客服", emoji: "🔧" },
       { id: "@persona/plugin-helper", name: "插件助手", emoji: "🧩" },
       { id: "@persona/coder", name: "编码助手", emoji: "👨💻" },
     ],
@@ -373,6 +387,8 @@ async function hallAppsHandler(req: any, res: any): Promise<void> {
 const APP_HALL_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "app-hall.html"), "utf-8");
 // 编码工作台页 (可改代码的对话应用专用)
 const WORKBENCH_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "workbench.html"), "utf-8");
+// 用户管理页 (管理员专用)
+const USER_ADMIN_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "user-admin.html"), "utf-8");
 
 // 首页 (跳转对话厅 + 产品简介)
 const INDEX_HTML = `<!DOCTYPE html>

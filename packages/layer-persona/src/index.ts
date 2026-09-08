@@ -126,6 +126,17 @@ export type {
   CodexChatResponse,
 } from "./codex-chat.js";
 
+// 应用报修客服角色形象 (工单受理)
+export {
+  repairChatService,
+  repairChatProvider,
+} from "./repair-chat.js";
+export type {
+  RepairChatRequest,
+  RepairChatResponse,
+} from "./repair-chat.js";
+import { repairChatService, repairChatProvider } from "./repair-chat.js";
+
 // ── 服务定义 ─────────────────────────────────────────────────────
 
 export interface TextInputRequest {
@@ -184,9 +195,9 @@ const textInputProvider: Provider<TextInputRequest, TextInputResponse> = {
 export const manifest: PluginManifest = {
   name: "@persona/character",
   layer: LayerId.Persona,
-  description: "角色人格层：感知（文本/语音）+ 角色形象（sales-chat/plugin-helper/coder/advisory-chat/harness-guide/timem-support/timem-project-assistant）",
+  description: "角色人格层：感知（文本/语音）+ 角色形象（sales-chat/plugin-helper/coder/advisory-chat/harness-guide/timem-support/timem-project-assistant/repair-chat）",
   version: "0.3.0",
-  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, coderService, codexChatService, advisoryChatService, harnessGuideService, timemSupportService, timemProjectAssistantService],
+  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, coderService, codexChatService, advisoryChatService, harnessGuideService, timemSupportService, timemProjectAssistantService, repairChatService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
 };
@@ -216,6 +227,7 @@ export const plugin: LayerPlugin = {
       harnessGuideProvider,
       timemSupportProvider,
       timemProjectAssistantProvider,
+      repairChatProvider,
     ];
   },
   getState(): PluginState {
