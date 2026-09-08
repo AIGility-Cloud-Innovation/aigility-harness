@@ -152,10 +152,10 @@ async function main(): Promise<void> {
       res.end(WORKBENCH_HTML);
       return;
     }
-    // 用户管理页 (管理员专用; 非管理员跳回大厅)
+    // 用户管理页 (管理员专用; 非管理员跳回大厅; 浏览器导航靠 httpOnly cookie 识别)
     if (req.method === "GET" && (req.url === "/admin/users" || req.url?.startsWith("/admin/users?"))) {
       const backend = await import("./backend.js");
-      const uid = backend.bearerUser(req);
+      const uid = backend.pageUserId(req);
       if (!uid || !(await backend.isAdminUser(uid))) {
         res.writeHead(302, { Location: "/hall" });
         res.end();

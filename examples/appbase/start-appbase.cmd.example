@@ -37,5 +37,10 @@ rem      都不设时, 首个注册的用户自动成为管理员; 也可 SQL �
 rem      UPDATE users SET is_admin=true WHERE email='...'
 rem set APPBASE_ADMIN_EMAILS=admin@example.com
 
+rem ---- 注册开关 (可选): 设为 false 后仅已有账号可登录 (默认允许注册) ----
+rem set APPBASE_ALLOW_REGISTER=false
+
+rem ---- 登录限流: 内建, 同 IP+邮箱 5 次失败锁 15 分钟, 无需配置 ----
+
 cd /d %~dp0
 pnpm start

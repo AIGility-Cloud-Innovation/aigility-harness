@@ -183,7 +183,9 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
 
 <script>
 var mgApp = null;
-var mgToken = localStorage.getItem('hall_token') || '';
+// hall_token 只存 sessionStorage (每标签页隔离): 同源打开的生成应用在新标签页里读不到, 防止 token 被恶意应用页窃取。
+// 页面导航门禁另由 httpOnly cookie 承担 (登录/注册时服务端 Set-Cookie)。
+var mgToken = sessionStorage.getItem('hall_token') || '';
 var userEmail = '';
 var isAdmin = false;
 var chatRoles = [];
@@ -219,7 +221,7 @@ function showLogin(msg) {
 }
 function forceRelogin(msg) {
   mgToken = ''; isAdmin = false;
-  localStorage.removeItem('hall_token');
+  sessionStorage.removeItem('hall_token');
   showLogin(msg);
 }
 function enterHall() {
@@ -241,13 +243,15 @@ function doLogin(register) {
     mgToken = d.token;
     userEmail = d.user.email;
     isAdmin = !!d.user.isAdmin;
-    localStorage.setItem('hall_token', d.token);
+    sessionStorage.setItem('hall_token', d.token);
     enterHall();
   }).catch(function(e) { msg.textContent = '✗ ' + e.message; });
 }
 function logout() {
   if (!confirm('退出登录？')) return;
-  localStorage.removeItem('hall_token');
+  // 服务端清 httpOnly cookie; 本页清 sessionStorage 后重载回登录门
+  fetch('/app/auth/logout', { method: 'POST' }).catch(function() {});
+  sessionStorage.removeItem('hall_token');
   location.reload();
 }
 document.getElementById('lgPassword').addEventListener('keydown', function(e) {

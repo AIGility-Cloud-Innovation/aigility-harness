@@ -80,7 +80,8 @@ function fetchJSON(url, opts, timeoutMs) {
     .finally(function() { clearTimeout(timer); });
 }
 function authH() {
-  var t = localStorage.getItem('hall_token') || '';
+  // hall_token 存 sessionStorage (与大厅同标签页导航过来, 可读到; 其他标签页/生成应用页读不到)
+  var t = sessionStorage.getItem('hall_token') || '';
   return t ? { Authorization: 'Bearer ' + t } : {};
 }
 function relaunchIfAuthErr(e) {

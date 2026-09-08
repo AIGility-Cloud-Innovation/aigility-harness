@@ -249,6 +249,54 @@ export function bearerUser(req: { headers: { authorization?: string | string[] }
   return token ? verifyToken(token) : null;
 }
 
+/**
+ * 页面路由专用的身份解析: Bearer 头 或 httpOnly cookie (hall_token)。
+ * 仅用于 HTML 页面门禁 (浏览器 location 导航带不了 Authorization 头)。
+ * API 一律仍走 bearerUser —— 纯 cookie 调 API 一律 401,
+ * 这样同源生成的应用页即使偷不到/发不出 token 也调不了接口。
+ */
+export function pageUserId(req: { headers: { authorization?: string | string[]; cookie?: string } }): string | null {
+  const viaHeader = bearerUser(req);
+  if (viaHeader) return viaHeader;
+  const m = /(?:^|;\s*)hall_token=([^;]+)/.exec(String(req.headers.cookie ?? ""));
+  return m ? verifyToken(decodeURIComponent(m[1])) : null;
+}
+
+/** 给登录/注册响应签发 httpOnly cookie (页面导航门禁用; API 不认 cookie) */
+export function setAuthCookie(res: ServerResponse, token: string): void {
+  res.setHeader("Set-Cookie",
+    `hall_token=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 24 * 3600}`);
+}
+
+/** ── 登录失败限流 (内存): 同 IP+邮箱 5 次失败锁 15 分钟 ── */
+const LOGIN_FAILS = new Map<string, { n: number; until: number }>();
+const LOGIN_MAX_FAILS = 5;
+const LOGIN_LOCK_MS = 15 * 60 * 1000;
+
+export function loginLockKey(req: { socket?: { remoteAddress?: string } }, email: string): string {
+  return `${req.socket?.remoteAddress ?? "unknown"}|${email.toLowerCase()}`;
+}
+export function isLoginLocked(key: string): number {
+  const rec = LOGIN_FAILS.get(key);
+  if (!rec) return 0;
+  if (rec.until > Date.now()) return Math.ceil((rec.until - Date.now()) / 60000);
+  if (rec.until !== 0 && rec.until <= Date.now()) LOGIN_FAILS.delete(key);
+  return 0;
+}
+export function recordLoginFail(key: string): number {
+  const rec = LOGIN_FAILS.get(key) ?? { n: 0, until: 0 };
+  rec.n += 1;
+  if (rec.n >= LOGIN_MAX_FAILS) {
+    rec.until = Date.now() + LOGIN_LOCK_MS;
+    rec.n = 0;
+  }
+  LOGIN_FAILS.set(key, rec);
+  return LOGIN_MAX_FAILS - rec.n;
+}
+export function clearLoginFails(key: string): void {
+  LOGIN_FAILS.delete(key);
+}
+
 /** 用户可见的大厅沙箱应用: 管理员=全部; 普通用户=被添加的应用 ∪ 自己名下注册的应用 */
 export async function visibleHallApps(allApps: string[], userId: string, isAdmin: boolean): Promise<string[]> {
   if (isAdmin) return allApps;
@@ -273,7 +321,11 @@ export async function appBackendHandler(
 
   try {
     // ── auth ──
+    // 注册开关: 设 APPBASE_ALLOW_REGISTER=false 后仅已有账号可登录
     if (method === "POST" && path === "/app/auth/register") {
+      if (process.env.APPBASE_ALLOW_REGISTER === "false") {
+        return json(res, 403, { error: "本站已关闭注册, 请联系管理员开通账号" });
+      }
       const body = await readBody(req);
       const email = String(body.email ?? "").trim().toLowerCase();
       const password = String(body.password ?? "");
@@ -296,6 +348,7 @@ export async function appBackendHandler(
         throw e;
       }
       const token = signToken(id);
+      setAuthCookie(res, token);
       return json(res, 201, { token, user: { id, email, isAdmin: makeAdmin } });
     }
 
@@ -303,16 +356,31 @@ export async function appBackendHandler(
       const body = await readBody(req);
       const email = String(body.email ?? "").trim().toLowerCase();
       const password = String(body.password ?? "");
+      // 限流: 同 IP+邮箱 5 次失败锁 15 分钟 (防暴力试密码)
+      const lockKey = loginLockKey(req, email);
+      const lockMin = isLoginLocked(lockKey);
+      if (lockMin > 0) {
+        return json(res, 429, { error: `失败次数过多, 账号已锁定, 约 ${lockMin} 分钟后再试` });
+      }
       const { rows } = await pool.query(
         "SELECT id, email, password_hash, is_admin FROM users WHERE email = $1",
         [email],
       );
       if (rows.length === 0 || !(await verifyPassword(password, rows[0].password_hash))) {
-        return json(res, 401, { error: "邮箱或密码错误" });
+        const left = recordLoginFail(lockKey);
+        return json(res, 401, { error: left > 0 ? `邮箱或密码错误 (还可尝试 ${left} 次)` : "邮箱或密码错误" });
       }
+      clearLoginFails(lockKey);
       const token = signToken(rows[0].id);
       const isAdmin = Boolean(rows[0].is_admin) || adminEmails().includes(email);
+      setAuthCookie(res, token);
       return json(res, 200, { token, user: { id: rows[0].id, email: rows[0].email, isAdmin } });
+    }
+
+    // 登出: 清除 httpOnly cookie (前端同时清 sessionStorage)
+    if (method === "POST" && path === "/app/auth/logout") {
+      res.setHeader("Set-Cookie", "hall_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+      return json(res, 200, { ok: true });
     }
 
     // 当前登录者信息 (前端启动时校验 token / 拿管理员身份)

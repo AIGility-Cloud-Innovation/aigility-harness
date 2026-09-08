@@ -55,6 +55,11 @@ td button { border:none; border-radius:8px; padding:5px 10px; font-size:11.5px; 
 
 <script>
 var users = [];
+// 与大厅同一标签页导航而来, sessionStorage 里带着 hall_token; 页面门禁另有 httpOnly cookie 兜底
+function ah() {
+  var t = sessionStorage.getItem('hall_token') || '';
+  return t ? { Authorization: 'Bearer ' + t } : {};
+}
 function toast(t) {
   var el = document.getElementById('msg');
   el.textContent = t; el.style.opacity = 1;
@@ -63,7 +68,9 @@ function toast(t) {
 function fetchJSON(url, opts, timeoutMs) {
   var ctl = new AbortController();
   var timer = setTimeout(function() { ctl.abort(); }, timeoutMs || 30000);
-  return fetch(url, Object.assign({}, opts, { signal: ctl.signal }))
+  opts = Object.assign({}, opts);
+  opts.headers = Object.assign({}, ah(), opts.headers || {});
+  return fetch(url, Object.assign(opts, { signal: ctl.signal }))
     .then(function(r) {
       return r.json().catch(function() { return {}; }).then(function(d) {
         if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
