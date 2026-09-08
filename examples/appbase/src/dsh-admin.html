@@ -43,6 +43,10 @@ textarea.minput:focus, input.minput:focus { border-color:var(--accent); }
 .regbar .row2 { display:flex; gap:8px; }
 .regbar .row2 > * { flex:1; }
 #msg { position:fixed; left:50%; bottom:26px; transform:translateX(-50%); background:var(--ink); color:#fff; font-size:12.5px; padding:9px 18px; border-radius:10px; opacity:0; transition:opacity .25s; pointer-events:none; z-index:99; max-width:80vw; }
+.srcs { font-size:12.5px; line-height:2.1; }
+.srcs a { color:var(--accent); font-weight:600; text-decoration:none; }
+.srcs a:hover { text-decoration:underline; }
+.srcs .w { color:var(--ink2); }
 </style>
 </head>
 <body>
@@ -63,6 +67,24 @@ textarea.minput:focus, input.minput:focus { border-color:var(--accent); }
   </div>
 
   <div id="pluginList"></div>
+
+  <div class="card">
+    <div class="chead"><b class="nm">🔎 插件从哪里找</b></div>
+    <div class="srcs">
+      🌍 <a href="https://github.com/deepseek-ai/deepseek-harness" target="_blank" rel="noopener">DeepSeek Harness 官方仓库 (GitHub)</a>
+      <span class="w">— "everything is a plugin" 主仓库，插件生态与说明在这里</span><br>
+      📚 <a href="https://github.com/deepseek-ai/deepseek-harness/tree/master/docs/cordis-tutorial" target="_blank" rel="noopener">Cordis 插件开发教程</a>
+      <span class="w">— 每章可运行，最终写出一个自己的插件（写好后用下方「注册插件」接入）</span><br>
+      📦 <a href="https://www.npmjs.com/search?q=scope%3Adeepseek-ai" target="_blank" rel="noopener">npm · @deepseek-ai scope</a>
+      <span class="w">/</span>
+      <a href="https://www.npmjs.com/search?q=keywords%3Acordis" target="_blank" rel="noopener">keywords: cordis</a>
+      <span class="w">— 官方与社区发布的插件包；<b>先 pnpm add 装到本机</b>，再在这里注册加载</span><br>
+      🏢 <a href="https://git.aigility.cloud/explore/repos" target="_blank" rel="noopener">公司 Gitea (git.aigility.cloud)</a>
+      <span class="w">— 内部插件仓库（已用的 TiMEM-AI/dsh-plugin-timem 就在这里），需登录，拉取后 pnpm install</span><br>
+      🏗 <a href="https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/architecture.md" target="_blank" rel="noopener">架构文档</a>
+      <span class="w">— 插件贡献的三类产物：服务 / 类型化事件 / 可回滚效果</span>
+    </div>
+  </div>
 
   <div class="card">
     <div class="chead">
