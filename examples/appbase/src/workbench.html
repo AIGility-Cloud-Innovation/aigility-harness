@@ -30,17 +30,18 @@ main { flex:1; display:flex; flex-direction:column; max-width:980px; width:100%;
 .inputbar textarea:focus { border-color:var(--accent); box-shadow:0 0 0 3.5px rgba(99,102,241,.12); }
 .send { border:none; background:var(--accent); color:#fff; border-radius:12px; padding:0 24px; font-weight:700; cursor:pointer; font-family:inherit; font-size:13.5px; }
 .send:disabled { opacity:.55; cursor:wait; }
+.progress-bar { align-self:flex-start; font-size:11.5px; color:var(--ink2); background:var(--soft); border-radius:8px; padding:3px 10px; }
+.final-prompt { align-self:flex-start; width:92%; background:#fff; border:1.5px solid var(--accent); border-radius:12px; padding:10px 12px; }
+.final-prompt pre { white-space:pre-wrap; word-break:break-word; font-size:12.5px; font-family:Consolas,monospace; max-height:260px; overflow-y:auto; margin:0 0 8px; }
+.final-prompt button { border:none; background:var(--accent); color:#fff; border-radius:8px; padding:6px 12px; font-size:12px; font-weight:600; cursor:pointer; font-family:inherit; }
+.final-prompt .sub { font-size:11px; color:var(--ink2); margin-top:6px; }
 </style>
 </head>
 <body>
 <header>
   <a class="back" href="/hall">← 大厅</a>
   <h1>🛠 编码工作台</h1>
-  <label>角色</label>
-  <select id="roleSel">
-    <option value="@persona/codex-chat">🪶 网页应用生成器</option>
-    <option value="@persona/coder">👨‍💻 编码助手</option>
-  </select>
+  <b id="roleName" style="font-size:13px"></b>
   <label>目标应用</label>
   <select id="appSel" onchange="onAppChange()"></select>
   <label id="toolLabel">编码工具</label>
@@ -59,12 +60,15 @@ main { flex:1; display:flex; flex-direction:column; max-width:980px; width:100%;
 
 <script>
 var qs = new URLSearchParams(location.search);
-var roleSel = document.getElementById('roleSel');
+// 角色由入口决定 (大厅卡片带 ?role=), 页面内不再切换: 进来是什么就是什么
+var ROLE = qs.get('role') === '@persona/coder' ? '@persona/coder' : '@persona/codex-chat';
+var ROLE_NAMES = { '@persona/codex-chat': '🪶 网页应用生成器', '@persona/coder': '👨‍💻 编码教练' };
 var appSel = document.getElementById('appSel');
 var toolSel = document.getElementById('toolSel');
 var chatHistory = [];
 var NEW_APP = "__new__";
 var inFlight = false;
+var sessionState = null; // 编码教练分步引导工作流状态 (由前端携带回传, 服务无状态)
 
 // ── 通用: 带超时与错误透传的 fetchJSON; 登录态从大厅带过来 ──
 function fetchJSON(url, opts, timeoutMs) {
@@ -89,12 +93,17 @@ function relaunchIfAuthErr(e) {
   return false;
 }
 
-function currentRoleName() {
-  return roleSel.options[roleSel.selectedIndex] ? roleSel.options[roleSel.selectedIndex].text : '';
-}
-function isCoach() { return roleSel.value === '@persona/coder'; }
+function isCoach() { return ROLE === '@persona/coder'; }
 function histKey() {
-  return 'wb_chat_' + roleSel.value + '_' + (appSel.value||'-');
+  return 'wb_chat_' + ROLE + '_' + (appSel.value||'-');
+}
+function stateKey() { return histKey() + '_state'; }
+function loadSessionState() {
+  try { sessionState = JSON.parse(localStorage.getItem(stateKey()) || 'null') || { phase: 1 }; }
+  catch (e) { sessionState = { phase: 1 }; }
+}
+function saveSessionState() {
+  try { localStorage.setItem(stateKey(), JSON.stringify(sessionState)); } catch (e) {}
 }
 function onAppChange() {
   if (appSel.value === NEW_APP) createApp();
@@ -122,16 +131,11 @@ function renderMode() {
   toolSel.parentElement && (document.getElementById('toolLabel').style.display = coach ? 'none' : '');
   toolSel.style.display = coach ? 'none' : '';
   document.getElementById('tip').textContent = coach
-    ? '💡 教学模式：编码教练只讲解架构与用法，不会修改任何代码。想让 AI 真实改代码请切到「网页应用生成器」。'
+    ? '💡 引导模式：教练分 5 步引导你设计一个案例应用（只设计，不实际生成/保存），最后产出完整提示词，交给「网页应用生成器」落地。'
     : '💡 编辑模式：AI 会真实修改「目标应用」的代码文件（改动前自动备份）。可选择「新建应用」从零开始。';
 }
 
 // ── 选择器 ──
-function initRole() {
-  var wanted = qs.get('role') || '@persona/codex-chat';
-  roleSel.value = wanted;
-  if (roleSel.selectedIndex < 0) roleSel.selectedIndex = 0;
-}
 function loadApps(keep) {
   // keep=true: 刷新列表时保持当前选中, 不回退到 "-- 选择应用 --"
   var prev = keep ? appSel.value : '';
@@ -163,10 +167,11 @@ function loadHistory() {
   box.innerHTML = '';
   chatHistory.forEach(function(m){ addMsg(m.role, m.content, true); });
   if (!chatHistory.length) {
-    addMsg('bot', currentRoleName() + '。' + (isCoach()
-      ? '我可以讲解系统架构、插件体系和应用的实现思路。'
-      : '选择目标应用后，描述要做的改动。'), true); // 欢迎语不写入历史/上下文
+    addMsg('bot', isCoach()
+      ? '你好，我是编码教练 👨‍💻\n我会分 5 步引导你设计一个案例应用：需求理解 → 功能清单 → 页面与数据 → 交互与边界 → 确认出完整提示词。全程只做设计引导，不会真正生成或保存应用。\n先说说你想做什么？给谁用、解决什么问题？'
+      : '选择目标应用后，描述要做的改动。', true); // 欢迎语不写入历史/上下文
   }
+  loadSessionState();
   box.scrollTop = 1e9;
 }
 function saveHistory() {
@@ -177,6 +182,7 @@ function clearHistory() {
   if (!confirm('清空当前组合的聊天记录？')) return;
   chatHistory = [];
   localStorage.removeItem(histKey());
+  localStorage.removeItem(stateKey()); // 引导进度一并重置
   loadHistory();
 }
 function addMsg(role, text, skipSave) {
@@ -196,6 +202,38 @@ function addMsg(role, text, skipSave) {
 function openTarget() {
   if (!appSel.value) { alert('请先选择目标应用'); return; }
   window.open('/apps/' + encodeURIComponent(appSel.value), '_blank');
+}
+
+// ── 教练进度条 / 完整提示词卡片 (均不入聊天历史) ──
+function appendBar(text) {
+  var box = document.getElementById('msgs');
+  var el = document.createElement('div');
+  el.className = 'progress-bar';
+  el.textContent = text;
+  box.appendChild(el);
+  box.scrollTop = 1e9;
+}
+function appendCopyPrompt(prompt) {
+  var box = document.getElementById('msgs');
+  var wrap = document.createElement('div');
+  wrap.className = 'final-prompt';
+  var pre = document.createElement('pre');
+  pre.textContent = prompt;
+  var btn = document.createElement('button');
+  btn.textContent = '📋 复制完整提示词';
+  btn.onclick = function() {
+    var done = function() { btn.textContent = '✓ 已复制，回大厅发给「网页应用生成器」即可真正生成'; btn.disabled = true; };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(prompt).then(done, done);
+    else done();
+  };
+  var hint = document.createElement('div');
+  hint.className = 'sub';
+  hint.textContent = '教练只负责设计引导，不会真正生成/保存应用；落地请把提示词交给「网页应用生成器」。';
+  wrap.appendChild(pre);
+  wrap.appendChild(btn);
+  wrap.appendChild(hint);
+  box.appendChild(wrap);
+  box.scrollTop = 1e9;
 }
 
 // ── 发送 ──
@@ -218,20 +256,28 @@ function sendChat() {
     : '🛠 工作中…（' + (toolSel.options[toolSel.selectedIndex]||{text:''}).text + '，可能需要 1-3 分钟）', true); // 状态气泡不写入历史
   var message = coach ? text : ('目标应用文件: ' + appSel.value + '\n\n' + text);
   fetchJSON('/hall/chat', { method:'POST', headers: Object.assign({ 'Content-Type':'application/json' }, authH()),
-    body: JSON.stringify({
-      role: roleSel.value,
+    body: JSON.stringify(Object.assign({
+      role: ROLE,
       message: message,
       history: hp,
-      session_id: 'wb-' + roleSel.value + '-' + appSel.value + '-' + toolSel.value,
-      driver: toolSel.value,
-      app: appSel.value
-    }) },
-    11 * 60 * 1000) // 服务端编码 Agent 上限 10 分钟, 前端 11 分钟兜底 abort
+      session_id: 'wb-' + ROLE + '-' + appSel.value + '-' + toolSel.value
+    }, coach
+      ? { session_state: sessionState || { phase: 1 } } // 教练: 携带引导工作流状态
+      : { driver: toolSel.value, app: appSel.value })) },
+    coach ? 3 * 60 * 1000 : 11 * 60 * 1000) // 生成器对齐服务端编码 Agent 上限 10 分钟; 教练纯 LLM 3 分钟
     .then(function(d) {
       statusEl.remove();
       var reply = d.response || '(无回复)';
-      if (d.degraded) reply += '\n\n（⚠ 降级回复：编码工具不可用，以上内容未经真实执行，请勿视为已完成）';
+      if (d.degraded) reply += '\n\n（⚠ 降级回复：以上为占位内容，请稍后重试）';
       addMsg('bot', reply);
+      if (coach && d.session_state) { sessionState = d.session_state; saveSessionState(); }
+      if (coach && !d.done && d.progress && d.phase_title) {
+        appendBar('📍 已完成 ' + d.progress + ' · 当前第 ' + d.phase + ' 阶段「' + d.phase_title + '」');
+      }
+      if (coach && d.done && d.final_prompt) {
+        appendBar('✅ 设计完成！完整提示词已生成');
+        appendCopyPrompt(d.final_prompt);
+      }
       loadApps(true); // 刷新列表但保持当前选中
     })
     .catch(function(e) {
@@ -255,12 +301,9 @@ document.getElementById('chatInput').addEventListener('keydown', function(e){
     loadHistory();
   });
 });
-roleSel.addEventListener('change', function() {
-  renderMode();
-  loadHistory();
-});
 
-initRole();
+document.getElementById('roleName').textContent = ROLE_NAMES[ROLE] || ROLE;
+if (isCoach()) { appSel.style.display = 'none'; document.querySelector('header label').style.display = 'none'; }
 loadApps();
 loadTools();
 renderMode();

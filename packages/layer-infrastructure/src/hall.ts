@@ -188,7 +188,7 @@ async function handleChat(
   const role = roleById.get(roleId);
   if (!role) { send(404, { error: `未知角色: ${roleId}` }); return; }
 
-  // 调对应角色能力 (persona 层), 带人设覆盖; 透传前端会话记忆 / 驱动 / 目标应用
+  // 调对应角色能力 (persona 层), 带人设覆盖; 透传前端会话记忆 / 驱动 / 目标应用 / 工作流状态
   const payload = {
     user_input: message,
     session_id: typeof body.session_id === "string" && body.session_id ? body.session_id : undefined,
@@ -196,6 +196,7 @@ async function handleChat(
     ...(typeof body.driver === "string" && body.driver ? { driver: body.driver } : {}),
     ...(typeof body.mode === "string" && body.mode ? { mode: body.mode } : {}),
     ...(typeof body.app === "string" && body.app ? { cwd: body.app } : {}),
+    ...(body.session_state !== undefined && body.session_state !== null ? { session_state: body.session_state } : {}),
     ...(role.system ? { system: role.system } : {}),
   };
   try {
@@ -204,11 +205,23 @@ async function handleChat(
       send(500, { error: `角色 ${role.name} 调用失败: ${result.error}` });
       return;
     }
-    const value = result.value as { response?: string; agent_name?: string; degraded?: boolean };
+    const value = result.value as {
+      response?: string; agent_name?: string; degraded?: boolean;
+      phase?: number; phase_count?: number; phase_title?: string; progress?: string;
+      done?: boolean; final_prompt?: string; session_state?: unknown;
+    };
     send(200, {
       response: value?.response ?? "（无回复）",
       agent_name: value?.agent_name ?? role.name,
       role: roleId,
+      // 工作流类角色 (如编码教练分步引导) 透出阶段元数据, 供前端展示进度/复制提示词
+      ...(value?.phase !== undefined ? { phase: value.phase } : {}),
+      ...(value?.phase_count !== undefined ? { phase_count: value.phase_count } : {}),
+      ...(value?.phase_title !== undefined ? { phase_title: value.phase_title } : {}),
+      ...(value?.progress !== undefined ? { progress: value.progress } : {}),
+      ...(value?.done !== undefined ? { done: value.done } : {}),
+      ...(value?.final_prompt !== undefined ? { final_prompt: value.final_prompt } : {}),
+      ...(value?.session_state !== undefined ? { session_state: value.session_state } : {}),
       ...(value?.degraded ? { degraded: true } : {}),
     });
   } catch (e: any) {

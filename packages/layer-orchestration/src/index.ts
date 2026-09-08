@@ -87,6 +87,18 @@ export type {
   PluginInstallResponse,
 } from "./plugin-install.js";
 
+import {
+  guidedDesignService,
+  guidedDesignProvider,
+} from "./guided-design.js";
+export { guidedDesignService, guidedDesignProvider };
+export type {
+  GuidedDesignRequest,
+  GuidedDesignResponse,
+  GuidedDesignSessionState,
+  DesignPhase,
+} from "./guided-design.js";
+
 // ── 服务定义 ─────────────────────────────────────────────────────
 
 export interface TaskPlanningRequest {
@@ -289,7 +301,7 @@ export const manifest: PluginManifest = {
   layer: LayerId.Orchestration,
   description: "编排规划层：任务规划占位 + 工作流引擎占位 + 插件安装工作流 + Codex 编码代理，消费认知层 LLM",
   version: "0.2.0",
-  provides: [taskPlanningService, workflowEngineService, pluginInstallService, codexAgentService, zcodeAgentService, claudeAgentService],
+  provides: [taskPlanningService, workflowEngineService, pluginInstallService, codexAgentService, zcodeAgentService, claudeAgentService, guidedDesignService],
   consumes: [llmInferenceRef],
   preferredCarrier: CarrierKind.Thread,
   dependsOn: ["@cognitive/llm-inference"],
@@ -308,7 +320,7 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [taskPlanningProvider, workflowEngineProvider, pluginInstallProvider, codexAgentProvider, zcodeAgentProvider, claudeAgentProvider];
+    return [taskPlanningProvider, workflowEngineProvider, pluginInstallProvider, codexAgentProvider, zcodeAgentProvider, claudeAgentProvider, guidedDesignProvider];
   },
   getState(): PluginState {
     return pluginState;
