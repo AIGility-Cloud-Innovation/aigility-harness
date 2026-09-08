@@ -64,6 +64,29 @@ var appSel = document.getElementById('appSel');
 var toolSel = document.getElementById('toolSel');
 var chatHistory = [];
 var NEW_APP = "__new__";
+var inFlight = false;
+
+// ── 通用: 带超时与错误透传的 fetchJSON; 登录态从大厅带过来 ──
+function fetchJSON(url, opts, timeoutMs) {
+  var ctl = new AbortController();
+  var timer = setTimeout(function() { ctl.abort(); }, timeoutMs || 30000);
+  return fetch(url, Object.assign({}, opts, { signal: ctl.signal }))
+    .then(function(r) {
+      return r.json().catch(function() { return {}; }).then(function(d) {
+        if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+        return d;
+      });
+    })
+    .finally(function() { clearTimeout(timer); });
+}
+function authH() {
+  var t = localStorage.getItem('hall_token') || '';
+  return t ? { Authorization: 'Bearer ' + t } : {};
+}
+function relaunchIfAuthErr(e) {
+  if (e && /未授权|401/.test(e.message)) { location.href = '/hall'; return true; }
+  return false;
+}
 
 function currentRoleName() {
   return roleSel.options[roleSel.selectedIndex] ? roleSel.options[roleSel.selectedIndex].text : '';
@@ -80,14 +103,15 @@ function createApp() {
   var name = prompt('新应用名称（中文或英文，不用带 .html）:');
   if (!name) { appSel.value = appSel.options.length > 1 ? appSel.options[1].value : ''; loadHistory(); return; }
   var file = name + '.html';
-  fetch('/app/hall/apps', { method:'POST', headers:{'Content-Type':'application/json'},
+  fetchJSON('/app/hall/apps', { method:'POST',
+    headers: Object.assign({ 'Content-Type':'application/json' }, authH()),
     body: JSON.stringify({ name: file, content: '<!DOCTYPE html>\n<html lang="zh-CN"\n><head><meta charset="UTF-8"\n><title>' + name + '</title></head><body><h1>' + name + '</h1><p>placeholder</p></body></html>' }) })
-    .then(function(r){ return r.json(); }).then(function(d) {
-      if (d.error) { alert('创建失败: ' + d.error); loadApps(); return; }
+    .then(function(d) {
       localStorage.setItem('wb_app', file);
-      loadApps();
+      loadApps(true);
       alert('应用「' + name + '」已创建，现在可以直接向生成器描述需求。');
-    });
+    })
+    .catch(function(e) { if (!relaunchIfAuthErr(e)) alert('创建失败: ' + e.message); loadApps(); });
 }
 
 // ── 模式 ──
@@ -107,24 +131,26 @@ function initRole() {
   roleSel.value = wanted;
   if (roleSel.selectedIndex < 0) roleSel.selectedIndex = 0;
 }
-function loadApps() {
-  fetch('/app/hall/apps').then(function(r){ return r.json(); }).then(function(d) {
-    var wanted = qs.get('app') || localStorage.getItem('wb_app');
+function loadApps(keep) {
+  // keep=true: 刷新列表时保持当前选中, 不回退到 "-- 选择应用 --"
+  var prev = keep ? appSel.value : '';
+  fetchJSON('/app/hall/apps', { headers: authH() }).then(function(d) {
+    var wanted = keep ? prev : (qs.get('app') || localStorage.getItem('wb_app'));
     appSel.innerHTML = '<option value="">-- 选择应用 --</option><option value="__new__">➕ 新建应用</option>' + (d.apps||[]).map(function(a){
       return '<option value="'+a.name+'">'+a.name.replace('.html','')+'</option>';
     }).join('');
-    if (wanted && (d.apps||[]).some(function(a){ return a.name === wanted; })) appSel.value = wanted;
-  });
+    if (wanted && wanted !== NEW_APP && (d.apps||[]).some(function(a){ return a.name === wanted; })) appSel.value = wanted;
+  }).catch(function(e){ relaunchIfAuthErr(e); });
 }
 function loadTools() {
-  fetch('/app/hall/tools').then(function(r){ return r.json(); }).then(function(d) {
+  fetchJSON('/app/hall/tools', { headers: authH() }).then(function(d) {
     var avail = (d.tools||[]).filter(function(t){ return t.available; });
     var wanted = qs.get('tool') || localStorage.getItem('wb_tool');
     toolSel.innerHTML = avail.map(function(t){
       return '<option value="'+t.id+'">'+t.name+(t.version?' · '+t.version:'')+'</option>';
     }).join('') || '<option value="">(无可用工具)</option>';
     if (wanted && avail.some(function(t){ return t.id === wanted; })) toolSel.value = wanted;
-  });
+  }).catch(function(e){ relaunchIfAuthErr(e); });
 }
 
 // ── 聊天记录持久化 (按 角色+模式+应用+工具) ──
@@ -138,7 +164,7 @@ function loadHistory() {
   if (!chatHistory.length) {
     addMsg('bot', currentRoleName() + '。' + (isCoach()
       ? '我可以讲解系统架构、插件体系和应用的实现思路。'
-      : '选择目标应用后，描述要做的改动。'));
+      : '选择目标应用后，描述要做的改动。'), true); // 欢迎语不写入历史/上下文
   }
   box.scrollTop = 1e9;
 }
@@ -146,6 +172,7 @@ function saveHistory() {
   localStorage.setItem(histKey(), JSON.stringify(chatHistory.slice(-60)));
 }
 function clearHistory() {
+  if (inFlight) { alert('当前有请求进行中，等回复完成后再清空'); return; }
   if (!confirm('清空当前组合的聊天记录？')) return;
   chatHistory = [];
   localStorage.removeItem(histKey());
@@ -153,15 +180,17 @@ function clearHistory() {
 }
 function addMsg(role, text, skipSave) {
   var el = document.createElement('div');
-  el.className = 'msg ' + role;
+  el.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
   el.textContent = text;
   var box = document.getElementById('msgs');
   box.appendChild(el);
   box.scrollTop = 1e9;
+  // 存储用 assistant (LLM 语境); 状态气泡/欢迎语/错误提示 skipSave 不入历史
   if (!skipSave && (role === 'user' || role === 'bot')) {
     chatHistory.push({ role: role === 'user' ? 'user' : 'assistant', content: text });
     saveHistory();
   }
+  return el;
 }
 function openTarget() {
   if (!appSel.value) { alert('请先选择目标应用'); return; }
@@ -170,21 +199,24 @@ function openTarget() {
 
 // ── 发送 ──
 function sendChat() {
+  if (inFlight) return; // 按钮禁用拦不住回车, 入口统一拦并发
   var input = document.getElementById('chatInput');
   var text = input.value.trim();
   if (!text) return;
   if (!isCoach() && !appSel.value) { alert('请先选择目标应用（或新建一个）'); return; }
   if (!isCoach() && !toolSel.value) { alert('当前电脑没有可用的编码工具'); return; }
-  addMsg('user', text);
-  input.value = '';
+  inFlight = true;
   var btn = document.getElementById('sendBtn');
   btn.disabled = true;
-  var hp = chatHistory.slice(-10);
-  addMsg('bot', wbMode === 'edit'
-    ? '工作中…（' + (toolSel.options[toolSel.selectedIndex]||{text:''}).text + '，可能需要 1-3 分钟）'
-    : '思考中…');
-  var message = wbMode === 'edit' ? ('目标应用文件: ' + appSel.value + '\n\n' + text) : text;
-  fetch('/hall/chat', { method:'POST', headers:{'Content-Type':'application/json'},
+  addMsg('user', text);
+  input.value = '';
+  var hp = chatHistory.slice(-10); // addMsg 已入历史, 直接截取
+  var coach = isCoach();
+  var statusEl = addMsg('bot', coach
+    ? '⏳ 思考中…'
+    : '🛠 工作中…（' + (toolSel.options[toolSel.selectedIndex]||{text:''}).text + '，可能需要 1-3 分钟）', true); // 状态气泡不写入历史
+  var message = coach ? text : ('目标应用文件: ' + appSel.value + '\n\n' + text);
+  fetchJSON('/hall/chat', { method:'POST', headers: Object.assign({ 'Content-Type':'application/json' }, authH()),
     body: JSON.stringify({
       role: roleSel.value,
       message: message,
@@ -192,21 +224,27 @@ function sendChat() {
       session_id: 'wb-' + roleSel.value + '-' + appSel.value + '-' + toolSel.value,
       driver: toolSel.value,
       app: appSel.value
-    }) })
-    .then(function(r){ return r.json(); }).then(function(d) {
-      var box = document.getElementById('msgs');
-      box.lastChild.remove();
-      addMsg('bot', d.response || '(无回复)');
-      loadApps();
+    }) },
+    11 * 60 * 1000) // 服务端编码 Agent 上限 10 分钟, 前端 11 分钟兜底 abort
+    .then(function(d) {
+      statusEl.remove();
+      var reply = d.response || '(无回复)';
+      if (d.degraded) reply += '\n\n（⚠ 降级回复：编码工具不可用，以上内容未经真实执行，请勿视为已完成）';
+      addMsg('bot', reply);
+      loadApps(true); // 刷新列表但保持当前选中
     })
     .catch(function(e) {
-      var box = document.getElementById('msgs');
-      box.lastChild.remove();
-      addMsg('bot', '请求失败: ' + e.message);
+      statusEl.remove();
+      if (relaunchIfAuthErr(e)) return;
+      addMsg('bot', '请求失败: ' + (e.name === 'AbortError'
+        ? '等待超时（11 分钟）。可能是编码工具卡死，请检查服务端后重试'
+        : e.message), true); // 错误提示如实展示, 但不写入历史
     })
-    .finally(function(){ btn.disabled = false; input.focus(); });
+    .finally(function(){ inFlight = false; btn.disabled = false; input.focus(); });
 }
 document.getElementById('chatInput').addEventListener('keydown', function(e){
+  // 中文输入法选词的回车 (isComposing/keyCode 229) 不当作发送
+  if (e.isComposing || e.keyCode === 229) return;
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
 });
 [appSel, toolSel].forEach(function(sel) {

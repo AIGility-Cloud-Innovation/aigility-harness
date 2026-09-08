@@ -13,6 +13,10 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
 .hero::after { content:''; position:absolute; right:-70px; top:-110px; width:340px; height:340px; border-radius:50%; background:radial-gradient(circle,rgba(255,255,255,.14),transparent 65%); pointer-events:none; }
 .hero h1 { font-size:24px; letter-spacing:.5px; }
 .hero p { margin-top:6px; font-size:13px; color:rgba(255,255,255,.75); }
+.hero .accbar { position:relative; z-index:1; margin-top:14px; display:flex; align-items:center; gap:10px; font-size:12.5px; color:rgba(255,255,255,.9); flex-wrap:wrap; }
+.hero .accbar .who { background:rgba(255,255,255,.14); padding:5px 12px; border-radius:10px; }
+.hero .accbar button { border:none; background:rgba(255,255,255,.2); color:#fff; border-radius:10px; padding:5px 14px; font-size:12px; cursor:pointer; font-weight:600; font-family:inherit; }
+.hero .accbar button:hover { background:rgba(255,255,255,.32); }
 .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:16px; margin-top:22px; }
 .app-card { background:#fff; border:1px solid var(--line); border-radius:16px; padding:22px 20px; cursor:pointer; transition:transform .18s, box-shadow .18s, border-color .18s; }
 .app-card:hover { transform:translateY(-4px); border-color:var(--accent); box-shadow:0 12px 30px rgba(99,102,241,.15); }
@@ -28,7 +32,7 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
 .sec-head .st { font-size:14px; font-weight:700; }
 .sec-head .ss { font-size:12px; color:var(--ink2); margin-top:2px; }
 
-.empty { text-align:center; padding:50px; color:var(--ink2); background:#fff; border-radius:16px; border:1px dashed var(--line); }
+.empty { text-align:center; padding:50px; color:var(--ink2); background:#fff; border-radius:16px; border:1px dashed var(--line); grid-column:1/-1; }
 .drawer { position:fixed; inset:0; background:rgba(15,23,42,.45); display:none; justify-content:flex-end; z-index:50; }
 .drawer.show { display:flex; }
 .panel { width:460px; max-width:96vw; background:#fff; height:100%; display:flex; flex-direction:column; box-shadow:-8px 0 40px rgba(0,0,0,.2); }
@@ -50,7 +54,6 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
 .keyval { font-family:Consolas,monospace; font-size:11.5px; background:#f1f4f9; padding:2px 6px; border-radius:5px; cursor:pointer; }
 .okchip { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; background:var(--green-soft); color:var(--green); }
 .offchip { background:#f1f4f9; color:var(--ink2); }
-.loginbox { border:1.5px solid var(--line); border-radius:12px; padding:14px; margin-bottom:16px; }
 .chatpanel .msgs { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:10px; background:#fafbfe; }
 .msg { max-width:85%; padding:9px 13px; border-radius:12px; font-size:13.5px; line-height:1.6; white-space:pre-wrap; word-break:break-word; }
 .msg.user { align-self:flex-end; background:var(--accent); color:#fff; }
@@ -59,13 +62,42 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
 .inputbar textarea { flex:1; border:1.5px solid var(--line); border-radius:10px; padding:9px 11px; font-family:inherit; font-size:13.5px; resize:none; height:52px; outline:none; }
 .inputbar textarea:focus { border-color:var(--accent); }
 .send { border:none; background:var(--accent); color:#fff; border-radius:10px; padding:0 18px; font-weight:600; cursor:pointer; font-family:inherit; }
+.send:disabled { opacity:.55; cursor:wait; }
+
+/* ── 登录门 (先登录再进大厅) ── */
+.login-view { position:fixed; inset:0; background:linear-gradient(135deg,#1e1b4b,#4f46e5 60%,#7c3aed); display:flex; align-items:center; justify-content:center; z-index:100; padding:20px; }
+.login-card { background:#fff; border-radius:20px; padding:34px 30px; width:380px; max-width:94vw; box-shadow:0 24px 70px rgba(0,0,0,.4); }
+.login-card h2 { font-size:20px; }
+.login-card .lsub { font-size:12.5px; color:var(--ink2); margin:6px 0 18px; }
+.login-btns { display:flex; gap:10px; margin-top:4px; }
+.login-msg { font-size:12.5px; color:var(--rose); margin-top:12px; min-height:16px; }
 </style>
 </head>
 <body>
-<div class="shell">
+
+<!-- 登录门 -->
+<div class="login-view" id="loginView" style="display:none">
+  <div class="login-card">
+    <h2>🚀 AppBase</h2>
+    <div class="lsub">请先登录（或注册）账号，再进入应用大厅</div>
+    <input class="minput" id="lgEmail" placeholder="邮箱" autocomplete="username">
+    <input class="minput" id="lgPassword" type="password" placeholder="密码（注册至少 6 位）" autocomplete="current-password">
+    <div class="login-btns">
+      <button class="mbtn" style="flex:1" onclick="doLogin(false)">登录</button>
+      <button class="mbtn g" style="flex:1" onclick="doLogin(true)">注册并登录</button>
+    </div>
+    <div class="login-msg" id="lgMsg"></div>
+  </div>
+</div>
+
+<div class="shell" id="shellWrap" style="display:none">
   <div class="hero">
     <h1>🚀 AppBase · 应用大厅</h1>
     <p>AI 生成的网页应用都住在这里 —— 打开即用，账号与 LLM 配置统一管理</p>
+    <div class="accbar">
+      <span class="who" id="whoami"></span>
+      <button onclick="logout()">退出登录</button>
+    </div>
   </div>
   <div class="grid" id="grid"></div>
 </div>
@@ -75,48 +107,47 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
   <div class="panel">
     <div class="phead"><b>⚙ 应用管理 — <span id="mgAppName"></span></b><button class="btn-x" onclick="closeMg()">✕</button></div>
     <div class="pbody">
-      <div class="loginbox" id="mgLogin">
-        <div style="font-size:12.5px;color:var(--ink2);margin-bottom:10px">管理需要先登录 AppBase 账号（数据存在你的账号下）</div>
-        <input class="minput" id="mgEmail" placeholder="邮箱">
-        <input class="minput" id="mgPassword" type="password" placeholder="密码">
-        <button class="mbtn" onclick="mgLogin(false)">登录</button>
-        <button class="mbtn g" onclick="mgLogin(true)">注册并登录</button>
-        <div id="mgMsg" style="font-size:12px;color:var(--ink2);margin-top:8px"></div>
+      <div class="sec">
+        <h3>👥 大厅成员</h3>
+        <div class="sh">被添加的账号在主页可见并打开该应用；管理员始终可见全部应用</div>
+        <div id="memList"></div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <input class="minput" id="memEmail" placeholder="对方注册邮箱（需先注册）" style="margin:0">
+          <button class="mbtn" onclick="addMember()">添加</button>
+        </div>
       </div>
-      <div id="mgContent" style="display:none">
-        <div class="sec">
-          <h3>👥 可登录账号</h3>
-          <div class="sh">该应用自己的登录账号（用户名 + 密码，应用内登录页使用）</div>
-          <div id="accList"></div>
-          <div style="display:flex;gap:8px;margin-top:8px">
-            <input class="minput" id="accUser" placeholder="用户名" style="margin:0">
-            <input class="minput" id="accPass" placeholder="密码" style="margin:0">
-            <button class="mbtn" onclick="addAccount()">添加</button>
-          </div>
+      <div class="sec">
+        <h3>🔑 可登录账号</h3>
+        <div class="sh">该应用自己的登录账号（用户名 + 密码，应用内登录页使用）</div>
+        <div id="accList"></div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <input class="minput" id="accUser" placeholder="用户名" style="margin:0">
+          <input class="minput" id="accPass" placeholder="密码" style="margin:0">
+          <button class="mbtn" onclick="addAccount()">添加</button>
         </div>
-        <div class="sec">
-          <h3>🤖 LLM 配置</h3>
-          <div class="sh">该应用 AI 功能使用的上游接口（Key 保存在服务端，前端不接触）。留空则使用全局默认。</div>
-          <div style="display:flex;gap:8px;margin-bottom:8px">
-            <input class="minput" id="llmUrl" placeholder="URL, 如 https://open.bigmodel.cn/api/paas/v4" style="margin:0">
-            <input class="minput" id="llmModel" list="modelOptions" placeholder="模型, 如 glm-4.6" style="margin:0;width:170px;flex:none">
-            <datalist id="modelOptions"></datalist>
-          </div>
-          <input class="minput" id="llmKey" placeholder="API Key（留空表示不修改已保存的）">
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <button class="mbtn" onclick="saveLlm()">保存 LLM 配置</button>
-            <button class="mbtn g" onclick="fetchModels()">⟳ 获取模型列表</button>
-            <span id="modelMsg" style="font-size:12px;color:var(--ink2)"></span>
-          </div>
-          <div style="font-size:11.5px;color:var(--ink2);margin-top:8px">📊 LLM 用量监控：规划中，见 docs/app-management-design.md</div>
+      </div>
+      <div class="sec">
+        <h3>🤖 LLM 配置</h3>
+        <div class="sh">该应用 AI 功能使用的上游接口（Key 保存在服务端，前端不接触）。留空则使用全局默认。</div>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <input class="minput" id="llmUrl" placeholder="URL, 如 https://open.bigmodel.cn/api/paas/v4" style="margin:0">
+          <input class="minput" id="llmModel" list="modelOptions" placeholder="模型, 如 glm-4.6" style="margin:0;width:170px;flex:none">
+          <datalist id="modelOptions"></datalist>
         </div>
-        <div class="sec">
-          <h3>📦 应用 .env 配置</h3>
-          <div class="sh">额外配置项，KEY=VALUE 每行一条，# 开头为注释。应用运行时可读取（window.APP_ENV）。</div>
-          <textarea class="minput" id="envText" style="min-height:110px;font-family:Consolas,monospace;font-size:12px" placeholder="CLASS_NAME=三年级二班&#10;SCHOOL=实验小学&#10;MAX_STUDENTS=50"></textarea>
-          <button class="mbtn" onclick="saveEnv()">保存 .env 配置</button>
-          <span id="envMsg" style="font-size:12px;color:var(--ink2);margin-left:8px"></span>
+        <input class="minput" id="llmKey" placeholder="API Key（留空表示不修改已保存的）">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="mbtn" onclick="saveLlm()">保存 LLM 配置</button>
+          <button class="mbtn g" onclick="fetchModels()">⟳ 获取模型列表</button>
+          <span id="modelMsg" style="font-size:12px;color:var(--ink2)"></span>
         </div>
+        <div style="font-size:11.5px;color:var(--ink2);margin-top:8px">📊 LLM 用量监控：规划中，见 docs/app-management-design.md</div>
+      </div>
+      <div class="sec">
+        <h3>📦 应用 .env 配置</h3>
+        <div class="sh">额外配置项，KEY=VALUE 每行一条，# 开头为注释。应用运行时可读取（window.APP_ENV）。</div>
+        <textarea class="minput" id="envText" style="min-height:110px;font-family:Consolas,monospace;font-size:12px" placeholder="CLASS_NAME=三年级二班&#10;SCHOOL=实验小学&#10;MAX_STUDENTS=50"></textarea>
+        <button class="mbtn" onclick="saveEnv()">保存 .env 配置</button>
+        <span id="envMsg" style="font-size:12px;color:var(--ink2);margin-left:8px"></span>
       </div>
     </div>
   </div>
@@ -132,7 +163,7 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
     <div class="msgs" id="msgs"></div>
     <div class="inputbar">
       <textarea id="chatInput" placeholder="输入内容…"></textarea>
-      <button class="send" onclick="sendChat()">发送</button>
+      <button class="send" id="chatSendBtn" onclick="sendChat()">发送</button>
     </div>
   </div>
 </div>
@@ -140,16 +171,90 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
 <script>
 var mgApp = null;
 var mgToken = localStorage.getItem('hall_token') || '';
+var userEmail = '';
+var isAdmin = false;
 var chatRoles = [];
 var currentRole = null;
 var chatHistory = [];
+var chatStoreKey = '';
+var inFlight = false;
 
+// ── 通用: 带超时与错误透传的 fetchJSON ──
+function fetchJSON(url, opts, timeoutMs) {
+  var ctl = new AbortController();
+  var timer = setTimeout(function() { ctl.abort(); }, timeoutMs || 30000);
+  return fetch(url, Object.assign({}, opts, { signal: ctl.signal }))
+    .then(function(r) {
+      return r.json().catch(function() { return {}; }).then(function(d) {
+        if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+        return d;
+      });
+    })
+    .finally(function() { clearTimeout(timer); });
+}
+function authHeaders() { return mgToken ? { Authorization: 'Bearer ' + mgToken } : {}; }
+
+// ── 登录门: 先登录, 再进大厅 ──
+function showLogin(msg) {
+  document.getElementById('loginView').style.display = 'flex';
+  document.getElementById('shellWrap').style.display = 'none';
+  var m = document.getElementById('lgMsg');
+  m.textContent = msg || '';
+  document.getElementById('lgEmail').focus();
+}
+function forceRelogin(msg) {
+  mgToken = ''; isAdmin = false;
+  localStorage.removeItem('hall_token');
+  showLogin(msg);
+}
+function enterHall() {
+  document.getElementById('loginView').style.display = 'none';
+  document.getElementById('shellWrap').style.display = '';
+  document.getElementById('whoami').textContent = userEmail + (isAdmin ? ' · 管理员' : '');
+  loadApps();
+}
+function doLogin(register) {
+  var email = document.getElementById('lgEmail').value.trim();
+  var password = document.getElementById('lgPassword').value;
+  var msg = document.getElementById('lgMsg');
+  msg.textContent = '';
+  fetchJSON('/app/auth/' + (register ? 'register' : 'login'), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: email, password: password })
+  }).then(function(d) {
+    if (!d.token) { msg.textContent = '✗ ' + (d.error || '失败'); return; }
+    mgToken = d.token;
+    userEmail = d.user.email;
+    isAdmin = !!d.user.isAdmin;
+    localStorage.setItem('hall_token', d.token);
+    enterHall();
+  }).catch(function(e) { msg.textContent = '✗ ' + e.message; });
+}
+function logout() {
+  if (!confirm('退出登录？')) return;
+  localStorage.removeItem('hall_token');
+  location.reload();
+}
+document.getElementById('lgPassword').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) doLogin(false);
+});
+// 启动: 有 token 先校验, 过期/无效则回到登录门
+(function startup() {
+  if (!mgToken) return showLogin();
+  fetchJSON('/app/auth/me', { headers: authHeaders() }).then(function(d) {
+    userEmail = d.user.email;
+    isAdmin = !!d.user.isAdmin;
+    enterHall();
+  }).catch(function() { forceRelogin('登录已过期，请重新登录'); });
+})();
+
+// ── 应用列表 (管理员=全部功能; 普通用户=仅被添加到的应用) ──
 function loadApps() {
-  fetch('/app/hall/apps').then(function(r){ return r.json(); }).then(function(d) {
+  fetchJSON('/app/hall/apps', { headers: authHeaders() }).then(function(d) {
     chatRoles = [
       { id:'@persona/codex-chat', icon:'🪶', name:'网页应用生成器', ds:'动作：描述需求，生成 HTML 应用放进大厅', gen:true, greet:'描述你想要的网页应用，我会生成单文件 HTML 并放入大厅。例如：做一个班级值日表，可以按星期切换。' },
       { id:'@persona/sales-chat', icon:'🎧', name:'AppBase 客服', ds:'聊天：解答 AppBase 系统的一切使用问题', greet:'你好，我是 AppBase 客服。关于这套系统的任何问题——功能、配置、常见故障——直接问。' },
-      { id:'@persona/coder', icon:'🎓', name:'编码教练', ds:'教学模式：讲解系统架构与用法（不修改代码）', gen:false, greet:'你好，我是编码教练。我可以讲解系统架构、插件体系和应用的实现思路。' }
+      { id:'@persona/coder', icon:'🎓', name:'编码教练', ds:'教学模式：讲解系统架构与用法（不修改代码）', greet:'你好，我是编码教练。我可以讲解系统架构、插件体系和应用的实现思路。' }
     ];
     var secCard = function(title, sub) {
       return '<div class="sec-head"><div><div class="st">' + title + '</div><div class="ss">' + sub + '</div></div></div>';
@@ -168,15 +273,22 @@ function loadApps() {
         + '<div class="ds">' + r.ds + '</div>'
         + '<div class="ops"><button>打开工作台 →</button></div></div>';
     };
-    var html = secCard('💬 对话角色', '纯聊天互动，点开即聊');
-    chatRoles.forEach(function(r, i) {
-      if (r.id !== '@persona/codex-chat' && r.id !== '@persona/coder') html += chatCard(r, i);
-    });
-    html += secCard('🛠 编码工作台', '能修改项目代码：选择目标应用与编码工具（Codex / ZCode / Claude）');
-    chatRoles.forEach(function(r, i) {
-      if (r.id === '@persona/codex-chat' || r.id === '@persona/coder') html += codeCard(r, i);
-    });
-    (d.apps||[]).forEach(function(a) {
+    var html = '';
+    if (isAdmin) {
+      html += secCard('💬 对话角色', '纯聊天互动，点开即聊');
+      chatRoles.forEach(function(r, i) {
+        if (r.id !== '@persona/codex-chat' && r.id !== '@persona/coder') html += chatCard(r, i);
+      });
+      html += secCard('🛠 编码工作台', '能修改项目代码：选择目标应用与编码工具（Codex / ZCode / Claude）');
+      chatRoles.forEach(function(r, i) {
+        if (r.id === '@persona/codex-chat' || r.id === '@persona/coder') html += codeCard(r, i);
+      });
+      html += secCard('📱 全部应用', '管理员可见并管理所有应用');
+    } else {
+      html += secCard('📱 我的应用', '被添加到的应用');
+    }
+    var apps = d.apps || [];
+    apps.forEach(function(a) {
       var icon = a.name.indexOf('teacher') >= 0 ? '📚' : '📄';
       html += '<div class="app-card" onclick="openApp(\'' + encodeURIComponent(a.name) + '\')">'
         + '<div class="icon">' + icon + '</div>'
@@ -184,112 +296,122 @@ function loadApps() {
         + '<div class="ds">' + (a.size/1024).toFixed(1) + ' KB · ' + new Date(a.mtime).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) + '</div>'
         + '<div class="ops">'
         + '<button onclick="event.stopPropagation();openApp(\'' + encodeURIComponent(a.name) + '\')">打开</button>'
-        + '<button class="mg" onclick="event.stopPropagation();openMg(\'' + encodeURIComponent(a.name) + '\')">设置</button>'
+        + (isAdmin ? '<button class="mg" onclick="event.stopPropagation();openMg(\'' + encodeURIComponent(a.name) + '\')">设置</button>' : '')
         + '</div></div>';
     });
+    if (!apps.length && !isAdmin) {
+      html += '<div class="empty"><h3>还没有可用的应用</h3><p>请联系管理员把你添加到应用成员里</p></div>';
+    }
     document.getElementById('grid').innerHTML = html;
+  }).catch(function(e) {
+    if (/未授权|401/.test(e.message)) forceRelogin('登录已过期，请重新登录');
   });
 }
 
 function openApp(enc) {
   var name = decodeURIComponent(enc);
-  fetch('/app/hall/key?app=' + encodeURIComponent(name), {
-    headers: mgToken ? { Authorization: 'Bearer ' + mgToken } : {}
-  }).then(function(r){ return r.ok ? r.json() : { key:'' }; }).then(function(d) {
-    var url = '/apps/' + enc;
-    if (d.key) url += '#gw=' + encodeURIComponent(d.key);
-    window.open(url, '_blank');
-  }).catch(function(){ window.open('/apps/' + enc, '_blank'); });
+  fetchJSON('/app/hall/key?app=' + encodeURIComponent(name), { headers: authHeaders() })
+    .then(function(d) {
+      var url = '/apps/' + enc;
+      if (d.key) url += '#gw=' + encodeURIComponent(d.key);
+      window.open(url, '_blank');
+    })
+    .catch(function() { window.open('/apps/' + enc, '_blank'); });
 }
 
 // ── 管理 ──
 function openMg(enc) {
   mgApp = decodeURIComponent(enc);
   document.getElementById('mgAppName').textContent = mgApp.replace('.html','');
-  mgToken = localStorage.getItem('hall_token') || '';
-  document.getElementById('mgLogin').style.display = mgToken ? 'none' : 'block';
-  document.getElementById('mgContent').style.display = mgToken ? 'block' : 'none';
-  if (mgToken) loadManage();
+  loadManage();
   document.getElementById('mgDrawer').classList.add('show');
 }
 function closeMg() { document.getElementById('mgDrawer').classList.remove('show'); }
-function mgLogin(register) {
-  var email = document.getElementById('mgEmail').value.trim();
-  var password = document.getElementById('mgPassword').value;
-  fetch('/app/auth/' + (register ? 'register' : 'login'), {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ email:email, password:password })
-  }).then(function(r){ return r.json(); }).then(function(d) {
-    if (!d.token) { document.getElementById('mgMsg').textContent = '✗ ' + (d.error||'失败'); return; }
-    mgToken = d.token;
-    localStorage.setItem('hall_token', d.token);
-    document.getElementById('mgLogin').style.display = 'none';
-    document.getElementById('mgContent').style.display = 'block';
-    loadManage();
-  });
-}
-function authHeaders() { return { 'Content-Type':'application/json', Authorization:'Bearer ' + mgToken }; }
+function jheaders() { return { 'Content-Type': 'application/json', Authorization: 'Bearer ' + mgToken }; }
 
 function loadManage() {
-  fetch('/app/hall/manage?app=' + encodeURIComponent(mgApp), { headers: authHeaders() })
-    .then(function(r){ return r.json(); }).then(function(d) {
-      if (d.error) return;
-      var accHtml = (d.accounts||[]).map(function(a) {
-        return '<div class="rowline"><div class="grow"><b>' + a.username + '</b>'
-          + (a.note ? '<div class="sub">' + a.note + '</div>' : '')
-          + '</div><button onclick="resetPwd(\'' + a.id + '\',\'' + a.username + '\')">重置密码</button>'
-          + '<button onclick="delAccount(\'' + a.id + '\')">删除</button></div>';
-      }).join('') || '<div class="sub" style="font-size:12px;color:var(--ink2)">暂无账号</div>';
-      document.getElementById('accList').innerHTML = accHtml;
-      var keyHtml = (d.keys||[]).map(function(k) {
+  fetchJSON('/app/hall/manage?app=' + encodeURIComponent(mgApp), { headers: jheaders() }).then(function(d) {
+    var memHtml = (d.members||[]).map(function(m) {
+      return '<div class="rowline"><div class="grow"><b>' + m.email + '</b>'
+        + '<div class="sub">添加于 ' + new Date(m.added_at).toLocaleDateString() + '</div></div>'
+        + '<button onclick="delMember(\'' + m.user_id + '\')">移出</button></div>';
+    }).join('') || '<div class="sub" style="font-size:12px;color:var(--ink2)">暂无成员（管理员默认可见）</div>';
+    document.getElementById('memList').innerHTML = memHtml;
+    var accHtml = (d.accounts||[]).map(function(a) {
+      return '<div class="rowline"><div class="grow"><b>' + a.username + '</b>'
+        + (a.note ? '<div class="sub">' + a.note + '</div>' : '')
+        + '</div><button onclick="resetPwd(\'' + a.id + '\',\'' + a.username + '\')">重置密码</button>'
+        + '<button onclick="delAccount(\'' + a.id + '\')">删除</button></div>';
+    }).join('') || '<div class="sub" style="font-size:12px;color:var(--ink2)">暂无账号</div>';
+    document.getElementById('accList').innerHTML = accHtml;
+    var keyListEl = document.getElementById('keyList'); // 元素可能不存在, 判空防中断后面渲染
+    if (keyListEl) {
+      keyListEl.innerHTML = (d.keys||[]).map(function(k) {
         return '<div class="rowline"><div class="grow">'
           + (k.revoked ? '<span class="offchip" style="border-radius:10px;padding:2px 8px;font-size:11px">已吊销</span> ' : '<span class="okchip">有效</span> ')
           + '<span class="keyval" onclick="navigator.clipboard.writeText(\'' + k.key + '\')" title="点击复制">' + k.key.slice(0,20) + '…</span>'
           + '<div class="sub">' + (k.label || '默认 Key') + ' · ' + new Date(k.created_at).toLocaleDateString() + '</div></div>'
           + (k.revoked ? '' : '<button onclick="revokeKey(\'' + k.id + '\')">吊销</button>')
           + '</div>';
-      }).join('') || '<div class="sub" style="font-size:12px;color:var(--ink2)">暂无 Key</div>';
-      document.getElementById('keyList').innerHTML = keyHtml;
-      if (d.llm) {
-        document.getElementById('llmUrl').value = d.llm.url || '';
-        document.getElementById('llmModel').value = d.llm.model || '';
-        document.getElementById('llmKey').value = '';
-        document.getElementById('llmKey').placeholder = d.llm.hasKey ? ('已配置（' + d.llm.keyMasked + '），留空不修改') : 'API Key';
-      }
-      if (typeof d.envText === 'string') {
-        document.getElementById('envText').value = d.envText;
-      }
-    });
+      }).join('') || '';
+    }
+    if (d.llm) {
+      document.getElementById('llmUrl').value = d.llm.url || '';
+      document.getElementById('llmModel').value = d.llm.model || '';
+      document.getElementById('llmKey').value = '';
+      document.getElementById('llmKey').placeholder = d.llm.hasKey ? ('已配置（' + d.llm.keyMasked + '），留空不修改') : 'API Key';
+    }
+    if (typeof d.envText === 'string') {
+      document.getElementById('envText').value = d.envText;
+    }
+  }).catch(function(e) { alert('加载管理信息失败: ' + e.message); });
+}
+function addMember() {
+  var email = document.getElementById('memEmail').value.trim();
+  if (!email) return;
+  fetchJSON('/app/hall/manage/member?app=' + encodeURIComponent(mgApp), {
+    method: 'POST', headers: jheaders(), body: JSON.stringify({ email: email })
+  }).then(function() {
+    document.getElementById('memEmail').value = '';
+    loadManage();
+  }).catch(function(e) { alert('添加失败: ' + e.message); });
+}
+function delMember(userId) {
+  fetchJSON('/app/hall/manage/member/' + userId + '?app=' + encodeURIComponent(mgApp), {
+    method: 'DELETE', headers: jheaders()
+  }).then(function() { loadManage(); })
+    .catch(function(e) { alert('移出失败: ' + e.message); });
 }
 function addAccount() {
-  fetch('/app/hall/manage/account?app=' + encodeURIComponent(mgApp), {
-    method:'POST', headers:authHeaders(),
+  fetchJSON('/app/hall/manage/account?app=' + encodeURIComponent(mgApp), {
+    method:'POST', headers:jheaders(),
     body: JSON.stringify({ username: document.getElementById('accUser').value.trim(), password: document.getElementById('accPass').value })
   }).then(function(){ document.getElementById('accUser').value=''; document.getElementById('accPass').value=''; loadManage(); });
 }
 function delAccount(id) {
-  fetch('/app/hall/manage/account/' + id + '?app=' + encodeURIComponent(mgApp), { method:'DELETE', headers:authHeaders() })
+  fetchJSON('/app/hall/manage/account/' + id + '?app=' + encodeURIComponent(mgApp), { method:'DELETE', headers:jheaders() })
     .then(function(){ loadManage(); });
 }
 function resetPwd(id, username) {
   var np = prompt('为「' + username + '」设置新密码（至少 4 位）：');
   if (np === null) return;
-  fetch('/app/hall/manage/account/' + id + '/reset?app=' + encodeURIComponent(mgApp), {
-    method:'POST', headers:authHeaders(), body: JSON.stringify({ newPassword: np })
-  }).then(function(r){ return r.json(); }).then(function(d){ alert(d.ok ? '✓ 密码已重置' : '✗ ' + (d.error||'')); });
+  fetchJSON('/app/hall/manage/account/' + id + '/reset?app=' + encodeURIComponent(mgApp), {
+    method:'POST', headers:jheaders(), body: JSON.stringify({ newPassword: np })
+  }).then(function(d){ alert(d.ok ? '✓ 密码已重置' : '✗ ' + (d.error||'')); })
+    .catch(function(e){ alert('✗ ' + e.message); });
 }
 function saveLlm() {
-  fetch('/app/hall/manage/llm?app=' + encodeURIComponent(mgApp), {
-    method:'PUT', headers:authHeaders(),
+  fetchJSON('/app/hall/manage/llm?app=' + encodeURIComponent(mgApp), {
+    method:'PUT', headers:jheaders(),
     body: JSON.stringify({
       url: document.getElementById('llmUrl').value.trim(),
       model: document.getElementById('llmModel').value.trim(),
       key: document.getElementById('llmKey').value.trim()
     })
-  }).then(function(r){ return r.json(); }).then(function(d) {
+  }).then(function(d) {
     document.getElementById('llmMsg').textContent = d.ok ? '✓ 已保存' : '✗ ' + (d.error||'');
     loadManage();
-  });
+  }).catch(function(e){ document.getElementById('llmMsg').textContent = '✗ ' + e.message; });
 }
 function fetchModels() {
   var msg = document.getElementById('modelMsg');
@@ -299,9 +421,8 @@ function fetchModels() {
   var k = document.getElementById('llmKey').value.trim();
   if (u) params.set('url', u);
   if (k) params.set('key', k);
-  fetch('/app/hall/manage/llm/models?' + params.toString(), { headers: authHeaders() })
-    .then(function(r){ return r.json(); }).then(function(d) {
-      if (d.error) { msg.textContent = '✗ ' + d.error; return; }
+  fetchJSON('/app/hall/manage/llm/models?' + params.toString(), { headers: jheaders() })
+    .then(function(d) {
       document.getElementById('modelOptions').innerHTML =
         (d.models||[]).map(function(m){ return '<option value="' + m + '">'; }).join('');
       msg.textContent = '✓ 获取到 ' + (d.models||[]).length + ' 个模型，点击模型输入框选择';
@@ -309,15 +430,15 @@ function fetchModels() {
     .catch(function(e){ msg.textContent = '✗ ' + e.message; });
 }
 function saveEnv() {
-  fetch('/app/hall/manage/llm?app=' + encodeURIComponent(mgApp), {
-    method:'PUT', headers:authHeaders(),
+  fetchJSON('/app/hall/manage/llm?app=' + encodeURIComponent(mgApp), {
+    method:'PUT', headers:jheaders(),
     body: JSON.stringify({ envText: document.getElementById('envText').value })
-  }).then(function(r){ return r.json(); }).then(function(d) {
+  }).then(function(d) {
     document.getElementById('envMsg').textContent = d.ok ? '✓ 已保存' : '✗ ' + (d.error||'');
-  });
+  }).catch(function(e){ document.getElementById('envMsg').textContent = '✗ ' + e.message; });
 }
 function revokeKey(id) {
-  fetch('/app/hall/manage/key/' + id + '?app=' + encodeURIComponent(mgApp), { method:'DELETE', headers:authHeaders() })
+  fetchJSON('/app/hall/manage/key/' + id + '?app=' + encodeURIComponent(mgApp), { method:'DELETE', headers:jheaders() })
     .then(function(){ loadManage(); });
 }
 
@@ -327,6 +448,7 @@ function openWorkbench(i) {
   location.href = '/hall/workbench?role=' + encodeURIComponent(r.id);
 }
 function openChat(i) {
+  if (!isAdmin) return; // 对话角色是管理功能
   currentRole = chatRoles[i];
   chatStoreKey = 'hall_chat_' + currentRole.id;
   document.getElementById('chatTitle').textContent = currentRole.icon + ' ' + currentRole.name;
@@ -337,55 +459,66 @@ function openChat(i) {
   if (chatHistory.length) {
     chatHistory.forEach(function(m) { addMsg(m.role, m.content, true); });
   } else {
-    addMsg('bot', currentRole.greet);
+    addMsg('bot', currentRole.greet, true); // 欢迎语不写入历史
   }
 }
 function clearChatHistory() {
   if (!currentRole) return;
+  if (inFlight) { alert('当前有请求进行中，等回复完成后再清空'); return; }
   if (!confirm('清空「' + currentRole.name + '」的聊天记录？')) return;
   chatHistory.length = 0;
   localStorage.removeItem(chatStoreKey);
   document.getElementById('msgs').innerHTML = '';
-  addMsg('bot', currentRole.greet);
+  addMsg('bot', currentRole.greet, true);
 }
 function closeChat() { document.getElementById('chatDrawer').classList.remove('show'); loadApps(); }
 function addMsg(role, text, skipSave) {
   var el = document.createElement('div');
-  el.className = 'msg ' + role;
+  el.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
   el.textContent = text;
   var box = document.getElementById('msgs');
   box.appendChild(el);
   box.scrollTop = 1e9;
+  // 存储用 assistant (LLM 语境), 展示统一 bot 样式; 状态气泡/欢迎语/错误提示 skipSave 不入历史
   if (!skipSave && currentRole && (role === 'user' || role === 'bot')) {
-    chatHistory.push({ role: role, content: text });
+    chatHistory.push({ role: role === 'user' ? 'user' : 'assistant', content: text });
     try { localStorage.setItem(chatStoreKey, JSON.stringify(chatHistory.slice(-60))); } catch (e) {}
   }
+  return el;
 }
 function sendChat() {
+  if (inFlight) return; // 回车不经过按钮, 入口统一拦并发
   var input = document.getElementById('chatInput');
   var text = input.value.trim();
   if (!text || !currentRole) return;
+  inFlight = true;
+  document.getElementById('chatSendBtn').disabled = true;
   addMsg('user', text);
   input.value = '';
-  var hp = chatHistory.slice(-10);
-  chatHistory.push({ role:'user', content:text });
-  addMsg('bot', '正在思考…（编码任务约需 1-3 分钟）');
-  fetch('/hall/chat', { method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ role: currentRole.id, message:text, history:hp, session_id:'hall-'+currentRole.id+'-'+Date.now() }) })
-    .then(function(r){ return r.json(); }).then(function(d) {
-      var msgs = document.getElementById('msgs');
-      msgs.lastChild.remove();
-      addMsg('bot', d.response || '(无回复)');
-      chatHistory.push({ role:'assistant', content:d.response||'' });
+  var hp = chatHistory.slice(-10); // addMsg 已入历史, 这里不再重复 push
+  var statusEl = addMsg('bot', '⏳ 正在思考…', true); // 状态气泡不写入历史/上下文
+  fetchJSON('/hall/chat', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ role: currentRole.id, message:text, history:hp, session_id:'hall-'+currentRole.id+'-'+Date.now() }) },
+    3 * 60 * 1000)
+    .then(function(d) {
+      statusEl.remove();
+      var reply = d.response || '(无回复)';
+      if (d.degraded) reply += '\n\n（⚠ 降级回复：编码工具不可用，以上内容未经真实执行，请勿视为已完成）';
+      addMsg('bot', reply);
       loadApps();
     })
     .catch(function(e) {
-      var msgs = document.getElementById('msgs');
-      msgs.lastChild.remove();
-      addMsg('bot','请求失败: '+e.message);
+      statusEl.remove();
+      addMsg('bot', '请求失败: ' + (e.name === 'AbortError' ? '等待超时（3 分钟），请稍后重试' : e.message), true);
+    })
+    .finally(function() {
+      inFlight = false;
+      document.getElementById('chatSendBtn').disabled = false;
     });
 }
 document.getElementById('chatInput').addEventListener('keydown', function(e){
+  // 中文输入法选词的回车 (isComposing/keyCode 229) 不当作发送
+  if (e.isComposing || e.keyCode === 229) return;
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
 });
 window.onclick = function(e) {
@@ -394,7 +527,6 @@ window.onclick = function(e) {
     if (e.target.id === 'chatDrawer') loadApps();
   }
 };
-loadApps();
 </script>
 </body>
 </html>

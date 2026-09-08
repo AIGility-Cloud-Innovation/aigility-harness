@@ -54,6 +54,15 @@ async function ensureSchema(): Promise<void> {
       password_hash TEXT NOT NULL,
       created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    -- 管理员标记 (大厅全功能); 与环境变量 APPBASE_ADMIN_EMAILS 白名单取并集
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;
+    -- 大厅应用成员: 被添加的账号在主页可见该应用 (管理员始终可见全部)
+    CREATE TABLE IF NOT EXISTS app_members (
+      app_id   TEXT NOT NULL,
+      user_id  TEXT NOT NULL REFERENCES users(id),
+      added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (app_id, user_id)
+    );
     CREATE TABLE IF NOT EXISTS app_tables (
       id         TEXT PRIMARY KEY,
       owner_id   TEXT NOT NULL,
@@ -204,6 +213,41 @@ function json(res: ServerResponse, code: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
+// ── 管理员 / 成员 ────────────────────────────────────────────────
+
+/** 管理员邮箱白名单 (环境变量 APPBASE_ADMIN_EMAILS, 逗号分隔; 与 users.is_admin 取并集) */
+function adminEmails(): string[] {
+  return (process.env.APPBASE_ADMIN_EMAILS ?? "")
+    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+}
+
+/** 该登录用户是否管理员: is_admin 列或邮箱白名单 */
+export async function isAdminUser(userId: string): Promise<boolean> {
+  const { rows } = await pool.query("SELECT email, is_admin FROM users WHERE id = $1", [userId]);
+  if (rows.length === 0) return false;
+  return Boolean(rows[0].is_admin) || adminEmails().includes(rows[0].email);
+}
+
+/** 从请求头解析登录用户 id: 无/无效 token 返回 null */
+export function bearerUser(req: { headers: { authorization?: string | string[] } }): string | null {
+  const raw = req.headers.authorization;
+  const auth = Array.isArray(raw) ? raw[0] : raw;
+  const token = auth?.startsWith("Bearer ") ? auth.slice(7) : "";
+  return token ? verifyToken(token) : null;
+}
+
+/** 用户可见的大厅沙箱应用: 管理员=全部; 普通用户=被添加的应用 ∪ 自己名下注册的应用 */
+export async function visibleHallApps(allApps: string[], userId: string, isAdmin: boolean): Promise<string[]> {
+  if (isAdmin) return allApps;
+  const { rows } = await pool.query(
+    `SELECT app_id FROM app_members WHERE user_id = $1
+     UNION
+     SELECT id AS app_id FROM apps WHERE owner_id = $1 AND category = 'hall'`,
+    [userId]);
+  const visible = new Set(rows.map((r: any) => r.app_id));
+  return allApps.filter((a) => visible.has(a));
+}
+
 // ── 路由 ─────────────────────────────────────────────────────────
 
 export async function appBackendHandler(
@@ -225,17 +269,21 @@ export async function appBackendHandler(
       }
       const id = randomUUID();
       const hash = await hashPassword(password);
+      // 首个注册用户自动成为管理员 (兜底引导); 邮箱白名单内的也直接是管理员
+      const { rows: admins } = await pool.query("SELECT 1 FROM users WHERE is_admin LIMIT 1");
+      const makeAdmin = adminEmails().includes(email)
+        || (admins.length === 0 && adminEmails().length === 0);
       try {
         await pool.query(
-          "INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)",
-          [id, email, hash],
+          "INSERT INTO users (id, email, password_hash, is_admin) VALUES ($1, $2, $3, $4)",
+          [id, email, hash, makeAdmin],
         );
       } catch (e: any) {
         if (String(e?.code) === "23505") return json(res, 409, { error: "邮箱已注册" });
         throw e;
       }
       const token = signToken(id);
-      return json(res, 201, { token, user: { id, email } });
+      return json(res, 201, { token, user: { id, email, isAdmin: makeAdmin } });
     }
 
     if (method === "POST" && path === "/app/auth/login") {
@@ -243,14 +291,26 @@ export async function appBackendHandler(
       const email = String(body.email ?? "").trim().toLowerCase();
       const password = String(body.password ?? "");
       const { rows } = await pool.query(
-        "SELECT id, email, password_hash FROM users WHERE email = $1",
+        "SELECT id, email, password_hash, is_admin FROM users WHERE email = $1",
         [email],
       );
       if (rows.length === 0 || !(await verifyPassword(password, rows[0].password_hash))) {
         return json(res, 401, { error: "邮箱或密码错误" });
       }
       const token = signToken(rows[0].id);
-      return json(res, 200, { token, user: { id: rows[0].id, email: rows[0].email } });
+      const isAdmin = Boolean(rows[0].is_admin) || adminEmails().includes(email);
+      return json(res, 200, { token, user: { id: rows[0].id, email: rows[0].email, isAdmin } });
+    }
+
+    // 当前登录者信息 (前端启动时校验 token / 拿管理员身份)
+    if (method === "GET" && path === "/app/auth/me") {
+      const userId = bearerUser(req);
+      if (!userId) return json(res, 401, { error: "未登录" });
+      const { rows } = await pool.query("SELECT id, email FROM users WHERE id = $1", [userId]);
+      if (rows.length === 0) return json(res, 401, { error: "用户不存在" });
+      return json(res, 200, {
+        user: { id: rows[0].id, email: rows[0].email, isAdmin: await isAdminUser(userId) },
+      });
     }
 
     // ── 应用账号登录 (用户名+密码, 与 AppBase 主账号体系无关) ──
@@ -368,12 +428,19 @@ export async function appBackendHandler(
           [appId, userId, appId]);
         own = await pool.query("SELECT id FROM apps WHERE id = $1 AND owner_id = $2", [appId, userId]);
       }
-      if (own.rows.length === 0) return json(res, 403, { error: "不是该应用的管理者" });
+      // 管理者 = 应用 owner 或管理员 (管理员可管理所有应用)
+      if (own.rows.length === 0 && !(await isAdminUser(userId))) {
+        return json(res, 403, { error: "不是该应用的管理者" });
+      }
 
       if (method === "GET" && path === "/app/hall/manage") {
         const { rows: accounts } = await pool.query(
           "SELECT id, username, note, created_at FROM app_accounts WHERE app_id = $1 ORDER BY created_at",
           [appId]);
+        const { rows: members } = await pool.query(
+          `SELECT m.user_id, u.email, m.added_at FROM app_members m
+           JOIN users u ON u.id = m.user_id
+           WHERE m.app_id = $1 ORDER BY m.added_at`, [appId]);
         const { rows: keys } = await pool.query(
           "SELECT id, key, label, revoked, created_at FROM app_keys WHERE app_id = $1 ORDER BY created_at",
           [appId]);
@@ -395,12 +462,31 @@ export async function appBackendHandler(
           "SELECT url, key, model, env, updated_at FROM app_llm_config WHERE app_id = $1", [appId]);
         const llmCfg = llm[0] ?? { url: "", key: "", model: "", env: {}, updated_at: null };
         return json(res, 200, {
-          accounts, keys, usage, agg,
+          accounts, members, keys, usage, agg,
           llm: { url: llmCfg.url, model: llmCfg.model,
                  keyMasked: llmCfg.key ? "••••" + llmCfg.key.slice(-4) : "",
                  hasKey: Boolean(llmCfg.key), updated_at: llmCfg.updated_at },
           envText: envToText(llmCfg.env),
         });
+      }
+
+      // 大厅成员: 把已注册账号添加进该应用 (添加后对方主页可见)
+      if (method === "POST" && path === "/app/hall/manage/member") {
+        const body = await readBody(req);
+        const email = String(body.email ?? "").trim().toLowerCase();
+        if (!email) return json(res, 400, { error: "email 必填" });
+        const { rows: u } = await pool.query("SELECT id FROM users WHERE email = $1", [email]);
+        if (u.length === 0) return json(res, 404, { error: "该邮箱尚未注册 (对方需先在大厅注册账号)" });
+        await pool.query(
+          "INSERT INTO app_members (app_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+          [appId, u[0].id]);
+        return json(res, 200, { ok: true });
+      }
+      const delMember = path.match(/^\/app\/hall\/manage\/member\/([^/]+)$/);
+      if (method === "DELETE" && delMember) {
+        await pool.query("DELETE FROM app_members WHERE app_id = $1 AND user_id = $2",
+          [appId, decodeURIComponent(delMember[1])]);
+        return json(res, 200, { ok: true });
       }
 
       if (method === "POST" && path === "/app/hall/manage/account") {

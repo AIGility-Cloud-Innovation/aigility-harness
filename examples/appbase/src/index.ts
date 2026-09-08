@@ -128,9 +128,15 @@ async function main(): Promise<void> {
       const url2 = new URL(req.url ?? "/", "http://x");
       const appName = url2.searchParams.get("app") ?? "";
       const auth = req.headers.authorization ?? "";
-      const userId = auth.startsWith("Bearer ") ? await import("./backend.js").then(m => m.verifyToken(auth.slice(7))) : null;
-      if (!userId || !appName) { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ key: "" })); return; }
-      const key = await import("./backend.js").then(m => m.ensureAppKey(appName, userId));
+      const backend = await import("./backend.js");
+      const userId = auth.startsWith("Bearer ") ? backend.verifyToken(auth.slice(7)) : null;
+      const noKey = () => { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ key: "" })); };
+      if (!userId || !appName) { noKey(); return; }
+      // 管理员或该应用成员才发 Key (大厅里本来就只显示可见应用, 这里兜底)
+      const isAdmin = await backend.isAdminUser(userId);
+      const allowed = isAdmin || (await backend.visibleHallApps([appName], userId, false)).length > 0;
+      if (!allowed) { noKey(); return; }
+      const key = await backend.ensureAppKey(appName, userId);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ key }));
       return;
@@ -158,8 +164,17 @@ async function main(): Promise<void> {
       res.end(APP_HALL_HTML);
       return;
     }
-    // hall 路由 (由 hall 返回的 handler 处理)
+    // hall 路由 (由 hall 返回的 handler 处理); 对话 API 同样需要先登录
     if (hallHandler) {
+      if (req.method === "POST" && (req.url ?? "").split("?")[0] === "/hall/chat") {
+        const backend = await import("./backend.js");
+        const uid = backend.bearerUser(req);
+        if (!uid) {
+          res.writeHead(401, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "未授权: 请先登录" }));
+          return;
+        }
+      }
       await hallHandler(req, res);
       return;
     }
@@ -262,21 +277,28 @@ async function hallAppsHandler(req: any, res: any): Promise<void> {
   const method = req.method ?? "GET";
 
   if (method === "GET" && path === "/app/hall/apps") {
-    if (!existsSync(SANDBOX_ROOT)) return json(200, { apps: [] });
-    const apps = existsSync(SANDBOX_ROOT)
-      ? (await import("node:fs")).readdirSync(SANDBOX_ROOT)
-          .filter((f: string) => f.endsWith(".html"))
-          .map((f: string) => {
-            const st = statSync(join(SANDBOX_ROOT, f));
-            return { name: f, size: st.size, mtime: st.mtimeMs };
-          })
-          .sort((a: any, b: any) => b.mtime - a.mtime)
-      : [];
-    return json(200, { apps });
+    // 需登录; 管理员看全部, 普通用户只看被添加到的应用
+    const backend = await import("./backend.js");
+    const userId = backend.bearerUser(req);
+    if (!userId) return json(401, { error: "未授权: 请先登录" });
+    if (!existsSync(SANDBOX_ROOT)) return json(200, { apps: [], isAdmin: false });
+    const all = (await import("node:fs")).readdirSync(SANDBOX_ROOT)
+        .filter((f: string) => f.endsWith(".html"))
+        .map((f: string) => {
+          const st = statSync(join(SANDBOX_ROOT, f));
+          return { name: f, size: st.size, mtime: st.mtimeMs };
+        })
+        .sort((a: any, b: any) => b.mtime - a.mtime);
+    const isAdmin = await backend.isAdminUser(userId);
+    const names = new Set(await backend.visibleHallApps(all.map((a: any) => a.name), userId, isAdmin));
+    return json(200, { apps: all.filter((a: any) => names.has(a.name)), isAdmin });
   }
 
-  // 创建新应用 (空模板)
+  // 创建新应用 (空模板) — 仅管理员 (工作台/生成器属管理功能)
   if (method === "POST" && path === "/app/hall/apps") {
+    const backend0 = await import("./backend.js");
+    const uid0 = backend0.bearerUser(req);
+    if (!uid0 || !(await backend0.isAdminUser(uid0))) return json(403, { error: "仅管理员可创建应用" });
     let body = "";
     for await (const c of req) body += c;
     const parsed = JSON.parse(body || "{}");
@@ -293,6 +315,13 @@ async function hallAppsHandler(req: any, res: any): Promise<void> {
     const name = safeAppName(decodeURIComponent(fileMatch[1]));
     if (!name) return json(400, { error: "非法应用文件名" });
     const filePath = join(SANDBOX_ROOT, name);
+
+    // 写操作 (改名/覆盖/新建/删除) 仅管理员; GET (页面与 meta) 保持开放
+    if (method !== "GET") {
+      const be = await import("./backend.js");
+      const uid = be.bearerUser(req);
+      if (!uid || !(await be.isAdminUser(uid))) return json(403, { error: "仅管理员可修改应用文件" });
+    }
 
     if (method === "GET" && !url.searchParams.get("meta")) {
       if (!existsSync(filePath)) return json(404, { error: "应用不存在" });

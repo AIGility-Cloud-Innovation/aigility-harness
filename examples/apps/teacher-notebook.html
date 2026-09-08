@@ -1034,7 +1034,7 @@ function saveAiDraft() {
             title: e.title, content: e.content, tags: e.tags, date: e.date,
             createdAt: new Date().toISOString()
         });
-        if (e.score) applyScore(e.studentId, e.score, e.title || e.content.slice(0, 20), true, e.category, 'AI 记一笔');
+        if (e.score) applyScore(e.studentId, e.score, e.title || e.content.slice(0, 20), true, e.category, 'AI 记一笔', true);
         if (e.attendance) {
             const d = e.date || todayStr();
             (attendance[d] = attendance[d] || {})[e.studentId] = e.attendance;
@@ -1272,7 +1272,7 @@ function startLuckyDraw() {
     }, 90);
 }
 // quickScore 已移除: 加减分必须经由记忆本记录
-function applyScore(studentId, change, reason, silent, category, source) {
+function applyScore(studentId, change, reason, silent, category, source, skipMemory) {
     const st = studentById(studentId);
     if (!st) return;
     st.score = (st.score || 0) + change;
@@ -1284,7 +1284,8 @@ function applyScore(studentId, change, reason, silent, category, source) {
         date: new Date().toISOString()
     });
     // 同步沉淀为记忆本积分事件
-    memories.push({
+    // skipMemory: 调用方已写入原文记忆时传 true (如 saveAiDraft), 原文本身就是记录, 不再重复追加
+    if (!skipMemory) memories.push({
         id: Date.now().toString(36) + Math.random().toString(36).slice(2,6),
         studentId, studentName: st.name,
         category: 'score', senti: change > 0 ? 'pos' : 'neg',

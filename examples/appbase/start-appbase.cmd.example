@@ -32,5 +32,10 @@ set APPBASE_GATEWAY_KEY=【填:随机长串, 如 openssl rand -hex 24 的输出�
 rem ---- 登录 token 签名: 默认用 src\.token-secret 文件持久化, 重启不失效, 无需设置 ----
 rem set APPBASE_TOKEN_SECRET=
 
+rem ---- 管理员账号 (可选): 逗号分隔的邮箱白名单, 与库内 is_admin 列取并集;
+rem      都不设时, 首个注册的用户自动成为管理员; 也可 SQL 提拔:
+rem      UPDATE users SET is_admin=true WHERE email='...'
+rem set APPBASE_ADMIN_EMAILS=admin@example.com
+
 cd /d %~dp0
 pnpm start
