@@ -745,7 +745,7 @@ function sendText(text) {
   var hp = chatHistory.slice(-10); // addMsg 已入历史, 这里截取即可
   var statusEl = addMsg('bot', '⏳ 正在思考…', true); // 状态气泡不写入历史/上下文
   fetchJSON('/hall/chat', { method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ role: currentRole.id, message:text, history:hp, session_id:'hall-'+currentRole.id+'-'+Date.now() }) },
+    body: JSON.stringify({ role: currentRole.id, message:text, history:hp, session_id:'hall-'+currentRole.id+'-'+Date.now(), user_key: userEmail }) },
     3 * 60 * 1000)
     .then(function(d) {
       statusEl.remove();

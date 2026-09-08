@@ -31,6 +31,8 @@ export interface RepairChatRequest {
   user_input: string;
   /** 会话 ID (可选) */
   session_id?: string;
+  /** 用户标识 (大厅登录邮箱; 用于 TiMEM 记忆按用户隔离, 可选) */
+  user_key?: string;
   /** 会话历史 (前端维护, 透传给编排层做上下文) */
   history?: Array<{ role: "user" | "assistant"; content: string }>;
 }
@@ -84,14 +86,34 @@ const repairChatProvider: Provider<RepairChatRequest, RepairChatResponse> = {
     ctx: SeamContext,
   ): Promise<Result<RepairChatResponse>> {
     const agentName = "应用报修客服";
+    const memUserId = request.user_key ?? "anonymous";
+
+    // TiMEM 记忆召回 (尽力而为): 按用户检索相关历史记忆, 失败静默降级不阻塞对话
+    let memoryBlock = "";
+    try {
+      const mem = await ctx.call(
+        { id: "@cognitive/timem-memory", versionRange: "^1.0.0" },
+        { query: request.user_input.slice(0, 200), user_id: memUserId, agent_id: "repair-chat", limit: 3 },
+      );
+      const value = (mem as { value?: { ok?: boolean; results?: Array<{ content: string }>; error?: string } }).value;
+      const items = value?.ok ? (value.results ?? []).map((r) => r.content).filter(Boolean) : [];
+      if (items.length > 0) {
+        memoryBlock = `\n\n【该用户的历史相关记忆】(可参考; 与当前问题相关时提及, 不确定时询问)\n${items
+          .map((c, i) => `${i + 1}. ${c}`)
+          .join("\n")}`;
+      }
+      console.log(`[repair-mem] recalled ${items.length} memories for ${memUserId}${value?.ok ? "" : ` (timem: ${value?.error ?? "unavailable"})`}`);
+    } catch (e) {
+      console.log(`[repair-mem] recall skipped: ${String((e as Error)?.message ?? e)}`);
+    }
 
     const chatRequest = {
       user_input: request.user_input,
       merchant_id: "default",
-      customer_id: "anonymous",
+      customer_id: memUserId,
       session_id: request.session_id ?? ctx.sessionId,
       agent_name: agentName,
-      system_prompt: REPAIR_SUPPORT_PROMPT,
+      system_prompt: REPAIR_SUPPORT_PROMPT + memoryBlock,
       ...(request.history?.length ? { history: request.history } : {}),
     };
 
@@ -105,6 +127,25 @@ const repairChatProvider: Provider<RepairChatRequest, RepairChatResponse> = {
     const response = (result as { ok: boolean }).ok
       ? (wfValue?.result ?? wfValue?.response ?? "抱歉，我没有理解您的意思。")
       : "抱歉，智能助理暂时无法响应，请稍后重试。";
+
+    // 记忆沉淀 (尽力而为): 把本次报修交互存入 TiMEM, 下次同类问题可召回
+    if ((result as { ok: boolean }).ok) {
+      try {
+        const w = await ctx.call(
+          { id: "@cognitive/timem-memory-write", versionRange: "^1.0.0" },
+          {
+            content: `报修对话 (${new Date().toISOString().slice(0, 10)}): 用户描述「${request.user_input.slice(0, 150)}」; 客服答复要点: ${response.slice(0, 200)}`,
+            user_id: memUserId,
+            agent_id: "repair-chat",
+          },
+        );
+        const wv = (w as { value?: { ok?: boolean; error?: string } }).value;
+        if (wv?.ok) console.log(`[repair-mem] saved exchange for ${memUserId}`);
+        else console.log(`[repair-mem] save failed: ${wv?.error ?? "unknown"}`);
+      } catch (e) {
+        console.log(`[repair-mem] save skipped: ${String((e as Error)?.message ?? e)}`);
+      }
+    }
 
     return ok({
       response,

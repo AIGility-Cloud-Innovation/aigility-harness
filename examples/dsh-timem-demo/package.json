@@ -10,13 +10,13 @@
     "start": "tsx src/index.ts"
   },
   "dependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/cordis": "^4.0.2",
     "@timem/dsh-plugin-timem": "git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git"
   },
   "devDependencies": {
-    "typescript": "^5.5.0",
-    "vitest": "^2.0.0",
+    "@types/node": "^20.14.0",
     "tsx": "^4.19.0",
-    "@types/node": "^20.14.0"
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
   }
 }

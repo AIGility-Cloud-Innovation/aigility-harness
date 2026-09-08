@@ -1346,5 +1346,16 @@ export async function initAppBackend(): Promise<void> {
      ON CONFLICT (name) DO NOTHING`,
     [JSON.stringify({ apiKey: "", baseUrl: "http://127.0.0.1:8001", defaultDomain: "appbase" })],
   );
+  // DSH 插件配置 → 认知能力环境变量桥: timem 的 apiKey/baseUrl 存在 dsh_plugins 表,
+  // 未显式设置环境变量时灌入, 让 @cognitive/timem-memory 直接可用
+  // (必须在内核 bootstrap 前执行 —— 本函数的调用时机即满足)。
+  // 注意: 管理页改配置后需重启服务才能刷新到这里。
+  try {
+    const { rows } = await pool.query("SELECT config FROM dsh_plugins WHERE name = 'timem'");
+    const cfg = (rows[0]?.config ?? {}) as Record<string, unknown>;
+    if (!process.env.TIMEM_API_KEY && cfg.apiKey) process.env.TIMEM_API_KEY = String(cfg.apiKey);
+    if (!process.env.TIMEM_BASE_URL && cfg.baseUrl) process.env.TIMEM_BASE_URL = String(cfg.baseUrl);
+    if (!process.env.TIMEM_DEFAULT_DOMAIN && cfg.defaultDomain) process.env.TIMEM_DEFAULT_DOMAIN = String(cfg.defaultDomain);
+  } catch { /* 无 timem 行不影响启动 */ }
   console.log(`AppBase 后端已就绪 (PG ${PG_CONFIG.host}:${PG_CONFIG.port}/${PG_CONFIG.database})`);
 }

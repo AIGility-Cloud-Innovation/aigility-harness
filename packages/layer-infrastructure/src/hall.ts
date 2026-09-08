@@ -193,6 +193,7 @@ async function handleChat(
     user_input: message,
     session_id: typeof body.session_id === "string" && body.session_id ? body.session_id : undefined,
     history: Array.isArray(body.history) ? body.history.slice(-20) : [],
+    ...(typeof body.user_key === "string" && body.user_key ? { user_key: body.user_key } : {}),
     ...(typeof body.driver === "string" && body.driver ? { driver: body.driver } : {}),
     ...(typeof body.mode === "string" && body.mode ? { mode: body.mode } : {}),
     ...(typeof body.app === "string" && body.app ? { cwd: body.app } : {}),

@@ -24,6 +24,13 @@ import type {
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { TimemClient } from "@timem/dsh-plugin-timem";
+import {
+  timemMemoryService,
+  timemMemoryWriteService,
+  createTimemMemoryProvider,
+  createTimemMemoryWriteProvider,
+} from "./timem-memory-provider.js";
 
 // ── LLM Inference 契约（类型下沉 core，此包只做 re-export 保持兼容）─
 export type {
@@ -272,9 +279,9 @@ const litellmProvider: Provider<LlmInferenceRequest, LlmInferenceResponse> = {
 export const manifest: PluginManifest = {
   name: "@cognitive/llm-inference",
   layer: LayerId.Cognitive,
-  description: "认知核心层：LLM 推理（stub + litellm）",
-  version: "0.2.0",
-  provides: [llmInferenceService],
+  description: "认知核心层：LLM 推理（stub + litellm）+ TiMEM 记忆检索/写入",
+  version: "0.3.0",
+  provides: [llmInferenceService, timemMemoryService, timemMemoryWriteService],
   consumes: [],
   preferredCarrier: CarrierKind.Thread,
 };
@@ -292,7 +299,14 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [litellmProvider, stubProvider]; // litellm 先注册 = resolve 优先选它
+    // timem 客户端按环境变量构造 (装配方须在 bootstrap 前注入 TIMEM_API_KEY/BASE_URL,
+    // appbase 在 initAppBackend 里从 dsh_plugins 表桥接); 未配置 key 时构造不报错,
+    // 调用期失败由 provider 内部捕获并以 ok:false 降级
+    const timemClient = new TimemClient({
+      apiKey: process.env.TIMEM_API_KEY ?? "",
+      baseUrl: process.env.TIMEM_BASE_URL,
+    });
+    return [litellmProvider, stubProvider, createTimemMemoryProvider(timemClient), createTimemMemoryWriteProvider(timemClient)]; // litellm 先注册 = resolve 优先选它
   },
   getState(): PluginState {
     return pluginState;
