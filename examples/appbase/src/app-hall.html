@@ -107,6 +107,7 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
     <p>AI 生成的网页应用都住在这里 —— 打开即用，账号与 LLM 配置统一管理</p>
     <div class="accbar">
       <span class="who" id="whoami"></span>
+      <button id="tkBadge" onclick="openRoleChat('repair'); setTimeout(function(){ if (document.getElementById('ticketPanel').style.display !== 'block') toggleTicketPanel(); }, 150)" style="display:none"></button>
       <button onclick="logout()">退出登录</button>
     </div>
   </div>
@@ -229,6 +230,21 @@ function enterHall() {
   document.getElementById('shellWrap').style.display = '';
   document.getElementById('whoami').textContent = userEmail + (isAdmin ? ' · 管理员' : '');
   loadApps();
+  refreshTicketBadge();
+  setInterval(refreshTicketBadge, 60 * 1000); // 工单角标每分钟轮询
+}
+// 工单角标: 管理员=待处理工单数; 普通用户=自己待处理的工单数 (都有才显示)
+function refreshTicketBadge() {
+  fetchJSON('/app/tickets', { headers: authHeaders() }).then(function(d) {
+    var open = (d.tickets||[]).filter(function(t){ return t.status !== 'resolved'; }).length;
+    var b = document.getElementById('tkBadge');
+    if (open > 0) {
+      b.textContent = (d.isAdmin ? '🔧 待处理工单 ' : '🔧 我的工单 ') + open;
+      b.style.display = '';
+    } else {
+      b.style.display = 'none';
+    }
+  }).catch(function() {});
 }
 function doLogin(register) {
   var email = document.getElementById('lgEmail').value.trim();
@@ -279,7 +295,7 @@ function loadApps() {
     // 工具/管理卡 (仅管理员)
     if (isAdmin) {
       html += workbenchCardHtml('codex', '🪶', '网页应用生成器', '描述需求，生成/修改 HTML 应用');
-      html += workbenchCardHtml('coder', '🎓', '编码教练', '教学模式：讲解架构与用法，不修改代码');
+      html += workbenchCardHtml('coder', '🎓', '编码教练', '分步引导你设计案例应用，产出完整提示词（不实际生成）');
       html += '<div class="app-card" onclick="location.href=\'/admin/users\'">'
         + '<div class="icon">👥</div><div class="nm">用户管理</div>'
         + '<div class="ds">管理全部账号：管理员身份 / 密码重置 / 成员关系 / 删除</div>'
@@ -502,7 +518,7 @@ function loadTickets() {
         + (d.isAdmin ? ' · ' + esc(t.owner_email || '') : '') + '</div>'
         + (t.solution ? '<div class="sub" style="margin-top:3px">💡 ' + esc(t.solution).slice(0, 120) + (t.solution.length > 120 ? '…' : '') + '</div>' : '')
         + '<div class="tops">'
-        + '<button class="t-assist" onclick="assistTicket(\'' + t.id + '\')">🛠 生成器协助</button>'
+        + (d.isAdmin ? '<button class="t-assist" onclick="assistTicket(\'' + t.id + '\')">🛠 生成器协助</button>' : '')
         + (t.status === 'resolved'
             ? '<button class="t-reopen" onclick="setTicketStatus(\'' + t.id + '\',\'open\')">重新打开</button>'
             : '<button class="t-resolve" onclick="setTicketStatus(\'' + t.id + '\',\'resolved\')">✓ 标记已解决</button>')

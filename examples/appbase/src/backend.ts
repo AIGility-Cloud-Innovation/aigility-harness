@@ -1004,6 +1004,19 @@ export async function appBackendHandler(
       const tableName = decodeURIComponent(dataMatch[1]);
       const rowId = dataMatch[2] ? decodeURIComponent(dataMatch[2]) : null;
 
+      // 双账号统一: 应用账号 (appacc:) 读写的数据统一挂到该应用 owner 名下,
+      // 避免不同应用账号/主账号各存一份导致数据分裂 (2026-09-08 核查确认过分裂, 已迁移存量)。
+      let dataOwner = userId;
+      if (userId.startsWith("appacc:")) {
+        const { rows: acc } = await pool.query(
+          `SELECT ow.owner_id FROM app_accounts a
+           LEFT JOIN apps ow ON ow.id = a.app_id
+           WHERE a.id = $1`,
+          [userId.slice("appacc:".length)],
+        );
+        if (acc[0]?.owner_id) dataOwner = acc[0].owner_id;
+      }
+
       // 自动建表 (app_tables) + 数据行 (app_rows) 沿用现有结构
       if (method === "GET" && !rowId) {
         const { rows } = await pool.query(
@@ -1011,7 +1024,7 @@ export async function appBackendHandler(
            FROM app_rows r JOIN app_tables t ON r.table_id = t.id
            WHERE t.owner_id = $1 AND t.table_name = $2
            ORDER BY r.created_at DESC`,
-          [userId, tableName],
+          [dataOwner, tableName],
         );
         return json(res, 200, { rows });
       }
@@ -1022,13 +1035,13 @@ export async function appBackendHandler(
         let tableId: string;
         const { rows: tRows } = await pool.query(
           "SELECT id FROM app_tables WHERE owner_id = $1 AND table_name = $2",
-          [userId, tableName],
+          [dataOwner, tableName],
         );
         if (tRows.length === 0) {
           tableId = randomUUID();
           await pool.query(
             "INSERT INTO app_tables (id, owner_id, table_name) VALUES ($1, $2, $3)",
-            [tableId, userId, tableName],
+            [tableId, dataOwner, tableName],
           );
         } else {
           tableId = tRows[0].id;
@@ -1036,7 +1049,7 @@ export async function appBackendHandler(
         const id = randomUUID();
         await pool.query(
           "INSERT INTO app_rows (id, table_id, owner_id, data) VALUES ($1, $2, $3, $4)",
-          [id, tableId, userId, JSON.stringify(body.data ?? {})],
+          [id, tableId, dataOwner, JSON.stringify(body.data ?? {})],
         );
         return json(res, 201, { id });
       }
@@ -1048,7 +1061,7 @@ export async function appBackendHandler(
             `UPDATE app_rows r SET data = $3, updated_at = now()
              FROM app_tables t
              WHERE r.id = $1 AND r.table_id = t.id AND t.owner_id = $2 AND t.table_name = $4`,
-            [rowId, userId, JSON.stringify(body.data ?? {}), tableName],
+            [rowId, dataOwner, JSON.stringify(body.data ?? {}), tableName],
           );
           if (rowCount === 0) return json(res, 404, { error: "数据不存在" });
           return json(res, 200, { ok: true });
@@ -1057,7 +1070,7 @@ export async function appBackendHandler(
           const { rowCount } = await pool.query(
             `DELETE FROM app_rows r USING app_tables t
              WHERE r.id = $1 AND r.table_id = t.id AND t.owner_id = $2 AND t.table_name = $3`,
-            [rowId, userId, tableName],
+            [rowId, dataOwner, tableName],
           );
           if (rowCount === 0) return json(res, 404, { error: "数据不存在" });
           return json(res, 200, { ok: true });
