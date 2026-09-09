@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>aigility-harness · 完整架构图</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --card:#1c2333; --line:#2d3748;
+    --ink:#e6edf3; --sub:#8b949e; --brand:#58a6ff; --green:#3fb950;
+    --orange:#d29922; --purple:#bc8cff; --pink:#ff7b72; --teal:#39c5cf;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:"Microsoft YaHei","Segoe UI",system-ui,sans-serif;padding:34px 40px 60px;font-size:13px}
+  h1{font-size:22px;letter-spacing:.5px}
+  h1 small{font-size:12px;color:var(--sub);font-weight:400;margin-left:12px}
+  .sub{color:var(--sub);margin:6px 0 26px}
+  .band{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:0 auto;max-width:1240px}
+  .band h2{font-size:13px;color:var(--brand);margin-bottom:10px;letter-spacing:1px}
+  .band h2 .tag{font-size:11px;color:var(--sub);font-weight:400;margin-left:8px}
+  .cards{display:flex;flex-wrap:wrap;gap:10px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;flex:1;min-width:150px}
+  .card b{display:block;font-size:12.5px;margin-bottom:4px}
+  .card span{color:var(--sub);font-size:11px;line-height:1.5;display:block}
+  .card.hl{border-color:var(--brand);box-shadow:0 0 0 1px rgba(88,166,255,.25)}
+  .arrow{ text-align:center;color:var(--sub);font-size:15px;line-height:1;padding:7px 0;max-width:1240px;margin:0 auto}
+  .arrow small{font-size:10.5px;margin-left:8px;color:#58708a}
+  .gap{height:14px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .chip{border-radius:20px;padding:3px 10px;font-size:11px;border:1px solid var(--line);background:#131a2a}
+  .chip.qa{border-color:#ff7b72;color:#ff9b93}.chip.review{border-color:#d29922;color:#e3b341}
+  .chip.draft{border-color:#3fb950;color:#7ee787}.chip.kb{border-color:#39c5cf;color:#7de3ea}
+  .chip.insight{border-color:#bc8cff;color:#d2b9ff}
+  .legend{display:flex;gap:14px;max-width:1240px;margin:18px auto 0;color:var(--sub);font-size:11px;flex-wrap:wrap}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  table{width:100%;border-collapse:collapse;font-size:11px;margin-top:6px}
+  td,th{border:1px solid var(--line);padding:4px 8px;text-align:left;color:var(--ink)}
+  th{color:var(--sub);background:#131a2a}
+</style>
+</head>
+<body>
+
+<h1>aigility-harness · 完整架构图 <small>五域插件架构 + 制度流程管理智能体垂直切片 · 2026-09</small></h1>
+<p class="sub">域号 = 自底向上的装配/依赖序（OSI 式）；运行时调用经 Capability Seam 扁平化：D3→D4、D4→D2/D5 工具、外设→主动触发 D4——域号不限制调用方向</p>
+
+<!-- 外部 -->
+<div class="band" style="max-width:1240px">
+  <h2>外部依赖 / 用户</h2>
+  <div class="cards">
+    <div class="card"><b>👤 用户</b><span>浏览器: hall(:3419) / /dsh 管理页 / workbench / policy-agent(:3430)<br>飞书 / 企业微信 Bot</span></div>
+    <div class="card"><b>🧠 LLM 上游</b><span>LiteLLM 网关(:48724)<br>或 bigmodel 直连(LLM_PROVIDER=bigmodel)</span></div>
+    <div class="card"><b>☁️ TiMEM Cloud</b><span>长期记忆 / 经验规则<br>@timem/dsh-plugin-timem (Gitea 私仓)</span></div>
+    <div class="card"><b>🐘 PostgreSQL (appbase)</b><span>users / apps / dsh_plugins / 审计 / 工单</span></div>
+  </div>
+</div>
+<div class="arrow">▼ Seam 调用（HTTP/WS · fetch · JSON-RPC）<small>入口见 L5/L1</small></div>
+
+<!-- D5 工具与外设 -->
+<div class="band">
+  <h2>D5 行动执行域 &nbsp;<span class="tag">工具(被调) 与 外设(主动触发)</span></h2>
+  <div class="cards">
+    <div class="card"><b>text-to-speech</b><span>msedge-tts · 由 D3/D4 经 ctx.call 调用</span></div>
+    <div class="card"><b>tool-execution（占位）</b><span>通用工具执行 · 二期: doc-parse / docx 批注等制度智能体工具入驻此域</span></div>
+    <div class="card"><b>外设（主动触发源）</b><span>定时任务 · 消息推送 · watcher · 自带事件循环主动发起 D4 编排（现状由 D1 各 ingress 承担触发）</span></div>
+  </div>
+  <span style="color:#8b949e;font-size:11px;display:block;margin-top:8px">调用边: 编排工作流节点(capability_node) / LLM function calling → 工具；外设 → 主动触发编排<br>⚠ 语义张力: 被调工具按「只依赖更小编号」应 &lt; D4；现行 LAYER_DESCRIPTORS 中 Action.dependsOn=[Infra, Orchestration]（LayerId/layer-* 为代码保留命名, 对应域见 README 3.1） 为下游外化语义, 运行时无影响（Seam 扁平）, 待工具类能力增多后一次性调整</span>
+</div>
+<div class="arrow">▼</div>
+
+<!-- D3 -->
+<div class="band">
+  <h2>D3 角色人格域 &nbsp;<span class="tag">构建主体形象, 委托 L4</span></h2>
+  <div class="cards">
+    <div class="card hl"><b>policy-chat 制度流程管理智能体</b><span>意图路由(15模块) · 制度定位 · TiMEM 召回 · 闲聊兜底 workflow-engine</span></div>
+    <div class="card"><b>编码教练 / codex-chat</b><span>教学讲解 · 编码代理驱动(zcode/codex/claude)</span></div>
+    <div class="card"><b>报修客服 repair-chat</b><span>工单受理 · TiMEM 记忆</span></div>
+    <div class="card"><b>sales / advisory / harness-guide / timem-support …</b><span>各业务角色形象 · speech-to-text（vosk/whisper，STT 归属本域）</span></div>
+  </div>
+</div>
+<div class="arrow">▼ ctx.call(ref, request)</div>
+
+<!-- D4 -->
+<div class="band">
+  <h2>D4 编排规划域 &nbsp;<span class="tag">决定调什么工具、走什么流程</span></h2>
+  <div class="cards">
+    <div class="card hl" style="flex:2.2;min-width:340px">
+      <b>policy-review · 审查编排（13 模块, 规则打底 + LLM 增强 + 全量降级）</b>
+      <div class="chips">
+        <span class="chip qa">13 智能问答(事实/条件/专题)</span>
+        <span class="chip review">1 思维导图</span><span class="chip review">7 内容概述(两级比对)</span>
+        <span class="chip review">9 规范性检查(五层)</span><span class="chip review">10 合规性审查(三要素)</span>
+        <span class="chip review">11 一致性审查</span><span class="chip review">12 审查分层(四级)</span>
+        <span class="chip draft">4 制度起草</span><span class="chip draft">5 流程图(抽取/渲染解耦)</span>
+        <span class="chip draft">6 控制文档 v0.1</span><span class="chip draft">8 业务逻辑(五查)</span>
+        <span class="chip kb">3 上位变动提醒(三情形)</span><span class="chip kb">14 库更新(经 policy-kb)</span>
+        <span class="chip insight">15 数据沉淀·意见书初稿</span>
+      </div>
+      <span style="margin-top:6px">每次运行自动落审查记录 → 模块15 的数据来源</span>
+    </div>
+    <div class="card"><b>workflow-engine</b><span>TS stub, py-bridge 可热切换 LangGraph(YAML)</span></div>
+    <div class="card"><b>guided-design</b><span>多阶段引导式设计(编码教练用)</span></div>
+    <div class="card"><b>codex / zcode / claude agent</b><span>编码代理 · 快照备份回滚</span></div>
+    <div class="card"><b>timem-task</b><span>会话↔任务分类 → 外部 agentd(UDS)</span></div>
+  </div>
+</div>
+<div class="arrow">▼</div>
+
+<!-- D2 -->
+<div class="band">
+  <h2>D2 认知决策域 &nbsp;<span class="tag">纯规则能力 + LLM 推理 + 记忆</span></h2>
+  <div class="cards">
+    <div class="card"><b>llm-inference</b><span>litellm 网关 / bigmodel 直连 / stub 三 Provider, resolve 先注册者优先; 失败→各模块降级</span></div>
+    <div class="card hl"><b>policy-parser 条款解析器</b><span>第X章/节/条/（一）/1. 锚点切片 · 管理要素 · 引用识别 · 异常队列 · 条款树 diff</span></div>
+    <div class="card hl"><b>policy-kb 知识库台账</b><span>统一字段入库 · 版本归档 · 效力两规则 · 检索/词族 · 统计缺口三规则 · 依据小库 · 意见语料 · JSON 快照</span></div>
+    <div class="card"><b>timem-memory / write</b><span>尽力而为召回与沉淀, env 指纹热重建</span></div>
+  </div>
+</div>
+<div class="arrow">▼</div>
+
+<!-- D1 -->
+<div class="band">
+  <h2>D1 底座兼容域 &nbsp;<span class="tag">内核无关: 一切皆是插件</span></h2>
+  <div class="cards">
+    <div class="card"><b>kernel-dsh (cordis 4.0)</b><span>DeepSeek Harness 内核适配: SeamRegistry · 载体(线程/子进程/守护/网络服务) · 事件总线 · 可逆副作用</span></div>
+    <div class="card"><b>InMemoryKernelAdapter</b><span>原型内核(policy-agent / appbase 装配用) · bootstrap 按层拓扑排序</span></div>
+    <div class="card hl"><b>py-bridge</b><span>声明式 Python 插件 · JSON-RPC over stdio · 反向 call_ts_capability<br>→ aigility Python SDK(LangGraph/RAG, 二期: doc-parse / docx 批注)</span></div>
+    <div class="card"><b>config / logging / audit / rate-limit</b><span>基建四件套 · config/default.json(LLM 网关兜底)</span></div>
+    <div class="card" style="flex-basis:100%"><b>ingress 边缘入口（代码归属本域 layer-infrastructure）</b><span>hall 多角色大厅(:3419) · http-ingress AI 网关(:3418, OpenAI 兼容/SSE/Bearer) · feishu(Lark WS 长连接) · wecom(企微 aibot) —— AppID→persona 路由；policy-agent(:3430) 为示例装配自有 server, 不属五域任一域</span></div>
+  </div>
+</div>
+
+<div class="gap"></div>
+
+<!-- 数据与种子 -->
+<div class="band">
+  <h2>数据与语料 &nbsp;<span class="tag">POC 口径: 合成种子 + 真实审查语料</span></h2>
+  <div class="grid2">
+    <div class="card"><b>种子制度(合成, 可演示全部模块)</b>
+      <table><tr><th>编号</th><th>名称</th><th>演示点</th></tr>
+        <tr><td>JT-ZB-2024-001 v1/v2</td><td>招标采购管理办法</td><td>两级版本比对</td></tr>
+        <tr><td>JT-GY-2024-002</td><td>供应商管理办法</td><td>跨制度对撞</td></tr>
+        <tr><td>JT-SJ-2023-003</td><td>数据安全实施细则</td><td>依据并列/审批主体</td></tr>
+        <tr><td>JT-TAN-2024-004</td><td>碳排放权交易管理办法</td><td>时限无起算</td></tr></table>
+    </div>
+    <div class="card"><b>真实语料(来自审核样例)</b>
+      <span>· 高频依据小库 10 条: 反垄断法§22 / 碳排放条例§7,11 / 数据安全法§35… 原文待补录不编造<br>
+      · 审查意见语料 15 条(64 条全量的代表性子集): 四级口径反推 + 采纳三态判例<br>
+      · 定性映射: 职能管理+公司具体规章 → 业务分管领导审议批准</span>
+    </div>
+  </div>
+</div>
+
+<div class="legend">
+  <span><i style="background:#58a6ff"></i>蓝框 = 本次新增(制度流程智能体)</span>
+  <span><i class="qa" style="border-radius:50%"></i>红 = 首页</span>
+  <span><i class="review" style="border-radius:50%"></i>黄 = 审查</span>
+  <span><i class="draft" style="border-radius:50%"></i>绿 = 起草</span>
+  <span><i class="kb" style="border-radius:50%"></i>青 = 知识库</span>
+  <span><i class="insight" style="border-radius:50%"></i>紫 = 洞察</span>
+  <span>人机边界: 模型产出审查线索, 三级审查与签发权限在人</span>
+</div>
+
+</body>
+</html>
