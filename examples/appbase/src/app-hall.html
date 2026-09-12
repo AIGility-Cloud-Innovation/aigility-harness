@@ -108,52 +108,11 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
     <div class="accbar">
       <span class="who" id="whoami"></span>
       <button id="tkBadge" onclick="openRoleChat('repair'); setTimeout(function(){ if (document.getElementById('ticketPanel').style.display !== 'block') toggleTicketPanel(); }, 150)" style="display:none"></button>
-      <button id="llmCfgBtn" onclick="openLlmDrawer()" style="display:none">⚙ 设置</button>
+      <button id="llmCfgBtn" onclick="location.href='/admin'" style="display:none">⚙ 平台设置</button>
       <button onclick="logout()">退出登录</button>
     </div>
   </div>
   <div class="grid" id="grid"></div>
-</div>
-
-<!-- 全局 LLM 配置抽屉 (仅管理员) -->
-<div class="drawer" id="llmDrawer">
-  <div class="panel">
-    <div class="phead"><b>🌐 全局 LLM 配置</b><button class="btn-x" onclick="closeLlmDrawer()">✕</button></div>
-    <div class="pbody">
-      <div class="sec">
-        <h3>已存平台</h3>
-        <div class="sh">可保存多个平台的 Key，点「启用」即时切换（热生效，无需重启）。Key 只存服务端，页面只显示掩码；点平台名可载入编辑。</div>
-        <div id="llmPlatList"><div class="sub" style="font-size:12px;color:var(--ink2)">加载中…</div></div>
-      </div>
-      <div class="sec">
-        <h3>添加 / 编辑平台</h3>
-        <div style="display:flex;gap:8px;margin-bottom:8px">
-          <select class="minput" id="llmPreset" style="margin:0" onchange="applyLlmPreset()">
-            <option value="">— 选择预设自动填 URL —</option>
-            <option value="智谱">智谱 (GLM)</option>
-            <option value="DeepSeek">DeepSeek</option>
-            <option value="Kimi">Kimi (月之暗面)</option>
-            <option value="OpenAI">OpenAI</option>
-            <option value="Ollama">Ollama (本机)</option>
-            <option value="自定义">自定义</option>
-          </select>
-        </div>
-        <input class="minput" id="gpModel" list="gpModelOptions" placeholder="默认模型, 如 glm-4.6" style="margin:0">
-        <datalist id="gpModelOptions"></datalist>
-        <div id="gpIdentity" style="font-size:12px;color:var(--ink2);margin-top:6px"></div>
-        <input class="minput" id="gpUrl" placeholder="URL, 如 https://open.bigmodel.cn/api/paas/v4" style="margin-top:8px" oninput="updateGpIdentity()">
-        <input class="minput" id="gpKey" placeholder="API Key（留空或 •••• 开头 = 不修改已保存的）" style="margin-top:8px">
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
-          <button class="mbtn g" onclick="saveLlmGlobal(true)">保存并启用</button>
-          <button class="mbtn" onclick="saveLlmGlobal(false)">仅保存</button>
-          <button class="mbtn" onclick="testLlmGlobal()">🔌 测试连接</button>
-          <button class="mbtn" onclick="fetchGlobalModels()">⟳ 获取模型列表</button>
-          <button class="mbtn" style="background:var(--rose);color:#fff" onclick="deleteLlmGlobal()">删除</button>
-        </div>
-        <div id="llmGlobalMsg" style="font-size:12px;color:var(--ink2);margin-top:8px"></div>
-      </div>
-    </div>
-  </div>
 </div>
 
 <!-- 管理抽屉 -->
@@ -424,119 +383,7 @@ function openMg(enc) {
 function closeMg() { document.getElementById('mgDrawer').classList.remove('show'); }
 
 // ── 全局 LLM 配置 (仅管理员) ──
-var LLM_PRESETS = {
-  '智谱': { url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4.6' },
-  'DeepSeek': { url: 'https://api.deepseek.com', model: 'deepseek-chat' },
-  'Kimi': { url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
-  'OpenAI': { url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
-  'Ollama': { url: 'http://127.0.0.1:11434/v1', model: '' },
-  '自定义': { url: '', model: '' }
-};
-var llmPlatCache = [];
-function gpPlatform() {
-  var preset = document.getElementById('llmPreset').value;
-  if (preset && preset !== '自定义') return preset;
-  try { return new URL(document.getElementById('gpUrl').value.trim()).hostname || '自定义'; }
-  catch (e) { return '自定义'; }
-}
-function updateGpIdentity() {
-  var el = document.getElementById('gpIdentity');
-  if (el) el.textContent = '将保存为平台: ' + gpPlatform();
-}
-function applyLlmPreset() {
-  var name = document.getElementById('llmPreset').value;
-  var p = LLM_PRESETS[name];
-  if (!p) { updateGpIdentity(); return; }
-  // 已存过该平台 → 载入其保存的 url/model
-  var saved = llmPlatCache.find(function(x) { return x.platform === name; });
-  if (saved) {
-    document.getElementById('gpUrl').value = saved.base_url || p.url;
-    document.getElementById('gpModel').value = saved.model || p.model || '';
-  } else {
-    if (p.url) document.getElementById('gpUrl').value = p.url;
-    if (p.model) document.getElementById('gpModel').value = p.model;
-  }
-  updateGpIdentity();
-}
-function openLlmDrawer() { document.getElementById('llmDrawer').classList.add('show'); loadLlmGlobal(); }
-function closeLlmDrawer() { document.getElementById('llmDrawer').classList.remove('show'); }
-function setLlmMsg(t) { document.getElementById('llmGlobalMsg').textContent = t; }
-function loadLlmGlobal() {
-  fetchJSON('/app/hall/llm-global', { headers: jheaders() }).then(function(d) {
-    llmPlatCache = d.platforms || [];
-    document.getElementById('llmPlatList').innerHTML = (d.platforms || []).map(function(p) {
-      return '<div class="rowline" style="justify-content:space-between;align-items:center;margin-bottom:6px">'
-        + '<span><b style="cursor:pointer" data-plat="' + p.platform + '" onclick="editLlmGlobal(this.dataset.plat)">' + (p.is_active ? '✅ ' : '⚪ ') + p.platform + '</b>'
-        + '<span style="color:var(--ink2);font-size:12px">　' + (p.model || '(无模型)') + '　' + (p.key_masked || '(无 Key)') + '</span></span>'
-        + '<span>' + (p.is_active ? '<span style="font-size:12px;color:var(--green)">使用中</span>' : '<button class="mbtn g" style="padding:2px 10px" data-plat="' + p.platform + '" onclick="activateLlmGlobal(this.dataset.plat)">启用</button>') + '</span>'
-        + '</div>';
-    }).join('') || '<div class="sub" style="font-size:12px;color:var(--ink2)">还没有平台，在下方添加一个</div>';
-  }).catch(function(e) { setLlmMsg('✗ 加载失败: ' + e.message); });
-}
-function editLlmGlobal(platform) {
-  fetchJSON('/app/hall/llm-global', { headers: jheaders() }).then(function(d) {
-    var p = (d.platforms || []).find(function(x) { return x.platform === platform; });
-    if (!p) return;
-    var known = Object.keys(LLM_PRESETS).indexOf(p.platform) >= 0 && p.platform !== '自定义';
-    document.getElementById('llmPreset').value = known ? p.platform : '自定义';
-    document.getElementById('gpUrl').value = p.base_url || '';
-    document.getElementById('gpModel').value = p.model || '';
-    document.getElementById('gpKey').value = '';
-    updateGpIdentity();
-    setLlmMsg('已载入「' + p.platform + '」，Key 留空则保持不变');
-  });
-}
-function gpRead() {
-  return {
-    platform: gpPlatform(),
-    base_url: document.getElementById('gpUrl').value.trim(),
-    model: document.getElementById('gpModel').value.trim(),
-    api_key: document.getElementById('gpKey').value.trim()
-  };
-}
-function saveLlmGlobal(activate) {
-  var b = gpRead();
-  if (!b.platform) { setLlmMsg('✗ 请填平台名'); return; }
-  b.activate = !!activate;
-  fetchJSON('/app/hall/llm-global', { method: 'PUT', headers: jheaders(), body: JSON.stringify(b) })
-    .then(function(d) {
-      setLlmMsg(d.ok ? (activate ? '✓ 已保存并启用（热生效）' : '✓ 已保存') : '✗ ' + (d.error || ''));
-      loadLlmGlobal();
-    })
-    .catch(function(e) { setLlmMsg('✗ ' + e.message); });
-}
-function fetchGlobalModels() {
-  var b = gpRead();
-  if (!b.base_url) { setLlmMsg('✗ 请先选预设或填 URL'); return; }
-  setLlmMsg('拉取模型列表中…');
-  fetchJSON('/app/hall/llm-global/models', { method: 'POST', headers: jheaders(), body: JSON.stringify(b) })
-    .then(function(d) {
-      var models = d.models || [];
-      document.getElementById('gpModelOptions').innerHTML =
-        models.map(function(m) { return '<option value="' + m + '">'; }).join('');
-      setLlmMsg(d.ok === false ? '✗ ' + (d.error || '拉取失败') : '✓ 获取到 ' + models.length + ' 个模型，点击模型输入框选择');
-    })
-    .catch(function(e) { setLlmMsg('✗ ' + e.message); });
-}
-function testLlmGlobal() {
-  var b = gpRead();
-  if (!b.base_url) { setLlmMsg('✗ 请先选预设或填 URL'); return; }
-  setLlmMsg('测试中…（Key 留空时用已保存的）');
-  fetchJSON('/app/hall/llm-global/test', { method: 'POST', headers: jheaders(), body: JSON.stringify(b) })
-    .then(function(d) { setLlmMsg(d.ok ? '✓ 连接成功，' + d.latency_ms + 'ms' : '✗ ' + (d.error || '失败')); })
-    .catch(function(e) { setLlmMsg('✗ ' + e.message); });
-}
-function activateLlmGlobal(platform) {
-  fetchJSON('/app/hall/llm-global/activate', { method: 'POST', headers: jheaders(), body: JSON.stringify({ platform: platform }) })
-    .then(function(d) { toast(d.ok ? '已启用 ' + platform + '（热生效）' : (d.error || '失败')); loadLlmGlobal(); })
-    .catch(function(e) { toast('✗ ' + e.message); });
-}
-function deleteLlmGlobal() {
-  var b = gpRead();
-  fetchJSON('/app/hall/llm-global/' + encodeURIComponent(b.platform), { method: 'DELETE', headers: jheaders() })
-    .then(function(d) { setLlmMsg(d.ok ? '✓ 已删除 ' + b.platform : '✗ ' + (d.error || '')); loadLlmGlobal(); })
-    .catch(function(e) { setLlmMsg('✗ ' + e.message); });
-}
+
 function jheaders() { return { 'Content-Type': 'application/json', Authorization: 'Bearer ' + mgToken }; }
 
 // ── 通用反馈 (内嵌浏览器可能禁用 alert/confirm/prompt, 一律用内联交互替代) ──
