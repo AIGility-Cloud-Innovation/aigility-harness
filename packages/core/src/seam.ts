@@ -41,6 +41,8 @@ export interface ServiceDefinition<TRequest = unknown, TResponse = unknown> {
   requestSchema?: Record<string, unknown>;
   /** JSON Schema for the response payload */
   responseSchema?: Record<string, unknown>;
+  /** 健康信息是否可对非管理员公开 (默认 false, 仅管理员可见) */
+  healthPublic?: boolean;
 }
 
 // ── Provider (the implementation) ────────────────────────────────
@@ -152,6 +154,13 @@ export interface SeamRegistry {
 
   /** List all registered providers for a given capability */
   listProviders(id: CapabilityId): Provider[];
+
+  /** 全局枚举全部已注册服务 (管理面板/调试用) */
+  listAllServices(): Array<{
+    service: ServiceDefinition;
+    providerName: string;
+    state: PluginState;
+  }>;
 
   /** Subscribe to registry events (register/unregister/rebind) */
   onEvent(callback: (event: SeamRegistryEvent) => void): () => void;

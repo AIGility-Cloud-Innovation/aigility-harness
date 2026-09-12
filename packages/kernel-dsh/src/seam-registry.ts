@@ -19,6 +19,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import type {
   CapabilityId,
   CapabilityRef,
+  PluginState,
   Result,
 } from "@aigility-harness/core";
 import type {
@@ -129,6 +130,14 @@ export class CordisSeamRegistry implements SeamRegistry {
   listProviders(id: CapabilityId): Provider[] {
     const names = this.byService.get(id) ?? [];
     return names.map((n) => this.byName.get(n)!.provider);
+  }
+
+  listAllServices(): Array<{ service: ServiceDefinition; providerName: string; state: PluginState }> {
+    const out: Array<{ service: ServiceDefinition; providerName: string; state: PluginState }> = [];
+    for (const entry of this.byName.values()) {
+      out.push({ service: entry.service, providerName: entry.provider.name, state: entry.provider.state });
+    }
+    return out;
   }
 
   onEvent(callback: (event: SeamRegistryEvent) => void): () => void {

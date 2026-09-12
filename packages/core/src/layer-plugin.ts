@@ -24,6 +24,23 @@ import type {
 // ── Plugin Manifest ──────────────────────────────────────────────
 
 /**
+ * 管理面板贡献点: 插件声明自己提供一个管理面板(壳页自动渲染为标签)。
+ * 端点实现可以由插件自带, 也可由装配(host)提供 —— 声明只描述挂载点。
+ */
+export interface AdminPanelContribution {
+  /** 面板唯一 id (壳页标签键) */
+  id: string;
+  /** 标签标题 */
+  title: string;
+  /** 图标 emoji */
+  icon: string;
+  /** 该面板的后端端点前缀 (壳按前缀转交) */
+  endpointPrefix: string;
+  /** 是否要求管理员 (默认 true) */
+  requiredAdmin?: boolean;
+}
+
+/**
  * Static metadata declared by every plugin.  This is read at load time
  * before any code executes, enabling the kernel to plan deployment
  * without instantiating plugins.
@@ -55,6 +72,9 @@ export interface PluginManifest {
    * Used for topological sort at boot.
    */
   dependsOn?: string[];
+
+  /** 管理面板贡献 (可选): 壳页按声明聚合渲染 */
+  adminPanels?: AdminPanelContribution[];
 }
 
 // ── Layer Plugin ─────────────────────────────────────────────────

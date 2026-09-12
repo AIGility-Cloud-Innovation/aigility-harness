@@ -92,6 +92,22 @@ class InMemorySeamRegistry implements SeamRegistry {
     return this.providersByService.get(id) ?? [];
   }
 
+  listAllServices(): Array<{ service: ServiceDefinition; providerName: string; state: PluginState }> {
+    const out: Array<{ service: ServiceDefinition; providerName: string; state: PluginState }> = [];
+    for (const [id, list] of this.providersByService) {
+      for (const p of list) {
+        // providersByService 只存了 service id; 定义从首个 provider 的 service 引用取
+        const svc = (p as unknown as { service?: ServiceDefinition }).service;
+        out.push({
+          service: svc ?? ({ id, version: "-", layer: LayerId.Infrastructure, description: "" } as ServiceDefinition),
+          providerName: p.name,
+          state: p.state,
+        });
+      }
+    }
+    return out;
+  }
+
   onEvent(callback: (event: SeamRegistryEvent) => void): () => void {
     this.listeners.add(callback);
     return () => {
