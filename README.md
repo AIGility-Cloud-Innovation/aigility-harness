@@ -26,13 +26,14 @@
 │╠══════════════════════════════════════════════════════════════════╣    │
 │║  ┌──────────────────────────────────────────────────────────────┐║    │
 │║  │D5 行动执行层 (layer-action) — 手脚                           │║    │
+│║  │   @action/codex-agent/zcode-agent/claude-agent 编码工人      │║    │
 │║  │   @action/text-to-speech · 工具执行 / 多渠道输出             │║    │
 │║  └──────────────────────────────────────────────────────────────┘║    │
 │║        │ 依赖 D4 + D1                                            ║    │
 │║        ▼                                                         ║    │
 │║  ┌──────────────────────────────────────────────────────────────┐║    │
 │║  │D4 编排规划层 (layer-orchestration) — 小脑                    │║    │
-│║  │   @orchestration/workflow-engine · codex-agent               │║    │
+│║  │   @orchestration/workflow-engine · 任务规划/引导设计          │║    │
 │║  │   timem-project-task(需求缓冲延时汇总) · guided-design       │║    │
 │║  └──────────────────────────────────────────────────────────────┘║    │
 │║        │ 依赖 D2 + D1（D3 与 D4 平级，互不依赖）                 ║    │
@@ -105,8 +106,8 @@ sequenceDiagram
 flowchart TB
     subgraph KERNEL["内核 kernel-dsh (DSH-Cordis) — 五域以插件形态运行其上"]
         direction TB
-        D5["D5 行动执行层 layer-action<br/>text-to-speech / 工具执行"]
-        D4["D4 编排规划层 layer-orchestration<br/>workflow-engine / codex-agent / timem-project-task / guided-design"]
+        D5["D5 行动执行层 layer-action<br/>codex/zcode/claude 编码代理工人 / text-to-speech / 工具执行"]
+        D4["D4 编排规划层 layer-orchestration<br/>workflow-engine / timem-project-task / guided-design"]
         D3["D3 角色人格层 layer-persona<br/>sales-chat / repair-chat / app-dev / coding-coach / harness-guide / timem-support"]
         D2["D2 认知算力层 layer-cognitive<br/>llm-inference / memory"]
         D1["D1 底座基础层 layer-infrastructure<br/>http-ingress / wecom-ingress / http-relay / protocol-adapter / PgBusBridge"]
@@ -291,6 +292,11 @@ D2 认知域只考虑三件事：**算力供应、稳定保障、给不同的算
 
 ## 七、快速开始
 
+> 📖 **详细启动与部署文档**（docs/ 目录，本节只列最简命令）：
+> [启动与部署指南.md](docs/启动与部署指南.md) —— 本机日常启动速查 + 端口/环境变量配置参考 + 从零部署踩坑与换机迁移。
+>
+> AppBase（推荐体验入口）日常启动：双击 `examples/appbase/start-appbase.cmd`，就绪后访问 <http://127.0.0.1:3419/hall>。
+
 ### 环境要求
 
 - **Node.js ≥ 20**
@@ -318,7 +324,9 @@ pnpm run test         # vitest 全量测试（9 包 120+ 例，含 kernel-dsh 42
 pnpm example:prototype
 ```
 
-原型模式：五域能力全部以 DSH 进程内插件运行，内存级 Provider，无需任何外部服务。演示流程：人格（文本输入）→ 认知（litellm/内存推理）→ 编排（任务规划 + codex-agent）→ 行动（TTS）→ 底座（配置/日志/协议适配）。
+原型模式：五域能力全部以 DSH 进程内插件运行，无需任何外部服务。演示流程：人格（文本输入）→ 认知（**stub 确定性推理，默认零依赖**；`LLM_PROVIDER=litellm/bigmodel` 可切真实推理）→ 编排（任务规划 + codex-agent）→ 行动（TTS）→ 底座（配置/日志/协议适配）。
+
+演示跑完后 **Web UI 默认常驻**（`http://127.0.0.1:3399/`，Ctrl+C 退出；`PROTO_DEMO_EXIT=1` 恢复"自测后退出"旧行为）。
 
 ### 开箱即用（最小 Web UI）
 
@@ -327,13 +335,13 @@ pnpm --filter prototype-mode start   # 或组合示例:
 pnpm --filter @aigility-harness/example-openai-gateway start
 ```
 
-起服务后浏览器打开 `http://localhost:<port>/`（或 `/ui`），即可与三个角色对话：
+起服务后浏览器打开 `http://localhost:<port>/`（或 `/ui`），即可与销售客服对话（单角色页，原型演示保持极简）：
 
-| 页签 | 端点 | 功能 |
-|------|------|------|
-| **销售客服** | `POST /api/chat` | 业务对话（销售客服角色 → 工作流回复） |
-| **插件安装助手** | `POST /api/plugin-helper` | 开箱引导安装：问"怎么加插件/RAG/记忆" → 真实扫描插件清单 → 返回接入指引 |
-| **网页应用开发员** | `POST /api/coder` | 编码对话（app-dev 角色 → codex-agent → 编码 CLI 真实干活） |
+| 端点 | 功能 |
+|------|------|
+| `POST /api/chat` | 业务对话（销售客服角色 → 工作流回复） |
+| `POST /api/plugin-helper` | 开箱引导安装：问"怎么加插件/RAG/记忆" → 真实扫描插件清单 → 返回接入指引（服务端仍开放，UI 未挂页签） |
+| `POST /api/coder` | 编码对话（app-dev 角色 → codex-agent → 编码 CLI 真实干活）（服务端仍开放，UI 未挂页签） |
 
 agent 路径→角色映射可配置（`agentRoutes`），未命中路径回退 `perceptionId`。
 
@@ -354,6 +362,8 @@ pnpm start
 
 内置角色：🎧 平台客服、🔧 应用报修客服（延时汇总建单）、🪶 网页应用开发员（zcode/codex/claude 驱动，生成单文件 HTML 应用）、🧩 插件助手、👨‍💻 编码教练。聊天历史云端持久化；LLM 配置多平台热切换。
 
+登录页右侧内嵌「🧪 原型演示（免登录）」卡片（即 `pnpm example:prototype` 常驻的最小 Web UI）：游客先试玩，UI 顶部提示条引导注册/登录进入应用大厅。
+
 ### 特色案例：企业微信 → Codex
 
 企业微信「智能机器人」原生接入——在企微群里 @机器人，即可驱动 codex 真实干活：
@@ -366,7 +376,7 @@ pnpm --filter wecom-coder start
 # 3. 企微 @机器人: 「帮我写个冒泡排序」 → codex 干活 → 群里回结果
 ```
 
-链路：企微 WebSocket 长连接（`@wecom/aibot-node-sdk`）→ `@infrastructure/wecom-ingress` → `@persona/app-dev` → `@orchestration/codex-agent` → 编码 CLI（经框架认知层供能）。支持流式"思考中…"占位与 Markdown 回复。
+链路：企微 WebSocket 长连接（`@wecom/aibot-node-sdk`）→ `@infrastructure/wecom-ingress` → `@persona/app-dev` → `@action/codex-agent` → 编码 CLI（经框架认知层供能）。支持流式"思考中…"占位与 Markdown 回复。
 
 ### 现有验证案例（均为可替换示例）
 
@@ -467,8 +477,8 @@ harness (TS)                          Python (子进程)
 |------|---------|-------------|------|
 | **业务持久化** | 普通表 | — | ✅ 既有 |
 | **消息总线** | `LISTEN/NOTIFY` + `event_log` 表（小信封避开 8KB 限制，seq 自增支持事件溯源） | `BusBridge` / `BusEnvelope` | ✅ `PgBusBridge` 已实现 |
-| **任务队列** | pgmq 扩展 或 `FOR UPDATE SKIP LOCKED` | `TaskQueue`（enqueue/dequeue/ack/nack/stats，租约式消费语义对齐 SQS/pgmq） | 🔶 契约就绪，实现后置 |
-| **向量检索** | pgvector（HNSW 索引） | `VectorStore`（upsert/search/remove/count，支持 metadata 过滤） | 🔶 契约就绪，实现后置 |
+| **任务队列** | `FOR UPDATE SKIP LOCKED`（无需扩展；装有 pgmq 时可按同契约换实现） | `TaskQueue`（enqueue/dequeue/ack/nack/stats，租约式消费语义对齐 SQS/pgmq） | ✅ `PgTaskQueue` 已实现 |
+| **向量检索** | pgvector（HNSW 索引） | `VectorStore`（upsert/search/remove/count，支持 metadata 过滤） | ✅ `PgVectorStore` 已实现 |
 
 **可更换原则**：三个契约（BusBridge / TaskQueue / VectorStore）全部"契约在 core、实现在域"——将来任何一职要换独立中间件（NATS / Redis Stream / Milvus），只动工厂一行，上层业务零改动。
 
@@ -481,7 +491,7 @@ harness (TS)                          Python (子进程)
 | **阶段 1**（✅ 已完成） | 原型闭环 | 五域能力 DSH 插件化，验证完整业务逻辑；kernel-dsh 35 测例 + codex-agent 规划闭环通过 |
 | **阶段 1.5**（✅ 已完成） | 跨语言桥接 | py-bridge 通用 Python 对接器，aigility ADK 端到端验证通过 |
 | **阶段 1.75**（✅ 已完成） | 开箱可用 | sales-chat/plugin-helper 角色 + plugin-install 引导工作流 + 最小 Web UI（`GET /` `/ui`）+ agent 路径→角色路由 |
-| **阶段 2**（🔶 桥与契约就绪） | 桥接层开发 | BusBridge 契约 + BusEnvelope 信封 + RemoteEventBus 跨进程事件桥 + `PgBusBridge` 实现（LISTEN/NOTIFY + event_log，✅）；`TaskQueue` / `VectorStore` 契约就绪（🔶 实现后置）；真实总线可更换（pgmq/pgvector/NATS/Milvus 按部署选定） |
+| **阶段 2**（✅ 已完成） | 桥接层开发 | BusBridge 契约 + BusEnvelope 信封 + RemoteEventBus 跨进程事件桥 + `PgBusBridge` 实现（LISTEN/NOTIFY + event_log）；`PgTaskQueue`（FOR UPDATE SKIP LOCKED）+ `PgVectorStore`（pgvector HNSW）；真实总线可更换（pgmq/pgvector/NATS/Milvus 按部署选定） |
 | **阶段 3**（⏳ 未实现） | 进程载体封装 | 守护进程管理、多载体统一抽象 |
 | **阶段 4**（⏳ 未实现） | 智能调度与自动替换 | 健康探测、指标采集、自动切换控制器 |
 | **阶段 5**（⏳ 未实现） | 生产加固 | 安全、鉴权、全链路追踪、状态迁移、熔断降级 |
@@ -500,13 +510,16 @@ aigility-harness/
 │   ├── kernel-dsh/                # DSH-Cordis 内核适配器（Seam Registry / Effect Manager / Carrier Manager）
 │   ├── layer-cognitive/           # D2 认知算力层（LLM 推理：stub + litellm + timem-memory-provider）
 │   ├── layer-persona/            # D3 角色人格层（sales-chat / repair-chat / app-dev / coding-coach / plugin-helper / advisory-chat / harness-guide / timem-support / speech-to-text）
-│   ├── layer-orchestration/       # D4 编排规划层（任务规划 + plugin-install + codex-agent/zcode-agent/claude-agent + timem-project-task 需求缓冲工作流 + guided-design）
-│   ├── layer-action/              # D5 行动执行层（TTS）
+│   ├── layer-orchestration/       # D4 编排规划层（任务规划 + plugin-install + timem-project-task 需求缓冲工作流 + guided-design）
+│   ├── layer-action/              # D5 行动执行层（编码代理工人 codex/zcode/claude + TTS + 沙箱快照）
 │   ├── layer-infrastructure/      # D1 底座基础层（config/logging/protocol-adapter/http-ingress/wecom-ingress/http-relay/PgBusBridge）
 │   │   └── src/
 │   │       ├── protocol-adapter.ts    # 协议翻译（Anthropic/OpenAI/Responses → 内部标准，类型取自 core 契约）
 │   │       ├── http-ingress.ts        # HTTP 唯一入口（dev/agent 双链路 + SSE 流式 + 最小 UI）
 │   │       ├── sse.ts                 # SSE 帧编码原子模块（传输无关）
+│   │       ├── pg-bus-bridge.ts       # 消息总线一职（LISTEN/NOTIFY + event_log 持久化）
+│   │       ├── pg-task-queue.ts       # 任务队列一职（FOR UPDATE SKIP LOCKED 租约式消费）
+│   │       ├── pg-vector-store.ts     # 向量检索一职（pgvector + HNSW, 三种度量）
 │   │       └── ui.ts                  # 最小 Web UI（单文件内嵌 HTML, GET / /ui）
 │   ├── py-bridge/                 # 跨语言桥接（独立包，只依赖 core）：Python 生态声明式接入
 │   │   ├── src/
@@ -533,6 +546,11 @@ aigility-harness/
 │   ├── e2e-aigility.py            # aigility Memory/RAG 端到端测试
 │   └── e2e-workflow.py            # aigility WorkflowEngine 端到端测试
 └── docs/
+    ├── 启动与部署指南.md             # 启动与部署总指南（日常启动速查 + 配置参考 + 部署踩坑与迁移）
+    ├── app-management-design.md      # 应用管理设计
+    ├── feishu-ingress-design.md      # 飞书入口设计
+    ├── policy-agent.md               # 策略 Agent 设计
+    ├── task-orchestration-workflow-design.md  # 任务编排工作流设计
     └── plugin-integration-design.md   # 插件接入设计文档 v0.2（历史草案，术语为当时的五层口径）
 ```
 
