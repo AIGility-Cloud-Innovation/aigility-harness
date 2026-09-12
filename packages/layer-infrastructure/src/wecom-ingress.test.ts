@@ -2,7 +2,7 @@
  * wecom-ingress 单测 — 企业微信智能机器人入口
  *
  * 验证:
- *   1. 服务定义归属 Infrastructure 层且 consumes @persona/coder
+ *   1. 服务定义归属 Infrastructure 层且 consumes @persona/app-dev
  *   2. 缺凭证时明确报错
  *   3. 收到文本消息 → 路由到角色 → 返回结果（mock SDK）
  *   4. health: 未连接时 healthy=false
@@ -23,10 +23,10 @@ function mockCtx(reply: unknown) {
 }
 
 describe("wecom-ingress", () => {
-  it("服务定义归属 Infrastructure 层，consumes @persona/coder", () => {
+  it("服务定义归属 Infrastructure 层，consumes @persona/app-dev", () => {
     expect(wecomIngressService.id).toBe("@infrastructure/wecom-ingress");
     expect(wecomIngressService.layer).toBe("infrastructure");
-    expect(wecomCoderRef.id).toBe("@persona/coder");
+    expect(wecomCoderRef.id).toBe("@persona/app-dev");
   });
 
   it("缺凭证时明确报错", async () => {

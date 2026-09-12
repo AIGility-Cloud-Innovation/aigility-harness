@@ -115,7 +115,7 @@ export const manifest: PluginManifest = {
   layer: LayerId.Infrastructure,
   description: "底座基础层：控制台日志 + 内存配置 + 协议适配 + 限流 + 审计",
   version: "0.3.0",
-  provides: [loggingService, configService, protocolAdapterService, rateLimitService, auditService],
+  provides: [loggingService, configService, protocolAdapterService, rateLimitService, auditService, httpRelayService],
   consumes: [llmInferenceRef],
   preferredCarrier: CarrierKind.Thread,
 };
@@ -133,7 +133,7 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [loggingProvider, configProvider, createProtocolAdapterProvider(), httpIngressProvider, hallProvider, rateLimitProvider, auditProvider];
+    return [loggingProvider, configProvider, createProtocolAdapterProvider(), httpIngressProvider, hallProvider, rateLimitProvider, auditProvider, httpRelayProvider];
   },
   getState(): PluginState {
     return pluginState;
@@ -157,12 +157,18 @@ export {
   httpIngressService,
   httpIngressProvider,
   stopHttpServer,
+  updateModelsUpstream,
 } from "./http-ingress.js";
 export type {
   HttpIngressRequest,
   HttpIngressResponse,
 } from "./http-ingress.js";
 import { httpIngressProvider, httpIngressService } from "./http-ingress.js";
+import { httpRelayProvider, httpRelayService } from "./http-relay.js";
+
+// 服务端 HTTP 转发能力 (具名目标, 防开放代理)
+export { httpRelayService, httpRelayProvider, relayTargets, relayManifest } from "./http-relay.js";
+export type { HttpRelayRequest, HttpRelayResponse } from "./http-relay.js";
 
 // SSE 帧编码原子模块（http-ingress 流式输出复用；Hono 等备件换装时同款 import）
 export {

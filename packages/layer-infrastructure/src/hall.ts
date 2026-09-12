@@ -7,7 +7,7 @@
  * 设计要点:
  *   - 提供 GET /hall (对话厅页面) + POST /hall/chat (多角色对话 API)
  *   - 角色可配置: 装配方传入 roles 映射 (路径→能力ID + 显示名 + 人设)
- *   - 内置默认四角色: codex-chat(创建者) / sales-chat / plugin-helper / coder
+ *   - 内置默认四角色: app-dev(开发员) / sales-chat / plugin-helper / coding-coach
  *   - 零业务知识: hall 只做「把消息路由到对应角色」的纯传输, 角色知识在 persona 层
  */
 
@@ -31,7 +31,7 @@ import { readFileSync } from "node:fs";
 // ── 服务定义 ─────────────────────────────────────────────────────
 
 export interface HallRole {
-  /** 能力 ID (如 @persona/codex-chat) */
+  /** 能力 ID (如 @persona/app-dev) */
   id: string;
   /** 显示名 (如 "Codex 助手") */
   name: string;
@@ -74,10 +74,10 @@ export const hallService: ServiceDefinition<HallRequest, HallResponse> = {
 // ── 默认角色 ─────────────────────────────────────────────────────
 
 const DEFAULT_ROLES: HallRole[] = [
-  { id: "@persona/codex-chat", name: "Codex 网页应用生成器", emoji: "🪶", system: "你是 Codex 网页应用生成器, 专注生成/修改网页应用。" },
+  { id: "@persona/app-dev", name: "网页应用开发员", emoji: "🪶", system: "你是网页应用开发员, 专注生成/修改网页应用。" },
   { id: "@persona/sales-chat", name: "销售客服", emoji: "💼", system: "你是销售客服, 热情专业解答产品咨询。" },
   { id: "@persona/plugin-helper", name: "插件助手", emoji: "🧩", system: "你是插件安装助手, 帮助用户了解插件安装。" },
-  { id: "@persona/coder", name: "编码助手", emoji: "👨💻", system: "你是资深编码助手, 擅长写出高质量代码。" },
+  { id: "@persona/coding-coach", name: "编码教练", emoji: "👨💻", system: "你是编码教练, 分步引导设计, 不直接改文件。" },
 ];
 
 // ── Provider 实现 ────────────────────────────────────────────────

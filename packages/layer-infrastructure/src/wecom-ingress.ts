@@ -8,13 +8,13 @@
  * 用法（特色案例: 企业微信里 @机器人 就能驱动 codex 干活）:
  *   1. 企微后台创建「智能机器人」，拿到 botId + secret
  *   2. 配 .env: WECOM_BOT_ID=... WECOM_BOT_SECRET=...
- *   3. 装配 plugin-helper... 角色@persona/coder → @orchestration/codex-agent → codex
+ *   3. 装配 plugin-helper... 角色@persona/app-dev → @orchestration/codex-agent → codex
  *
  * SDK: @wecom/aibot-node-sdk（企业微信官方 AI Bot SDK）
  *   wss://openws.work.weixin.qq.com 内置默认地址，自动认证/心跳/重连
  *
  * 设计:
- *   - 收到 message.text → 按 agentRoutes（默认 /@persona/coder）调角色
+ *   - 收到 message.text → 按 agentRoutes（默认 /@persona/app-dev）调角色
  *   - 复用角色的标准请求载荷 { user_input }，与 http-ingress agent 链路一致
  *   - 流式占位（"正在处理…"）→ 拿到最终结果 → replyStream 发回企微
  *   - 未认证/断开由 SDK 内部处理（指数退避重连）
@@ -43,7 +43,7 @@ import type { WsFrame, TextMessage } from "@wecom/aibot-node-sdk";
 
 /** 消费编码助手角色能力（编码对话链路） */
 export const wecomCoderRef: CapabilityRef = {
-  id: "@persona/coder",
+  id: "@persona/app-dev",
   versionRange: "^1.0.0",
 };
 
@@ -56,9 +56,9 @@ export interface WeComIngressRequest {
   secret?: string;
   /** 自定义 WebSocket 地址（默认 wss://openws.work.weixin.qq.com） */
   wsUrl?: string;
-  /** 消息 → 角色映射（默认 { "*": "@persona/coder" }，全部走编码助手） */
+  /** 消息 → 角色映射（默认 { "*": "@persona/app-dev" }，全部走网页应用开发员） */
   agentRoutes?: Record<string, string>;
-  /** 兜底角色（未命中 agentRoutes 时，默认 @persona/coder） */
+  /** 兜底角色（未命中 agentRoutes 时，默认 @persona/app-dev） */
   perceptionId?: string;
   /** 流式占位文案（"正在处理…"） */
   thinkingText?: string;
@@ -130,8 +130,8 @@ export const wecomIngressProvider: Provider<WeComIngressRequest, WeComIngressRes
       );
     }
 
-    const agentRoutes = request.agentRoutes ?? { "*": "@persona/coder" };
-    const perceptionId = request.perceptionId ?? "@persona/coder";
+    const agentRoutes = request.agentRoutes ?? { "*": "@persona/app-dev" };
+    const perceptionId = request.perceptionId ?? "@persona/app-dev";
     const thinkingText = request.thinkingText ?? "正在处理中，请稍候…";
 
     const client = new AiBot.WSClient({

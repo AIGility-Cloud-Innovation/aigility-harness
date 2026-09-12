@@ -104,7 +104,7 @@ export const pluginHelperRef: CapabilityRef = {
 
 /** 消费编码助手角色能力（编码对话链路） */
 export const coderRef: CapabilityRef = {
-  id: "@persona/coder",
+  id: "@persona/app-dev",
   versionRange: "^1.0.0",
 };
 
@@ -154,13 +154,21 @@ const DEFAULT_AGENT_PATHS = ["/api/chat", "/api/plugin-helper", "/api/coder"];
 const DEFAULT_AGENT_ROUTES: Record<string, string> = {
   "/api/chat": "@persona/sales-chat",
   "/api/plugin-helper": "@persona/plugin-helper",
-  "/api/coder": "@persona/coder",
+  "/api/coder": "@persona/app-dev",
 };
 
 // ── Provider 实现 ────────────────────────────────────────────────
 
 let server: Server | null = null;
 let activeCtx: SeamContext | null = null;
+
+/** LLM 上游(透传 /v1/models 等), 启动后可经 updateModelsUpstream 热更新 */
+let modelsUpstream: HttpIngressRequest["modelsUpstream"] | undefined = undefined;
+
+/** 运行时热更新 LLM 上游配置(全局 LLM 配置保存/切换时调用), 无需重启 */
+export function updateModelsUpstream(up: { url: string; key: string }): void {
+  modelsUpstream = up;
+}
 
 const httpIngressProvider: Provider<HttpIngressRequest, HttpIngressResponse> = {
   service: httpIngressService,
@@ -180,7 +188,7 @@ const httpIngressProvider: Provider<HttpIngressRequest, HttpIngressResponse> = {
     const bearerToken = request.bearerToken;
     const tokenVerifier = request.tokenVerifier;
     const usageReportUrl = request.usageReportUrl;
-    const modelsUpstream = request.modelsUpstream;
+    modelsUpstream = request.modelsUpstream;
 
     if (server) {
       server.close();
