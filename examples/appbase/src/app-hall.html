@@ -313,18 +313,10 @@ function loadApps() {
     // 服务/对话卡 (所有人可见)
     html += chatCardHtml({ key:'sales', icon:'🎧', name:'平台客服', ds:'解答 AppBase 系统的一切使用问题' });
     html += chatCardHtml({ key:'repair', icon:'🔧', name:'应用报修客服', ds:'报修：描述问题 → 汇总确认 → 记录工单 → 开发员协助' });
-    // 工具/管理卡 (仅管理员)
+    // 工具/管理卡 (仅管理员) — DSH 插件与用户管理已并入「⚙ 平台设置」(/admin)
     if (isAdmin) {
       html += workbenchCardHtml('codex', '🪶', '网页应用开发员', '描述需求，生成/修改 HTML 应用');
       html += workbenchCardHtml('coder', '🎓', '编码教练', '教学模式：讲解架构与用法，不修改代码');
-      html += '<div class="app-card" onclick="location.href=\'/dsh\'">'
-        + '<div class="icon">🧩</div><div class="nm">DSH 插件管理</div>'
-        + '<div class="ds">DeepSeek Harness 插件：注册 / 配置 (apikey) / 加载到运行时</div>'
-        + '<div class="ops"><button>打开 →</button></div></div>';
-      html += '<div class="app-card" onclick="location.href=\'/admin/users\'">'
-        + '<div class="icon">👥</div><div class="nm">用户管理</div>'
-        + '<div class="ds">管理全部账号：管理员身份 / 密码重置 / 成员关系 / 删除</div>'
-        + '<div class="ops"><button>打开 →</button></div></div>';
     }
     // 应用卡
     hallApps.forEach(function(a) {
