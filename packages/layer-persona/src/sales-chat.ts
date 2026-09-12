@@ -90,8 +90,19 @@ const APPBASE_SUPPORT_PROMPT = [
   '- 遇到五域架构/Seam 契约/插件开发/py-bridge 等框架机制问题: 不要尝试解释, 明确回复「这是框架内部实现话题, 我专门负责产品使用问题; 机制细节请查阅仓库 README 与 docs/ 目录」, 然后把话题引回产品使用。',
   '- 报修请找应用报修客服; 学做应用找编码教练; 改代码找网页应用开发员。',
   '',
+  '【顺带推荐(销售话术)】',
+  '铁律: 先解决问题再顺带; 每轮回复最多一句、放在末尾; 同一会话同一话术只说一次(检查 history, 已说过就换一条或跳过); 只说下面素材库里真实存在的功能, 不夸大不承诺。',
+  '素材:',
+  '- 破冰话术已由系统在第一轮回复末尾自动追加, 无需你再输出。',
+  '- 顺带安利(解决问题后按话题挑一条): 问 LLM 配置→「多平台 Key 可并存, 哪个平台有额度切哪个, 保存即生效。」; 问数据→「聊天历史云端保存, 换设备登录同账号就能接上。」; 问改代码→「AI 改动前自动快照, 改坏随时回滚, 放心试。」',
+  '- 交叉引导(本角色满足不了时, 带出路转介): 想改应用→找 🪶 开发员; 需求说不清→找 👨‍💻 编码教练分步引导; 用着有问题→找 🔧 报修客服(汇总成工单转开发员)。',
+  '- 好评邀请(用户表达满意/感谢/称赞如"谢谢/好用/解决了", 且本会话未说过): 「很高兴帮到你！如果 AppBase 用着顺手, 欢迎去 GitHub 给我们点个 Star ⭐, 是对项目最大的鼓励: https://github.com/AIGility-Cloud-Innovation/aigility-harness」',
+  '',
   '回答原则: 结论先行、具体可操作; 不知道的功能如实说, 不编造。',
 ].join("\n");
+
+/** 已送过破冰话术的会话 (上限 500, 简单淘汰) */
+const icebreakerSent = new Set<string>();
 
 const salesChatProvider: Provider<SalesChatRequest, SalesChatResponse> = {
   service: salesChatService,
@@ -104,6 +115,7 @@ const salesChatProvider: Provider<SalesChatRequest, SalesChatResponse> = {
     // 1. 角色形象: "我是平台客服"
     const agentName = "平台客服";
     const memUserId = request.user_key ?? request.customer_id ?? "anonymous";
+    const sessKey = `${memUserId}|${request.session_id ?? ctx.sessionId}`;
 
     // 2. 动态角色清单 (hall 注入): 手册里的角色描述是稳定的, 清单以实际注册为准
     let dynamicBlock = "";
@@ -148,7 +160,7 @@ const salesChatProvider: Provider<SalesChatRequest, SalesChatResponse> = {
     // 4. 由同一个角色形象反馈
     const wfValue = (result as { ok: boolean; value?: { result?: string; response?: string; degraded?: boolean } })
       .value;
-    const response = (result as { ok: boolean }).ok
+    let response = (result as { ok: boolean }).ok
       ? (wfValue?.result ?? wfValue?.response ?? "抱歉，我没有理解您的意思。")
       : "抱歉，智能助理暂时无法响应，请稍后重试。";
 
@@ -171,8 +183,21 @@ const salesChatProvider: Provider<SalesChatRequest, SalesChatResponse> = {
       }
     }
 
+    // 破冰由代码保证: 每会话仅第一轮追加一次(服务端记账, 不依赖前端 history)
+    if (!icebreakerSent.has(sessKey)) {
+      icebreakerSent.add(sessKey); // 本会话破冰机会用掉(即使本轮因 Star/已有话术跳过)
+      if (icebreakerSent.size > 500) {
+        const first = icebreakerSent.values().next().value;
+        if (first) icebreakerSent.delete(first);
+      }
+      if (!/AI 现场生成/.test(response) && !/Star/.test(response)) {
+        response += "\n\n💡 大厅里的应用都是 AI 现场生成的——想要一个还没有的应用？直接找 🪶 网页应用开发员描述就行。";
+      }
+    }
+    const finalResponse = response;
+
     return ok({
-      response,
+      response: finalResponse,
       agent_name: agentName,
       session_id: ctx.sessionId,
       trace_id: ctx.traceId,
