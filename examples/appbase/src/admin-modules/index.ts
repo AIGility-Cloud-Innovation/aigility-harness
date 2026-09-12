@@ -40,8 +40,8 @@ export function adminPanelList(): Array<{ id: string; title: string; icon: strin
 export async function adminDispatch(req: IncomingMessage, res: ServerResponse, path: string, method: string): Promise<boolean> {
   // 管理壳页面板清单 (管理员)
   if (path === "/app/hall/admin-panels") {
-    const { json, bearerUser, isAdminUser } = await import("./context.js");
-    const uid = bearerUser(req);
+    const { json, pageUserId, isAdminUser } = await import("./context.js");
+    const uid = pageUserId(req);
     if (!uid || !(await isAdminUser(uid))) {
       json(res, 403, { error: "需要管理员权限" });
       return true;

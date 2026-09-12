@@ -458,24 +458,13 @@ tbody tr:last-child td { border-bottom: none; }
         <div class="modal-head"><h3>☁ 云端同步</h3><button class="modal-x" onclick="closeModal('cloudModal')">✕</button></div>
         <div id="cloudInfo" style="font-size:13px;color:var(--ink-2);line-height:1.7"></div>
         <div id="cloudForm">
-            <label class="fl">用户名</label>
-            <input id="cloudEmail" style="width:100%" placeholder="管理员分配的用户名">
-            <label class="fl">密码</label>
-            <input id="cloudPassword" type="password" style="width:100%" placeholder="密码">
-            <div style="display:flex;gap:10px;margin-top:18px">
-                <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="cloudLogin(false)">登录</button>
+            <div style="padding:10px 0;font-size:13px;color:var(--ink-2);line-height:1.8">
+                账号统一后使用<b>平台账号</b>（AppBase 大厅登录账号）。<br>
+                请从大厅登录后再打开本应用，数据将自动关联你的账号。
             </div>
-            <div style="margin-top:14px">
-                <button class="btn btn-ghost btn-sm" onclick="toggleChangePwd()">修改密码</button>
+            <div style="display:flex;gap:10px;margin-top:10px">
+                <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="location.href='/hall'">去大厅登录</button>
             </div>
-            <div id="chgPwdBox" style="display:none">
-                <label class="fl">旧密码</label>
-                <input id="chgOld" type="password" style="width:100%">
-                <label class="fl">新密码（至少 4 位）</label>
-                <input id="chgNew" type="password" style="width:100%">
-                <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="doChangePwd()">确认修改</button>
-            </div>
-            <div id="cloudMsg" style="font-size:12.5px;color:var(--ink-3);margin-top:12px"></div>
         </div>
         <div id="cloudActions" style="display:none">
             <label class="fl">教师姓名</label>
@@ -541,10 +530,11 @@ let profileStudentId = '';
 // 四个集合各存为 /app/data/notebook 下的一行; localStorage 为离线缓存。
 // API 基址用同源相对路径 (本页由 AppBase 伺服); 历史 localStorage 存的 127.0.0.1 一律视为过期忽略。
 const savedApiBase = localStorage.getItem('teacherNotebook_apiBase');
+const DATA_APP = 'teacher-notebook.html';
 const CLOUD = {
     base: (savedApiBase && !/127\.0\.0\.1|localhost/.test(savedApiBase)) ? savedApiBase : '',
-    get token() { return localStorage.getItem('teacherNotebook_token') || ''; },
-    set token(v) { v ? localStorage.setItem('teacherNotebook_token', v) : localStorage.removeItem('teacherNotebook_token'); },
+    get user() { return localStorage.getItem('teacherNotebook_user') || ''; },
+    set user(v) { v ? localStorage.setItem('teacherNotebook_user', v) : localStorage.removeItem('teacherNotebook_user'); },
     get rowIds() { return JSON.parse(localStorage.getItem('teacherNotebook_rowIds') || '{}'); },
     set rowIds(v) { localStorage.setItem('teacherNotebook_rowIds', JSON.stringify(v)); }
 };
@@ -553,10 +543,7 @@ const COLLECTIONS = ['students', 'attendance', 'scores', 'memories'];
 async function apiCall(method, path, body) {
     const resp = await fetch(CLOUD.base + path, {
         method,
-        headers: {
-            'Content-Type': 'application/json',
-            ...(CLOUD.token ? { 'Authorization': 'Bearer ' + CLOUD.token } : {})
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: body ? JSON.stringify(body) : undefined
     });
     const data = await resp.json().catch(() => ({}));
@@ -584,24 +571,22 @@ function saveTeacherInfo() {
 function cloudRefreshUI() {
     const t = teacherInfo();
     const teacherLabel = [t.name, t.subject].filter(Boolean).join(' · ');
-    if (CLOUD.token) {
-        // 显示当前登录者姓名; 未填写姓名时回退到登录用户名
-        const displayName = teacherLabel || localStorage.getItem('teacherNotebook_username') || '已登录';
+    if (CLOUD.user) {
+        const displayName = teacherLabel || CLOUD.user;
         cloudRenderChip('ok', `👩‍🏫 ${displayName}`);
         document.getElementById('cloudForm').style.display = 'none';
         document.getElementById('cloudActions').style.display = 'block';
-        const email = localStorage.getItem('teacherNotebook_username') || localStorage.getItem('teacherNotebook_email') || '';
         document.getElementById('cloudInfo').innerHTML =
-            `已登录 <b>${esc(email)}</b> · 数据实时保存到云端 PostgreSQL，换设备登录同一账号即可恢复。`;
+            `已登录 <b>${esc(CLOUD.user)}</b> · 数据实时保存到云端 PostgreSQL，同应用授权成员共享，换设备登录即可恢复。`;
         if (document.getElementById('teacherName')) {
             document.getElementById('teacherName').value = t.name || '';
             document.getElementById('teacherSubject').value = t.subject || '';
         }
     } else {
-        cloudRenderChip('off', '☁ 未登录 · 点击登录');
+        cloudRenderChip('off', '☁ 未登录 · 去大厅登录');
         document.getElementById('cloudForm').style.display = 'block';
         document.getElementById('cloudActions').style.display = 'none';
-        document.getElementById('cloudInfo').textContent = '登录后数据实时保存到云端，换设备不丢失。';
+        document.getElementById('cloudInfo').textContent = '使用 AppBase 大厅账号，登录后打开本应用即可自动关联。';
     }
 }
 
@@ -610,59 +595,34 @@ function openCloudModal() {
     document.getElementById('cloudModal').classList.add('show');
 }
 
-async function cloudLogin(register) {
-    // register 参数保留兼容, 应用账号由管理员在大厅创建, 这里只登录
-    const username = document.getElementById('cloudEmail').value.trim();
-    const password = document.getElementById('cloudPassword').value;
-    const msg = document.getElementById('cloudMsg');
-    if (!username || !password) { msg.textContent = '请填写用户名和密码'; return; }
-    msg.textContent = '登录中…';
+async function cloudIdentify() {
+    // 平台账号身份: httpOnly cookie 同源自动携带, 服务端 /app/auth/me 双轨识别
     try {
-        const data = await apiCall('POST', '/app/hall/appauth/login',
-            { app: 'teacher-notebook.html', username, password });
-        CLOUD.token = data.token;
-        localStorage.setItem('teacherNotebook_email', username);
-        localStorage.setItem('teacherNotebook_username', username);
-        msg.textContent = '';
+        const resp = await fetch(CLOUD.base + '/app/auth/me');
+        if (!resp.ok) throw new Error('未登录');
+        const d = await resp.json();
+        CLOUD.user = d.user.email;
         cloudRefreshUI();
-        closeModal('cloudModal');
-        const rows = await apiCall('GET', '/app/data/notebook');
+        const rows = await apiCall('GET', '/app/data/notebook?app=' + DATA_APP);
         if (rows.rows.length) {
             await cloudPull();
-            alert('已从云端恢复数据');
         } else {
             await cloudPush();
-            alert('本地数据已推送到云端');
         }
         loadAppEnv();
     } catch (e) {
-        msg.textContent = '失败：' + e.message + '（账号由管理员在大厅「账号/Key」中添加）';
+        CLOUD.user = '';
+        cloudRefreshUI();
     }
 }
 
-function toggleChangePwd() {
-    const box = document.getElementById('chgPwdBox');
-    box.style.display = box.style.display === 'none' || !box.style.display ? 'block' : 'none';
-}
-async function doChangePwd() {
-    const username = document.getElementById('cloudEmail').value.trim();
-    const msg = document.getElementById('cloudMsg');
-    try {
-        await apiCall('POST', '/app/hall/appauth/password', {
-            app: 'teacher-notebook.html',
-            username,
-            oldPassword: document.getElementById('chgOld').value,
-            newPassword: document.getElementById('chgNew').value
-        });
-        msg.textContent = '✓ 密码已修改';
-        document.getElementById('chgPwdBox').style.display = 'none';
-    } catch (e) {
-        msg.textContent = '✗ ' + e.message;
-    }
+async function cloudLogout() {
+    await fetch('/app/auth/logout', { method: 'POST' }).catch(function() {});
+    location.reload();
 }
 
 async function cloudPull() {
-    const data = await apiCall('GET', '/app/data/notebook');
+    const data = await apiCall('GET', '/app/data/notebook?app=' + DATA_APP);
     const rowIds = {};
     for (const row of data.rows) {
         const key = row.data.collection;
@@ -682,15 +642,15 @@ async function cloudPull() {
 }
 
 async function cloudPush() {
-    if (!CLOUD.token) return;
+    if (!CLOUD.user) return;
     const rowIds = CLOUD.rowIds;
     for (const key of COLLECTIONS) {
         const payload = key === 'attendance' ? attendance : ({ students, scores, memories })[key];
         const body = { data: { collection: key, payload } };
         try {
-            if (rowIds[key]) await apiCall('PUT', '/app/data/notebook/' + rowIds[key], body);
+            if (rowIds[key]) await apiCall('PUT', '/app/data/notebook/' + rowIds[key] + '?app=' + DATA_APP, body);
             else {
-                const created = await apiCall('POST', '/app/data/notebook', body);
+                const created = await apiCall('POST', '/app/data/notebook?app=' + DATA_APP, body);
                 rowIds[key] = created.id;
             }
         } catch (e) {
@@ -701,10 +661,7 @@ async function cloudPush() {
     cloudRenderChip('ok', '☁ 已同步');
 }
 
-function cloudLogout() {
-    CLOUD.token = '';
-    cloudRefreshUI();
-}
+
 
 function saveLocal() {
     localStorage.setItem(KEYS.STUDENTS, JSON.stringify(students));
@@ -716,7 +673,7 @@ function saveLocal() {
 
 function saveData() {
     saveLocal();
-    if (CLOUD.token) cloudPush(); // 静默推送, 失败不影响本地使用
+    if (CLOUD.user) cloudPush(); // 静默推送, 失败不影响本地使用
 }
 const todayStr = () => {
     const d = new Date();
@@ -937,7 +894,7 @@ async function aiStructure() {
     if (!text) return alert('请先输入一段观察记录');
     // 设置面板展开时, 以输入框当前值保存
     const statusEl = document.getElementById('aiStatus');
-    if (!CLOUD.token) return alert('请先登录（右上角），LLM 由管理员统一配置');
+    if (!CLOUD.user) return alert('请先从大厅登录并打开本应用，LLM 由管理员统一配置');
     statusEl.textContent = 'AI 正在结构化…';
     const roster = students.map(s => s.name).join('、');
     const sys = `你是班主任的班级记录助手。把用户描述的班级日常整理为结构化记忆条目。
@@ -955,7 +912,7 @@ async function aiStructure() {
         // 走服务端 LLM 代理: 上游 url/key/model 由管理员在大厅配置, 前端不接触凭证
         const resp = await fetch('/app/hall/llm?app=teacher-notebook.html', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CLOUD.token },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 temperature: 0.2,
                 messages: [{ role: 'system', content: sys }, { role: 'user', content: text }]
@@ -1356,9 +1313,7 @@ function renderAll() {
 // 读取大厅为该应用配置的 .env (window.APP_ENV 供功能使用)
 async function loadAppEnv() {
     try {
-        const resp = await fetch('/app/hall/appauth/env?app=teacher-notebook.html', {
-            headers: { Authorization: 'Bearer ' + CLOUD.token }
-        });
+        const resp = await fetch('/app/hall/appauth/env?app=teacher-notebook.html');
         if (!resp.ok) return;
         const data = await resp.json();
         window.APP_ENV = data.env || {};
@@ -1381,11 +1336,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('attendanceDate').value = todayStr();
     renderStudentList(); loadAttendance(); renderScoreList(); renderHeroStats();
     cloudRefreshUI();
-    // 已登录则后台拉取云端数据 (云端优先)
-    if (CLOUD.token) {
-        cloudPull().then(() => loadAppEnv()).catch(() => cloudRenderChip('off', '☁ 离线 · 本地模式'));
-    }
-    loadAppEnv();
+    // 平台账号身份探测 (cookie): 已登录则后台同步云端数据 (云端优先)
+    cloudIdentify();
 });
 </script>
 </body>

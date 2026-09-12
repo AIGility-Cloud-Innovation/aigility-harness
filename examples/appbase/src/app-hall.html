@@ -130,18 +130,8 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
         <div class="sh">被添加的账号在主页可见并打开该应用；管理员始终可见全部应用</div>
         <div id="memList"></div>
         <div style="display:flex;gap:8px;margin-top:8px">
-          <input class="minput" id="memEmail" placeholder="对方注册邮箱（需先注册）" style="margin:0">
+          <select class="minput" id="memEmail" style="margin:0"><option value="">加载注册账号中…</option></select>
           <button class="mbtn" onclick="addMember()">添加</button>
-        </div>
-      </div>
-      <div class="sec">
-        <h3>🔑 可登录账号</h3>
-        <div class="sh">该应用自己的登录账号（用户名 + 密码，应用内登录页使用）</div>
-        <div id="accList"></div>
-        <div style="display:flex;gap:8px;margin-top:8px">
-          <input class="minput" id="accUser" placeholder="用户名" style="margin:0">
-          <input class="minput" id="accPass" placeholder="密码" style="margin:0">
-          <button class="mbtn" onclick="addAccount()">添加</button>
         </div>
       </div>
       <div class="sec">
@@ -446,8 +436,7 @@ function loadManage() {
         + '<button onclick="armConfirm(this, function(){ delMember(\'' + m.user_id + '\') })">移出</button></div>';
     }).join('') || '<div class="sub" style="font-size:12px;color:var(--ink2)">暂无成员（管理员默认可见）</div>';
     document.getElementById('memList').innerHTML = memHtml;
-    accData = d.accounts || [];
-    renderAccList();
+    fillMemberCandidates();
     var keyListEl = document.getElementById('keyList'); // 元素可能不存在, 判空防中断后面渲染
     if (keyListEl) {
       keyListEl.innerHTML = (d.keys||[]).map(function(k) {
@@ -470,42 +459,13 @@ function loadManage() {
     }
   }).catch(function(e) { alert('加载管理信息失败: ' + e.message); });
 }
-// ── 应用内账号 (内联交互: 重置=行内输入, 删除=两击确认) ──
-var accData = [];
-var accEditingId = null;
-function renderAccList() {
-  var html = accData.map(function(a) {
-    var right;
-    if (accEditingId === a.id) {
-      right = '<input class="minput" id="accNewPwd" type="password" placeholder="新密码(至少4位)" style="margin:0;width:130px">'
-        + '<button class="mbtn s" onclick="confirmAccReset(\'' + a.id + '\')">确定</button>'
-        + '<button class="mbtn g s" onclick="accEditingId=null;renderAccList()">取消</button>';
-    } else {
-      right = '<button onclick="accEditingId=\'' + a.id + '\';renderAccList()">重置密码</button>'
-        + '<button onclick="armConfirm(this, function(){ delAcc(\'' + a.id + '\') })">删除</button>';
-    }
-    return '<div class="rowline"><div class="grow"><b>' + esc(a.username) + '</b>'
-      + (a.note ? '<div class="sub">' + esc(a.note) + '</div>' : '')
-      + '</div>' + right + '</div>';
-  }).join('') || '<div class="sub" style="font-size:12px;color:var(--ink2)">暂无账号</div>';
-  document.getElementById('accList').innerHTML = html;
-}
-function confirmAccReset(id) {
-  var np = document.getElementById('accNewPwd').value;
-  if (np.length < 4) return toast('✗ 新密码至少 4 位');
-  fetchJSON('/app/hall/manage/account/' + id + '/reset?app=' + encodeURIComponent(mgApp), {
-    method: 'POST', headers: jheaders(), body: JSON.stringify({ newPassword: np })
-  }).then(function() {
-    accEditingId = null;
-    toast('✓ 密码已重置');
-    renderAccList();
-  }).catch(function(e) { toast('✗ ' + e.message); });
-}
-function delAcc(id) {
-  fetchJSON('/app/hall/manage/account/' + id + '?app=' + encodeURIComponent(mgApp), {
-    method: 'DELETE', headers: jheaders()
-  }).then(function() { toast('✓ 账号已删除'); loadManage(); })
-    .catch(function(e) { toast('✗ ' + e.message); });
+function fillMemberCandidates() {
+  fetchJSON('/app/hall/manage/user-emails', { headers: jheaders() }).then(function(d) {
+    var sel = document.getElementById('memEmail');
+    sel.innerHTML = (d.emails || []).map(function(e) {
+      return '<option value="' + esc(e) + '">' + esc(e) + '</option>';
+    }).join('') || '<option value="">(暂无注册账号)</option>';
+  }).catch(function() { /* 非管理员/owner 时忽略 */ });
 }
 function addMember() {
   var email = document.getElementById('memEmail').value.trim();
@@ -522,19 +482,6 @@ function delMember(userId) {
     method: 'DELETE', headers: jheaders()
   }).then(function() { toast('✓ 已移出'); loadManage(); })
     .catch(function(e) { toast('✗ 移出失败: ' + e.message); });
-}
-function addAccount() {
-  var un = document.getElementById('accUser').value.trim();
-  var pw = document.getElementById('accPass').value;
-  fetchJSON('/app/hall/manage/account?app=' + encodeURIComponent(mgApp), {
-    method:'POST', headers:jheaders(),
-    body: JSON.stringify({ username: un, password: pw })
-  }).then(function(){ document.getElementById('accUser').value=''; document.getElementById('accPass').value=''; toast('✓ 账号已添加'); loadManage(); })
-    .catch(function(e){ toast('✗ 添加失败: ' + e.message); });
-}
-function delAccount(id) {
-  fetchJSON('/app/hall/manage/account/' + id + '?app=' + encodeURIComponent(mgApp), { method:'DELETE', headers:jheaders() })
-    .then(function(){ loadManage(); });
 }
 function saveLlm() {
   fetchJSON('/app/hall/manage/llm?app=' + encodeURIComponent(mgApp), {

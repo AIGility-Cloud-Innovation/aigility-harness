@@ -27,7 +27,7 @@ import { dshLoadPlugin, dshLoadEnabled, dshStatus } from "./dsh-host.js";
 import {
   json, readBody, pool, hashPassword, verifyPassword, signToken, setAuthCookie,
   bearerUser, verifyToken, isAdminUser, writeAudit, emailOf, loginLimiter, loginLockKey,
-  PG_CONFIG,
+  pageUserId, PG_CONFIG,
 } from "./admin-modules/context.js";
 import { adminDispatch, adminPanelList } from "./admin-modules/index.js";
 import { initLlmConfig, normalizeLlmBase } from "./admin-modules/llm-config.js";
@@ -288,63 +288,34 @@ export async function appBackendHandler(
       }
     }
 
-    // ── 应用账号登录 (用户名+密码, 与 AppBase 主账号体系无关) ──
-    if (method === "POST" && path === "/app/hall/appauth/login") {
-      const body = await readBody(req);
-      const appId = String(body.app ?? "");
-      const username = String(body.username ?? "").trim();
-      const password = String(body.password ?? "");
-      const { rows } = await pool.query(
-        "SELECT id, password_hash FROM app_accounts WHERE app_id = $1 AND username = $2",
-        [appId, username]);
-      if (rows.length === 0 || !(await verifyPassword(password, rows[0].password_hash))) {
-        return json(res, 401, { error: "用户名或密码错误" });
-      }
-      const subject = "appacc:" + rows[0].id;
-      return json(res, 200, { token: signToken(subject), username, accountId: rows[0].id });
-    }
-
-    // 应用账号改密 (本人凭旧密码)
-    if (method === "POST" && path === "/app/hall/appauth/password") {
-      const body = await readBody(req);
-      const auth = req.headers.authorization ?? "";
-      const subject = auth.startsWith("Bearer ") ? verifyToken(auth.slice(7)) : null;
-      if (!subject || !subject.startsWith("appacc:")) return json(res, 401, { error: "未授权" });
-      const accountId = subject.slice(7);
-      const username = String(body.username ?? "").trim();
-      const oldPassword = String(body.oldPassword ?? "");
-      const newPassword = String(body.newPassword ?? "");
-      const appIdBody = String(body.app ?? "");
-      if (newPassword.length < 4) return json(res, 400, { error: "新密码至少 4 位" });
-      const { rows } = await pool.query(
-        "SELECT password_hash FROM app_accounts WHERE id = $1 AND app_id = $2 AND username = $3",
-        [accountId, appIdBody, username]);
-      if (rows.length === 0 || !(await verifyPassword(oldPassword, rows[0].password_hash))) {
-        return json(res, 401, { error: "旧密码错误" });
-      }
-      const hash = await hashPassword(newPassword);
-      await pool.query("UPDATE app_accounts SET password_hash = $1 WHERE id = $2", [hash, accountId]);
-      return json(res, 200, { ok: true });
-    }
-
-    // 应用读取自己的 .env (需应用账号 token)
+    // ── 应用 .env 读取 (账号统一改造: 平台账号身份, Bearer 或 cookie 双轨) ──
     if (method === "GET" && path === "/app/hall/appauth/env") {
-      const auth3 = req.headers.authorization ?? "";
-      const subj3 = auth3.startsWith("Bearer ") ? verifyToken(auth3.slice(7)) : null;
-      if (!subj3 || !subj3.startsWith("appacc:")) return json(res, 401, { error: "未授权" });
+      const uid = pageUserId(req);
+      if (!uid) return json(res, 401, { error: "未授权: 请先登录" });
       const envApp = String(new URL(req.url ?? "/", "http://x").searchParams.get("app") ?? "");
       const { rows } = await pool.query(
         "SELECT env FROM app_llm_config WHERE app_id = $1", [envApp]);
       return json(res, 200, { env: rows[0]?.env ?? {} });
     }
 
-    // ── LLM 代理: 应用凭 app-token 调用, 上游配置存服务端 (Key 不出后端) ──
+    // ── LLM 代理: 应用凭平台账号身份调用 (Bearer 或 cookie), 上游配置存服务端 (Key 不出后端) ──
     if (method === "POST" && path === "/app/hall/llm") {
-      const auth = req.headers.authorization ?? "";
-      const subject = auth.startsWith("Bearer ") ? verifyToken(auth.slice(7)) : null;
-      if (!subject || !subject.startsWith("appacc:")) return json(res, 401, { error: "未授权: 需要应用账号 token" });
+      const subject = pageUserId(req);
+      if (!subject) return json(res, 401, { error: "未授权: 请先登录" });
       const body = await readBody(req);
       const llmAppId = String(new URL(req.url ?? "/", "http://x").searchParams.get("app") ?? "");
+      // 应用访问权: owner ∪ 成员 ∪ 管理员
+      if (llmAppId) {
+        const { rows: appRow } = await pool.query("SELECT owner_id FROM apps WHERE id = $1", [llmAppId]);
+        if (appRow.length === 0) return json(res, 404, { error: "应用不存在: " + llmAppId });
+        const isOwner = appRow[0].owner_id === subject;
+        const isMember = !isOwner
+          ? (await pool.query("SELECT 1 FROM app_members WHERE app_id = $1 AND user_id = $2", [llmAppId, subject])).rowCount! > 0
+          : false;
+        if (!isOwner && !isMember && !(await isAdminUser(subject))) {
+          return json(res, 403, { error: "你没有该应用的访问权限" });
+        }
+      }
       const { rows } = await pool.query("SELECT url, key, model FROM app_llm_config WHERE app_id = $1", [llmAppId]);
       let url = rows[0]?.url ?? "";
       let key = rows[0]?.key ?? "";
@@ -371,6 +342,20 @@ export async function appBackendHandler(
     }
 
     // ── 应用管理: 账号 / API Key / LLM 用量 (需登录用户) ──
+    // ── 成员候选: 注册账号邮箱清单 (owner/admin 为应用添加成员时下拉选择) ──
+    if (method === "GET" && path === "/app/hall/manage/user-emails") {
+      const mu = pageUserId(req) ?? bearerUser(req);
+      if (!mu) return json(res, 401, { error: "未授权: 请先登录" });
+      if (!(await isAdminUser(mu))) {
+        // 非管理员须为某应用 owner 才能取候选
+        const { rows: own } = await pool.query(
+          "SELECT 1 FROM apps WHERE owner_id = $1 LIMIT 1", [mu]);
+        if (own.length === 0) return json(res, 403, { error: "需要管理员或应用创建者身份" });
+      }
+      const { rows } = await pool.query("SELECT email FROM users ORDER BY email");
+      return json(res, 200, { emails: rows.map((r: any) => r.email) });
+    }
+
     // ── 聊天历史云端持久化 (登录用户级: 退出/换浏览器/清本地存储都不丢) ──
     if (path === "/app/hall/chat-history") {
       const auth = req.headers.authorization ?? "";
@@ -416,8 +401,7 @@ export async function appBackendHandler(
         return json(res, 200, { ok: true });
       }
 
-      const auth = req.headers.authorization ?? "";
-      const userId = auth.startsWith("Bearer ") ? verifyToken(auth.slice(7)) : null;
+      const userId = pageUserId(req);
       if (!userId) return json(res, 401, { error: "未授权: 先登录" });
       const appId = String(new URL(req.url ?? "/", "http://x").searchParams.get("app") ?? "");
       if (!appId) return json(res, 400, { error: "缺少 app 参数" });
@@ -738,11 +722,13 @@ export async function appBackendHandler(
       return json(res, 404, { error: "app class: not found" });
     }
 
-    // ── auth 中间件 (以下全部需要 token) ──
+    // ── auth 中间件 (以下全部需要 token; /app/data 除外 —— 数据路由内做 Bearer/cookie 双轨鉴权) ──
     const auth = req.headers.authorization ?? "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     const userId = token ? verifyToken(token) : null;
-    if (!userId) return json(res, 401, { error: "未授权: 需要 Bearer token" });
+    if (!userId && !path.startsWith("/app/data/")) {
+      return json(res, 401, { error: "未授权: 需要 Bearer token" });
+    }
 
     // ── apps 表 ──
     if (method === "GET" && path === "/app/apps") {
@@ -800,23 +786,33 @@ export async function appBackendHandler(
       }
     }
 
-    // ── 应用数据 (多租户: 按 owner_id 隔离) ──
+    // ── 应用数据 (账号统一改造: 数据归属应用虚拟 owner `app:<appId>`, 授权成员共享读写) ──
     const dataMatch = path.match(/^\/app\/data\/([^/]+)(?:\/([^/]+))?$/);
     if (dataMatch) {
       const tableName = decodeURIComponent(dataMatch[1]);
       const rowId = dataMatch[2] ? decodeURIComponent(dataMatch[2]) : null;
+      // 双轨身份: Bearer 或 httpOnly cookie (应用新标签页靠 cookie; 上方 auth 中间件仅认 Bearer, 此处重取)
+      const dataUid = pageUserId(req) ?? userId;
+      if (!dataUid) return json(res, 401, { error: "未授权: 请先登录" });
 
-      // 双账号统一: 应用账号 (appacc:) 读写的数据统一挂到该应用 owner 名下,
-      // 避免不同应用账号/主账号各存一份导致数据分裂 (2026-09-08 核查确认过分裂, 已迁移存量)。
-      let dataOwner = userId;
-      if (userId.startsWith("appacc:")) {
-        const { rows: acc } = await pool.query(
-          `SELECT ow.owner_id FROM app_accounts a
-           LEFT JOIN apps ow ON ow.id = a.app_id
-           WHERE a.id = $1`,
-          [userId.slice("appacc:".length)],
-        );
-        if (acc[0]?.owner_id) dataOwner = acc[0].owner_id;
+      // 应用归属: 带 ?app=<appId> 的请求 → 数据挂 `app:<appId>` (成员共享, 参照 class: 虚拟 owner 先例);
+      // 未带 app → 按用户隔离 (兼容班级等旧链路)
+      const dataAppId = String(new URL(req.url ?? "/", "http://x").searchParams.get("app") ?? "");
+      let dataOwner: string;
+      if (dataAppId) {
+        // 应用访问权: owner ∪ 成员 ∪ 管理员
+        const { rows: appRow } = await pool.query("SELECT owner_id FROM apps WHERE id = $1", [dataAppId]);
+        if (appRow.length === 0) return json(res, 404, { error: "应用不存在: " + dataAppId });
+        const isOwner = appRow[0].owner_id === dataUid;
+        const isMember = !isOwner
+          ? (await pool.query("SELECT 1 FROM app_members WHERE app_id = $1 AND user_id = $2", [dataAppId, dataUid])).rowCount! > 0
+          : false;
+        if (!isOwner && !isMember && !(await isAdminUser(dataUid))) {
+          return json(res, 403, { error: "你没有该应用的访问权限, 请联系管理员或应用创建者添加" });
+        }
+        dataOwner = "app:" + dataAppId;
+      } else {
+        dataOwner = dataUid;
       }
 
       // 自动建表 (app_tables) + 数据行 (app_rows) 沿用现有结构
@@ -956,6 +952,24 @@ export async function initAppBackend(): Promise<void> {
 
   // 全局 LLM 平台配置: 种子/应用逻辑在 admin-modules/llm-config.ts (管理界面插件化)
   await initLlmConfig();
+
+  // 账号统一改造存量迁移 (2026-09-12): /app/data 归属从用户改为应用虚拟 owner `app:<appId>`。
+  // teacher-notebook 是当前唯一按应用存数据的消费者(表名 notebook); 其 owner 名下同名表迁到 app: 前缀。
+  // 迁移幂等: app: 前缀的行不会重复匹配。
+  try {
+    const { rows: hallApps } = await pool.query(
+      "SELECT id, owner_id FROM apps WHERE category = 'hall' AND id = 'teacher-notebook.html'");
+    for (const app of hallApps) {
+      await pool.query(
+        `UPDATE app_tables SET owner_id = $1
+         WHERE owner_id = $2 AND table_name = 'notebook'
+           AND owner_id NOT LIKE 'app:%'`,
+        ["app:" + app.id, app.owner_id]);
+    }
+    console.log("[migrate] 应用数据归属已迁移至 app:<appId> 虚拟 owner");
+  } catch (e) {
+    console.error("[migrate] 应用数据归属迁移失败(忽略):", e);
+  }
 
   // 数据转发目标种子: 全局 APPBASE_RELAY_TARGETS 里的目标写入对应应用 .env (用户可在管理抽屉改)
   try {
