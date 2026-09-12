@@ -5,6 +5,8 @@
  * （@orchestration/task-planning 消费 @cognitive/llm-inference）
  */
 
+import "./defaults.js";
+
 import {
   LayerId,
   RunMode,
@@ -46,9 +48,11 @@ import type {
 import type {
   TaskPlanningRequest,
   TaskPlanningResponse,
+} from "@aigility-harness/layer-orchestration";
+import type {
   CodexAgentRequest,
   CodexAgentResponse,
-} from "@aigility-harness/layer-orchestration";
+} from "@aigility-harness/layer-action";
 import type {
   ProtocolAdapterRequest,
   ProtocolAdapterResponse,
@@ -266,11 +270,11 @@ async function main(): Promise<void> {
   }
 
   // 8. 编码代理演示：orchestration -> Codex CLI（外部编码代理内化为编排能力）
-  console.log("\n8. 编码代理演示：@orchestration/codex-agent（驱动 Codex CLI）");
+  console.log("\n8. 编码代理演示：@action/codex-agent（驱动 Codex CLI）");
   const ctx5 = kernel.createContext("session-005", LayerId.Orchestration);
 
   const codexRef: CapabilityRef = {
-    id: "@orchestration/codex-agent",
+    id: "@action/codex-agent",
     versionRange: "^1.0.0",
   };
   const codexRes = await kernel.registry.resolve<CodexAgentRequest, CodexAgentResponse>(codexRef);
@@ -376,8 +380,10 @@ async function main(): Promise<void> {
         const agentBody = await agentRes.json() as Record<string, unknown>;
         log("agent", `HTTP ${agentRes.status}: ${JSON.stringify(agentBody).slice(0, 200)}`);
       } finally {
-        await stopHttpServer();
-        log("http-ingress", "server stopped");
+        if (process.env.PROTO_DEMO_EXIT === "1") {
+          await stopHttpServer();
+          log("http-ingress", "server stopped");
+        }
       }
     }
   }
@@ -399,15 +405,24 @@ async function main(): Promise<void> {
     log("py-bridge", "接入方式: 加入 bootstrap plugins 数组即可, Python 侧零改动");
   }
 
-  // 10. 关闭
-  console.log("\n10. 关闭...");
-  const sd = await shutdown(kernel, scheduler);
-  if (!sd.ok) {
-    console.error("   关闭失败:", sd.error);
-    process.exit(1);
+  // 10. 常驻服务 / 一次性演示
+  if (process.env.PROTO_DEMO_EXIT === "1") {
+    console.log("\n10. 关闭...");
+    const sd = await shutdown(kernel, scheduler);
+    if (!sd.ok) {
+      console.error("   关闭失败:", sd.error);
+      process.exit(1);
+    }
+    console.log("   关闭成功，kernel.isReady =", kernel.isReady());
+    console.log("\n=== 原型模式演示完成 ===");
+    return;
   }
-  console.log("   关闭成功，kernel.isReady =", kernel.isReady());
-  console.log("\n=== 原型模式演示完成 ===");
+  // 默认常驻: 最小 Web UI 持续可用(AppBase 登录页旁的原型演示卡片内嵌本服务)
+  console.log("\n=== 原型模式演示完成 · Web UI 常驻中 ===");
+  console.log("    浏览器打开 http://127.0.0.1:3399/ (或 /ui) 与角色对话");
+  console.log("    AppBase 登录页右侧「原型演示」卡片即本服务 · Ctrl+C 退出");
+  console.log("    (一次性自测后退出: PROTO_DEMO_EXIT=1)");
+  await new Promise(() => {}); // 常驻, HTTP 服务器持续监听
 }
 
 main().catch((e) => {

@@ -77,27 +77,44 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
 .t-reopen { background:#fff3e6; color:#d97706; }
 /* 登录门 */
 .login-view { position:fixed; inset:0; background:linear-gradient(135deg,#1e1b4b,#4f46e5 60%,#7c3aed); display:flex; align-items:center; justify-content:center; z-index:100; padding:20px; }
+.login-row { display:flex; gap:18px; align-items:stretch; justify-content:center; flex-wrap:wrap; max-height:94vh; }
 .login-card { background:#fff; border-radius:20px; padding:34px 30px; width:380px; max-width:94vw; box-shadow:0 24px 70px rgba(0,0,0,.4); }
 .login-card h2 { font-size:20px; }
 .login-card .lsub { font-size:12.5px; color:var(--ink2); margin:6px 0 18px; }
 .login-btns { display:flex; gap:10px; margin-top:4px; }
 .login-msg { font-size:12.5px; color:var(--rose); margin-top:12px; min-height:16px; }
+/* 原型演示卡（免登录游客试玩，内嵌 prototype-mode 最小 UI） */
+.proto-card { background:#fff; border-radius:20px; padding:18px 18px 12px; width:560px; max-width:92vw; display:flex; flex-direction:column; box-shadow:0 24px 70px rgba(0,0,0,.4); }
+.proto-card h2 { font-size:20px; }
+.proto-card .lsub { font-size:12.5px; color:var(--ink2); margin:6px 0 12px; }
+.proto-frame { flex:1; width:100%; min-height:400px; border:0; border-radius:12px; background:#0b1220; }
+.proto-note { font-size:11px; color:var(--ink2); margin-top:8px; opacity:.8; }
+.proto-note code { background:var(--soft); border-radius:5px; padding:1px 6px; }
+@media (max-width:1060px) { .proto-card { display:none; } }
 </style>
 </head>
 <body>
 
 <!-- 登录门 -->
 <div class="login-view" id="loginView" style="display:none">
-  <div class="login-card">
-    <h2>🚀 AppBase</h2>
-    <div class="lsub">请先登录（或注册）账号，再进入应用大厅<br><small style="opacity:.6">powered by aigility-harness</small></div>
-    <input class="minput" id="lgEmail" placeholder="邮箱" autocomplete="username">
-    <input class="minput" id="lgPassword" type="password" placeholder="密码（注册至少 6 位）" autocomplete="current-password">
-    <div class="login-btns">
-      <button class="mbtn" style="flex:1" onclick="doLogin(false)">登录</button>
-      <button class="mbtn g" style="flex:1" onclick="doLogin(true)">注册并登录</button>
+  <div class="login-row">
+    <div class="login-card">
+      <h2>🚀 AppBase</h2>
+      <div class="lsub">请先登录（或注册）账号，再进入应用大厅<br><small style="opacity:.6">powered by aigility-harness</small></div>
+      <input class="minput" id="lgEmail" placeholder="邮箱" autocomplete="username">
+      <input class="minput" id="lgPassword" type="password" placeholder="密码（注册至少 6 位）" autocomplete="current-password">
+      <div class="login-btns">
+        <button class="mbtn" style="flex:1" onclick="doLogin(false)">登录</button>
+        <button class="mbtn g" style="flex:1" onclick="doLogin(true)">注册并登录</button>
+      </div>
+      <div class="login-msg" id="lgMsg"></div>
     </div>
-    <div class="login-msg" id="lgMsg"></div>
+    <div class="proto-card">
+      <h2>🧪 原型演示（免登录）</h2>
+      <div class="lsub">五域 Agent 最小 Web UI —— 游客即点即聊<br><small style="opacity:.6">注册登录后可进应用大厅，体验多角色与完整功能</small></div>
+      <iframe class="proto-frame" src="http://127.0.0.1:3399/ui" title="aigility-harness 原型演示"></iframe>
+      <div class="proto-note">若上方空白，请先在本机启动原型：<code>pnpm example:prototype</code></div>
+    </div>
   </div>
 </div>
 

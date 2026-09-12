@@ -297,9 +297,10 @@ describe("http-ingress 最小 Web UI", () => {
     expect(resp.status).toBe(200);
     expect(resp.headers.get("content-type")).toContain("text/html");
     const html = await resp.text();
-    expect(html).toContain("aigility-harness");
+    expect(html).toContain("aigility 原型演示");
+    expect(html).toContain("销售客服");
     expect(html).toContain("/api/chat");
-    expect(html).toContain("/api/plugin-helper");
+    expect(html).not.toContain("data-role"); // 已移除角色切换
   });
 
   it("GET /ui 同样返回 UI (且 GET 不破坏 POST 链路)", async () => {
@@ -311,7 +312,7 @@ describe("http-ingress 最小 Web UI", () => {
 
     const uiResp = await fetch("http://127.0.0.1:18342/ui");
     expect(uiResp.status).toBe(200);
-    expect((await uiResp.text())).toContain("插件安装助手");
+    expect((await uiResp.text())).toContain("注册 / 登录 AppBase");
 
     // POST 链路不受影响: 未知路径仍 404
     const postResp = await fetch("http://127.0.0.1:18342/api/nonexistent", {

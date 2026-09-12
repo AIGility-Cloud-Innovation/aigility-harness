@@ -72,7 +72,7 @@ const stubProvider: Provider<LlmInferenceRequest, LlmInferenceResponse> = {
     _ctx: SeamContext,
   ): Promise<Result<LlmInferenceResponse>> {
     const lastMsg = request.messages[request.messages.length - 1];
-    const text = `[stub-llm] model=${request.model} echo: ${lastMsg?.content ?? "(empty)"}`;
+    const text = String(lastMsg?.content ?? "(empty)");
     return ok({
       text,
       message: { role: "assistant", content: text },
@@ -373,7 +373,13 @@ export const plugin: LayerPlugin = {
     // appbase 在 initAppBackend 里从 dsh_plugins 表桥接, 且保存配置时原地更新 env);
     // 未配置 key 时构造不报错, 调用期失败由 provider 内部捕获并以 ok:false 降级
     const timemClient = new EnvTimemClient();
-    return [litellmProvider, stubProvider, createTimemMemoryProvider(timemClient), createTimemMemoryWriteProvider(timemClient)]; // litellm 先注册 = resolve 优先选它
+    // LLM_PROVIDER=stub 时 stub 先注册(resolve 优先选它) —— 原型/离线自证零外部依赖;
+    // 其余取值(缺省/litellm/bigmodel)仍 litellm 优先
+    const llmProviders =
+      process.env.LLM_PROVIDER === "stub"
+        ? [stubProvider, litellmProvider]
+        : [litellmProvider, stubProvider];
+    return [...llmProviders, createTimemMemoryProvider(timemClient), createTimemMemoryWriteProvider(timemClient)]; // 先注册 = resolve 优先选它
   },
   getState(): PluginState {
     return pluginState;
