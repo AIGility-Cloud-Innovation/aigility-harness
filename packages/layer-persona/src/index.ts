@@ -104,27 +104,27 @@ export type {
 } from "./plugin-helper.js";
 import { pluginHelperService, pluginHelperProvider } from "./plugin-helper.js";
 
-// 编码助手角色形象 (实现无关, 委托 L4 编码 Agent)
+// 编码教练角色形象 (只引导不落盘, 委托 L4 guided-design)
 export {
-  coderService,
-  coderProvider,
-} from "./coder.js";
+  codingCoachService,
+  codingCoachProvider,
+} from "./coding-coach.js";
 export type {
-  CoderRequest,
-  CoderResponse,
-} from "./coder.js";
-import { coderService, coderProvider } from "./coder.js";
-import { codexChatService, codexChatProvider } from "./codex-chat.js";
+  CodingCoachRequest,
+  CodingCoachResponse,
+} from "./coding-coach.js";
+import { codingCoachService, codingCoachProvider } from "./coding-coach.js";
+import { appDevService, appDevProvider } from "./app-dev.js";
 export {
-  codexChatService,
-  codexChatProvider,
+  appDevService,
+  appDevProvider,
   getAllowedCwd,
   ensureSandboxRoot,
-} from "./codex-chat.js";
+} from "./app-dev.js";
 export type {
-  CodexChatRequest,
-  CodexChatResponse,
-} from "./codex-chat.js";
+  AppDevRequest,
+  AppDevResponse,
+} from "./app-dev.js";
 
 // 应用报修客服角色形象 (工单受理)
 export {
@@ -195,9 +195,9 @@ const textInputProvider: Provider<TextInputRequest, TextInputResponse> = {
 export const manifest: PluginManifest = {
   name: "@persona/character",
   layer: LayerId.Persona,
-  description: "角色人格层：感知（文本/语音）+ 角色形象（sales-chat/plugin-helper/coder/advisory-chat/harness-guide/timem-support/timem-project-assistant/repair-chat）",
+  description: "角色人格层：感知（文本/语音）+ 角色形象（sales-chat/plugin-helper/app-dev/coding-coach/advisory-chat/harness-guide/timem-support/timem-project-assistant/repair-chat）",
   version: "0.3.0",
-  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, coderService, codexChatService, advisoryChatService, harnessGuideService, timemSupportService, timemProjectAssistantService, repairChatService],
+  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, appDevService, codingCoachService, advisoryChatService, harnessGuideService, timemSupportService, timemProjectAssistantService, repairChatService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
 };
@@ -221,8 +221,8 @@ export const plugin: LayerPlugin = {
       whisperSttProvider,
       salesChatProvider,
       pluginHelperProvider,
-      coderProvider,
-      codexChatProvider,
+      appDevProvider,
+      codingCoachProvider,
       advisoryChatProvider,
       harnessGuideProvider,
       timemSupportProvider,

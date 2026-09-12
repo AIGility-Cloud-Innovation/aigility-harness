@@ -2,7 +2,7 @@
  * @orchestration/claude-agent — Claude Code CLI 编码代理能力
  *
  * 通过 Claude Code CLI 的 headless 模式 (`claude -p <prompt>`) 驱动 Claude 执行编码任务，
- * 与 codex-agent / zcode-agent 平级，作为网页应用生成器的可切换工具之一。
+ * 与 codex-agent / zcode-agent 平级，作为网页应用开发员的可切换工具之一。
  *
  * Windows: claude 是 npm .cmd 包装, 必须经 shell spawn (Node 禁止无 shell 直接 spawn .cmd);
  *          参数含空格时需自行加引号。

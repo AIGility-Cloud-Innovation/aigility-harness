@@ -45,15 +45,32 @@ export type {
 };
 
 import {
-  timemTaskService,
-  timemTaskProvider,
-  enableTimemTask,
-} from "./timem-task.js";
-export { timemTaskService, timemTaskProvider, enableTimemTask };
+  timemProjectTaskService,
+  timemProjectTaskProvider,
+  enableTimemProjectTask,
+} from "./timem-project-task.js";
+export { timemProjectTaskService, timemProjectTaskProvider, enableTimemProjectTask };
 export type {
-  TimemTaskRequest,
-  TimemTaskResponse,
-} from "./timem-task.js";
+  TimemProjectTaskRequest,
+  TimemProjectTaskResponse,
+} from "./timem-project-task.js";
+
+export { RequirementStore } from "./requirement-store.js";
+export type {
+  SessionPhase,
+  SessionState,
+  Requirement,
+  RequirementStatus,
+  Consolidation,
+  ConsolidationItem,
+} from "./requirement-store.js";
+export {
+  CONSOLIDATION_SYSTEM_PROMPT,
+  parseConsolidation,
+  topoSort,
+  buildConsolidation,
+  renderConsolidation,
+} from "./consolidation.js";
 
 import {
   zcodeAgentService,
@@ -206,7 +223,14 @@ const workflowEngineProvider: Provider<
           request.system_prompt ||
           `你是「${request.agent_name ?? "智能助理"}」。请用简体中文简洁、专业地回复用户。`,
       },
-      ...history.map((m) => ({ role: m.role, content: m.content })),
+      // 角色归一化: 旧版前端曾存 role:"bot", 智谱等上游对非法角色报 1214 ——
+      // 统一收敛为 user/assistant, 内容强转字符串, 脏历史不炸链路
+      ...history
+        .filter((m) => m && typeof m.content === "string" && m.content.trim())
+        .map((m) => ({
+          role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
+          content: m.content,
+        })),
       { role: "user" as const, content: request.user_input },
     ];
     console.log('[workflow-engine] system_prompt len:', request.system_prompt?.length ?? 0, '| agent:', request.agent_name);

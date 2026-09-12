@@ -6,8 +6,8 @@
  *   - 状态由调用方携带 (session_state), 服务无状态, 天然多设备/多会话安全
  *   - LLM 只负责内容: 提炼确认 + 提出下一阶段问题; 最终阶段产出完整提示词
  *
- * 场景: 编码教练 (@persona/coder) 引导用户一步步设计一个案例应用,
- * 不真正生成/保存任何文件, 最终输出可直接交给网页应用生成器的完整提示词。
+ * 场景: 编码教练 (@persona/coding-coach) 引导用户一步步设计一个案例应用,
+ * 不真正生成/保存任何文件, 最终输出可直接交给网页应用开发员的完整提示词。
  *
  * 契约:
  *   Request  { user_input, history?, session_state? }   ← 前端每轮回传 session_state
@@ -121,7 +121,7 @@ const COACH_BASE_PROMPT = [
 ].join("\n");
 
 const FINAL_PROMPT_SPEC = [
-  "最终提示词必须是一段可直接粘贴给「网页应用生成器」的完整指令, 覆盖:",
+  "最终提示词必须是一段可直接粘贴给「网页应用开发员」的完整指令, 覆盖:",
   "应用名称与目标用户 / 功能清单(按优先级) / 页面结构 / 数据实体与字段 / 关键交互与边界情况 / 技术要求(单 HTML 自包含、后端 API 一律用相对路径空基址、禁止硬编码 127.0.0.1/localhost/内网 IP)。",
 ].join("\n");
 
@@ -213,24 +213,63 @@ const guidedDesignProvider: Provider<GuidedDesignRequest, GuidedDesignResponse> 
       });
     }
 
-    // ── 阶段 1..4: 记录本轮答案 → 提炼确认 → 提出下一阶段问题 ──
-    answers[phase] = request.user_input;
+    // ── 阶段 1..4: 意图闸门 → 实质回答则推进; 问教练/闲聊则以教练身份作答(不推进) ──
+    const cur = DESIGN_PHASES[phase - 1];
     const nextPhase = phase + 1;
     const next = DESIGN_PHASES[nextPhase - 1];
     const collectedSoFar = Object.entries(answers)
       .sort(([a], [b]) => Number(a) - Number(b))
       .map(([p, txt]) => `【第${p}阶段·${DESIGN_PHASES[Number(p) - 1]?.title ?? ""}】${txt}`)
       .join("\n");
+
+    // 单次 LLM 调用同时完成「意图判断 + 内容产出」: 第一行 ADVANCE/CHAT 标签, 之后是正文
+    const gateSystem = [
+      COACH_BASE_PROMPT,
+      `工作流共 ${PHASE_COUNT} 个阶段, 当前是第 ${phase} 阶段「${cur.title}」, 该阶段要收集: ${cur.collect}`,
+      "",
+      "请先判断用户最新输入的意图, 输出的第一行只写标签 (不带任何其他字符):",
+      "ADVANCE —— 用户在实质回答本阶段的问题(提供了设计信息)",
+      "CHAT —— 用户在问别的: 问你是谁/是不是某个工具、问流程或阶段含义、闲聊等",
+      "",
+      "第一行标签之后换行, 再输出正文:",
+      "- 若 CHAT: 以教练身份直接回答用户的问题 (可顺势把话题引回应用设计), 不要提下一阶段的问题, 不要把该输入当作设计答案。",
+      `- 若 ADVANCE: ① 用两三句提炼确认用户本轮输入 (有歧义就顺带追问); ② 作为教练提出第 ${nextPhase} 阶段「${next.title}」的关键问题, 2-4 个, 编号列出, 问题要围绕: ${next.collect}`,
+      "不要输出任何代码文件, 不要提前输出完整提示词。",
+    ].join("\n");
+    const gate = await callLlm(gateSystem);
+    const gateTag = /^\s*(ADVANCE|CHAT)\b/.exec(gate.text);
+    const isChat = !gate.degraded && gateTag?.[1] === "CHAT";
+    const gateBody = gate.text
+      .replace(/^\s*(ADVANCE|CHAT)\b[^\n]*\n?/i, "")
+      .trim();
+
+    // CHAT: 以教练身份答问, 阶段与已收集答案均不变
+    if (isChat) {
+      return ok({
+        result: gateBody || "我在的呢～你可以随时问我任何问题；也可以继续描述你的应用设计。",
+        phase,
+        phase_count: PHASE_COUNT,
+        phase_title: cur.title,
+        progress: `${phase - 1}/${PHASE_COUNT}`,
+        done: false,
+        session_state: { phase, answers },
+      });
+    }
+
+    // ADVANCE (或 LLM 不可用时的确定性推进): 记录本轮答案 → 提炼确认 → 下一阶段问题
+    answers[phase] = request.user_input;
     const system = [
       COACH_BASE_PROMPT,
-      `工作流共 ${PHASE_COUNT} 个阶段, 用户刚回答完第 ${phase} 阶段「${DESIGN_PHASES[phase - 1].title}」。`,
+      `工作流共 ${PHASE_COUNT} 个阶段, 用户刚回答完第 ${phase} 阶段「${cur.title}」。`,
       "此前各阶段收集到的结论:",
       collectedSoFar,
       "",
       `任务: ① 用两三句提炼确认用户本轮输入 (有歧义就顺带追问); ② 作为教练提出第 ${nextPhase} 阶段「${next.title}」的关键问题, 2-4 个, 编号列出, 问题要围绕: ${next.collect}`,
       "不要输出任何代码文件, 不要提前输出完整提示词。",
     ].join("\n");
-    const { text, degraded } = await callLlm(system);
+    const { text, degraded } = gate.degraded
+      ? { text: "", degraded: true }
+      : { text: gateBody, degraded: false };
     const fallback = [
       `（服务降级，LLM 暂不可用——先记住你的回答，稍后可继续。）`,
       `已记录第 ${phase} 阶段「${DESIGN_PHASES[phase - 1].title}」的回答。`,

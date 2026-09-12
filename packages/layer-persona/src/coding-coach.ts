@@ -1,8 +1,8 @@
 /**
- * L3 感知交互层: 编码教练角色形象 (coder)
+ * L3 感知交互层: 编码教练角色形象 (coding-coach)
  *
  * 教学模式: 分步引导用户设计一个案例应用——只引导、不真正生成/保存任何文件,
- * 最终产出可直接交给「网页应用生成器」的完整提示词。
+ * 最终产出可直接交给「网页应用开发员」的完整提示词。
  *
  * 设计要点:
  *   - 流程在 L4: 阶段推进/汇总/提示词产出由 @orchestration/guided-design
@@ -30,7 +30,7 @@ import type {
 
 // ── 服务定义 ─────────────────────────────────────────────────────
 
-export interface CoderRequest {
+export interface CodingCoachRequest {
   /** 用户输入 (如"我想给班里做个记账本") */
   user_input: string;
   /** 可选: 会话 ID */
@@ -44,7 +44,7 @@ export interface CoderRequest {
   };
 }
 
-export interface CoderResponse {
+export interface CodingCoachResponse {
   /** 角色反馈文字 (阶段引导 / 完整提示词导语) */
   response: string;
   /** 角色身份 */
@@ -64,13 +64,13 @@ export interface CoderResponse {
   /** done 时的完整应用提示词 */
   final_prompt?: string;
   /** 回传给前端保存的工作流状态 */
-  session_state?: CoderRequest["session_state"];
+  session_state?: CodingCoachRequest["session_state"];
   /** true = 降级回复 */
   degraded?: boolean;
 }
 
-export const coderService: ServiceDefinition<CoderRequest, CoderResponse> = {
-  id: "@persona/coder",
+export const codingCoachService: ServiceDefinition<CodingCoachRequest, CodingCoachResponse> = {
+  id: "@persona/coding-coach",
   version: "1.0.0",
   layer: LayerId.Persona,
   description: "编码教练角色形象：分步引导设计案例应用(不落地) → 最终产出完整提示词",
@@ -84,14 +84,14 @@ export const guidedDesignRef: CapabilityRef = {
 
 // ── Provider 实现 ────────────────────────────────────────────────
 
-const coderProvider: Provider<CoderRequest, CoderResponse> = {
-  service: coderService,
+const codingCoachProvider: Provider<CodingCoachRequest, CodingCoachResponse> = {
+  service: codingCoachService,
   name: "persona-coder-guided",
   state: PluginState.Active,
   async execute(
-    request: CoderRequest,
+    request: CodingCoachRequest,
     ctx: SeamContext,
-  ): Promise<Result<CoderResponse>> {
+  ): Promise<Result<CodingCoachResponse>> {
     const agentName = "编码教练";
 
     // 流程交给编排层工作流: 阶段推进确定性, LLM 只产内容
@@ -107,7 +107,7 @@ const coderProvider: Provider<CoderRequest, CoderResponse> = {
       result?: string; degraded?: boolean;
       phase?: number; phase_count?: number; phase_title?: string; progress?: string;
       done?: boolean; final_prompt?: string;
-      session_state?: CoderRequest["session_state"];
+      session_state?: CodingCoachRequest["session_state"];
     } };
 
     if (!(result as { ok: boolean }).ok) {
@@ -143,16 +143,16 @@ const coderProvider: Provider<CoderRequest, CoderResponse> = {
   },
 };
 
-export { coderProvider };
+export { codingCoachProvider };
 
 // ── 插件 Manifest 与 LayerPlugin ─────────────────────────────────
 
 export const manifest: PluginManifest = {
-  name: "@persona/coder",
+  name: "@persona/coding-coach",
   layer: LayerId.Persona,
   description: "感知层：编码教练角色形象（分步引导设计案例应用，委托 L4 guided-design 工作流）",
   version: "0.2.0",
-  provides: [coderService],
+  provides: [codingCoachService],
   consumes: [guidedDesignRef],
   preferredCarrier: CarrierKind.Thread,
 };
@@ -170,7 +170,7 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [coderProvider];
+    return [codingCoachProvider];
   },
   getState(): PluginState {
     return pluginState;

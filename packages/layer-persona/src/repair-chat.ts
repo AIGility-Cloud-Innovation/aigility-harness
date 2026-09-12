@@ -1,11 +1,14 @@
 /**
  * L3 感知交互层: 应用报修客服角色形象 (repair-chat)
  *
- * 受理用户对 AppBase 网页应用的故障报修:
- *   - 引导用户把问题描述清楚 (应用/现象/复现/报错)
- *   - 给出初步判断与自查步骤
- *   - 信息足够后输出 ```ticket JSON``` 结构化工单块, 前端识别后一键建单
- *   - 建单后用户可转「网页应用生成器」进一步判断和处理
+ * 受理用户对 AppBase 网页应用的故障报修, 采用「延时汇总」工作流
+ * (与编排层 timem-project-task 需求缓冲同款思想: 先发散, 后收敛):
+ *   - 收集期: 只引导描述与给出自查步骤, 不建单、不输出 ticket 块;
+ *     全程对话轮次入会话缓冲区
+ *   - 汇总期: 用户显式说「就这些了/提交报修」或静默期满后, 一次 LLM 调用
+ *     整合全部轮次 → 输出结构化 ```ticket``` 草稿(汇总单)
+ *   - 确认期: 前端识别 ticket 块出「创建工单」按钮, 用户点按即确认建单
+ *   - 建单后用户可转「网页应用开发员」进一步判断和处理
  */
 
 import {
@@ -54,28 +57,114 @@ export const repairChatService: ServiceDefinition<RepairChatRequest, RepairChatR
   id: "@persona/repair-chat",
   version: "1.0.0",
   layer: LayerId.Persona,
-  description: "应用报修客服：受理故障报修 → 引导描述 → 输出工单块 → 委托 L4 回复",
+  description: "应用报修客服：受理故障报修 → 收集期引导(不入单) → 静默/显式触发延时汇总 → 工单草稿 → 确认建单",
 };
 
 // ── Provider 实现 ────────────────────────────────────────────────
 
+// 收集期引导提示词: 不允许 LLM 自己吐 ticket 块(汇总由延时工作流统一做)
 const REPAIR_SUPPORT_PROMPT = [
   '你是「应用报修客服」, 受理用户对 AppBase 里网页应用的故障报修。请用简体中文交流。',
   '',
-  '工作流程:',
+  '当前是【信息收集期】: 系统会在用户说「就这些了」后统一汇总建单, 你现在不需要、也不允许输出任何工单块/ticket/JSON。',
+  '',
+  '你要做的:',
   '1. 了解问题: 哪个应用、什么现象、期望是什么、如何复现、报错信息原文。一次只问一两个关键问题, 不要一次问一大串。',
   '2. 给出初步判断: 最可能的原因 + 用户可自行尝试的快速排查步骤。',
-  '3. 信息足够后 (至少有应用名+现象), 在回复末尾原样输出下面格式的工单块 (便于系统识别并创建工单):',
-  '```ticket',
-  '{"title": "一句话问题标题", "app": "应用名(如 teacher-notebook)", "detail": "现象/复现步骤/报错信息汇总"}',
-  '```',
-  '4. 提醒用户: 工单创建后, 可在工单列表点「生成器协助」, 让网页应用生成器进一步判断和处理。',
+  '3. 适时提醒: 信息补充得差不多了, 可以回复「就这些了」, 我会整理成工单。',
   '',
   '规则:',
-  '- 信息不足时不要输出 ticket 块; 问题描述有更新时可重新输出更完整的 ticket 块。',
+  '- 绝不输出 ```ticket 代码块或任何 JSON 工单结构。',
   '- 不编造不确定的原因; 涉及服务端 (登录/网络/数据库/LLM 配置) 的问题, 提示用户联系管理员检查。',
   '- 结论先行、具体可操作; 不知道的如实说。',
 ].join("\n");
+
+// ── 延时汇总: 会话缓冲区 (收集期轮次 → 静默/显式触发 → 工单草稿) ──
+
+interface RepairTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+interface RepairSession {
+  turns: RepairTurn[];
+  /** 静默期满预计算的工单草稿(下次消息送达时呈现) */
+  draft: string | null;
+  timer: NodeJS.Timeout | null;
+}
+
+const repairSessions = new Map<string, RepairSession>();
+
+/** 静默自动汇总窗口: 默认 3 分钟, env REPAIR_QUIET_MS 可调, 0=仅显式触发 */
+function repairQuietMs(): number {
+  const v = Number(process.env["REPAIR_QUIET_MS"]);
+  return Number.isFinite(v) && v >= 0 ? v : 3 * 60_000;
+}
+
+const REPAIR_SUBMIT_RE = /^(就这些|就这些了|提交报修|建单吧|创建工单|差不多了|没有了|没别的|报修完成|整理一下吧|汇总一下)[!。.！~]*$/;
+
+function repairSessionOf(key: string): RepairSession {
+  let sess = repairSessions.get(key);
+  if (!sess) {
+    sess = { turns: [], draft: null, timer: null };
+    repairSessions.set(key, sess);
+  }
+  return sess;
+}
+
+function armRepairQuiet(key: string, fire: () => void): void {
+  const sess = repairSessionOf(key);
+  if (sess.timer) clearTimeout(sess.timer);
+  const ms = repairQuietMs();
+  if (ms <= 0) return;
+  const t = setTimeout(() => {
+    sess.timer = null;
+    fire();
+  }, ms);
+  (t as unknown as { unref?: () => void }).unref?.();
+  sess.timer = t;
+}
+
+/** 汇总: 整合缓冲区全部轮次 → ticket 块; 失败返回 null */
+async function summarizeRepair(
+  ctx: SeamContext,
+  sess: RepairSession,
+): Promise<string | null> {
+  if (sess.turns.length === 0) return null;
+  const transcript = sess.turns
+    .map((t) => `${t.role === "user" ? "用户" : "客服"}: ${t.content}`)
+    .join("\n");
+  const res = (await ctx.call(
+    { id: "@cognitive/llm-inference", versionRange: "^1.0.0" },
+    {
+      model: process.env.LLM_MODEL ?? "glm-4.6",
+      messages: [
+        {
+          role: "system",
+          content: [
+            '你是报修工单整理器。下面是一段用户与报修客服的完整对话, 请整合出一张工单。',
+            '只输出如下格式的代码块, 不要输出任何其他内容:',
+            '```ticket',
+            '{"title": "一句话问题标题", "app": "应用名", "detail": "现象/复现步骤/报错信息/已尝试的排查, 按对话事实汇总"}',
+            '```',
+            '要求: app 取对话中明确提到的应用名(没有则填 "未知应用"); detail 忠实于对话, 不编造; title 20 字以内。',
+          ].join("\n"),
+        },
+        { role: "user", content: transcript.slice(0, 6000) },
+      ],
+      temperature: 0,
+    },
+  )) as { ok: boolean; value?: { text?: string } };
+  if (!res.ok || !res.value?.text) return null;
+  const m = /```ticket\s*\n([\s\S]*?)```/.exec(res.value.text);
+  if (!m) return null;
+  try {
+    JSON.parse(m[1]!.trim());
+    return "```ticket\n" + m[1]!.trim() + "\n```";
+  } catch {
+    return null;
+  }
+}
 
 const repairChatProvider: Provider<RepairChatRequest, RepairChatResponse> = {
   service: repairChatService,
@@ -87,6 +176,55 @@ const repairChatProvider: Provider<RepairChatRequest, RepairChatResponse> = {
   ): Promise<Result<RepairChatResponse>> {
     const agentName = "应用报修客服";
     const memUserId = request.user_key ?? "anonymous";
+    const sessKey = request.user_key ?? request.session_id ?? ctx.sessionId;
+    const sess = repairSessionOf(sessKey);
+    const input = request.user_input.trim();
+
+    // ── 延时汇总工作流分流 ──
+    // ① 显式提交信号 → 整合缓冲区出工单草稿(前端「创建工单」按钮即确认)
+    if (REPAIR_SUBMIT_RE.test(input)) {
+      const draft = sess.draft ?? (await summarizeRepair(ctx, sess));
+      sess.draft = null;
+      if (!draft) {
+        return ok({
+          response: sess.turns.length === 0
+            ? "还没有收到报修内容呢。请先描述: 哪个应用、什么现象、怎么复现？描述完回复「就这些了」我来整理工单。"
+            : "整理失败（模型输出无法解析）。请再补充一点信息，或直接回复「就这些了」重试。",
+          agent_name: agentName,
+          session_id: ctx.sessionId,
+          trace_id: ctx.traceId,
+        });
+      }
+      sess.turns = []; // 草稿已交付, 清空缓冲(建单后如需补充会开启新一轮)
+      return ok({
+        response:
+          "根据我们的沟通，我把报修信息整理成了工单草稿 👇 确认无误请点下方「创建工单」；需要补充就直接继续说。\n\n" +
+          draft +
+          "\n\n建单后可在工单列表点「开发员协助」交给网页应用开发员处理。",
+        agent_name: agentName,
+        session_id: ctx.sessionId,
+        trace_id: ctx.traceId,
+      });
+    }
+
+    // ② 静默期满已预计算好草稿 → 直接呈现(下一步同显式提交, 不再重复汇总)
+    if (sess.draft) {
+      const draft = sess.draft;
+      sess.draft = null;
+      sess.turns = [];
+      sess.turns.push({ role: "user", content: input });
+      return ok({
+        response:
+          "刚才我们的沟通告一段落，我已把报修信息整理成工单草稿 👇 确认无误请点下方「创建工单」；你刚说的这条我记下了，会开启新一轮整理。\n\n" +
+          draft,
+        agent_name: agentName,
+        session_id: ctx.sessionId,
+        trace_id: ctx.traceId,
+      });
+    }
+
+    // ③ 收集期: 正常引导回复, 但屏蔽 LLM 可能漏出的 ticket 块, 并把轮次记入缓冲
+    sess.turns.push({ role: "user", content: input });
 
     // TiMEM 记忆召回 (尽力而为): 按用户检索相关历史记忆, 失败静默降级不阻塞对话
     let memoryBlock = "";
@@ -124,9 +262,23 @@ const repairChatProvider: Provider<RepairChatRequest, RepairChatResponse> = {
 
     const wfValue = (result as { ok: boolean; value?: { result?: string; response?: string; degraded?: boolean } })
       .value;
-    const response = (result as { ok: boolean }).ok
+    let response = (result as { ok: boolean }).ok
       ? (wfValue?.result ?? wfValue?.response ?? "抱歉，我没有理解您的意思。")
       : "抱歉，智能助理暂时无法响应，请稍后重试。";
+
+    // 收集期保险: 屏蔽 LLM 可能漏出的 ticket 块(建单只走延时汇总通道)
+    response = response.replace(/```ticket[\s\S]*?```/g, "").trim();
+    sess.turns.push({ role: "assistant", content: response });
+
+    // 静默自动汇总: 用户停止输入 REPAIR_QUIET_MS 后预计算草稿(下次消息送达时呈现)
+    armRepairQuiet(sessKey, () => {
+      void summarizeRepair(ctx, sess)
+        .then((draft) => {
+          if (draft && sess.turns.length > 0) sess.draft = draft;
+          console.log(`[repair-flow] quiet summarize for ${sessKey}: ${sess.draft ? "ok" : "empty"}`);
+        })
+        .catch(() => undefined);
+    });
 
     // 记忆沉淀 (尽力而为): 把本次报修交互存入 TiMEM, 下次同类问题可召回。
     // 降级占位回复 (LLM 不可用) 不写入, 避免污染长期记忆。

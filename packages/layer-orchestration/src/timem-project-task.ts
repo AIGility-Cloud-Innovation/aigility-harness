@@ -30,10 +30,18 @@ import type {
 } from "@aigility-harness/core";
 import { request as httpRequest } from "node:http";
 import { execFile } from "node:child_process";
+import { RequirementStore } from "./requirement-store.js";
+import type { Consolidation, Requirement } from "./requirement-store.js";
+import {
+  CONSOLIDATION_SYSTEM_PROMPT,
+  parseConsolidation,
+  buildConsolidation,
+  renderConsolidation,
+} from "./consolidation.js";
 
 // ---- 请求/响应 ----
 
-export interface TimemTaskRequest {
+export interface TimemProjectTaskRequest {
   /** 用户任务指令(飞书消息文本等) */
   user_input: string;
   /** 用户 ID(记忆隔离/creator 记录) */
@@ -60,14 +68,29 @@ export interface TimemTaskRequest {
   prompt_override?: string;
   /** 立即执行(跳过等待延迟，1 秒后自动运行) */
   run_now?: boolean;
+  /** 显式信号(前端按钮): summarize=汇总执行, confirm=确认汇总单, chat=普通消息 */
+  signal?: "chat" | "summarize" | "confirm";
+  /** 静默自动汇总窗口 ms(0=关闭; 默认 env TIMEM_QUIET_SUMMARIZE_MS 或 10 分钟) */
+  quiet_ms?: number;
 }
 
-export type TimemTaskResponse =
+export type TimemProjectTaskResponse =
   | { type: "chat"; text: string }
   | { type: "ask"; text: string }
   | { type: "task"; taskId: string; status: string; response: string }
   | { type: "confirm"; taskId: string; status: string; promptPreview: string; response: string }
   | { type: "summary"; text: string }
+  /** 聊天期: 已记下第 N 条需求(前端据此渲染实时清单) */
+  | { type: "collected"; requirementId: string; content: string; count: number; text: string }
+  /** 收敛期: 汇总单(确认页), conflicts/missing 为高亮项 */
+  | {
+      type: "consolidation";
+      consolidationId: string;
+      version: number;
+      summaryText: string;
+      conflicts: string[];
+      missing: string[];
+    }
   | { type: "error"; text: string };
 
 // ---- ① classify: 任务判定 ----
@@ -135,20 +158,20 @@ async function classifyWithLlm(
 ): Promise<ClassifyResult> {
   try {
     const req: LlmInferenceRequest = {
-      model: "qwen2.5:7b",
+      model: process.env.LLM_MODEL ?? "glm-4.6",
       messages: [
         { role: "system", content: CLASSIFY_SYSTEM_PROMPT },
         { role: "user", content: input },
       ],
       temperature: 0,
     };
-    console.log(`[timem-task] classifyWithLlm start: model=qwen2.5:7b input="${input.slice(0, 40)}"`);
+    console.log(`[timem-project-task] classifyWithLlm start: model=${process.env.LLM_MODEL ?? "glm-4.6"} input="${input.slice(0, 40)}"`);
     const t0 = Date.now();
     const res = (await ctx.call<LlmInferenceRequest, LlmInferenceResponse>(
       llmInferenceRef,
       req,
     )) as Result<LlmInferenceResponse>;
-    console.log(`[timem-task] classifyWithLlm done: ${Date.now() - t0}ms ok=${res.ok}`);
+    console.log(`[timem-project-task] classifyWithLlm done: ${Date.now() - t0}ms ok=${res.ok}`);
     if (!res.ok) return { type: "unknown" };
     const parsed = parseLlmClassification(res.value.text);
     // 非任务或 JSON 解析失败 → 降级按非任务处理(unknown → chat)
@@ -206,7 +229,7 @@ function udsRequest(
         let data = "";
         res.on("data", (c) => (data += c));
         res.on("end", () => {
-          console.log(`[timem-task] UDS ${method} ${path} → HTTP ${res.statusCode} body=${data.slice(0, 200)}`);
+          console.log(`[timem-project-task] UDS ${method} ${path} → HTTP ${res.statusCode} body=${data.slice(0, 200)}`);
           resolve({ status: res.statusCode ?? 0, body: data });
         });
       },
@@ -276,6 +299,222 @@ async function gitHasOrigin(root: string): Promise<boolean> {
   return r.code === 0 && r.stdout.trim().length > 0;
 }
 
+// ---- 需求缓冲区 (E2 扩展: COLLECTING → SUMMARIZING → CONFIRMING → EXECUTING) ----
+
+/** 缓冲模式默认关闭时走快车道的多需求连接词 */
+const MULTI_REQ_CONNECTIVES = /还有|另外|同时|以及|顺便|再加上|其次|然后|再帮我|还要/;
+
+/** 「聊完了」显式信号关键词 */
+const SUMMARIZE_RE = /^(就这些|就这些了|汇总吧|汇总一下|开始汇总|没别的|没有了|聊完了|沟通结束|需求就这些)/;
+
+/** 汇总单确认关键词(CONFIRMING 阶段) */
+const CONSOLIDATION_CONFIRM_RE = /^(确认|确认执行|开始执行|执行吧|就这么办|同意|ok|okay)$/i;
+
+/** 静默自动汇总窗口: env 可覆盖, 默认 10 分钟; request.quiet_ms 优先 */
+function defaultQuietMs(): number {
+  const env = Number(process.env["TIMEM_QUIET_SUMMARIZE_MS"]);
+  return Number.isFinite(env) && env >= 0 ? env : 10 * 60_000;
+}
+
+/** 模块级单例存储(JSON 文件持久化, 路径 env 可配) */
+let requirementStore: RequirementStore | null = null;
+function getStore(): RequirementStore {
+  if (!requirementStore) {
+    requirementStore = new RequirementStore(process.env["TIMEM_REQUIREMENT_STORE_PATH"] || undefined);
+    requirementStore.recover();
+  }
+  return requirementStore;
+}
+
+/** 测试注入用(生产勿动) */
+export function resetRequirementStoreForTest(path?: string): void {
+  requirementStore = new RequirementStore(path);
+}
+
+/** 每会话一个静默计时器(借鉴 timem-project TopicSink 的 quiet window + 防抖) */
+const quietTimers = new Map<string, NodeJS.Timeout>();
+
+function armQuietTimer(
+  sessionId: string,
+  quietMs: number,
+  fire: () => void,
+): void {
+  const prev = quietTimers.get(sessionId);
+  if (prev) clearTimeout(prev);
+  if (quietMs <= 0) {
+    quietTimers.delete(sessionId);
+    return;
+  }
+  const t = setTimeout(() => {
+    quietTimers.delete(sessionId);
+    fire();
+  }, quietMs);
+  (t as unknown as { unref?: () => void }).unref?.();
+  quietTimers.set(sessionId, t);
+}
+
+function sessionIdOf(request: TimemProjectTaskRequest, ctx: SeamContext): string {
+  return request.conversation_id ?? request.session_id ?? ctx.sessionId;
+}
+
+/** 聊天期追加一条需求, 返回 collected 响应 */
+function appendRequirement(
+  sessionId: string,
+  request: TimemProjectTaskRequest,
+  ctx: SeamContext,
+): TimemProjectTaskResponse {
+  const store = getStore();
+  const content = request.user_input.trim().slice(0, 200);
+  const req = store.append(sessionId, content, request.user_input);
+  const count = store.listOpen(sessionId).length;
+  // 确认期补充需求 → 回到收集(E2: CONFIRMING → SUMMARIZING), 重汇总由下一条消息触发
+  if (store.session(sessionId).phase === "confirming") {
+    store.setPhase(sessionId, "summarizing");
+  }
+  // 静默自动汇总: provider 无反向推送通道 → 定时器只预计算汇总单, 下一条消息送达
+  armQuietTimer(sessionId, request.quiet_ms ?? defaultQuietMs(), () => {
+    void consolidateFor(ctx, sessionId).catch(() => undefined);
+  });
+  return {
+    type: "collected",
+    requirementId: req.id,
+    content,
+    count,
+    text: `已记录第 ${count} 条需求 📝「${content.slice(0, 40)}」\n继续说，聊完回复「就这些了」我再统一汇总设计。`,
+  };
+}
+
+/** 收敛期: 一次 LLM 调用(非法输出重试一次), 产出汇总单并落 CONFIRMING */
+async function consolidateFor(
+  ctx: SeamContext,
+  sessionId: string,
+): Promise<Result<Consolidation>> {
+  const store = getStore();
+  const open = store.listOpen(sessionId);
+  if (open.length === 0) return err("还没有记录任何需求");
+  const userContent = open.map((r: Requirement) => `${r.id}: ${r.content}`).join("\n");
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = (await ctx.call<LlmInferenceRequest, LlmInferenceResponse>(llmInferenceRef, {
+      model: process.env.LLM_MODEL ?? "glm-4.6",
+      messages: [
+        { role: "system", content: CONSOLIDATION_SYSTEM_PROMPT },
+        { role: "user", content: userContent },
+      ],
+      temperature: 0,
+    })) as Result<LlmInferenceResponse>;
+    if (!res.ok) continue;
+    const parsed = parseConsolidation(res.value.text, open);
+    if (parsed) {
+      const prev = store.latestConsolidation(sessionId);
+      const cons = buildConsolidation(sessionId, parsed.items, parsed.designDoc, (prev?.version ?? 0) + 1);
+      store.saveConsolidation(cons);
+      store.setPhase(sessionId, "confirming");
+      return ok(cons);
+    }
+  }
+  return err("汇总失败：模型输出无法解析（已重试一次）");
+}
+
+/** 汇总单 → 确认响应 */
+function consolidationResponse(cons: Consolidation): TimemProjectTaskResponse {
+  return {
+    type: "consolidation",
+    consolidationId: cons.id,
+    version: cons.version,
+    summaryText: renderConsolidation(cons),
+    conflicts: cons.items.flatMap((it) => (it.blockedByConflict ? [it.blockedByConflict] : [])),
+    missing: cons.items.flatMap((it) => it.missingInformation ?? []),
+  };
+}
+
+/** 汇总单项是否已执行完(其全部需求已 tasked; 断点续跑用) */
+function isItemDone(cons: Consolidation, itemIndex: number): boolean {
+  const store = getStore();
+  const item = cons.items[itemIndex];
+  if (!item) return true;
+  return item.requirementIds.every((id) => store.get(id)?.status === "tasked");
+}
+
+/** 执行期: 按拓扑序逐项 dispatch, 失败即暂停(E5 规则 1) */
+async function executeConsolidationQueue(
+  socketPath: string,
+  token: string,
+  source: string,
+  request: TimemProjectTaskRequest,
+  sessionId: string,
+): Promise<TimemProjectTaskResponse> {
+  const store = getStore();
+  const cons = store.latestConsolidation(sessionId);
+  if (!cons) return { type: "error", text: "没有可执行的汇总单" };
+  store.setPhase(sessionId, "executing");
+  const results: string[] = [];
+  let paused = false;
+
+  for (const idx of cons.executionOrder) {
+    const item = cons.items[idx];
+    if (!item) continue;
+    if (isItemDone(cons, idx)) continue; // 断点续跑: 跳过已完成项
+    if (item.blockedByConflict) {
+      results.push(`⏸「${item.taskTitle}」冲突待拍板（${item.blockedByConflict}），已跳过`);
+      continue;
+    }
+    // 归仓 + git 校验(复用单任务链路)
+    const identified = await activeHooks.udsRequest(socketPath, token, "POST", "/v1/tasks/identify-project", {
+      text: item.taskDescription,
+      conversationId: sessionId,
+      senderId: request.user_id ?? "",
+    });
+    const ident = parseUdsJson<IdentifyProjectResponse>(identified);
+    const projectId = ident.projectId;
+    if (!projectId) {
+      results.push(`⏸「${item.taskTitle}」识别不到归属项目，队列暂停。处理后回复「确认」继续。`);
+      paused = true;
+      break;
+    }
+    const root = Array.isArray(ident.rootPaths) ? ident.rootPaths[0] : undefined;
+    const gitError = await validateProjectGit(projectId, root);
+    if (gitError) {
+      results.push(`⏸「${item.taskTitle}」${gitError}`);
+      paused = true;
+      break;
+    }
+    // 派发: 每个任务共享统一设计文档 + 验收标准(E5 规则 2)
+    const taskReq: TimemProjectTaskRequest = {
+      ...request,
+      user_input: `【统一设计】\n${cons.designDoc}\n\n【任务】\n${item.taskDescription}\n\n【验收标准】\n${item.acceptanceCriteria.join("；")}`,
+      title: item.taskTitle,
+      message_id: `${cons.id}-${idx}`,
+    };
+    const created = await dispatch(socketPath, token, source, taskReq, projectId);
+    const taskId = created?.id ?? created?.taskId ?? "";
+    if (!taskId) {
+      results.push(`⏸「${item.taskTitle}」创建任务失败（${created?.lastError ?? "未知错误"}），队列暂停。`);
+      paused = true;
+      break;
+    }
+    // E5 规则 0: 确认只发生一次(汇总单已人审), 执行循环对 agentd 程序自动确认并立即运行
+    await confirmTask(socketPath, token, taskId, undefined, true);
+    const status = await pollTaskUntilFinal(socketPath, token, taskId);
+    if (status === "completed" || status === "needs_review") {
+      results.push(`${status === "completed" ? "✅" : "👀"}「${item.taskTitle}」${status === "completed" ? "完成" : "执行完毕待验收"}`);
+      for (const rid of item.requirementIds) {
+        // 一期简化: 确认执行后统一 tasked(merged/dropped 细化留二期)
+        store.transition(rid, "open", "tasked");
+      }
+    } else {
+      results.push(`❌「${item.taskTitle}」${status === null ? "超时" : `状态 ${status}`}，后续任务暂停。处理完回复「确认」续跑。`);
+      paused = true;
+      break;
+    }
+  }
+
+  if (!paused) {
+    store.setPhase(sessionId, "collecting"); // E2: 全部完成回到聊天
+    results.push("全部任务处理完毕 🎉 有新需求随时说。");
+  }
+  return { type: "task", taskId: cons.id, status: paused ? "paused" : "completed", response: results.join("\n") };
+}
+
 // ---- Provider 实现 ----
 
 const POLL_INTERVAL_MS = 2_000;
@@ -285,7 +524,7 @@ let activeSocketPath = defaultSocketPath();
 let activeToken = defaultToken();
 
 /** 运行时覆盖配置(装配时可注入) */
-export function enableTimemTask(options: { socketPath?: string; token?: string }): void {
+export function enableTimemProjectTask(options: { socketPath?: string; token?: string }): void {
   if (options.socketPath) activeSocketPath = options.socketPath;
   if (options.token !== undefined) activeToken = options.token;
 }
@@ -304,9 +543,9 @@ interface AgentdContextGate {
   value?: string;
 }
 
-export const timemTaskProvider: Provider<TimemTaskRequest, TimemTaskResponse> = {
+export const timemProjectTaskProvider: Provider<TimemProjectTaskRequest, TimemProjectTaskResponse> = {
   service: {
-    id: "@orchestration/timem-task",
+    id: "@orchestration/timem-project-task",
     version: "1.0.0",
     layer: LayerId.Orchestration,
     description:
@@ -322,10 +561,10 @@ export const timemTaskProvider: Provider<TimemTaskRequest, TimemTaskResponse> = 
     };
   },
   async execute(
-    request: TimemTaskRequest,
+    request: TimemProjectTaskRequest,
     ctx: SeamContext,
     _options?: { socketPath?: string; token?: string },
-  ): Promise<Result<TimemTaskResponse>> {
+  ): Promise<Result<TimemProjectTaskResponse>> {
     const socketPath = _options?.socketPath ?? activeSocketPath;
     const token = _options?.token ?? activeToken;
     const source = request.source ?? "feishu";
@@ -422,7 +661,7 @@ export const timemTaskProvider: Provider<TimemTaskRequest, TimemTaskResponse> = 
             (t) => (t.title ?? "").includes(keyword) || (t.description ?? "").includes(keyword),
           );
         }
-        console.log(`[timem-task] cancel: keyword="${keyword}" mine=${mine.length} cancelable=${cancelable.length} conv=${request.conversation_id ?? request.session_id ?? ""}`);
+        console.log(`[timem-project-task] cancel: keyword="${keyword}" mine=${mine.length} cancelable=${cancelable.length} conv=${request.conversation_id ?? request.session_id ?? ""}`);
         if (cancelable.length === 0) {
           const hint = keyword ? `（未找到描述包含「${keyword}」的可取消任务）` : "";
           return ok({ type: "chat", text: `当前没有可取消的任务${hint}。` });
@@ -440,6 +679,28 @@ export const timemTaskProvider: Provider<TimemTaskRequest, TimemTaskResponse> = 
         });
       }
 
+      // ⓪c 需求缓冲区分流 (E2 扩展: 聊天累积 → 汇总 → 确认 → 按序执行)
+      const sessionId = sessionIdOf(request, ctx);
+      const store = getStore();
+      const input = request.user_input.trim();
+
+      // 「聊完了」显式信号(关键词或前端按钮) → 汇总收敛
+      if (request.signal === "summarize" || SUMMARIZE_RE.test(input)) {
+        const cons = await consolidateFor(ctx, sessionId);
+        if (!cons.ok) return ok({ type: "error", text: cons.error });
+        return ok(consolidationResponse(cons.value));
+      }
+
+      // CONFIRMING/EXECUTING 阶段的确认意图 → 按序执行/断点续跑
+      // (新需求消息不在此拦截, 交给下方 classify 判定后走追加+重汇总)
+      const phase = store.session(sessionId).phase;
+      if (
+        (phase === "confirming" || phase === "executing") &&
+        (request.signal === "confirm" || CONSOLIDATION_CONFIRM_RE.test(input))
+      ) {
+        return ok(await executeConsolidationQueue(socketPath, token, source, request, sessionId));
+      }
+
       // ① classify: 是否任务
       let verdict = classifyMessage(request.user_input);
       if (verdict.type === "unknown") {
@@ -455,15 +716,35 @@ export const timemTaskProvider: Provider<TimemTaskRequest, TimemTaskResponse> = 
         });
       }
 
+      // ①a 缓冲分流 (E8): 显式项目名或显式 project_id + 单一动作(无多需求连接词)
+      //    → 快车道直走原三段式; 其余任务意图 → 进需求缓冲区, 聊天期绝不执行(E2 原则 1)
+      const fastLane =
+        (PROJECT_PATTERN.test(request.user_input) || !!request.project_id) &&
+        !MULTI_REQ_CONNECTIVES.test(request.user_input);
+      if (!fastLane) {
+        const collected = appendRequirement(sessionId, request, ctx);
+        // 确认页补充需求 → 立即重汇总(v+1), E9-5
+        if (phase === "confirming") {
+          const reCons = await consolidateFor(ctx, sessionId);
+          if (reCons.ok) return ok(consolidationResponse(reCons.value));
+        }
+        return ok(collected);
+      }
+
+      // ①b CONFIRMING 阶段的非任务输入 → 重展汇总单(等确认, 不被闲聊带偏)
+      if (phase === "confirming" && store.latestConsolidation(sessionId)) {
+        return ok(consolidationResponse(store.latestConsolidation(sessionId)!));
+      }
+
       // ② identify: 归仓(显式 project_id 优先; 仍调 identify-project 以取 rootPaths 供 git 校验)
-      console.log(`[timem-task] identify start: ${request.user_input.slice(0, 30)}`);
+      console.log(`[timem-project-task] identify start: ${request.user_input.slice(0, 30)}`);
       const identifyBody = {
         text: request.user_input,
         conversationId: request.conversation_id ?? request.session_id ?? ctx.sessionId,
         senderId: request.user_id ?? "",
         ...(request.project_id ? { projectId: request.project_id } : {}),
       };
-      console.log(`[timem-task] identify body: ${JSON.stringify(identifyBody).slice(0, 300)}`);
+      console.log(`[timem-project-task] identify body: ${JSON.stringify(identifyBody).slice(0, 300)}`);
       const identified = await activeHooks.udsRequest(
         socketPath,
         token,
@@ -547,7 +828,7 @@ export const timemTaskProvider: Provider<TimemTaskRequest, TimemTaskResponse> = 
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      console.log(`[timem-task] 处理异常: ${msg} (type=${typeof e}, ctor=${(e as any)?.constructor?.name})`);
+      console.log(`[timem-project-task] 处理异常: ${msg} (type=${typeof e}, ctor=${(e as any)?.constructor?.name})`);
       if (
         msg.includes("ECONNREFUSED") ||
         msg.includes("ENOENT") ||
@@ -646,7 +927,7 @@ async function dispatch(
   socketPath: string,
   token: string,
   source: string,
-  request: TimemTaskRequest,
+  request: TimemProjectTaskRequest,
   projectId: string,
 ): Promise<CreateFromMessageResult | null> {
   const createBody = {
@@ -658,7 +939,7 @@ async function dispatch(
     text: request.user_input,
     projectId,
   };
-  console.log(`[timem-task] dispatch createBody.sourceMessageId=${createBody.sourceMessageId} message_id=${request.message_id ?? "(undefined)"} session_id=${request.session_id ?? "(undefined)"}`);
+  console.log(`[timem-project-task] dispatch createBody.sourceMessageId=${createBody.sourceMessageId} message_id=${request.message_id ?? "(undefined)"} session_id=${request.session_id ?? "(undefined)"}`);
   const created = await activeHooks.udsRequest(
     socketPath,
     token,
@@ -758,21 +1039,21 @@ function summarizeTask(task: AgentdTask, status: string): string {
   }
 }
 
-export const timemTaskService: ServiceDefinition<TimemTaskRequest, TimemTaskResponse> = {
-  id: "@orchestration/timem-task",
+export const timemProjectTaskService: ServiceDefinition<TimemProjectTaskRequest, TimemProjectTaskResponse> = {
+  id: "@orchestration/timem-project-task",
   version: "1.0.0",
   layer: LayerId.Orchestration,
   description: "TiMEM Project 三段式任务工作流: classify(是否任务) → identify(归仓) → dispatch(派发执行)",
 };
 
 export const manifest: PluginManifest = {
-  name: "@orchestration/timem-task",
+  name: "@orchestration/timem-project-task",
   layer: LayerId.Orchestration,
   description: "编排层: TiMEM Project 三段式任务工作流(是否任务→归仓→派发)",
   version: "1.0.0",
-  provides: [timemTaskService],
+  provides: [timemProjectTaskService],
   consumes: [llmInferenceRef],
   preferredCarrier: CarrierKind.Thread,
 };
 
-export { timemTaskService as service, timemTaskProvider as provider, manifest as timemTaskManifest };
+export { timemProjectTaskService as service, timemProjectTaskProvider as provider, manifest as timemTaskManifest };

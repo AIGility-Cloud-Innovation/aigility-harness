@@ -1,5 +1,5 @@
 /**
- * 特色案例: 企业微信 @机器人 → @persona/coder → codex（经框架认知层）
+ * 特色案例: 企业微信 @机器人 → @persona/app-dev → codex（经框架认知层）
  *
  * 运行前准备:
  *   1. 企微后台创建「智能机器人」，拿到 botId + secret

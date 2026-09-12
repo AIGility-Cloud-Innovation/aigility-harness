@@ -61,7 +61,7 @@ export interface TimemProjectAssistantResponse {
 }
 
 // 编排层判别联合响应的局部 shape（不引用 orchestration 类型，层间解耦）
-interface TimemTaskResponseLike {
+interface TimemProjectTaskResponseLike {
   type?: string;
   text?: string;
   response?: string;
@@ -136,9 +136,9 @@ export const timemProjectAssistantProvider: Provider<
     }
 
     // 委托 L4 编排：TIMEM_PROJECT 真实执行桥接（UDS → agentd → codex）
-    // 注：装配时若 timem-task 不可用（agentd 未起）会降级报错提示
+    // 注：装配时若 timem-project-task 不可用（agentd 未起）会降级报错提示
     const result = await ctx.call(
-      { id: "@orchestration/timem-task", versionRange: "^1.0.0" },
+      { id: "@orchestration/timem-project-task", versionRange: "^1.0.0" },
       {
         user_input: input,
         user_id: userId,
@@ -157,7 +157,7 @@ export const timemProjectAssistantProvider: Provider<
     );
 
     const value = (result as { ok: boolean; value?: unknown }).ok
-      ? (result as { value?: TimemTaskResponseLike }).value
+      ? (result as { value?: TimemProjectTaskResponseLike }).value
       : undefined;
 
     // 记住待确认任务 ID（确认闸门：用户回复「确认」时用）

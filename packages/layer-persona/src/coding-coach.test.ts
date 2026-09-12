@@ -1,5 +1,5 @@
 /**
- * coder 角色单测 — @persona/coder (编码教练: 分步引导设计)
+ * coding-coach 角色单测 — @persona/coding-coach (编码教练: 分步引导设计)
  *
  * 验证:
  *   1. 服务定义归属 Persona 层且 id 正确, 名称不含实现名
@@ -11,9 +11,9 @@ import { describe, it, expect } from "vitest";
 import { LayerId, ok, err } from "@aigility-harness/core";
 import type { SeamContext } from "@aigility-harness/core";
 import {
-  coderService,
-  coderProvider,
-} from "./coder.js";
+  codingCoachService,
+  codingCoachProvider,
+} from "./coding-coach.js";
 
 /** 最小 SeamContext 测试替身 */
 function mockContext(callImpl: SeamContext["call"]): SeamContext {
@@ -29,20 +29,20 @@ function mockContext(callImpl: SeamContext["call"]): SeamContext {
   };
 }
 
-describe("@persona/coder 契约", () => {
+describe("@persona/coding-coach 契约", () => {
   it("服务定义归属 Persona 层且 id 正确", () => {
-    expect(coderService.id).toBe("@persona/coder");
-    expect(coderService.layer).toBe(LayerId.Persona);
-    expect(coderService.version).toBe("1.0.0");
+    expect(codingCoachService.id).toBe("@persona/coding-coach");
+    expect(codingCoachService.layer).toBe(LayerId.Persona);
+    expect(codingCoachService.version).toBe("1.0.0");
   });
 
   it("角色名不含实现名, 描述体现教练引导", () => {
-    expect(coderService.id).not.toMatch(/codex|claude|opencode|guided-design/i);
-    expect(coderService.description).toContain("编码教练");
+    expect(codingCoachService.id).not.toMatch(/codex|claude|opencode|guided-design/i);
+    expect(codingCoachService.description).toContain("编码教练");
   });
 
   it("Provider 绑定同一服务定义", () => {
-    expect(coderProvider.service).toBe(coderService);
+    expect(codingCoachProvider.service).toBe(codingCoachService);
   });
 });
 
@@ -59,7 +59,7 @@ describe("coder execute", () => {
       });
     }) as SeamContext["call"]);
 
-    const r = await coderProvider.execute(
+    const r = await codingCoachProvider.execute(
       { user_input: "我想给班里做个记账本", session_state: { phase: 1 } },
       ctx,
     );
@@ -91,7 +91,7 @@ describe("coder execute", () => {
         session_state: { phase: 5, answers: {} },
       })) as SeamContext["call"]);
 
-    const r = await coderProvider.execute({ user_input: "确认，出提示词" }, ctx);
+    const r = await codingCoachProvider.execute({ user_input: "确认，出提示词" }, ctx);
 
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -103,7 +103,7 @@ describe("coder execute", () => {
     const ctx = mockContext((async () =>
       err("guided-design unreachable")) as SeamContext["call"]);
 
-    const r = await coderProvider.execute({ user_input: "开始" }, ctx);
+    const r = await codingCoachProvider.execute({ user_input: "开始" }, ctx);
 
     expect(r.ok).toBe(true); // 角色不抛错, 反馈失败原因
     if (!r.ok) return;

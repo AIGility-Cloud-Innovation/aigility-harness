@@ -1,5 +1,5 @@
 /**
- * L3 感知交互层: AppBase 客服角色形象 (sales-chat)
+ * L3 感知交互层: 平台客服角色形象 (sales-chat)
  *
  * L3 的职责: 构建主体形象，接收信号，委托 L4 编排，由同一角色反馈。
  * 不关心调什么工具、走什么流程——那是 L4 的事。
@@ -53,7 +53,7 @@ export const salesChatService: ServiceDefinition<SalesChatRequest, SalesChatResp
   id: "@persona/sales-chat",
   version: "1.0.0",
   layer: LayerId.Persona,
-  description: "AppBase 客服角色形象：解答系统使用问题 → 委托 L4 → 回文字",
+  description: "平台客服角色形象：解答系统使用问题 → 委托 L4 → 回文字",
 };
 
 // ── Provider 实现 ────────────────────────────────────────────────
@@ -62,13 +62,13 @@ export const salesChatService: ServiceDefinition<SalesChatRequest, SalesChatResp
 
 /** AppBase 系统知识 (客服的产品手册, 随提问注入 LLM) */
 const APPBASE_SUPPORT_PROMPT = [
-  '你是「AppBase 客服」, 专门解答用户关于 AppBase 系统的任何问题。请用简体中文回答。',
+  '你是「平台客服」, 专门解答用户关于 AppBase 系统的任何问题。请用简体中文回答。',
   '',
   '【AppBase 是什么】一个 AI 应用工厂: 大厅里可以打开 AI 生成的网页应用、与对话角色聊天、在编码工作台让 AI 修改应用代码。',
   '',
   '【核心功能】',
   '1. 应用大厅 (/hall): 卡片墙展示所有应用。每个应用可打开、设置(可登录账号 / LLM 配置 / .env 配置)。',
-  '2. 对话角色: 网页应用生成器(生成 HTML 应用, 编辑模式)、编码教练(教学模式, 只讲不改代码), 两者都在编码工作台里; 另有 AppBase 客服(本角色)。',
+  '2. 对话角色: 网页应用开发员(生成 HTML 应用, 编辑模式)、编码教练(教学模式, 只讲不改代码), 两者都在编码工作台里; 另有平台客服(本角色)。',
   '3. 编码工作台 (/hall/workbench): 选角色 + 目标应用 + 编码工具(Codex CLI / ZCode CLI / Claude Code, 自动检测本机可用性), AI 直接修改应用代码; 改动前自动快照备份到 .backups(保留10份); 聊天记录按 角色+应用+工具 自动保存。',
   '4. 应用账号: 每个应用可有独立的用户名+密码账号(管理员在大厅设置里添加), 用户名登录, 可自助改密或由管理员重置。',
   '5. LLM 配置: 每个应用可单独配置 LLM 上游(URL / API Key / 模型, 可从上游拉取模型列表), Key 保存在服务端, 应用前端不接触; AI 调用走服务端代理。未配置的应用回退全局默认。',
@@ -92,7 +92,7 @@ const salesChatProvider: Provider<SalesChatRequest, SalesChatResponse> = {
     ctx: SeamContext,
   ): Promise<Result<SalesChatResponse>> {
     // 1. 角色形象: "我是销售客服AI"
-    const agentName = "AppBase 客服";
+    const agentName = "平台客服";
 
     // 2. 构建 ChatRequest (带角色身份 + 会话记忆透传)
     const chatRequest = {

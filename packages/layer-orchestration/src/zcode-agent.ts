@@ -2,7 +2,7 @@
  * @orchestration/zcode-agent — ZCode CLI 编码代理能力
  *
  * 通过 ZCode CLI 的 headless 模式 (`zcode -p <prompt>`) 驱动 ZCode 执行编码任务，
- * 与 codex-agent 平级，作为网页应用生成器的可切换「主理人」(AGENT_DRIVER=zcode)。
+ * 与 codex-agent 平级，作为网页应用开发员的可切换「主理人」(AGENT_DRIVER=zcode)。
  *
  * 与 codex-agent 的差异:
  *   - codex 走 `codex exec --json` 的 JSONL 事件流协议；
@@ -62,13 +62,16 @@ function zcodeCliPath(): string {
   );
 }
 
-/** spawn cwd 必须是目录: 传入的是 .html 文件时取其所在目录 */
+/** spawn cwd 必须是已存在的目录: 文件→所在目录; 不存在→父目录(如 DB-only 应用 id 在沙箱根下)→进程目录 */
 function resolveAgentCwd(cwd?: string): string {
   const target = cwd ?? process.cwd();
   try {
     if (existsSync(target) && statSync(target).isFile()) return dirname(target);
+    if (existsSync(target) && statSync(target).isDirectory()) return target;
   } catch { /* ignore */ }
-  return target;
+  const parent = dirname(target);
+  if (existsSync(parent)) return parent;
+  return process.cwd();
 }
 
 export const zcodeAgentService: ServiceDefinition<
@@ -128,7 +131,8 @@ const zcodeAgentProvider: Provider<ZcodeAgentRequest, ZcodeAgentResponse> = {
 
     backupHtmlFiles(request.cwd ?? process.cwd(), "zcode");
     return new Promise<Result<ZcodeAgentResponse>>((resolve) => {
-      const child = spawn(process.env.ZCODE_NODE_BIN ?? "node", args, {
+      // 默认用服务器自身的 node 绝对路径 (Windows 下 spawn 裸 "node" 受 PATH/cwd 影响, 曾报 ENOENT)
+      const child = spawn(process.env.ZCODE_NODE_BIN ?? process.execPath, args, {
         stdio: ["ignore", "pipe", "pipe"],
         env: { ...process.env },
         cwd: resolveAgentCwd(request.cwd),
@@ -157,7 +161,7 @@ const zcodeAgentProvider: Provider<ZcodeAgentRequest, ZcodeAgentResponse> = {
 
       child.on("error", (e: Error) => {
         clearTimeout(timer);
-        finish(err(`zcode-agent: failed to spawn zcode: ${e.message}`));
+        finish(err(`zcode-agent: failed to spawn zcode: ${e.message} (cwd=${resolveAgentCwd(request.cwd)})`));
       });
 
       child.on("close", (code: number | null) => {
