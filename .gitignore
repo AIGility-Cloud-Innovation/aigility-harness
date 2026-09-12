@@ -18,3 +18,6 @@ __pycache__/
 examples/appbase/src/.token-secret
 # AppBase 本机一键启动脚本 (含密钥, 不入库); 模板: start-appbase.cmd.example
 examples/appbase/start-appbase.cmd
+
+# ZCode CLI 在仓库内运行时的产物
+.zcode/
