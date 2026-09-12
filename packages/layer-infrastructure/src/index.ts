@@ -186,6 +186,19 @@ export { RemoteEventBus, bridgeEventBus, demoEvent, isRemote } from "./remote-ev
 export { createPgBusBridge, channelName, setupSql } from "./pg-bus-bridge.js";
 export type { PgBusBridgeOptions } from "./pg-bus-bridge.js";
 
+// PG 任务队列（阶段 2: 任务队列可更换, FOR UPDATE SKIP LOCKED）
+export { createPgTaskQueue, taskQueueSetupSql } from "./pg-task-queue.js";
+export type { PgTaskQueueOptions, PgTaskQueue } from "./pg-task-queue.js";
+
+// PG 向量检索（阶段 2: 向量检索可更换, pgvector + HNSW）
+export {
+  createPgVectorStore,
+  METRIC_MAPPINGS,
+  vectorLiteral,
+  vectorStoreSetupSql,
+} from "./pg-vector-store.js";
+export type { PgVectorStoreOptions, PgVectorStore } from "./pg-vector-store.js";
+
 // 企业微信智能机器人入口（特色案例: 企微 @机器人 → coder → codex）
 export {
   wecomIngressService,
