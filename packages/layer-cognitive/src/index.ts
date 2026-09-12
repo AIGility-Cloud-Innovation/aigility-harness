@@ -128,8 +128,13 @@ function readFileConfig(): LiteLLMFileConfig {
 }
 
 const fileCfg = readFileConfig();
-const LITELLM_URL = process.env.LITELLM_URL ?? fileCfg.url ?? DEFAULT_LITELLM_URL;
-const LITELLM_KEY = process.env.LITELLM_KEY ?? fileCfg.key ?? DEFAULT_LITELLM_KEY;
+// 每次调用时读 env(而非 boot 冻结): 全局 LLM 配置保存后写 env 即热生效
+function litellmEndpoint(): { url: string; key: string } {
+  return {
+    url: process.env.LITELLM_URL ?? fileCfg.url ?? DEFAULT_LITELLM_URL,
+    key: process.env.LITELLM_KEY ?? fileCfg.key ?? DEFAULT_LITELLM_KEY,
+  };
+}
 
 // ── LLM 端点解析 ─────────────────────────────────────────────────
 // 内部调用不经过任何 HTTP 网关：由 LLM_PROVIDER 选择认知层直连的供应商
@@ -160,10 +165,11 @@ function resolveEndpoint(): LlmEndpoint {
       thinking,
     };
   }
+  const litellm = litellmEndpoint();
   return {
     name: "litellm",
-    completionsUrl: `${LITELLM_URL}/v1/chat/completions`,
-    key: LITELLM_KEY,
+    completionsUrl: `${litellm.url}/v1/chat/completions`,
+    key: litellm.key,
     thinking,
   };
 }
@@ -258,7 +264,7 @@ const litellmProvider: Provider<LlmInferenceRequest, LlmInferenceResponse> = {
       };
     }
     try {
-      const resp = await fetch(`${LITELLM_URL}/health/liveliness`, {
+      const resp = await fetch(`${litellmEndpoint().url}/health/liveliness`, {
         signal: AbortSignal.timeout(5_000),
       });
       return {
