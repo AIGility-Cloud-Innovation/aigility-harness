@@ -22,6 +22,7 @@ import { plugin as infrastructurePlugin } from "@aigility-harness/layer-infrastr
 import { plugin as cognitivePlugin } from "@aigility-harness/layer-cognitive";
 import { plugin as personaPlugin } from "@aigility-harness/layer-persona";
 import { plugin as orchestrationPlugin } from "@aigility-harness/layer-orchestration";
+import { plugin as actionPlugin } from "@aigility-harness/layer-action";
 import { wecomIngressProvider } from "@aigility-harness/layer-infrastructure";
 
 async function main(): Promise<void> {
@@ -46,6 +47,7 @@ async function main(): Promise<void> {
     cognitivePlugin,
     personaPlugin,
     orchestrationPlugin,
+    actionPlugin,
   ];
   for (const p of plugins) {
     console.log(`装配 ${p.manifest.name} (layer=${p.manifest.layer})`);

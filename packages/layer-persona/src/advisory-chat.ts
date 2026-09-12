@@ -62,7 +62,7 @@ export interface AdvisoryChatResponse {
 }
 
 export const advisoryChatService: ServiceDefinition<AdvisoryChatRequest, AdvisoryChatResponse> = {
-  id: "@advisory/advisory-chat",
+  id: "@persona/advisory-chat",
   version: "1.0.0",
   layer: LayerId.Persona,
   description: "就业数据顾问角色形象：收问题 → 委托编排层分析 → 回文字+图表",
@@ -151,7 +151,7 @@ export { advisoryChatProvider };
 // ── 插件 Manifest 与 LayerPlugin ─────────────────────────────────
 
 export const manifest: PluginManifest = {
-  name: "@advisory/advisory-chat",
+  name: "@persona/advisory-chat",
   layer: LayerId.Persona,
   description: "感知层：就业数据顾问角色形象（含行业知识提示词）",
   version: "0.1.0",

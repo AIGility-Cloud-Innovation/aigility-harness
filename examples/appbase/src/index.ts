@@ -29,11 +29,12 @@ import { existsSync, readFileSync, writeFileSync, unlinkSync, statSync, readdirS
 import { spawnSync } from "node:child_process";
 import { resolve, join, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { backupHtmlFiles } from "@aigility-harness/layer-orchestration";
+import { backupHtmlFiles } from "@aigility-harness/layer-action";
 import { plugin as infrastructurePlugin } from "@aigility-harness/layer-infrastructure";
 import { plugin as cognitivePlugin } from "@aigility-harness/layer-cognitive";
 import { plugin as personaPlugin } from "@aigility-harness/layer-persona";
 import { plugin as orchestrationPlugin } from "@aigility-harness/layer-orchestration";
+import { plugin as actionPlugin } from "@aigility-harness/layer-action";
 import { appBackendHandler, initAppBackend, isKnownGatewayKey } from "./backend.js";
 
 const APP_PORT = 3419;
@@ -54,6 +55,7 @@ async function main(): Promise<void> {
     cognitivePlugin,
     personaPlugin,
     orchestrationPlugin,
+    actionPlugin,
   ];
   console.log("装配插件:");
   for (const p of plugins) {
@@ -81,8 +83,9 @@ async function main(): Promise<void> {
   }
   console.log(`bootstrap 成功 (kernel.isReady=${kernel.isReady()})`);
   // 管理模块注入内核 (框架层插件枚举用)
-  const { setAdminKernel } = await import("./admin-modules/index.js");
+  const { setAdminKernel, setAdminManifests } = await import("./admin-modules/index.js");
   setAdminKernel(kernel);
+  setAdminManifests(plugins.map((p) => p.manifest));
 
   // 4. 统一 HTTP server (3419): hall + 后端 API 同源
   let hallHandler: ((req: any, res: any) => Promise<void>) | null = null;

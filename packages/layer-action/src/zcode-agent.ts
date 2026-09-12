@@ -1,5 +1,5 @@
 /**
- * @orchestration/zcode-agent — ZCode CLI 编码代理能力
+ * @action/zcode-agent — ZCode CLI 编码代理能力
  *
  * 通过 ZCode CLI 的 headless 模式 (`zcode -p <prompt>`) 驱动 ZCode 执行编码任务，
  * 与 codex-agent 平级，作为网页应用开发员的可切换「主理人」(AGENT_DRIVER=zcode)。
@@ -78,15 +78,15 @@ export const zcodeAgentService: ServiceDefinition<
   ZcodeAgentRequest,
   ZcodeAgentResponse
 > = {
-  id: "@orchestration/zcode-agent",
+  id: "@action/zcode-agent",
   version: "1.0.0",
-  layer: LayerId.Orchestration,
+  layer: LayerId.Action,
   description: "ZCode CLI 编码代理：headless 模式驱动 ZCode 执行编码任务",
 };
 
 /** 消费声明（与 codex-agent 一样, 任务执行自身不依赖认知层; 模型访问在 CLI 侧） */
 export const zcodeAgentRef: CapabilityRef = {
-  id: "@orchestration/zcode-agent",
+  id: "@action/zcode-agent",
   versionRange: "^1.0.0",
 };
 
@@ -113,7 +113,7 @@ const zcodeAgentProvider: Provider<ZcodeAgentRequest, ZcodeAgentResponse> = {
 
     ctx.emit({
       type: "zcode-agent.spawn",
-      layer: LayerId.Orchestration,
+      layer: LayerId.Action,
       payload: { cwd: resolveAgentCwd(request.cwd), mode },
       traceId: ctx.traceId,
     });
@@ -207,9 +207,9 @@ export { zcodeAgentProvider };
 // ── 插件 Manifest 与 LayerPlugin ─────────────────────────────────
 
 export const manifest: PluginManifest = {
-  name: "@orchestration/zcode-agent",
-  layer: LayerId.Orchestration,
-  description: "编排层：ZCode CLI 编码代理 (headless)",
+  name: "@action/zcode-agent",
+  layer: LayerId.Action,
+  description: "行动层：ZCode CLI 编码代理 (headless)",
   version: "0.1.0",
   provides: [zcodeAgentService],
   consumes: [],

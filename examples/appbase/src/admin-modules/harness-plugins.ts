@@ -4,7 +4,7 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { json, bearerUser, isAdminUser } from "./context.js";
-import { getAdminKernel } from "./kernel-ref.js";
+import { getAdminKernel, getAdminManifests } from "./kernel-ref.js";
 
 /** 框架层插件枚举 (管理员); 返回 true = 已响应 */
 export async function handle(req: IncomingMessage, res: ServerResponse, path: string, method: string): Promise<boolean> {
@@ -28,19 +28,33 @@ export async function handle(req: IncomingMessage, res: ServerResponse, path: st
     return true;
   }
   const all = kernel.registry.listAllServices();
+  // provides/consumes 数据源是 LayerPlugin.manifest (ServiceDefinition 上没有这两个字段):
+  // 按服务 id 反查所属 manifest, 提供该 manifest 的 provides/consumes 数量
+  const manifestByService = new Map<string, { provides: number; consumes: number; plugin: string }>();
+  for (const m of getAdminManifests()) {
+    const providesArr = Array.isArray(m.provides) ? m.provides : [];
+    const consumesArr = Array.isArray(m.consumes) ? m.consumes : [];
+    for (const svc of providesArr) {
+      const id = (svc as { id?: string })?.id;
+      if (typeof id === "string") {
+        manifestByService.set(id, { provides: providesArr.length, consumes: consumesArr.length, plugin: m.name });
+      }
+    }
+  }
   const items = [];
   for (const entry of all) {
     const svc = entry.service as {
       id: string; version: string; layer: string; description: string;
-      provides?: unknown[]; consumes?: unknown[];
     };
+    const counts = manifestByService.get(svc.id);
     items.push({
       id: svc.id,
       version: svc.version,
       layer: svc.layer,
       description: svc.description,
-      provides: Array.isArray(svc.provides) ? svc.provides.length : 0,
-      consumes: Array.isArray(svc.consumes) ? svc.consumes.length : 0,
+      provides: counts?.provides ?? 0,
+      consumes: counts?.consumes ?? 0,
+      plugin: counts?.plugin,
       providerName: entry.providerName,
       state: entry.state,
     });

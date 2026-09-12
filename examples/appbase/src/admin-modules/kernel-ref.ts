@@ -12,3 +12,23 @@ export function setAdminKernel(kernel: NonNullable<typeof adminKernel>): void {
 export function getAdminKernel(): typeof adminKernel {
   return adminKernel;
 }
+
+/** 装配的 LayerPlugin manifests (框架层插件枚举的 provides/consumes 数据源) */
+export interface AdminManifestLike {
+  name: string;
+  layer: string;
+  description: string;
+  version: string;
+  provides: unknown[];
+  consumes: unknown[];
+}
+
+let adminManifests: AdminManifestLike[] = [];
+
+export function setAdminManifests(manifests: AdminManifestLike[]): void {
+  adminManifests = manifests;
+}
+
+export function getAdminManifests(): AdminManifestLike[] {
+  return adminManifests;
+}

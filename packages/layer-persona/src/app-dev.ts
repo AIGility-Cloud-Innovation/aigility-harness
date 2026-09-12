@@ -2,12 +2,12 @@
  * L3 感知交互层: 网页应用开发员 (app-dev)
  *
  * 与用户「直接沟通」的网页应用开发角色——根据描述生成/修改网页应用，
- * 把生成任务委托给 L4 的 @orchestration/codex-agent 执行真实编码。
+ * 把生成任务委托给 D5 的 @action/codex-agent 执行真实编码。
  *
  * 设计要点:
  *   - 专注建应用: 用户说「建个记账本」→ codex-agent 生成前端 HTML
  *   - 可操作目录受限: 只能在沙箱根 examples/apps 内生成/修改文件
- *   - 绑定实现 @orchestration/codex-agent (可换底层)
+ *   - 绑定实现 @action/codex-agent (可换底层)
  *
  * 与 coding-coach 的区别: coding-coach 偏「分步引导设计(不动手)」, coder 偏「网页应用
  * 生成/修改」, 且带目录沙箱限制。
@@ -68,14 +68,14 @@ export const appDevService: ServiceDefinition<AppDevRequest, AppDevResponse> = {
 
 /** 委托的 L4 编码 Agent (实现无关; 换 claude-code/opencode 只改这一处) */
 export const codexAgentRef: CapabilityRef = {
-  id: "@orchestration/codex-agent",
+  id: "@action/codex-agent",
   versionRange: "^1.0.0",
 };
 
 /** 各编码 Agent */
 const agentRefs: Record<string, CapabilityRef> = {
-  zcode: { id: "@orchestration/zcode-agent", versionRange: "^1.0.0" },
-  claude: { id: "@orchestration/claude-agent", versionRange: "^1.0.0" },
+  zcode: { id: "@action/zcode-agent", versionRange: "^1.0.0" },
+  claude: { id: "@action/claude-agent", versionRange: "^1.0.0" },
 };
 
 /** 驱动选择: 请求级 driver > 环境变量 AGENT_DRIVER > 默认 codex */
@@ -240,7 +240,7 @@ const appDevProvider: Provider<AppDevRequest, AppDevResponse> = {
       planningModel: process.env.LLM_MODEL ?? "glm-4.6",
     };
 
-    // 4. 委托 L4 编码 Agent (请求级 driver: codex / zcode / claude)
+    // 4. 委托 D5 编码 Agent (请求级 driver: codex / zcode / claude)
     const result = await ctx.call(agentDriverRef(request.driver), task);
 
     // 5. 由同一角色形象反馈
@@ -276,7 +276,7 @@ const appDevProvider: Provider<AppDevRequest, AppDevResponse> = {
   async health(): Promise<HealthStatus> {
     return {
       healthy: true,
-      detail: "app-dev ready (委托 @orchestration/codex-agent)",
+      detail: "app-dev ready (委托 @action/codex-agent)",
       checkedAt: new Date().toISOString(),
     };
   },

@@ -26,9 +26,51 @@ import {
   type TextToSpeechRequest,
   type TextToSpeechResponse,
 } from "./text-to-speech.js";
+import {
+  codexAgentService,
+  codexAgentProvider,
+  type CodexAgentRequest,
+  type CodexAgentResponse,
+  type CodexAgentItem,
+  type CodexAgentTurnUsage,
+  type CodexApprovalPolicy,
+  type CodexSandboxMode,
+} from "./codex-agent.js";
+import {
+  zcodeAgentService,
+  zcodeAgentProvider,
+  zcodeAgentRef,
+  type ZcodeAgentRequest,
+  type ZcodeAgentResponse,
+} from "./zcode-agent.js";
+import {
+  claudeAgentService,
+  claudeAgentProvider,
+  claudeAgentRef,
+  type ClaudeAgentRequest,
+  type ClaudeAgentResponse,
+} from "./claude-agent.js";
 
 export { textToSpeechService, textToSpeechProvider };
 export type { TextToSpeechRequest, TextToSpeechResponse };
+
+// 编码代理工人（D5：领活 → 执行 → 交产出，spawn CLI 子进程产生真实副作用）
+export { codexAgentService, codexAgentProvider };
+export type {
+  CodexAgentRequest,
+  CodexAgentResponse,
+  CodexAgentItem,
+  CodexAgentTurnUsage,
+  CodexApprovalPolicy,
+  CodexSandboxMode,
+};
+export { zcodeAgentService, zcodeAgentProvider, zcodeAgentRef };
+export { claudeAgentService, claudeAgentProvider, claudeAgentRef };
+export type { ZcodeAgentRequest, ZcodeAgentResponse };
+export type { ClaudeAgentRequest, ClaudeAgentResponse };
+
+// 沙箱快照备份工具（编码代理改文件前自动快照；版本回滚 UI 复用）
+export { backupHtmlFiles } from "./sandbox-backup.js";
 
 // ── 服务定义 ─────────────────────────────────────────────────────
 
@@ -89,9 +131,9 @@ const toolExecutionProvider: Provider<
 export const manifest: PluginManifest = {
   name: "@action/tool-execution",
   layer: LayerId.Action,
-  description: "行动执行层：工具执行占位 + 文本转语音",
-  version: "0.2.0",
-  provides: [toolExecutionService, textToSpeechService],
+  description: "行动执行层：工具执行占位 + 文本转语音 + 编码代理工人(codex/zcode/claude)",
+  version: "0.3.0",
+  provides: [toolExecutionService, textToSpeechService, codexAgentService, zcodeAgentService, claudeAgentService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
 };
@@ -109,7 +151,7 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [toolExecutionProvider, textToSpeechProvider];
+    return [toolExecutionProvider, textToSpeechProvider, codexAgentProvider, zcodeAgentProvider, claudeAgentProvider];
   },
   getState(): PluginState {
     return pluginState;

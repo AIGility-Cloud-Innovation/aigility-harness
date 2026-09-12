@@ -1,5 +1,5 @@
 /**
- * @orchestration/claude-agent — Claude Code CLI 编码代理能力
+ * @action/claude-agent — Claude Code CLI 编码代理能力
  *
  * 通过 Claude Code CLI 的 headless 模式 (`claude -p <prompt>`) 驱动 Claude 执行编码任务，
  * 与 codex-agent / zcode-agent 平级，作为网页应用开发员的可切换工具之一。
@@ -62,14 +62,14 @@ export const claudeAgentService: ServiceDefinition<
   ClaudeAgentRequest,
   ClaudeAgentResponse
 > = {
-  id: "@orchestration/claude-agent",
+  id: "@action/claude-agent",
   version: "1.0.0",
-  layer: LayerId.Orchestration,
+  layer: LayerId.Action,
   description: "Claude Code CLI 编码代理：headless 模式驱动 Claude 执行编码任务",
 };
 
 export const claudeAgentRef: CapabilityRef = {
-  id: "@orchestration/claude-agent",
+  id: "@action/claude-agent",
   versionRange: "^1.0.0",
 };
 
@@ -89,7 +89,7 @@ const claudeAgentProvider: Provider<ClaudeAgentRequest, ClaudeAgentResponse> = {
 
     ctx.emit({
       type: "claude-agent.spawn",
-      layer: LayerId.Orchestration,
+      layer: LayerId.Action,
       payload: { cwd: request.cwd },
       traceId: ctx.traceId,
     });
@@ -167,9 +167,9 @@ export { claudeAgentProvider };
 // ── 插件 Manifest 与 LayerPlugin ─────────────────────────────────
 
 export const manifest: PluginManifest = {
-  name: "@orchestration/claude-agent",
-  layer: LayerId.Orchestration,
-  description: "编排层：Claude Code CLI 编码代理 (headless)",
+  name: "@action/claude-agent",
+  layer: LayerId.Action,
+  description: "行动层：Claude Code CLI 编码代理 (headless)",
   version: "0.1.0",
   provides: [claudeAgentService],
   consumes: [],

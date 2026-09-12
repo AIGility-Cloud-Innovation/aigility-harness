@@ -10,7 +10,7 @@ import * as usersMod from "./users.js";
 import * as llmConfigMod from "./llm-config.js";
 import * as dshPluginsMod from "./dsh-plugins.js";
 import * as harnessPluginsMod from "./harness-plugins.js";
-export { setAdminKernel } from "./kernel-ref.js";
+export { setAdminKernel, setAdminManifests } from "./kernel-ref.js";
 
 export interface AdminModuleDef {
   id: string;

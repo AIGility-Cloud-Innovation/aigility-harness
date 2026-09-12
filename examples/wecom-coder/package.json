@@ -12,6 +12,7 @@
     "@aigility-harness/layer-cognitive": "workspace:*",
     "@aigility-harness/layer-persona": "workspace:*",
     "@aigility-harness/layer-orchestration": "workspace:*",
+    "@aigility-harness/layer-action": "workspace:*",
     "prototype-mode": "workspace:*"
   },
   "devDependencies": {

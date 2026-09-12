@@ -16,7 +16,7 @@ function mockContext(callImpl?: SeamContext["call"]): SeamContext {
   return {
     sessionId: "it-session",
     traceId: "it-trace",
-    callerLayer: LayerId.Orchestration,
+    callerLayer: LayerId.Action,
     addEffect: () => "effect-1",
     emit: () => {},
     getState: () => undefined,
@@ -34,10 +34,10 @@ const codexAvailable = (): boolean => {
   }
 };
 
-describe("@orchestration/codex-agent 契约", () => {
-  it("服务定义归属 Orchestration 层且版本/描述正确", () => {
-    expect(codexAgentService.id).toBe("@orchestration/codex-agent");
-    expect(codexAgentService.layer).toBe("orchestration");
+describe("@action/codex-agent 契约", () => {
+  it("服务定义归属 Action 层且版本/描述正确", () => {
+    expect(codexAgentService.id).toBe("@action/codex-agent");
+    expect(codexAgentService.layer).toBe("action");
     expect(codexAgentService.version).toBe("1.0.0");
     expect(typeof codexAgentService.description).toBe("string");
   });

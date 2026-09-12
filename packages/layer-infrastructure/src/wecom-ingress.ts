@@ -8,7 +8,7 @@
  * 用法（特色案例: 企业微信里 @机器人 就能驱动 codex 干活）:
  *   1. 企微后台创建「智能机器人」，拿到 botId + secret
  *   2. 配 .env: WECOM_BOT_ID=... WECOM_BOT_SECRET=...
- *   3. 装配 plugin-helper... 角色@persona/app-dev → @orchestration/codex-agent → codex
+ *   3. 装配 plugin-helper... 角色@persona/app-dev → @action/codex-agent → codex
  *
  * SDK: @wecom/aibot-node-sdk（企业微信官方 AI Bot SDK）
  *   wss://openws.work.weixin.qq.com 内置默认地址，自动认证/心跳/重连

@@ -23,26 +23,6 @@ import type {
   LlmInferenceRequest,
   LlmInferenceResponse,
 } from "@aigility-harness/core";
-import {
-  codexAgentService,
-  codexAgentProvider,
-  type CodexAgentRequest,
-  type CodexAgentResponse,
-  type CodexAgentItem,
-  type CodexAgentTurnUsage,
-  type CodexApprovalPolicy,
-  type CodexSandboxMode,
-} from "./codex-agent.js";
-
-export { codexAgentService, codexAgentProvider };
-export type {
-  CodexAgentRequest,
-  CodexAgentResponse,
-  CodexAgentItem,
-  CodexAgentTurnUsage,
-  CodexApprovalPolicy,
-  CodexSandboxMode,
-};
 
 import {
   timemProjectTaskService,
@@ -71,28 +51,6 @@ export {
   buildConsolidation,
   renderConsolidation,
 } from "./consolidation.js";
-
-import {
-  zcodeAgentService,
-  zcodeAgentProvider,
-  zcodeAgentRef,
-} from "./zcode-agent.js";
-export { zcodeAgentService, zcodeAgentProvider, zcodeAgentRef };
-export type {
-  ZcodeAgentRequest,
-  ZcodeAgentResponse,
-} from "./zcode-agent.js";
-
-import {
-  claudeAgentService,
-  claudeAgentProvider,
-  claudeAgentRef,
-} from "./claude-agent.js";
-export { claudeAgentService, claudeAgentProvider, claudeAgentRef };
-export type {
-  ClaudeAgentRequest,
-  ClaudeAgentResponse,
-} from "./claude-agent.js";
 
 import {
   pluginInstallService,
@@ -325,7 +283,7 @@ export const manifest: PluginManifest = {
   layer: LayerId.Orchestration,
   description: "编排规划层：任务规划占位 + 工作流引擎占位 + 插件安装工作流 + Codex 编码代理，消费认知层 LLM",
   version: "0.2.0",
-  provides: [taskPlanningService, workflowEngineService, pluginInstallService, codexAgentService, zcodeAgentService, claudeAgentService, guidedDesignService],
+  provides: [taskPlanningService, workflowEngineService, pluginInstallService, guidedDesignService],
   consumes: [llmInferenceRef],
   preferredCarrier: CarrierKind.Thread,
   dependsOn: ["@cognitive/llm-inference"],
@@ -344,11 +302,9 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [taskPlanningProvider, workflowEngineProvider, pluginInstallProvider, codexAgentProvider, zcodeAgentProvider, claudeAgentProvider, guidedDesignProvider];
+    return [taskPlanningProvider, workflowEngineProvider, pluginInstallProvider, guidedDesignProvider];
   },
   getState(): PluginState {
     return pluginState;
   },
 };
-// 沙箱快照备份工具（编码代理改文件前自动快照；版本回滚 UI 复用）
-export { backupHtmlFiles } from "./sandbox-backup.js";

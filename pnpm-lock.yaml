@@ -26,6 +26,9 @@ importers:
       '@aigility-harness/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@aigility-harness/layer-action':
+        specifier: workspace:*
+        version: link:../../packages/layer-action
       '@aigility-harness/layer-cognitive':
         specifier: workspace:*
         version: link:../../packages/layer-cognitive
@@ -165,6 +168,9 @@ importers:
       '@aigility-harness/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@aigility-harness/layer-action':
+        specifier: workspace:*
+        version: link:../../packages/layer-action
       '@aigility-harness/layer-cognitive':
         specifier: workspace:*
         version: link:../../packages/layer-cognitive
