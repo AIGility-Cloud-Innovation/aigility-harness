@@ -61,8 +61,8 @@ main { flex:1; display:flex; flex-direction:column; max-width:980px; width:100%;
 <script>
 var qs = new URLSearchParams(location.search);
 // 角色由入口决定 (大厅卡片带 ?role=), 页面内不再切换: 进来是什么就是什么
-var ROLE = qs.get('role') === '@persona/coder' ? '@persona/coder' : '@persona/codex-chat';
-var ROLE_NAMES = { '@persona/codex-chat': '🪶 网页应用生成器', '@persona/coder': '👨‍💻 编码教练' };
+var ROLE = qs.get('role') === '@persona/coding-coach' ? '@persona/coding-coach' : '@persona/app-dev';
+var ROLE_NAMES = { '@persona/app-dev': '🪶 网页应用开发员', '@persona/coding-coach': '👨‍💻 编码教练' };
 var appSel = document.getElementById('appSel');
 var toolSel = document.getElementById('toolSel');
 var chatHistory = [];
@@ -93,11 +93,23 @@ function relaunchIfAuthErr(e) {
   return false;
 }
 
-function isCoach() { return ROLE === '@persona/coder'; }
+function isCoach() { return ROLE === '@persona/coding-coach'; }
 function histKey() {
   return 'wb_chat_' + ROLE + '_' + (appSel.value||'-');
 }
 function stateKey() { return histKey() + '_state'; }
+// ── 聊天历史云端持久化 ──
+function cloudSaveHistory(key, messages) {
+  fetchJSON('/app/hall/chat-history', { method: 'PUT', headers: Object.assign({'Content-Type':'application/json'}, authH()),
+    body: JSON.stringify({ key: key, messages: messages.slice(-60) }) }).catch(function() {});
+}
+function cloudLoadHistory(key, apply) {
+  fetchJSON('/app/hall/chat-history?key=' + encodeURIComponent(key), { headers: authH() })
+    .then(function(d) {
+      var msgs = (d.messages || []).filter(function(m) { return m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string'; });
+      if (msgs.length) apply(msgs);
+    }).catch(function() {});
+}
 function loadSessionState() {
   try { sessionState = JSON.parse(localStorage.getItem(stateKey()) || 'null') || { phase: 1 }; }
   catch (e) { sessionState = { phase: 1 }; }
@@ -119,7 +131,7 @@ function createApp() {
     .then(function(d) {
       localStorage.setItem('wb_app', file);
       loadApps(true);
-      alert('应用「' + name + '」已创建，现在可以直接向生成器描述需求。');
+      alert('应用「' + name + '」已创建，现在可以直接向开发员描述需求。');
     })
     .catch(function(e) { if (!relaunchIfAuthErr(e)) alert('创建失败: ' + e.message); loadApps(); });
 }
@@ -131,7 +143,7 @@ function renderMode() {
   toolSel.parentElement && (document.getElementById('toolLabel').style.display = coach ? 'none' : '');
   toolSel.style.display = coach ? 'none' : '';
   document.getElementById('tip').textContent = coach
-    ? '💡 引导模式：教练分 5 步引导你设计一个案例应用（只设计，不实际生成/保存），最后产出完整提示词，交给「网页应用生成器」落地。'
+    ? '💡 引导模式：教练分 5 步引导你设计一个案例应用（只设计，不实际生成/保存），最后产出完整提示词，交给「网页应用开发员」落地。'
     : '💡 编辑模式：AI 会真实修改「目标应用」的代码文件（改动前自动备份）。可选择「新建应用」从零开始。';
 }
 
@@ -166,6 +178,14 @@ function loadHistory() {
   var box = document.getElementById('msgs');
   box.innerHTML = '';
   chatHistory.forEach(function(m){ addMsg(m.role, m.content, true); });
+  // 云端历史: 比本地长则以云端为准重渲染(退出/换浏览器/清本地存储都不丢)
+  cloudLoadHistory(histKey(), function(msgs) {
+    if (msgs.length <= chatHistory.length) return;
+    chatHistory = msgs.slice();
+    box.innerHTML = '';
+    chatHistory.forEach(function(m){ addMsg(m.role, m.content, true); });
+    box.scrollTop = 1e9;
+  });
   if (!chatHistory.length) {
     addMsg('bot', isCoach()
       ? '你好，我是编码教练 👨‍💻\n我会分 5 步引导你设计一个案例应用：需求理解 → 功能清单 → 页面与数据 → 交互与边界 → 确认出完整提示词。全程只做设计引导，不会真正生成或保存应用。\n先说说你想做什么？给谁用、解决什么问题？'
@@ -176,6 +196,7 @@ function loadHistory() {
 }
 function saveHistory() {
   localStorage.setItem(histKey(), JSON.stringify(chatHistory.slice(-60)));
+  cloudSaveHistory(histKey(), chatHistory);
 }
 function clearHistory() {
   if (inFlight) { alert('当前有请求进行中，等回复完成后再清空'); return; }
@@ -183,6 +204,7 @@ function clearHistory() {
   chatHistory = [];
   localStorage.removeItem(histKey());
   localStorage.removeItem(stateKey()); // 引导进度一并重置
+  cloudSaveHistory(histKey(), []);
   loadHistory();
 }
 function addMsg(role, text, skipSave) {
@@ -222,13 +244,13 @@ function appendCopyPrompt(prompt) {
   var btn = document.createElement('button');
   btn.textContent = '📋 复制完整提示词';
   btn.onclick = function() {
-    var done = function() { btn.textContent = '✓ 已复制，回大厅发给「网页应用生成器」即可真正生成'; btn.disabled = true; };
+    var done = function() { btn.textContent = '✓ 已复制，回大厅发给「网页应用开发员」即可真正生成'; btn.disabled = true; };
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(prompt).then(done, done);
     else done();
   };
   var hint = document.createElement('div');
   hint.className = 'sub';
-  hint.textContent = '教练只负责设计引导，不会真正生成/保存应用；落地请把提示词交给「网页应用生成器」。';
+  hint.textContent = '教练只负责设计引导，不会真正生成/保存应用；落地请把提示词交给「网页应用开发员」。';
   wrap.appendChild(pre);
   wrap.appendChild(btn);
   wrap.appendChild(hint);
@@ -264,7 +286,7 @@ function sendChat() {
     }, coach
       ? { session_state: sessionState || { phase: 1 } } // 教练: 携带引导工作流状态
       : { driver: toolSel.value, app: appSel.value })) },
-    coach ? 3 * 60 * 1000 : 11 * 60 * 1000) // 生成器对齐服务端编码 Agent 上限 10 分钟; 教练纯 LLM 3 分钟
+    coach ? 3 * 60 * 1000 : 11 * 60 * 1000) // 开发员对齐服务端编码 Agent 上限 10 分钟; 教练纯 LLM 3 分钟
     .then(function(d) {
       statusEl.remove();
       var reply = d.response || '(无回复)';

@@ -90,7 +90,7 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
 <div class="login-view" id="loginView" style="display:none">
   <div class="login-card">
     <h2>🚀 AppBase</h2>
-    <div class="lsub">请先登录（或注册）账号，再进入应用大厅</div>
+    <div class="lsub">请先登录（或注册）账号，再进入应用大厅<br><small style="opacity:.6">powered by aigility-harness</small></div>
     <input class="minput" id="lgEmail" placeholder="邮箱" autocomplete="username">
     <input class="minput" id="lgPassword" type="password" placeholder="密码（注册至少 6 位）" autocomplete="current-password">
     <div class="login-btns">
@@ -104,14 +104,56 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
 <div class="shell" id="shellWrap" style="display:none">
   <div class="hero">
     <h1>🚀 AppBase · 应用大厅</h1>
-    <p>AI 生成的网页应用都住在这里 —— 打开即用，账号与 LLM 配置统一管理</p>
+    <p>AI 生成的网页应用都住在这里 —— 打开即用，账号与 LLM 配置统一管理<br><small style="opacity:.65">powered by aigility-harness · <a href="/hall/flows" target="_blank" style="color:inherit">对话流图</a></small></p>
     <div class="accbar">
       <span class="who" id="whoami"></span>
       <button id="tkBadge" onclick="openRoleChat('repair'); setTimeout(function(){ if (document.getElementById('ticketPanel').style.display !== 'block') toggleTicketPanel(); }, 150)" style="display:none"></button>
+      <button id="llmCfgBtn" onclick="openLlmDrawer()" style="display:none">⚙ 设置</button>
       <button onclick="logout()">退出登录</button>
     </div>
   </div>
   <div class="grid" id="grid"></div>
+</div>
+
+<!-- 全局 LLM 配置抽屉 (仅管理员) -->
+<div class="drawer" id="llmDrawer">
+  <div class="panel">
+    <div class="phead"><b>🌐 全局 LLM 配置</b><button class="btn-x" onclick="closeLlmDrawer()">✕</button></div>
+    <div class="pbody">
+      <div class="sec">
+        <h3>已存平台</h3>
+        <div class="sh">可保存多个平台的 Key，点「启用」即时切换（热生效，无需重启）。Key 只存服务端，页面只显示掩码；点平台名可载入编辑。</div>
+        <div id="llmPlatList"><div class="sub" style="font-size:12px;color:var(--ink2)">加载中…</div></div>
+      </div>
+      <div class="sec">
+        <h3>添加 / 编辑平台</h3>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <select class="minput" id="llmPreset" style="margin:0" onchange="applyLlmPreset()">
+            <option value="">— 选择预设自动填 URL —</option>
+            <option value="智谱">智谱 (GLM)</option>
+            <option value="DeepSeek">DeepSeek</option>
+            <option value="Kimi">Kimi (月之暗面)</option>
+            <option value="OpenAI">OpenAI</option>
+            <option value="Ollama">Ollama (本机)</option>
+            <option value="自定义">自定义</option>
+          </select>
+        </div>
+        <input class="minput" id="gpModel" list="gpModelOptions" placeholder="默认模型, 如 glm-4.6" style="margin:0">
+        <datalist id="gpModelOptions"></datalist>
+        <div id="gpIdentity" style="font-size:12px;color:var(--ink2);margin-top:6px"></div>
+        <input class="minput" id="gpUrl" placeholder="URL, 如 https://open.bigmodel.cn/api/paas/v4" style="margin-top:8px" oninput="updateGpIdentity()">
+        <input class="minput" id="gpKey" placeholder="API Key（留空或 •••• 开头 = 不修改已保存的）" style="margin-top:8px">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
+          <button class="mbtn g" onclick="saveLlmGlobal(true)">保存并启用</button>
+          <button class="mbtn" onclick="saveLlmGlobal(false)">仅保存</button>
+          <button class="mbtn" onclick="testLlmGlobal()">🔌 测试连接</button>
+          <button class="mbtn" onclick="fetchGlobalModels()">⟳ 获取模型列表</button>
+          <button class="mbtn" style="background:var(--rose);color:#fff" onclick="deleteLlmGlobal()">删除</button>
+        </div>
+        <div id="llmGlobalMsg" style="font-size:12px;color:var(--ink2);margin-top:8px"></div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- 管理抽屉 -->
@@ -161,7 +203,7 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
       </div>
       <div class="sec">
         <h3>📦 应用 .env 配置</h3>
-        <div class="sh">额外配置项，KEY=VALUE 每行一条，# 开头为注释。应用运行时可读取（window.APP_ENV）。</div>
+        <div class="sh">额外配置项，KEY=VALUE 每行一条，# 开头为注释。应用运行时可读取（window.APP_ENV）。数据转发目标也在这里配：RELAY_名字=地址（如 RELAY_LOOK_LOG=http://…），保存即生效。</div>
         <textarea class="minput" id="envText" style="min-height:110px;font-family:Consolas,monospace;font-size:12px" placeholder="CLASS_NAME=三年级二班&#10;SCHOOL=实验小学&#10;MAX_STUDENTS=50"></textarea>
         <button class="mbtn" onclick="saveEnv()">保存 .env 配置</button>
         <span id="envMsg" style="font-size:12px;color:var(--ink2);margin-left:8px"></span>
@@ -200,7 +242,7 @@ var currentRole = null;
 var chatHistory = [];
 var chatStoreKey = '';
 var inFlight = false;
-var repairAssistTicketId = null; // 生成器协助中的工单 id
+var repairAssistTicketId = null; // 开发员协助中的工单 id
 
 // ── 通用: 带超时与错误透传的 fetchJSON ──
 function fetchJSON(url, opts, timeoutMs) {
@@ -216,6 +258,20 @@ function fetchJSON(url, opts, timeoutMs) {
     .finally(function() { clearTimeout(timer); });
 }
 function authHeaders() { return mgToken ? { Authorization: 'Bearer ' + mgToken } : {}; }
+// ── 聊天历史云端持久化 (退出/换浏览器/清本地存储都不丢; 本地仅作缓存) ──
+function cloudSaveHistory(key, messages) {
+  if (!mgToken || !key) return;
+  fetchJSON('/app/hall/chat-history', { method: 'PUT', headers: jheaders(),
+    body: JSON.stringify({ key: key, messages: messages.slice(-60) }) }).catch(function() {});
+}
+function cloudLoadHistory(key, apply) {
+  if (!mgToken || !key) return;
+  fetchJSON('/app/hall/chat-history?key=' + encodeURIComponent(key), { headers: jheaders() })
+    .then(function(d) {
+      var msgs = (d.messages || []).filter(function(m) { return m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string'; });
+      if (msgs.length) apply(msgs);
+    }).catch(function() {});
+}
 
 // ── 登录门: 先登录, 再进大厅 ──
 function showLogin(msg) {
@@ -234,6 +290,7 @@ function enterHall() {
   document.getElementById('loginView').style.display = 'none';
   document.getElementById('shellWrap').style.display = '';
   document.getElementById('whoami').textContent = userEmail + (isAdmin ? ' · 管理员' : '');
+  document.getElementById('llmCfgBtn').style.display = isAdmin ? '' : 'none';
   loadApps();
   refreshTicketBadge();
   setInterval(refreshTicketBadge, 60 * 1000); // 工单角标每分钟轮询
@@ -295,11 +352,11 @@ function loadApps() {
     hallApps = d.apps || [];
     var html = '';
     // 服务/对话卡 (所有人可见)
-    html += chatCardHtml({ key:'repair', icon:'🔧', name:'应用报修客服', ds:'报修：描述问题 → 记录工单 → 生成器协助判断处理' });
-    html += chatCardHtml({ key:'sales', icon:'🎧', name:'AppBase 客服', ds:'解答 AppBase 系统的一切使用问题' });
+    html += chatCardHtml({ key:'sales', icon:'🎧', name:'平台客服', ds:'解答 AppBase 系统的一切使用问题' });
+    html += chatCardHtml({ key:'repair', icon:'🔧', name:'应用报修客服', ds:'报修：描述问题 → 汇总确认 → 记录工单 → 开发员协助' });
     // 工具/管理卡 (仅管理员)
     if (isAdmin) {
-      html += workbenchCardHtml('codex', '🪶', '网页应用生成器', '描述需求，生成/修改 HTML 应用');
+      html += workbenchCardHtml('codex', '🪶', '网页应用开发员', '描述需求，生成/修改 HTML 应用');
       html += workbenchCardHtml('coder', '🎓', '编码教练', '教学模式：讲解架构与用法，不修改代码');
       html += '<div class="app-card" onclick="location.href=\'/dsh\'">'
         + '<div class="icon">🧩</div><div class="nm">DSH 插件管理</div>'
@@ -365,6 +422,121 @@ function openMg(enc) {
   document.getElementById('mgDrawer').classList.add('show');
 }
 function closeMg() { document.getElementById('mgDrawer').classList.remove('show'); }
+
+// ── 全局 LLM 配置 (仅管理员) ──
+var LLM_PRESETS = {
+  '智谱': { url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4.6' },
+  'DeepSeek': { url: 'https://api.deepseek.com', model: 'deepseek-chat' },
+  'Kimi': { url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+  'OpenAI': { url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  'Ollama': { url: 'http://127.0.0.1:11434/v1', model: '' },
+  '自定义': { url: '', model: '' }
+};
+var llmPlatCache = [];
+function gpPlatform() {
+  var preset = document.getElementById('llmPreset').value;
+  if (preset && preset !== '自定义') return preset;
+  try { return new URL(document.getElementById('gpUrl').value.trim()).hostname || '自定义'; }
+  catch (e) { return '自定义'; }
+}
+function updateGpIdentity() {
+  var el = document.getElementById('gpIdentity');
+  if (el) el.textContent = '将保存为平台: ' + gpPlatform();
+}
+function applyLlmPreset() {
+  var name = document.getElementById('llmPreset').value;
+  var p = LLM_PRESETS[name];
+  if (!p) { updateGpIdentity(); return; }
+  // 已存过该平台 → 载入其保存的 url/model
+  var saved = llmPlatCache.find(function(x) { return x.platform === name; });
+  if (saved) {
+    document.getElementById('gpUrl').value = saved.base_url || p.url;
+    document.getElementById('gpModel').value = saved.model || p.model || '';
+  } else {
+    if (p.url) document.getElementById('gpUrl').value = p.url;
+    if (p.model) document.getElementById('gpModel').value = p.model;
+  }
+  updateGpIdentity();
+}
+function openLlmDrawer() { document.getElementById('llmDrawer').classList.add('show'); loadLlmGlobal(); }
+function closeLlmDrawer() { document.getElementById('llmDrawer').classList.remove('show'); }
+function setLlmMsg(t) { document.getElementById('llmGlobalMsg').textContent = t; }
+function loadLlmGlobal() {
+  fetchJSON('/app/hall/llm-global', { headers: jheaders() }).then(function(d) {
+    llmPlatCache = d.platforms || [];
+    document.getElementById('llmPlatList').innerHTML = (d.platforms || []).map(function(p) {
+      return '<div class="rowline" style="justify-content:space-between;align-items:center;margin-bottom:6px">'
+        + '<span><b style="cursor:pointer" data-plat="' + p.platform + '" onclick="editLlmGlobal(this.dataset.plat)">' + (p.is_active ? '✅ ' : '⚪ ') + p.platform + '</b>'
+        + '<span style="color:var(--ink2);font-size:12px">　' + (p.model || '(无模型)') + '　' + (p.key_masked || '(无 Key)') + '</span></span>'
+        + '<span>' + (p.is_active ? '<span style="font-size:12px;color:var(--green)">使用中</span>' : '<button class="mbtn g" style="padding:2px 10px" data-plat="' + p.platform + '" onclick="activateLlmGlobal(this.dataset.plat)">启用</button>') + '</span>'
+        + '</div>';
+    }).join('') || '<div class="sub" style="font-size:12px;color:var(--ink2)">还没有平台，在下方添加一个</div>';
+  }).catch(function(e) { setLlmMsg('✗ 加载失败: ' + e.message); });
+}
+function editLlmGlobal(platform) {
+  fetchJSON('/app/hall/llm-global', { headers: jheaders() }).then(function(d) {
+    var p = (d.platforms || []).find(function(x) { return x.platform === platform; });
+    if (!p) return;
+    var known = Object.keys(LLM_PRESETS).indexOf(p.platform) >= 0 && p.platform !== '自定义';
+    document.getElementById('llmPreset').value = known ? p.platform : '自定义';
+    document.getElementById('gpUrl').value = p.base_url || '';
+    document.getElementById('gpModel').value = p.model || '';
+    document.getElementById('gpKey').value = '';
+    updateGpIdentity();
+    setLlmMsg('已载入「' + p.platform + '」，Key 留空则保持不变');
+  });
+}
+function gpRead() {
+  return {
+    platform: gpPlatform(),
+    base_url: document.getElementById('gpUrl').value.trim(),
+    model: document.getElementById('gpModel').value.trim(),
+    api_key: document.getElementById('gpKey').value.trim()
+  };
+}
+function saveLlmGlobal(activate) {
+  var b = gpRead();
+  if (!b.platform) { setLlmMsg('✗ 请填平台名'); return; }
+  b.activate = !!activate;
+  fetchJSON('/app/hall/llm-global', { method: 'PUT', headers: jheaders(), body: JSON.stringify(b) })
+    .then(function(d) {
+      setLlmMsg(d.ok ? (activate ? '✓ 已保存并启用（热生效）' : '✓ 已保存') : '✗ ' + (d.error || ''));
+      loadLlmGlobal();
+    })
+    .catch(function(e) { setLlmMsg('✗ ' + e.message); });
+}
+function fetchGlobalModels() {
+  var b = gpRead();
+  if (!b.base_url) { setLlmMsg('✗ 请先选预设或填 URL'); return; }
+  setLlmMsg('拉取模型列表中…');
+  fetchJSON('/app/hall/llm-global/models', { method: 'POST', headers: jheaders(), body: JSON.stringify(b) })
+    .then(function(d) {
+      var models = d.models || [];
+      document.getElementById('gpModelOptions').innerHTML =
+        models.map(function(m) { return '<option value="' + m + '">'; }).join('');
+      setLlmMsg(d.ok === false ? '✗ ' + (d.error || '拉取失败') : '✓ 获取到 ' + models.length + ' 个模型，点击模型输入框选择');
+    })
+    .catch(function(e) { setLlmMsg('✗ ' + e.message); });
+}
+function testLlmGlobal() {
+  var b = gpRead();
+  if (!b.base_url) { setLlmMsg('✗ 请先选预设或填 URL'); return; }
+  setLlmMsg('测试中…（Key 留空时用已保存的）');
+  fetchJSON('/app/hall/llm-global/test', { method: 'POST', headers: jheaders(), body: JSON.stringify(b) })
+    .then(function(d) { setLlmMsg(d.ok ? '✓ 连接成功，' + d.latency_ms + 'ms' : '✗ ' + (d.error || '失败')); })
+    .catch(function(e) { setLlmMsg('✗ ' + e.message); });
+}
+function activateLlmGlobal(platform) {
+  fetchJSON('/app/hall/llm-global/activate', { method: 'POST', headers: jheaders(), body: JSON.stringify({ platform: platform }) })
+    .then(function(d) { toast(d.ok ? '已启用 ' + platform + '（热生效）' : (d.error || '失败')); loadLlmGlobal(); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function deleteLlmGlobal() {
+  var b = gpRead();
+  fetchJSON('/app/hall/llm-global/' + encodeURIComponent(b.platform), { method: 'DELETE', headers: jheaders() })
+    .then(function(d) { setLlmMsg(d.ok ? '✓ 已删除 ' + b.platform : '✗ ' + (d.error || '')); loadLlmGlobal(); })
+    .catch(function(e) { setLlmMsg('✗ ' + e.message); });
+}
 function jheaders() { return { 'Content-Type': 'application/json', Authorization: 'Bearer ' + mgToken }; }
 
 // ── 通用反馈 (内嵌浏览器可能禁用 alert/confirm/prompt, 一律用内联交互替代) ──
@@ -534,9 +706,9 @@ function saveLlm() {
       key: document.getElementById('llmKey').value.trim()
     })
   }).then(function(d) {
-    document.getElementById('llmMsg').textContent = d.ok ? '✓ 已保存' : '✗ ' + (d.error||'');
+    document.getElementById('modelMsg').textContent = d.ok ? '✓ 已保存' : '✗ ' + (d.error||'');
     loadManage();
-  }).catch(function(e){ document.getElementById('llmMsg').textContent = '✗ ' + e.message; });
+  }).catch(function(e){ document.getElementById('modelMsg').textContent = '✗ ' + e.message; });
 }
 function fetchModels() {
   var msg = document.getElementById('modelMsg');
@@ -570,14 +742,14 @@ function revokeKey(id) {
 // ── 对话抽屉 (角色定义 + 报修工单面板) ──
 var ROLE_DEFS = {
   repair: { id:'@persona/repair-chat', icon:'🔧', name:'应用报修客服', repair:true,
-    greet:'你好，我是应用报修客服。\n请描述你遇到的问题：哪个应用、什么现象、怎么复现、有无报错信息。\n信息足够后我会帮你整理成工单，之后可以让网页应用生成器协助判断处理。' },
-  sales: { id:'@persona/sales-chat', icon:'🎧', name:'AppBase 客服',
-    greet:'你好，我是 AppBase 客服。关于这套系统的任何问题——功能、配置、常见故障——直接问。' },
-  gen: { id:'@persona/codex-chat', icon:'🪶', name:'网页应用生成器',
+    greet:'你好，我是应用报修客服。\n请描述你遇到的问题：哪个应用、什么现象、怎么复现、有无报错信息。\n信息足够后我会帮你整理成工单，之后可以让网页应用开发员协助判断处理。' },
+  sales: { id:'@persona/sales-chat', icon:'🎧', name:'平台客服',
+    greet:'你好，我是平台客服。关于这套系统的任何问题——功能、配置、常见故障——直接问。' },
+  gen: { id:'@persona/app-dev', icon:'🪶', name:'网页应用开发员',
     greet:'描述你想要的网页应用，我会生成单文件 HTML 并放入大厅。' }
 };
 function openWorkbench(key) {
-  location.href = '/hall/workbench?role=@persona/' + (key === 'coder' ? 'coder' : 'codex-chat');
+  location.href = '/hall/workbench?role=@persona/' + (key === 'coder' ? 'coding-coach' : 'app-dev');
 }
 function openRoleChat(key) {
   currentRole = ROLE_DEFS[key];
@@ -596,6 +768,15 @@ function openRoleChat(key) {
   } else {
     addMsg('bot', currentRole.greet, true); // 欢迎语不写入历史
   }
+  // 云端历史: 比本地长(如换浏览器/本地被清)则以云端为准重渲染
+  cloudLoadHistory(chatStoreKey, function(msgs) {
+    if (msgs.length <= chatHistory.length || !currentRole || 'hall_chat_' + currentRole.id !== chatStoreKey) return;
+    chatHistory = msgs.slice();
+    document.getElementById('msgs').innerHTML = '';
+    chatHistory.forEach(function(m) { addMsg(m.role, m.content, true); });
+    var box = document.getElementById('msgs');
+    box.scrollTop = 1e9;
+  });
 }
 function toggleTicketPanel() {
   var tp = document.getElementById('ticketPanel');
@@ -615,7 +796,7 @@ function loadTickets() {
         + (d.isAdmin ? ' · ' + esc(t.owner_email || '') : '') + '</div>'
         + (t.solution ? '<div class="sub" style="margin-top:3px">💡 ' + esc(t.solution).slice(0, 120) + (t.solution.length > 120 ? '…' : '') + '</div>' : '')
         + '<div class="tops">'
-        + (d.isAdmin ? '<button class="t-assist" onclick="assistTicket(\'' + t.id + '\')">🛠 生成器协助</button>' : '')
+        + (d.isAdmin ? '<button class="t-assist" onclick="assistTicket(\'' + t.id + '\')">🛠 开发员协助</button>' : '')
         + (t.status === 'resolved'
             ? '<button class="t-reopen" onclick="setTicketStatus(\'' + t.id + '\',\'open\')">重新打开</button>'
             : '<button class="t-resolve" onclick="setTicketStatus(\'' + t.id + '\',\'resolved\')">✓ 标记已解决</button>')
@@ -660,7 +841,7 @@ function setTicketStatus(id, status) {
   }).then(function() { loadTickets(); })
     .catch(function(e) { alert('操作失败: ' + e.message); });
 }
-// 生成器协助: 切到生成器对话, 自动带上工单上下文
+// 开发员协助: 切到开发员对话, 自动带上工单上下文
 function assistTicket(ticketId) {
   var t = null;
   fetchJSON('/app/tickets', { headers: authHeaders() }).then(function(d) {
@@ -669,7 +850,7 @@ function assistTicket(ticketId) {
     currentRole = ROLE_DEFS.gen;
     chatStoreKey = 'hall_chat_gen_assist_' + ticketId;
     repairAssistTicketId = ticketId;
-    document.getElementById('chatTitle').textContent = '🪶 生成器 · 工单协助';
+    document.getElementById('chatTitle').textContent = '🪶 开发员 · 工单协助';
     document.getElementById('ticketPanel').style.display = 'none';
     document.getElementById('msgs').innerHTML = '';
     chatHistory = [];
@@ -689,6 +870,7 @@ function clearChatHistory() {
   if (!confirm('清空「' + document.getElementById('chatTitle').textContent + '」的聊天记录？')) return;
   chatHistory.length = 0;
   localStorage.removeItem(chatStoreKey);
+  cloudSaveHistory(chatStoreKey, []);
   document.getElementById('msgs').innerHTML = '';
   addMsg('bot', currentRole.greet, true);
 }
@@ -707,6 +889,7 @@ function addMsg(role, text, skipSave) {
   if (!skipSave && currentRole && (role === 'user' || role === 'bot')) {
     chatHistory.push({ role: role === 'user' ? 'user' : 'assistant', content: text });
     try { localStorage.setItem(chatStoreKey, JSON.stringify(chatHistory.slice(-60))); } catch (e) {}
+    cloudSaveHistory(chatStoreKey, chatHistory);
   }
   return el;
 }
@@ -744,7 +927,7 @@ function sendText(text) {
   document.getElementById('chatSendBtn').disabled = true;
   var hp = chatHistory.slice(-10); // addMsg 已入历史, 这里截取即可
   var statusEl = addMsg('bot', '⏳ 正在思考…', true); // 状态气泡不写入历史/上下文
-  fetchJSON('/hall/chat', { method:'POST', headers:{'Content-Type':'application/json'},
+  fetchJSON('/hall/chat', { method:'POST', headers:Object.assign({'Content-Type':'application/json'}, authHeaders()),
     body: JSON.stringify({ role: currentRole.id, message:text, history:hp, session_id:'hall-'+currentRole.id+'-'+Date.now(), user_key: userEmail }) },
     3 * 60 * 1000)
     .then(function(d) {
@@ -772,7 +955,7 @@ function sendText(text) {
         }
         return;
       }
-      // 生成器协助模式: 回复后给「记为解决方案」
+      // 开发员协助模式: 回复后给「记为解决方案」
       addMsg('bot', reply);
       if (repairAssistTicketId) {
         var tid = repairAssistTicketId;

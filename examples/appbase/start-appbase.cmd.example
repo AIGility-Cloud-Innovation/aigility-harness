@@ -13,7 +13,7 @@ docker start appbase-pg 2>nul
 if errorlevel 1 (
   docker run -d --name appbase-pg --restart unless-stopped ^
     -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=%APPBASE_PG_PASSWORD% ^
-    -e POSTGRES_DB=appbase -p 5433:5432 ^
+    -e POSTGRES_DB=appbase -p 127.0.0.1:5433:5432 ^
     -v appbase_pg_data:/var/lib/postgresql/data postgres:16-alpine
 )
 
@@ -21,6 +21,7 @@ rem ---- LLM 上游 (必填; 不填则页面能开, 对话/AI 报"该应用尚�
 set BIGMODEL_API_KEY=【填:智谱开放平台 API Key】
 
 rem ---- 编码代理驱动: zcode / codex (默认 codex) ----
+set APPBASE_RELAY_TARGETS=look_log=http://【填:日志服务地址:端口】/look_log
 set AGENT_DRIVER=zcode
 rem 可选, 一般无需设置 (默认 node + C:/Program Files/ZCode/resources/glm/zcode.cjs):
 rem set ZCODE_NODE_BIN=D:\Program Files\nodejs\node.exe

@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AppBase · 管理中心</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root { --ink:#1e293b; --ink2:#64748b; --line:#e8ecf4; --accent:#4f46e5; --soft:#eef0fe; --rose:#f43f5e; --rose-soft:#fde9ed; --green:#10b981; --green-soft:#e7f8f1; }
+body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; background:#f4f6fb; color:var(--ink); min-height:100vh; padding:28px 22px 70px; -webkit-font-smoothing:antialiased; }
+.shell { max-width:1080px; margin:0 auto; }
+.hero { background:linear-gradient(120deg,#312e81,#4f46e5 55%,#7c3aed); border-radius:22px; padding:26px 32px; color:#fff; box-shadow:0 10px 36px rgba(49,46,129,.35); }
+.hero h1 { font-size:22px; }
+.hero p { font-size:12.5px; color:rgba(255,255,255,.75); flex:1; min-width:200px; margin-top:4px; }
+.hero .top { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.hero button { border:none; background:rgba(255,255,255,.2); color:#fff; border-radius:10px; padding:7px 16px; font-size:12.5px; cursor:pointer; font-weight:600; font-family:inherit; }
+.hero button:hover { background:rgba(255,255,255,.32); }
+.tabs { display:flex; gap:8px; margin-top:16px; flex-wrap:wrap; }
+.tabs button { border:1.5px solid var(--line); background:#fff; color:var(--ink); border-radius:12px; padding:9px 16px; font-size:13.5px; font-weight:600; cursor:pointer; font-family:inherit; }
+.tabs button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+.tabpane { display:none; }
+.tabpane.on { display:block; }
+.card { background:#fff; border:1px solid var(--line); border-radius:16px; margin-top:18px; overflow:hidden; }
+.card.pad { padding:18px 20px; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th { text-align:left; padding:11px 14px; font-size:12px; color:var(--ink2); border-bottom:1px solid var(--line); background:#fafbfe; }
+td { padding:11px 14px; border-bottom:1px solid #f0f2f8; vertical-align:middle; }
+tr:last-child td { border-bottom:none; }
+.chip { display:inline-block; padding:2px 9px; border-radius:10px; font-size:11px; font-weight:600; }
+.chip.admin, .chip.on, .chip.ok { background:var(--green-soft); color:var(--green); }
+.chip.user, .chip.off { background:#f1f4f9; color:var(--ink2); }
+.chip.err { background:var(--rose-soft); color:var(--rose); }
+td button, .regbar button, .cbtn { border:none; border-radius:8px; padding:5px 10px; font-size:11.5px; cursor:pointer; font-weight:600; font-family:inherit; margin-right:5px; }
+.b-admin { background:var(--green-soft); color:var(--green); }
+.b-demote { background:#fff3e6; color:#d97706; }
+.b-pwd, .b-mem, .b-save, .b-en { background:var(--soft); color:var(--accent); }
+.b-del { background:var(--rose-soft); color:var(--rose); }
+.b-load { background:var(--green-soft); color:var(--green); }
+.b-unload { background:#fff3e6; color:#d97706; }
+.sub { font-size:11.5px; color:var(--ink2); }
+.minput { width:100%; border:1.5px solid var(--line); border-radius:9px; padding:8px 11px; font-size:12.5px; outline:none; font-family:inherit; }
+.minput:focus { border-color:var(--accent); }
+textarea.minput { min-height:96px; font-family:Consolas,monospace; }
+.hint { font-size:11.5px; color:var(--ink2); margin-top:6px; }
+.empty { text-align:center; padding:40px; color:var(--ink2); }
+.membar { display:none; padding:12px 14px; background:#fafbfe; border-bottom:1px solid var(--line); }
+.membar.show { display:block; }
+.membar .mrow { display:inline-flex; align-items:center; gap:7px; background:#fff; border:1px solid var(--line); border-radius:9px; padding:5px 10px; font-size:12px; margin:3px 6px 3px 0; }
+.membar .mrow button { border:none; background:var(--rose-soft); color:var(--rose); border-radius:6px; padding:2px 7px; font-size:11px; cursor:pointer; font-family:inherit; }
+.regbar { display:none; margin-top:10px; background:#fafbfe; border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+.regbar.show { display:block; }
+.regbar input { margin:0 0 8px; }
+.regbar .row2 { display:flex; gap:8px; }
+.regbar .row2 > * { flex:1; }
+.chead { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.chead b.nm { font-size:15px; }
+.pkg { font-family:Consolas,monospace; font-size:11.5px; color:var(--ink2); background:#f1f4f9; padding:2px 7px; border-radius:6px; }
+.ops { margin-left:auto; display:flex; gap:7px; flex-wrap:wrap; }
+#msg { position:fixed; left:50%; bottom:26px; transform:translateX(-50%); background:var(--ink); color:#fff; font-size:12.5px; padding:9px 18px; border-radius:10px; opacity:0; transition:opacity .25s; pointer-events:none; z-index:99; max-width:80vw; }
+.preset { display:flex; gap:8px; margin-bottom:8px; }
+.row2 { display:flex; gap:8px; }
+.row2 > * { flex:1; }
+.srcs { font-size:12.5px; line-height:2.1; }
+.srcs a { color:var(--accent); font-weight:600; text-decoration:none; }
+.srcs .w { color:var(--ink2); }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="hero">
+    <div class="top">
+      <h1>🛠 管理中心</h1>
+      <button onclick="location.href='/hall'">← 返回大厅</button>
+    </div>
+    <p>管理面板由各模块贡献（账号 / LLM 配置 / 插件管理）；插件经 manifest.adminPanels 声明的面板会自动出现在标签里</p>
+    <div class="tabs" id="tabs"></div>
+  </div>
+
+  <!-- 👥 账号与用户 -->
+  <div class="tabpane" id="pane-users">
+    <div class="card">
+      <table>
+        <thead><tr><th>邮箱</th><th>身份</th><th>注册时间</th><th>应用归属</th><th>成员关系</th><th>操作</th></tr></thead>
+        <tbody id="tbody"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)">
+        <b style="font-size:14px;flex:1">🔑 应用内账号</b>
+        <span class="sub" style="margin-right:10px">各应用自己的登录账号（用户名+密码），跨应用统一管理</span>
+        <button class="b-pwd" onclick="loadAppAccounts()">⟳ 刷新</button>
+        <button class="b-admin" style="margin-left:8px" onclick="openAccAdd()">➕ 添加账号</button>
+      </div>
+      <div id="accAddBar" style="display:none;padding:12px 14px;background:#fafbfe;border-bottom:1px solid var(--line)">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <select id="naApp" style="padding:6px 9px;border:1.5px solid var(--line);border-radius:8px;font-size:12.5px;background:#fff;outline:none"></select>
+          <input id="naUser" placeholder="用户名" style="width:130px;padding:6px 9px;border:1.5px solid var(--line);border-radius:8px;font-size:12.5px;outline:none">
+          <input id="naPass" type="password" placeholder="密码(至少4位)" style="width:130px;padding:6px 9px;border:1.5px solid var(--line);border-radius:8px;font-size:12.5px;outline:none">
+          <button class="b-admin" onclick="addAppAccount()">添加</button>
+          <button class="b-mem" onclick="document.getElementById('accAddBar').style.display='none'">收起</button>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>所属应用</th><th>用户名</th><th>备注</th><th>创建时间</th><th>操作</th></tr></thead>
+        <tbody id="accTbody"><tr><td colspan="5" class="empty">加载中…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)">
+        <b style="font-size:14px;flex:1">📜 审计日志</b>
+        <span class="sub" style="margin-right:10px">敏感操作留痕：登录 / 改密 / 提权 / 删除 / 应用变更（最近 100 条）</span>
+        <button class="b-pwd" onclick="loadAudit()">⟳ 刷新</button>
+      </div>
+      <table>
+        <thead><tr><th style="width:130px">时间</th><th style="width:190px">操作者</th><th style="width:150px">动作</th><th>对象 / 说明</th></tr></thead>
+        <tbody id="auditBody"><tr><td colspan="4" class="empty">点「刷新」加载</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 🌐 LLM 配置 -->
+  <div class="tabpane" id="pane-llm-config">
+    <div class="card pad">
+      <b style="font-size:14px">已存平台</b>
+      <div class="hint" style="margin:4px 0 10px">可保存多个平台的 Key，点「启用」即时切换（热生效，无需重启）。Key 只存服务端，页面只显示掩码；点平台名可载入编辑。</div>
+      <div id="llmPlatList"><div class="sub">加载中…</div></div>
+    </div>
+    <div class="card pad">
+      <b style="font-size:14px">添加 / 编辑平台</b>
+      <div class="preset" style="margin-top:10px">
+        <select class="minput" id="llmPreset" style="margin:0" onchange="applyLlmPreset()">
+          <option value="">— 选择预设自动填 URL —</option>
+          <option value="智谱">智谱 (GLM)</option>
+          <option value="DeepSeek">DeepSeek</option>
+          <option value="Kimi">Kimi (月之暗面)</option>
+          <option value="OpenAI">OpenAI</option>
+          <option value="Ollama">Ollama (本机)</option>
+          <option value="自定义">自定义</option>
+        </select>
+      </div>
+      <input class="minput" id="gpModel" list="gpModelOptions" placeholder="默认模型, 如 glm-4.6">
+      <datalist id="gpModelOptions"></datalist>
+      <div id="gpIdentity" class="hint"></div>
+      <input class="minput" id="gpUrl" placeholder="URL, 如 https://open.bigmodel.cn/api/paas/v4" style="margin-top:8px" oninput="updateGpIdentity()">
+      <input class="minput" id="gpKey" placeholder="API Key（留空或 •••• 开头 = 不修改已保存的）" style="margin-top:8px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+        <button class="b-load" onclick="saveLlmGlobal(true)">保存并启用</button>
+        <button class="b-save" onclick="saveLlmGlobal(false)">仅保存</button>
+        <button class="b-save" onclick="testLlmGlobal()">🔌 测试连接</button>
+        <button class="b-save" onclick="fetchGlobalModels()">⟳ 获取模型列表</button>
+        <button class="b-del" onclick="deleteLlmGlobal()">删除</button>
+      </div>
+      <div id="llmGlobalMsg" class="hint" style="margin-top:8px"></div>
+    </div>
+  </div>
+
+  <!-- 🧩 DSH 插件 -->
+  <div class="tabpane" id="pane-dsh-plugins">
+    <div class="card pad">
+      <div class="chead">
+        <b class="nm">运行时状态</b>
+        <span id="hostChip" class="chip off">未启动</span>
+        <span class="hint" id="hostInfo"></span>
+        <div class="ops"><button class="b-save" onclick="loadPlugins()">⟳ 刷新</button></div>
+      </div>
+      <div class="hint">插件包在本机需已安装（node_modules 可解析）。加载即把插件插入服务进程内的 cordis 运行时；保存配置后需重新加载生效。</div>
+    </div>
+    <div id="pluginList"></div>
+    <div class="card pad">
+      <div class="chead"><b class="nm">🔎 插件从哪里找</b></div>
+      <div class="srcs">
+        🌍 <a href="https://github.com/deepseek-ai/deepseek-harness" target="_blank" rel="noopener">DeepSeek Harness 官方仓库 (GitHub)</a>
+        <span class="w">— "everything is a plugin" 主仓库</span><br>
+        📚 <a href="https://github.com/deepseek-ai/deepseek-harness/tree/master/docs/cordis-tutorial" target="_blank" rel="noopener">Cordis 插件开发教程</a>
+        <span class="w">— 写好后用下方「注册插件」接入</span><br>
+        📦 <a href="https://www.npmjs.com/search?q=scope%3Adeepseek-ai" target="_blank" rel="noopener">npm · @deepseek-ai scope</a>
+        <span class="w">— 先 pnpm add 装到本机，再注册加载</span>
+      </div>
+    </div>
+    <div class="card pad">
+      <div class="chead"><b class="nm">➕ 注册插件</b>
+        <div class="ops"><button class="b-en" onclick="document.getElementById('regBar').classList.toggle('show')">展开/收起</button></div>
+      </div>
+      <div class="regbar" id="regBar">
+        <input class="minput" id="rgName" placeholder="名称（唯一标识，如 timem）">
+        <input class="minput" id="rgPkg" placeholder="npm 包名或可 import 的标识（如 @timem/dsh-plugin-timem）">
+        <div class="row2">
+          <input class="minput" id="rgExport" placeholder="插件导出名（可选）">
+          <input class="minput" id="rgDesc" placeholder="描述（可选）">
+        </div>
+        <div style="margin-top:8px"><button class="b-load" onclick="registerPlugin()">注册</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⚙ 框架层插件 -->
+  <div class="tabpane" id="pane-harness-plugins">
+    <div class="card">
+      <div style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)">
+        <b style="font-size:14px;flex:1">⚙ 框架层插件（LayerPlugin · 只读）</b>
+        <span class="sub" style="margin-right:10px">五层架构注册的全部 Seam 服务与 provider 状态</span>
+        <button class="b-pwd" onclick="loadHarness()">⟳ 刷新</button>
+      </div>
+      <table>
+        <thead><tr><th>服务 id</th><th>层</th><th>版本</th><th>provides/consumes</th><th>Provider</th><th>状态</th></tr></thead>
+        <tbody id="hpBody"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<div id="msg"></div>
+
+<script>
+// ── 通用 ──
+function ah() {
+  var t = sessionStorage.getItem('hall_token') || '';
+  return t ? { Authorization: 'Bearer ' + t } : {};
+}
+function toast(t) {
+  var el = document.getElementById('msg');
+  el.textContent = t; el.style.opacity = 1;
+  clearTimeout(el._t); el._t = setTimeout(function(){ el.style.opacity = 0; }, 3000);
+}
+function fetchJSON(url, opts, timeoutMs) {
+  var ctl = new AbortController();
+  var timer = setTimeout(function() { ctl.abort(); }, timeoutMs || 30000);
+  opts = Object.assign({}, opts);
+  opts.headers = Object.assign({}, ah(), opts.headers || {});
+  return fetch(url, Object.assign(opts, { signal: ctl.signal }))
+    .then(function(r) {
+      return r.json().catch(function() { return {}; }).then(function(d) {
+        if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+        return d;
+      });
+    })
+    .finally(function() { clearTimeout(timer); });
+}
+function esc(s) {
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function armConfirm(btn, fn) {
+  if (btn.getAttribute('data-armed') === '1') {
+    btn.removeAttribute('data-armed');
+    btn.textContent = btn.getAttribute('data-label');
+    fn();
+    return;
+  }
+  btn.setAttribute('data-armed', '1');
+  btn.setAttribute('data-label', btn.textContent);
+  btn.textContent = '确认?';
+  setTimeout(function() {
+    if (btn.getAttribute('data-armed') === '1') {
+      btn.removeAttribute('data-armed');
+      btn.textContent = btn.getAttribute('data-label');
+    }
+  }, 3000);
+}
+
+// ── 标签壳: 面板清单由服务端驱动 (未来插件贡献的面板自动出现) ──
+var PANES = {};
+function initTabs(panels) {
+  var bar = document.getElementById('tabs');
+  bar.innerHTML = (panels || []).map(function(p, i) {
+    return '<button id="tab-' + esc(p.id) + '" class="' + (i === 0 ? 'on' : '') + '" onclick="switchTab(\'' + esc(p.id) + '\')">' + esc(p.icon) + ' ' + esc(p.title) + '</button>';
+  }).join('');
+  (panels || []).forEach(function(p, i) {
+    var pane = document.getElementById('pane-' + p.id);
+    if (pane) { PANES[p.id] = pane; pane.className = 'tabpane' + (i === 0 ? ' on' : ''); }
+  });
+  var wanted = new URLSearchParams(location.search).get('tab');
+  if (wanted && PANES[wanted]) switchTab(wanted);
+}
+function switchTab(id) {
+  Object.keys(PANES).forEach(function(k) {
+    document.getElementById('tab-' + k).className = (k === id ? 'on' : '');
+    PANES[k].className = 'tabpane' + (k === id ? ' on' : '');
+  });
+}
+
+// ── 👥 账号与用户 ──
+var users = [];
+function loadUsers() {
+  fetchJSON('/app/admin/users').then(function(d) {
+    users = d.users || [];
+    renderUsers();
+  }).catch(function(e) {
+    document.getElementById('tbody').innerHTML =
+      '<tr><td colspan="6" class="empty">' + esc(e.message) + '</td></tr>';
+  });
+}
+function renderUsers() {
+  var tb = document.getElementById('tbody');
+  if (!users.length) { tb.innerHTML = '<tr><td colspan="6" class="empty">暂无用户</td></tr>'; return; }
+  tb.innerHTML = users.map(function(u) {
+    return '<tr id="row-' + u.id + '">'
+      + '<td><b>' + esc(u.email) + '</b></td>'
+      + '<td><span class="chip ' + (u.is_admin ? 'admin' : 'user') + '">' + (u.is_admin ? '管理员' : '普通用户') + '</span></td>'
+      + '<td class="sub">' + new Date(u.created_at).toLocaleString('zh-CN', {year:'2-digit',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) + '</td>'
+      + '<td>' + u.app_count + ' 个</td>'
+      + '<td><span class="sub">' + u.member_count + ' 个应用 <a href="javascript:void(0)" onclick="toggleMem(\'' + u.id + '\')">查看</a></span></td>'
+      + '<td>'
+      + (u.is_admin
+          ? '<button class="b-demote" onclick="setAdmin(\'' + u.id + '\', false)">取消管理员</button>'
+          : '<button class="b-admin" onclick="setAdmin(\'' + u.id + '\', true)">设为管理员</button>')
+      + '<button class="b-pwd" onclick="resetPwd(this, \'' + u.id + '\')">重置密码</button>'
+      + '<button class="b-mem" onclick="toggleMem(\'' + u.id + '\')">成员关系</button>'
+      + '<button class="b-del" onclick="armConfirm(this, function(){ delUser(\'' + u.id + '\') })">删除</button>'
+      + '</td></tr>'
+      + '<tr class="memrow" id="mem-' + u.id + '" style="display:none"><td colspan="6" style="padding:0"><div class="membar" id="membar-' + u.id + '">加载中…</div></td></tr>';
+  }).join('');
+}
+function setAdmin(id, val) {
+  var u = users.find(function(x){ return x.id === id; });
+  if (!val && !confirm('确定取消「' + u.email + '」的管理员身份？')) return;
+  fetchJSON('/app/admin/users/' + id + '/admin', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ is_admin: val })
+  }).then(function() { toast(val ? '✓ 已设为管理员' : '✓ 已取消管理员'); loadUsers(); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function resetPwd(btn, id) {
+  var cell = btn.parentNode;
+  cell.innerHTML = '<input id="np-' + id + '" type="password" placeholder="新密码(至少6位)" '
+    + 'style="width:130px;padding:4px 7px;border:1.5px solid var(--line);border-radius:7px;font-size:11.5px;outline:none;margin-right:5px">'
+    + '<button class="b-admin" onclick="confirmUserPwd(\'' + id + '\')">确定</button>'
+    + '<button class="b-mem" onclick="renderUsers()">取消</button>';
+  var input = document.getElementById('np-' + id);
+  input.focus();
+  input.addEventListener('keydown', function(e) {
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === 'Enter') confirmUserPwd(id);
+  });
+}
+function confirmUserPwd(id) {
+  var np = document.getElementById('np-' + id).value;
+  if (np.length < 6) return toast('✗ 新密码至少 6 位');
+  fetchJSON('/app/admin/users/' + id + '/password', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ newPassword: np })
+  }).then(function() { toast('✓ 密码已重置'); renderUsers(); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function toggleMem(id) {
+  var tr = document.getElementById('mem-' + id);
+  var show = tr.style.display === 'none';
+  tr.style.display = show ? '' : 'none';
+  if (show) loadMem(id);
+}
+function loadMem(id) {
+  var bar = document.getElementById('membar-' + id);
+  fetchJSON('/app/admin/users/' + id + '/memberships').then(function(d) {
+    var ms = d.memberships || [];
+    bar.innerHTML = ms.length
+      ? '被添加到的应用：' + ms.map(function(m) {
+          return '<span class="mrow">' + esc(m.app_id)
+            + '<button onclick="delMem(\'' + id + '\',\'' + esc(m.app_id) + '\')">移出</button></span>';
+        }).join('')
+      : '<span class="sub">没有被添加到任何应用</span>';
+  }).catch(function(e) { bar.textContent = '加载失败: ' + e.message; });
+}
+function delMem(id, appId) {
+  fetchJSON('/app/admin/users/' + id + '/member?app=' + encodeURIComponent(appId), { method: 'DELETE' })
+    .then(function() { toast('✓ 已移出'); loadMem(id); loadUsers(); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function delUser(id) {
+  var u = users.find(function(x){ return x.id === id; });
+  fetchJSON('/app/admin/users/' + id, { method: 'DELETE' })
+    .then(function() { toast('✓ 已删除 ' + u.email); loadUsers(); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function loadAudit() {
+  fetchJSON('/app/admin/audit?limit=100').then(function(d) {
+    var rows = d.entries || [];
+    document.getElementById('auditBody').innerHTML = rows.length
+      ? rows.map(function(e) {
+          return '<tr>'
+            + '<td class="sub">' + new Date(e.created_at).toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) + '</td>'
+            + '<td>' + esc(e.actor) + '</td>'
+            + '<td><span class="chip user" style="font-family:Consolas,monospace">' + esc(e.action) + '</span></td>'
+            + '<td class="sub">' + esc(e.target || '') + (e.detail ? ' · ' + esc(e.detail) : '') + '</td>'
+            + '</tr>';
+        }).join('')
+      : '<tr><td colspan="4" class="empty">暂无记录</td></tr>';
+  }).catch(function(e) {
+    document.getElementById('auditBody').innerHTML =
+      '<tr><td colspan="4" class="empty">加载失败: ' + esc(e.message) + '</td></tr>';
+  });
+}
+var appAccounts = [], accAppOptions = [], accEditId = null;
+function loadAppAccounts() {
+  fetchJSON('/app/admin/app-accounts').then(function(d) {
+    appAccounts = d.accounts || [];
+    renderAppAccounts();
+  }).catch(function(e) { toast('✗ 应用账号加载失败: ' + e.message); });
+}
+function ensureAppOptions(cb) {
+  if (accAppOptions.length) return cb();
+  fetchJSON('/app/hall/apps', { headers: ah() }).then(function(d) {
+    accAppOptions = (d.apps || []).map(function(a) { return a.name; });
+    cb();
+  }).catch(function() { cb(); });
+}
+function renderAppAccounts() {
+  var tb = document.getElementById('accTbody');
+  if (!tb) return;
+  if (!appAccounts.length) {
+    tb.innerHTML = '<tr><td colspan="5" class="empty">暂无应用内账号</td></tr>';
+    return;
+  }
+  tb.innerHTML = appAccounts.map(function(a) {
+    var ops;
+    if (accEditId === a.id) {
+      ops = '<input id="ap-' + a.id + '" type="password" placeholder="新密码(至少4位)" '
+        + 'style="width:120px;padding:4px 7px;border:1.5px solid var(--line);border-radius:7px;font-size:11.5px;outline:none;margin-right:5px">'
+        + '<button class="b-admin" onclick="confirmAccPwd(\'' + a.id + '\')">确定</button>'
+        + '<button class="b-mem" onclick="accEditId=null;renderAppAccounts()">取消</button>';
+    } else {
+      ops = '<button class="b-pwd" onclick="accEditId=\'' + a.id + '\';renderAppAccounts()">重置密码</button>'
+        + '<button class="b-del" onclick="armConfirm(this, function(){ delAppAcc(\'' + a.id + '\') })">删除</button>';
+    }
+    return '<tr>'
+      + '<td class="sub" style="font-family:Consolas,monospace">' + esc(a.app_id) + '</td>'
+      + '<td><b>' + esc(a.username) + '</b></td>'
+      + '<td class="sub">' + esc(a.note || '') + '</td>'
+      + '<td class="sub">' + new Date(a.created_at).toLocaleDateString() + '</td>'
+      + '<td>' + ops + '</td></tr>';
+  }).join('');
+}
+function confirmAccPwd(id) {
+  var acc = appAccounts.find(function(x){ return x.id === id; });
+  if (!acc) return;
+  var np = document.getElementById('ap-' + id).value;
+  if (np.length < 4) return toast('✗ 新密码至少 4 位');
+  fetchJSON('/app/hall/manage/account/' + id + '/reset?app=' + encodeURIComponent(acc.app_id), {
+    method: 'POST', headers: ah(),
+    body: JSON.stringify({ newPassword: np })
+  }).then(function() { toast('✓ 已重置 ' + acc.username); accEditId = null; renderAppAccounts(); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function delAppAcc(id) {
+  var acc = appAccounts.find(function(x){ return x.id === id; });
+  if (!acc) return;
+  fetchJSON('/app/hall/manage/account/' + id + '?app=' + encodeURIComponent(acc.app_id), {
+    method: 'DELETE', headers: ah()
+  }).then(function() { toast('✓ 已删除 ' + acc.username); loadAppAccounts(); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function addAppAccount() {
+  var app = document.getElementById('naApp').value;
+  var un = document.getElementById('naUser').value.trim();
+  var pw = document.getElementById('naPass').value;
+  if (!app || !un) return toast('✗ 请选择应用并填写用户名');
+  if (pw.length < 4) return toast('✗ 密码至少 4 位');
+  fetchJSON('/app/hall/manage/account?app=' + encodeURIComponent(app), {
+    method: 'POST', headers: ah(),
+    body: JSON.stringify({ username: un, password: pw })
+  }).then(function() {
+    toast('✓ 已添加 ' + un);
+    document.getElementById('naUser').value = ''; document.getElementById('naPass').value = '';
+    loadAppAccounts();
+  }).catch(function(e) { toast('✗ ' + e.message); });
+}
+function openAccAdd() {
+  ensureAppOptions(function() {
+    document.getElementById('naApp').innerHTML = accAppOptions.map(function(n) {
+      return '<option value="' + esc(n) + '">' + esc(n.replace('.html','')) + '</option>';
+    }).join('');
+    document.getElementById('accAddBar').style.display = 'block';
+  });
+}
+
+// ── 🌐 LLM 配置 ──
+var LLM_PRESETS = {
+  '智谱': { url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4.6' },
+  'DeepSeek': { url: 'https://api.deepseek.com', model: 'deepseek-chat' },
+  'Kimi': { url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+  'OpenAI': { url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  'Ollama': { url: 'http://127.0.0.1:11434/v1', model: '' },
+  '自定义': { url: '', model: '' }
+};
+var llmPlatCache = [];
+function gpPlatform() {
+  var preset = document.getElementById('llmPreset').value;
+  if (preset && preset !== '自定义') return preset;
+  try { return new URL(document.getElementById('gpUrl').value.trim()).hostname || '自定义'; }
+  catch (e) { return '自定义'; }
+}
+function updateGpIdentity() {
+  var el = document.getElementById('gpIdentity');
+  if (el) el.textContent = '将保存为平台: ' + gpPlatform();
+}
+function applyLlmPreset() {
+  var name = document.getElementById('llmPreset').value;
+  var p = LLM_PRESETS[name];
+  if (!p) { updateGpIdentity(); return; }
+  var saved = llmPlatCache.find(function(x) { return x.platform === name; });
+  if (saved) {
+    document.getElementById('gpUrl').value = saved.base_url || p.url;
+    document.getElementById('gpModel').value = saved.model || p.model || '';
+  } else {
+    if (p.url) document.getElementById('gpUrl').value = p.url;
+    if (p.model) document.getElementById('gpModel').value = p.model;
+  }
+  updateGpIdentity();
+}
+function setLlmMsg(t) { document.getElementById('llmGlobalMsg').textContent = t; }
+function loadLlmGlobal() {
+  fetchJSON('/app/hall/llm-global', { headers: ah() }).then(function(d) {
+    llmPlatCache = d.platforms || [];
+    document.getElementById('llmPlatList').innerHTML = (d.platforms || []).map(function(p) {
+      return '<div class="membar" style="display:block;background:transparent;border:none;padding:4px 0">'
+        + '<span class="mrow" style="flex:1;justify-content:space-between">'
+        + '<span><b style="cursor:pointer" data-plat="' + esc(p.platform) + '" onclick="editLlmGlobal(this.dataset.plat)">' + (p.is_active ? '✅ ' : '⚪ ') + esc(p.platform) + '</b>'
+        + '<span class="sub">　' + esc(p.model || '(无模型)') + '　' + esc(p.key_masked || '(无 Key)') + '</span></span>'
+        + '<span>' + (p.is_active ? '<span class="chip ok">使用中</span>' : '<button class="b-load" data-plat="' + esc(p.platform) + '" onclick="activateLlmGlobal(this.dataset.plat)">启用</button>') + '</span>'
+        + '</span></div>';
+    }).join('') || '<div class="sub">还没有平台，在下方添加一个</div>';
+  }).catch(function(e) { setLlmMsg('✗ 加载失败: ' + e.message); });
+}
+function editLlmGlobal(platform) {
+  var p = llmPlatCache.find(function(x) { return x.platform === platform; });
+  if (!p) return;
+  var known = Object.keys(LLM_PRESETS).indexOf(p.platform) >= 0 && p.platform !== '自定义';
+  document.getElementById('llmPreset').value = known ? p.platform : '自定义';
+  document.getElementById('gpUrl').value = p.base_url || '';
+  document.getElementById('gpModel').value = p.model || '';
+  document.getElementById('gpKey').value = '';
+  updateGpIdentity();
+  setLlmMsg('已载入「' + p.platform + '」，Key 留空则保持不变');
+}
+function gpRead() {
+  return {
+    platform: gpPlatform(),
+    base_url: document.getElementById('gpUrl').value.trim(),
+    model: document.getElementById('gpModel').value.trim(),
+    api_key: document.getElementById('gpKey').value.trim()
+  };
+}
+function saveLlmGlobal(activate) {
+  var b = gpRead();
+  if (!b.platform) { setLlmMsg('✗ 请先选预设或填 URL'); return; }
+  b.activate = !!activate;
+  fetchJSON('/app/hall/llm-global', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) })
+    .then(function(d) {
+      setLlmMsg(d.ok ? (activate ? '✓ 已保存并启用（热生效）' : '✓ 已保存') : '✗ ' + (d.error || ''));
+      loadLlmGlobal();
+    })
+    .catch(function(e) { setLlmMsg('✗ ' + e.message); });
+}
+function testLlmGlobal() {
+  var b = gpRead();
+  if (!b.base_url) { setLlmMsg('✗ 请先选预设或填 URL'); return; }
+  setLlmMsg('测试中…（Key 留空时用已保存的）');
+  fetchJSON('/app/hall/llm-global/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) })
+    .then(function(d) { setLlmMsg(d.ok ? '✓ 连接成功，' + d.latency_ms + 'ms' : '✗ ' + (d.error || '失败')); })
+    .catch(function(e) { setLlmMsg('✗ ' + e.message); });
+}
+function fetchGlobalModels() {
+  var b = gpRead();
+  if (!b.base_url) { setLlmMsg('✗ 请先选预设或填 URL'); return; }
+  setLlmMsg('拉取模型列表中…');
+  fetchJSON('/app/hall/llm-global/models', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) })
+    .then(function(d) {
+      var models = d.models || [];
+      document.getElementById('gpModelOptions').innerHTML =
+        models.map(function(m) { return '<option value="' + esc(m) + '">'; }).join('');
+      setLlmMsg(d.ok === false ? '✗ ' + (d.error || '拉取失败') : '✓ 获取到 ' + models.length + ' 个模型，点击模型输入框选择');
+    })
+    .catch(function(e) { setLlmMsg('✗ ' + e.message); });
+}
+function activateLlmGlobal(platform) {
+  fetchJSON('/app/hall/llm-global/activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform: platform }) })
+    .then(function(d) { toast(d.ok ? '已启用 ' + platform + '（热生效）' : (d.error || '失败')); loadLlmGlobal(); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function deleteLlmGlobal() {
+  var b = gpRead();
+  fetchJSON('/app/hall/llm-global/' + encodeURIComponent(b.platform), { method: 'DELETE', headers: ah() })
+    .then(function(d) { setLlmMsg(d.ok ? '✓ 已删除 ' + b.platform : '✗ ' + (d.error || '')); loadLlmGlobal(); })
+    .catch(function(e) { setLlmMsg('✗ ' + e.message); });
+}
+
+// ── 🧩 DSH 插件 ──
+function loadPlugins() {
+  fetchJSON('/app/dsh/plugins').then(function(d) {
+    var rt = d.runtime || {};
+    var chip = document.getElementById('hostChip');
+    chip.textContent = rt.hostAlive ? '运行中' : '未启动';
+    chip.className = 'chip ' + (rt.hostAlive ? 'on' : 'off');
+    document.getElementById('hostInfo').textContent = rt.hostAlive
+      ? ('启动于 ' + new Date(rt.startedAt).toLocaleString('zh-CN')) : '';
+    var rtAll = (rt && rt.plugins) || {};
+    renderDsh((d.plugins || []).map(function(p) {
+      var lines = Object.keys(p.config || {}).map(function(k) { return k + '=' + p.config[k]; });
+      return Object.assign({}, p, { configText: lines.join('\n'), rt: rtAll[p.name] || {} });
+    }));
+  }).catch(function(e) { toast('✗ ' + e.message); });
+}
+function renderDsh(plugins) {
+  var box = document.getElementById('pluginList');
+  if (!plugins.length) {
+    box.innerHTML = '<div class="card pad"><div class="hint">还没有注册插件，用下方「注册插件」添加。</div></div>';
+    return;
+  }
+  box.innerHTML = plugins.map(function(p) {
+    return '<div class="card pad">'
+      + '<div class="chead">'
+      + '<b class="nm">' + esc(p.name) + '</b>'
+      + '<span class="pkg">' + esc(p.package) + '</span>'
+      + '<span class="chip ' + (p.enabled ? 'on' : 'off') + '">' + (p.enabled ? '已启用' : '未启用') + '</span>'
+      + '<span id="st-' + esc(p.name) + '"></span>'
+      + '<div class="ops">'
+      + '<button class="b-en" onclick="toggleEnabled(\'' + esc(p.name) + '\', ' + (!p.enabled) + ')">' + (p.enabled ? '停用' : '启用') + '</button>'
+      + '<button class="b-load" onclick="loadOne(\'' + esc(p.name) + '\')">▶ 加载</button>'
+      + '<button class="b-unload" onclick="unloadOne(\'' + esc(p.name) + '\')">⏹ 停用运行</button>'
+      + '<button class="b-del" onclick="armConfirm(this, function(){ delPlugin(\'' + esc(p.name) + '\') })">删除</button>'
+      + '</div></div>'
+      + (p.description ? '<div class="hint" style="margin-top:4px">' + esc(p.description) + '</div>' : '')
+      + '<textarea class="minput" id="cfg-' + esc(p.name) + '" placeholder="KEY=VALUE 每行一条" style="margin-top:8px">' + esc(p.configText || '') + '</textarea>'
+      + '<div class="hint">机密项（含 key/token/secret 的键）服务端已掩码为 ••••；保存时保持 •••• 开头不变即可更新其他项。</div>'
+      + '<div style="margin-top:8px"><button class="b-save" onclick="saveConfig(\'' + esc(p.name) + '\')">💾 保存配置</button></div>'
+      + '</div>';
+  }).join('');
+  plugins.forEach(function(p) {
+    var el = document.getElementById('st-' + p.name);
+    var rt = p.rt || {};
+    if (!el) return;
+    if (rt.error) el.innerHTML = '<span class="chip err">加载失败</span> <span class="hint">' + esc(rt.error).slice(0, 80) + '</span>';
+    else if (rt.at) el.innerHTML = '<span class="chip ok">已加载</span> <span class="hint">' + new Date(rt.at).toLocaleString('zh-CN') + '</span>';
+    else el.innerHTML = '<span class="chip off">未加载</span>';
+  });
+}
+function toggleEnabled(name, val) {
+  fetchJSON('/app/dsh/plugins/' + encodeURIComponent(name), {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: val })
+  }).then(function() { toast(val ? '✓ 已启用（记得加载）' : '✓ 已停用'); loadPlugins(); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function saveConfig(name) {
+  var ta = document.getElementById('cfg-' + name);
+  fetchJSON('/app/dsh/plugins/' + encodeURIComponent(name), {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ configText: ta.value })
+  }).then(function() { toast('✓ 配置已保存（重新加载后生效）'); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function loadOne(name) {
+  toast('加载中…');
+  fetchJSON('/app/dsh/plugins/' + encodeURIComponent(name) + '/load', { method: 'POST' }, 60000)
+    .then(function(d) {
+      if (d.ok) toast('✓ 已加载到 DSH 运行时');
+      else toast('✗ 加载失败: ' + (d.error || '未知错误'));
+      loadPlugins();
+    })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function unloadOne(name) {
+  fetchJSON('/app/dsh/plugins/' + encodeURIComponent(name) + '/unload', { method: 'POST' })
+    .then(function() { toast('✓ 已停用运行（其余启用插件已重载）'); loadPlugins(); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function delPlugin(name) {
+  fetchJSON('/app/dsh/plugins/' + encodeURIComponent(name), { method: 'DELETE' })
+    .then(function() { toast('✓ 已删除'); loadPlugins(); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+function registerPlugin() {
+  var name = document.getElementById('rgName').value.trim();
+  var pkg = document.getElementById('rgPkg').value.trim();
+  if (!name || !pkg) return toast('✗ 名称和包名必填');
+  fetchJSON('/app/dsh/plugins', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: name, package: pkg,
+      exportName: document.getElementById('rgExport').value.trim(),
+      description: document.getElementById('rgDesc').value.trim()
+    })
+  }).then(function() {
+    toast('✓ 已注册 ' + name);
+    loadPlugins();
+  }).catch(function(e) { toast('✗ ' + e.message); });
+}
+
+// ── ⚙ 框架层插件 ──
+var LAYER_NAMES = {
+  infrastructure: 'L1 基础设施', cognitive: 'L2 认知', orchestration: 'L4 编排',
+  persona: 'L3 角色', action: 'L5 行动'
+};
+function loadHarness() {
+  fetchJSON('/app/admin/harness-plugins').then(function(d) {
+    var items = d.plugins || [];
+    document.getElementById('hpBody').innerHTML = items.length
+      ? items.map(function(p) {
+          return '<tr>'
+            + '<td style="font-family:Consolas,monospace;font-size:12px"><b>' + esc(p.id) + '</b>'
+            + '<div class="sub">' + esc(p.description || '') + '</div></td>'
+            + '<td><span class="chip user">' + esc(LAYER_NAMES[p.layer] || p.layer) + '</span></td>'
+            + '<td class="sub">' + esc(p.version) + '</td>'
+            + '<td class="sub">' + p.provides + ' / ' + p.consumes + '</td>'
+            + '<td class="sub" style="font-family:Consolas,monospace">' + esc(p.providerName) + '</td>'
+            + '<td><span class="chip ' + (String(p.state) === '2' || p.state === 2 ? 'ok' : 'user') + '">' + esc(String(p.state)) + '</span></td>'
+            + '</tr>';
+        }).join('')
+      : '<tr><td colspan="6" class="empty">无</td></tr>';
+  }).catch(function(e) {
+    document.getElementById('hpBody').innerHTML =
+      '<tr><td colspan="6" class="empty">' + esc(e.message) + '</td></tr>';
+  });
+}
+
+// ── 启动: 面板清单驱动标签 → 按需加载 ──
+fetchJSON('/app/hall/admin-panels').then(function(d) {
+  initTabs(d.panels || []);
+  loadUsers();
+  loadAudit();
+  loadAppAccounts();
+  loadLlmGlobal();
+  loadPlugins();
+  loadHarness();
+}).catch(function(e) {
+  document.getElementById('tabs').innerHTML = '<span class="sub">面板加载失败: ' + esc(e.message) + ' · <a href="/hall">回大厅</a></span>';
+});
+</script>
+</body>
+</html>

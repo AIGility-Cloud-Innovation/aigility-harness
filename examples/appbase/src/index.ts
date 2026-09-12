@@ -1,9 +1,9 @@
 /**
- * AppBase 产品装配：多功能对话厅 + Codex 网页应用生成器 + 后端 API + AI 网关
+ * AppBase 产品装配：多功能对话厅 + Codex 网页应用开发员 + 后端 API + AI 网关
  *
  * AppBase 产品形态:
  *   1. 多功能对话厅 (@infrastructure/hall) —— 框架自带基本前端, 多角色对话入口
- *      角色: codex-chat(Codex 网页应用生成器) / sales-chat / plugin-helper / coder
+ *      角色: app-dev(网页应用开发员) / sales-chat / plugin-helper / coding-coach
  *   2. 后端 API —— auth + apps 表 + 应用数据 (PG JSONB, 多租户隔离)
  *   3. AI 网关 (@infrastructure/http-ingress + protocol-adapter + llm-inference)
  *
@@ -40,7 +40,7 @@ const APP_PORT = 3419;
 const GATEWAY_PORT = 3418;
 
 async function main(): Promise<void> {
-  console.log("=== AppBase（对话厅 + 网页应用生成器 + 后端 API + AI 网关）===\n");
+  console.log("=== AppBase（对话厅 + 网页应用开发员 + 后端 API + AI 网关）===\n");
 
   // 0. 初始化后端 (PG schema)
   await initAppBackend();
@@ -80,6 +80,9 @@ async function main(): Promise<void> {
     return;
   }
   console.log(`bootstrap 成功 (kernel.isReady=${kernel.isReady()})`);
+  // 管理模块注入内核 (框架层插件枚举用)
+  const { setAdminKernel } = await import("./admin-modules/index.js");
+  setAdminKernel(kernel);
 
   // 4. 统一 HTTP server (3419): hall + 后端 API 同源
   let hallHandler: ((req: any, res: any) => Promise<void>) | null = null;
@@ -153,17 +156,16 @@ async function main(): Promise<void> {
       res.end(WORKBENCH_HTML);
       return;
     }
-    // 用户管理页 (管理员专用; 非管理员跳回大厅; 浏览器导航靠 httpOnly cookie 识别)
+    // 用户管理页 → 已并入统一管理壳 (重定向; 保留旧地址兼容书签)
     if (req.method === "GET" && (req.url === "/admin/users" || req.url?.startsWith("/admin/users?"))) {
-      const backend = await import("./backend.js");
-      const uid = backend.pageUserId(req);
-      if (!uid || !(await backend.isAdminUser(uid))) {
-        res.writeHead(302, { Location: "/hall" });
-        res.end();
-        return;
-      }
+      res.writeHead(302, { Location: "/admin?tab=users" });
+      res.end();
+      return;
+    }
+    // 对话流图页 (公开只读)
+    if (req.method === "GET" && (req.url === "/hall/flows" || req.url?.startsWith("/hall/flows?"))) {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(USER_ADMIN_HTML);
+      res.end(FLOWS_HTML);
       return;
     }
     // 应用大厅页 (替代原对话厅首页; 对话 API /hall/chat 不受影响)
@@ -176,6 +178,30 @@ async function main(): Promise<void> {
     if ((req.method === "GET" && (req.url === "/" || req.url === "/index.html"))) {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(APP_HALL_HTML);
+      return;
+    }
+    // 统一管理壳页 (管理员专用; 标签: 账号/LLM 配置/DSH 插件/框架层插件)
+    if (req.method === "GET" && (req.url === "/admin" || req.url?.startsWith("/admin?"))) {
+      const backend = await import("./backend.js");
+      const uid = backend.pageUserId(req);
+      if (!uid || !(await backend.isAdminUser(uid))) {
+        res.writeHead(302, { Location: "/hall" });
+        res.end();
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(ADMIN_HTML);
+      return;
+    }
+    // 旧管理页重定向到统一管理壳
+    if (req.method === "GET" && (req.url === "/admin/users" || req.url?.startsWith("/admin/users?"))) {
+      res.writeHead(302, { Location: "/admin?tab=users" });
+      res.end();
+      return;
+    }
+    if (req.method === "GET" && (req.url === "/dsh" || req.url?.startsWith("/dsh?"))) {
+      res.writeHead(302, { Location: "/admin?tab=dsh-plugins" });
+      res.end();
       return;
     }
     // DSH 插件管理页 (管理员专用; 非管理员跳回大厅; 浏览器导航靠 httpOnly cookie 识别)
@@ -223,11 +249,11 @@ async function main(): Promise<void> {
     port: APP_PORT,
     server,  // 注入统一 server
     roles: [
-      { id: "@persona/codex-chat", name: `网页应用生成器 (${process.env.AGENT_DRIVER === "zcode" ? "ZCode" : "Codex"} 驱动)`, emoji: "🪶" },
-      { id: "@persona/sales-chat", name: "AppBase 客服", emoji: "🎧" },
+      { id: "@persona/app-dev", name: `网页应用开发员 (${process.env.AGENT_DRIVER === "zcode" ? "ZCode" : "Codex"} 驱动)`, emoji: "🪶" },
+      { id: "@persona/sales-chat", name: "平台客服", emoji: "🎧" },
       { id: "@persona/repair-chat", name: "应用报修客服", emoji: "🔧" },
       { id: "@persona/plugin-helper", name: "插件助手", emoji: "🧩" },
-      { id: "@persona/coder", name: "编码助手", emoji: "👨💻" },
+      { id: "@persona/coding-coach", name: "编码教练", emoji: "👨‍💻" },
     ],
   }, hallCtx);
   if (!hallStart.ok) {
@@ -286,7 +312,7 @@ async function main(): Promise<void> {
 
 
 // ── 应用大厅: 沙箱应用文件管理 ──────────────────────────────────
-// 应用 = examples/apps 下的自包含 HTML 文件 (生成器产物 + 内置应用)。
+// 应用 = examples/apps 下的自包含 HTML 文件 (开发员产物 + 内置应用)。
 const SANDBOX_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "apps");
 
 function safeAppName(name: string): string | null {
@@ -322,7 +348,7 @@ async function hallAppsHandler(req: any, res: any): Promise<void> {
     return json(200, { apps: all.filter((a: any) => names.has(a.name)), isAdmin });
   }
 
-  // 创建新应用 (空模板) — 仅管理员 (工作台/生成器属管理功能)
+  // 创建新应用 (空模板) — 仅管理员 (工作台/开发员属管理功能)
   if (method === "POST" && path === "/app/hall/apps") {
     const backend0 = await import("./backend.js");
     const uid0 = backend0.bearerUser(req);
@@ -450,7 +476,8 @@ const APP_HALL_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)),
 // 编码工作台页 (可改代码的对话应用专用)
 const WORKBENCH_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "workbench.html"), "utf-8");
 // 用户管理页 (管理员专用)
-const USER_ADMIN_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "user-admin.html"), "utf-8");
+const FLOWS_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "flows.html"), "utf-8");
+const ADMIN_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "admin.html"), "utf-8");
 // DSH 插件管理页 (管理员专用)
 const DSH_ADMIN_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "dsh-admin.html"), "utf-8");
 

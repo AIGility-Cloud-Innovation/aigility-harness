@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AppBase · 对话流图</title>
+<style>
+  :root { --ink:#1e293b; --ink2:#64748b; --line:#e2e8f0; --accent:#4f46e5; --soft:#f4f6fb; --green:#059669; --rose:#e11d48; --amber:#b45309; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px 16px 60px; background:var(--soft); color:var(--ink);
+         font:15px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:var(--ink2); font-size:13px; margin-bottom:20px; }
+  .sub a { color: var(--accent); text-decoration:none; }
+  h2 { font-size:17px; margin:34px 0 4px; }
+  .rid { color:var(--ink2); font-size:12px; font-family:Consolas,monospace; margin-bottom:10px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:16px 18px; }
+  .flow { display:flex; flex-direction:column; }
+  .node { background:#fff; border:1.5px solid var(--line); border-radius:10px; padding:8px 12px; font-size:13.5px; }
+  .node b { font-size:13.5px; }
+  .node .d { color:var(--ink2); font-size:12px; }
+  .node.start { border-color:var(--accent); background:#eef2ff; }
+  .node.decision { border-style:dashed; border-color:var(--amber); background:#fffbeb; }
+  .node.terminal { border-color:var(--green); background:#ecfdf5; }
+  .node.warn { border-color:var(--rose); background:#fff1f2; }
+  .arrow { text-align:center; color:#94a3b8; font-size:13px; padding:2px 0; line-height:1.2; }
+  .arrow .lbl { color:var(--amber); font-size:12px; }
+  .split { display:flex; gap:12px; }
+  .split .arm { flex:1; display:flex; flex-direction:column; }
+  .arm-title { text-align:center; font-size:12px; color:var(--amber); padding:2px 0; }
+  .note { font-size:12px; color:var(--ink2); margin-top:10px; padding-top:8px; border-top:1px dashed var(--line); }
+  .tag { display:inline-block; font-size:11px; background:#eef2ff; color:var(--accent); border-radius:6px; padding:0 6px; margin-left:6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>对话流图</h1>
+  <div class="sub">大厅五个对话角色的真实对话流转（与代码实现同步，2026-09-12）· <a href="/hall">← 返回大厅</a></div>
+
+  <div class="card">
+    <h2 style="margin-top:0">共用入口（所有角色一致）</h2>
+    <div class="flow">
+      <div class="node start"><b>用户在大厅输入消息</b><div class="d">带 Bearer hall_token</div></div>
+      <div class="arrow">↓</div>
+      <div class="node">POST /hall/chat → bearerUser 鉴权（未登录 → 401「请先登录」）</div>
+      <div class="arrow">↓</div>
+      <div class="node">hall 按 role id 路由到对应 persona（附 system 人设 / history / session_state / user_key）</div>
+    </div>
+  </div>
+
+  <h2>🎧 平台客服</h2>
+  <div class="rid">@persona/sales-chat</div>
+  <div class="card"><div class="flow">
+    <div class="node start">用户消息 + 最近 10 轮历史</div>
+    <div class="arrow">↓</div>
+    <div class="node">workflow-engine：system(人设) + 历史角色归一化(bot→assistant) + 用户输入 → 一次 LLM 调用<span class="tag">LLM_MODEL</span></div>
+    <div class="arrow">↓</div>
+    <div class="split">
+      <div class="arm">
+        <div class="arm-title">LLM 成功</div>
+        <div class="node terminal">回复用户</div>
+      </div>
+      <div class="arm">
+        <div class="arm-title">LLM 失败</div>
+        <div class="node warn">降级占位回复（degraded 标记，前端黄字提示）</div>
+      </div>
+    </div>
+  </div>
+  <div class="note">无状态：上下文完全由前端 history 提供；角色归一化保证脏历史（旧版 role:"bot"）不炸上游。</div>
+  </div>
+
+  <h2>🔧 应用报修客服（延时汇总工作流）</h2>
+  <div class="rid">@persona/repair-chat · 静默窗口 REPAIR_QUIET_MS（默认 3 分钟）</div>
+  <div class="card"><div class="flow">
+    <div class="node start">用户消息</div>
+    <div class="arrow">↓</div>
+    <div class="node decision">是提交信号？<div class="d">「就这些了 / 提交报修 / 汇总一下 …」</div></div>
+    <div class="split">
+      <div class="arm">
+        <div class="arm-title">是（显式触发）</div>
+        <div class="flow">
+          <div class="node">汇总 LLM：整合缓冲区<b>全部轮次</b> → ```ticket``` 草稿（JSON 强校验，失败请重试）</div>
+          <div class="arrow">↓</div>
+          <div class="node terminal">呈现工单草稿 → 清空缓冲区（开启新一轮）</div>
+          <div class="arrow">↓ <span class="lbl">前端识别 ticket 块</span></div>
+          <div class="node terminal">用户点「创建工单」→ POST /app/tickets → 可转开发员协助</div>
+        </div>
+      </div>
+      <div class="arm">
+        <div class="arm-title">否（收集期）</div>
+        <div class="flow">
+          <div class="node decision">静默期已预计算草稿？</div>
+          <div class="split">
+            <div class="arm">
+              <div class="arm-title">是</div>
+              <div class="node terminal">呈现草稿；新输入开启下一轮收集</div>
+            </div>
+            <div class="arm">
+              <div class="arm-title">否</div>
+              <div class="flow">
+                <div class="node">引导回复（ticket 块出口屏蔽）+ 轮次入缓冲区</div>
+                <div class="arrow">↓ <span class="lbl">静默 3 分钟</span></div>
+                <div class="node">预计算工单草稿（下条消息送达时呈现）</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note">同款「先发散后收敛」：收集期绝不建单；TiMEM 记忆召回/沉淀照常（降级不写记忆）。会话缓冲在服务进程内存中。</div>
+  </div>
+
+  <h2>🪶 网页应用开发员</h2>
+  <div class="rid">@persona/app-dev · AGENT_DRIVER = zcode / codex / claude</div>
+  <div class="card"><div class="flow">
+    <div class="node start">用户任务（目标应用 = 沙箱 examples/apps 内）</div>
+    <div class="arrow">↓</div>
+    <div class="node decision">工作目录在沙箱白名单内？<div class="d">拒绝 .. / 绝对路径逃逸</div></div>
+    <div class="split">
+      <div class="arm"><div class="arm-title">否</div><div class="node warn">拒绝：无法执行（目录限制）</div></div>
+      <div class="arm"><div class="arm-title">是</div>
+        <div class="flow">
+          <div class="node">组装 prompt：人设 + 行为约束 4 条（不扩大范围/不越目录/不探系统/完成即停）+ 任务 + 工作目录</div>
+          <div class="arrow">↓</div>
+          <div class="node">L4 codex-agent → 编码 CLI 真实执行（首次改动前自动快照，可回滚）</div>
+          <div class="arrow">↓</div>
+          <div class="node terminal">回复：结果 + 访问方式（失败如实说明；CLI 不可用 → 降级标记）</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note">一次性执行模式（一条消息一轮生成）；聊天历史云端持久化（chat_history 表）。</div>
+  </div>
+
+  <h2>👨‍💻 编码教练（5 阶段状态机 + 意图闸门）</h2>
+  <div class="rid">@persona/coding-coach → @orchestration/guided-design · 只引导不落盘</div>
+  <div class="card"><div class="flow">
+    <div class="node start">用户消息（携带 session_state: phase + answers）</div>
+    <div class="arrow">↓</div>
+    <div class="node decision">意图闸门（单次 LLM，首行标签）<div class="d">ADVANCE=实质回答本阶段 / CHAT=问教练·工具·闲聊</div></div>
+    <div class="split">
+      <div class="arm">
+        <div class="arm-title">CHAT</div>
+        <div class="flow">
+          <div class="node terminal">教练直接答问，阶段与已收集答案不变</div>
+        </div>
+      </div>
+      <div class="arm">
+        <div class="arm-title">ADVANCE</div>
+        <div class="flow">
+          <div class="node">记录本阶段答案 → 提炼确认 + 提出下一阶段关键问题（阶段 +1）</div>
+          <div class="arrow">↓ <span class="lbl">1 需求理解 → 2 功能清单 → 3 页面与数据 → 4 交互与边界</span></div>
+          <div class="node">阶段 5「确认与出提示词」：汇总全部阶段结论 + 用户本轮修改意见</div>
+          <div class="arrow">↓</div>
+          <div class="node terminal">产出 ```app-prompt``` 完整提示词（可反复迭代）→ 交给开发员落地</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note">LLM 不可用时回退确定性推进（阶段照走、提示降级）；状态由前端携带，服务端无状态。</div>
+  </div>
+
+  <h2>🧩 插件助手</h2>
+  <div class="rid">@persona/plugin-helper → @orchestration/plugin-install</div>
+  <div class="card"><div class="flow">
+    <div class="node start">插件安装/使用问题</div>
+    <div class="arrow">↓</div>
+    <div class="node">plugin-install 工作流：识别插件 → 查启用状态与配置项 → 给出引导步骤</div>
+    <div class="arrow">↓</div>
+    <div class="node terminal">回复引导（管理员可到 /dsh 页完成实际加载与配置）</div>
+  </div></div>
+</div>
+</body>
+</html>

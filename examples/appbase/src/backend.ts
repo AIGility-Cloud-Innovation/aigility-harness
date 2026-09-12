@@ -21,8 +21,18 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { createMemoryRateLimiter, createMemoryAuditLog } from "@aigility-harness/layer-infrastructure";
+import { updateModelsUpstream } from "@aigility-harness/layer-infrastructure";
 import { dshLoadPlugin, dshLoadEnabled, dshStatus } from "./dsh-host.js";
+// ── Admin modules (管理界面插件化): 原语迁至 admin-modules/context, 路由迁至各模块 ──
+import {
+  json, readBody, pool, hashPassword, verifyPassword, signToken, setAuthCookie,
+  bearerUser, verifyToken, isAdminUser, writeAudit, emailOf, loginLimiter, loginLockKey,
+  PG_CONFIG,
+} from "./admin-modules/context.js";
+import { adminDispatch, adminPanelList } from "./admin-modules/index.js";
+import { initLlmConfig, normalizeLlmBase } from "./admin-modules/llm-config.js";
+import { httpRelayProvider, relayTargets } from "@aigility-harness/layer-infrastructure";
+import { parseEnvText } from "./admin-modules/context.js";
 
 const scryptAsync = promisify(scrypt) as (
   password: string,
@@ -31,20 +41,7 @@ const scryptAsync = promisify(scrypt) as (
 ) => Promise<Buffer>;
 
 // ── PG 连接 ──────────────────────────────────────────────────────
-// 连接信息来自环境变量 (APPBASE_PG_*) 或默认 127.0.0.1:5433 appbase 库。
-// 端口约定: 本机用 Docker 容器 appbase-pg (宿主 5433 → 容器 5432), 与此默认值对齐,
-//           无需设 APPBASE_PG_PORT; 原生 PG 跑在默认 5432 的机器需设 APPBASE_PG_PORT=5432。
-// 密码不硬编码: 读 APPBASE_PG_PASSWORD / PGPASSWORD (本机容器密码见 start-appbase.cmd)。
-
-const PG_CONFIG = {
-  host: process.env.APPBASE_PG_HOST ?? "127.0.0.1",
-  port: Number(process.env.APPBASE_PG_PORT ?? 5433),
-  database: process.env.APPBASE_PG_DATABASE ?? "appbase",
-  user: process.env.APPBASE_PG_USER ?? "postgres",
-  password: process.env.APPBASE_PG_PASSWORD ?? process.env.PGPASSWORD ?? "",
-};
-
-const pool = new pg.Pool(PG_CONFIG);
+// 已迁至 admin-modules/context.ts (管理界面插件化); pool/PG_CONFIG 经下方 re-export 提供。
 
 // ── 建表 (幂等) ──────────────────────────────────────────────────
 
@@ -154,6 +151,14 @@ async function ensureSchema(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     ALTER TABLE app_llm_config ADD COLUMN IF NOT EXISTS env JSONB NOT NULL DEFAULT '{}'::jsonb;
+    ALTER TABLE app_llm_config ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT false;
+    CREATE TABLE IF NOT EXISTS chat_history (
+      user_id    TEXT NOT NULL,
+      conv_key   TEXT NOT NULL,
+      messages   JSONB NOT NULL DEFAULT '[]'::jsonb,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (user_id, conv_key)
+    );
     CREATE TABLE IF NOT EXISTS llm_usage (
       id               TEXT PRIMARY KEY,
       key              TEXT NOT NULL,
@@ -180,146 +185,6 @@ async function ensureSchema(): Promise<void> {
 
 // ── 工具 ─────────────────────────────────────────────────────────
 
-async function hashPassword(password: string): Promise<string> {
-  const salt = randomBytes(16).toString("hex");
-  const hash = await scryptAsync(password, salt, 64);
-  return `${salt}:${hash.toString("hex")}`;
-}
-
-async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  const [salt, hashHex] = stored.split(":");
-  if (!salt || !hashHex) return false;
-  const hash = await scryptAsync(password, salt, 64);
-  return timingSafeEqual(Buffer.from(hashHex, "hex"), hash);
-}
-
-/** token 有效期 (毫秒): 默认 7 天 */
-const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-
-/**
- * token 签名密钥: 优先环境变量; 否则用本地持久化的随机密钥
- * (首次生成写入 examples/appbase/.token-secret, 重启后 token 不失效)。
- * 不再回退到公开的固定盐, 避免 token 可被伪造。
- */
-function getTokenSecret(): string {
-  const fromEnv = process.env.APPBASE_TOKEN_SECRET;
-  if (fromEnv) return fromEnv;
-  const secretFile = join(dirname(fileURLToPath(import.meta.url)), ".token-secret");
-  try {
-    const existing = readFileSync(secretFile, "utf8").trim();
-    if (existing) return existing;
-  } catch { /* 首次运行, 文件不存在 */ }
-  const generated = randomBytes(32).toString("hex");
-  writeFileSync(secretFile, generated, { mode: 0o600 });
-  return generated;
-}
-
-function signToken(userId: string): string {
-  // 自签名 token: userId.random.exp.sig (无第三方依赖)
-  const payload = `${userId}.${randomBytes(24).toString("hex")}.${Date.now() + TOKEN_TTL_MS}`;
-  const sig = createHmac("sha256", getTokenSecret()).update(payload).digest("hex");
-  return `${payload}.${sig}`;
-}
-
-export function verifyToken(token: string): string | null {
-  const parts = token.split(".");
-  if (parts.length !== 4) return null;
-  const [userId, nonce, expStr, sig] = parts;
-  const payload = `${userId}.${nonce}.${expStr}`;
-  const expected = createHmac("sha256", getTokenSecret()).update(payload).digest("hex");
-  if (!timingSafeEqual(Buffer.from(expected), Buffer.from(sig))) return null;
-  if (!Number.isFinite(Number(expStr)) || Number(expStr) < Date.now()) return null;
-  return userId;
-}
-
-function readBody(req: IncomingMessage): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on("data", (c) => chunks.push(c as Buffer));
-    req.on("end", () => {
-      try { resolve(JSON.parse(Buffer.concat(chunks).toString("utf-8") || "{}")); }
-      catch (e) { reject(e); }
-    });
-    req.on("error", reject);
-  });
-}
-
-function json(res: ServerResponse, code: number, body: unknown): void {
-  res.writeHead(code, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(body));
-}
-
-// ── 管理员 / 成员 ────────────────────────────────────────────────
-
-/** 管理员邮箱白名单 (环境变量 APPBASE_ADMIN_EMAILS, 逗号分隔; 与 users.is_admin 取并集) */
-function adminEmails(): string[] {
-  return (process.env.APPBASE_ADMIN_EMAILS ?? "")
-    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
-}
-
-/** 该登录用户是否管理员: is_admin 列或邮箱白名单 */
-export async function isAdminUser(userId: string): Promise<boolean> {
-  const { rows } = await pool.query("SELECT email, is_admin FROM users WHERE id = $1", [userId]);
-  if (rows.length === 0) return false;
-  return Boolean(rows[0].is_admin) || adminEmails().includes(rows[0].email);
-}
-
-/** 从请求头解析登录用户 id: 无/无效 token 返回 null */
-export function bearerUser(req: { headers: { authorization?: string | string[] } }): string | null {
-  const raw = req.headers.authorization;
-  const auth = Array.isArray(raw) ? raw[0] : raw;
-  const token = auth?.startsWith("Bearer ") ? auth.slice(7) : "";
-  return token ? verifyToken(token) : null;
-}
-
-/**
- * 页面路由专用的身份解析: Bearer 头 或 httpOnly cookie (hall_token)。
- * 仅用于 HTML 页面门禁 (浏览器 location 导航带不了 Authorization 头)。
- * API 一律仍走 bearerUser —— 纯 cookie 调 API 一律 401,
- * 这样同源生成的应用页即使偷不到/发不出 token 也调不了接口。
- */
-export function pageUserId(req: { headers: { authorization?: string | string[]; cookie?: string } }): string | null {
-  const viaHeader = bearerUser(req);
-  if (viaHeader) return viaHeader;
-  const m = /(?:^|;\s*)hall_token=([^;]+)/.exec(String(req.headers.cookie ?? ""));
-  return m ? verifyToken(decodeURIComponent(m[1])) : null;
-}
-
-/** 给登录/注册响应签发 httpOnly cookie (页面导航门禁用; API 不认 cookie) */
-export function setAuthCookie(res: ServerResponse, token: string): void {
-  res.setHeader("Set-Cookie",
-    `hall_token=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 24 * 3600}`);
-}
-
-// ── 登录限流 / 审计 (框架插件能力: @infrastructure/rate-limit + audit) ──
-const loginLimiter = createMemoryRateLimiter({ maxFails: 5, lockMs: 15 * 60 * 1000 });
-const auditRing = createMemoryAuditLog();
-
-export function loginLockKey(req: { socket?: { remoteAddress?: string } }, email: string): string {
-  return `${req.socket?.remoteAddress ?? "unknown"}|${email.toLowerCase()}`;
-}
-
-/**
- * 审计留痕: 敏感操作双写 —— 框架内存环形 (供 ctx.call 消费) + PG audit_log 表 (持久, 重启不丢)。
- * 写 PG 失败不阻塞业务。
- */
-export async function writeAudit(actor: string, action: string, target?: string, detail?: string): Promise<void> {
-  auditRing.append({ actor, action, target, detail });
-  try {
-    await pool.query(
-      "INSERT INTO audit_log (actor, action, target, detail) VALUES ($1,$2,$3,$4)",
-      [actor, action, target ?? "", detail ?? ""]);
-  } catch (e) {
-    console.error("[audit] pg write failed:", e);
-  }
-}
-
-/** 用户 id → 邮箱 (审计显示用; 查不到原样返回) */
-export async function emailOf(userId: string): Promise<string> {
-  const { rows } = await pool.query("SELECT email FROM users WHERE id = $1", [userId]);
-  return rows[0]?.email ?? userId;
-}
-
 /** 用户可见的大厅沙箱应用: 管理员=全部; 普通用户=被添加的应用 ∪ 自己名下注册的应用 */
 export async function visibleHallApps(allApps: string[], userId: string, isAdmin: boolean): Promise<string[]> {
   if (isAdmin) return allApps;
@@ -343,317 +208,32 @@ export async function appBackendHandler(
   const method = req.method ?? "GET";
 
   try {
-    // ── auth ──
-    // 注册开关: 设 APPBASE_ALLOW_REGISTER=false 后仅已有账号可登录
-    if (method === "POST" && path === "/app/auth/register") {
-      if (process.env.APPBASE_ALLOW_REGISTER === "false") {
-        return json(res, 403, { error: "本站已关闭注册, 请联系管理员开通账号" });
-      }
-      const body = await readBody(req);
-      const email = String(body.email ?? "").trim().toLowerCase();
-      const password = String(body.password ?? "");
-      if (!email || password.length < 6) {
-        return json(res, 400, { error: "email 和 password(≥6位) 必填" });
-      }
-      const id = randomUUID();
-      const hash = await hashPassword(password);
-      // 首个注册用户自动成为管理员 (兜底引导); 邮箱白名单内的也直接是管理员
-      const { rows: admins } = await pool.query("SELECT 1 FROM users WHERE is_admin LIMIT 1");
-      const makeAdmin = adminEmails().includes(email)
-        || (admins.length === 0 && adminEmails().length === 0);
-      try {
-        await pool.query(
-          "INSERT INTO users (id, email, password_hash, is_admin) VALUES ($1, $2, $3, $4)",
-          [id, email, hash, makeAdmin],
-        );
-      } catch (e: any) {
-        if (String(e?.code) === "23505") return json(res, 409, { error: "邮箱已注册" });
-        throw e;
-      }
-      const token = signToken(id);
-      setAuthCookie(res, token);
-      void writeAudit(email, "register", email, makeAdmin ? "(首个用户, 自动管理员)" : "");
-      return json(res, 201, { token, user: { id, email, isAdmin: makeAdmin } });
-    }
+    // ── 管理模块优先分发 (管理界面插件化: users/llm-config/dsh/harness-plugins) ──
+    if (await adminDispatch(req, res, path, method)) return;
 
-    if (method === "POST" && path === "/app/auth/login") {
-      const body = await readBody(req);
-      const email = String(body.email ?? "").trim().toLowerCase();
-      const password = String(body.password ?? "");
-      const ip = req.socket?.remoteAddress ?? "unknown";
-      // 限流 (框架 @infrastructure/rate-limit): 同 IP+邮箱 5 次失败锁 15 分钟
-      const lockKey = loginLockKey(req, email);
-      const lock = loginLimiter.check(lockKey);
-      if (lock.locked) {
-        void writeAudit(email, "login.locked", email, `ip=${ip} 剩余约 ${lock.retryAfterMin} 分钟`);
-        return json(res, 429, { error: `失败次数过多, 账号已锁定, 约 ${lock.retryAfterMin} 分钟后再试` });
+    // ── 数据转发 (L1 @infrastructure/http-relay 具名目标): 沙箱应用同源读取无 CORS 数据源 ──
+    const relayMatch = path.match(/^\/app\/relay\/([^/]+)$/);
+    if (relayMatch && method === "GET") {
+      const name = decodeURIComponent(relayMatch[1]);
+      const query = url.searchParams.toString();
+      // 目标解析: Referer 识别来源应用 → 该应用 .env 的 RELAY_<NAME> 优先, 回落全局 env
+      let relayBase: string | undefined;
+      const refApp = /\/app\/hall\/apps\/([^/?#]+\.html)/.exec(String(req.headers.referer ?? ""))?.[1];
+      if (refApp) {
+        const { rows: envRows } = await pool.query(
+          "SELECT env FROM app_llm_config WHERE app_id = $1", [refApp]);
+        const envCfg = (envRows[0]?.env ?? {}) as Record<string, unknown>;
+        const v = envCfg["RELAY_" + name.toUpperCase()];
+        if (typeof v === "string" && /^https?:\/\//.test(v)) relayBase = v;
       }
-      const { rows } = await pool.query(
-        "SELECT id, email, password_hash, is_admin FROM users WHERE email = $1",
-        [email],
+      const relay = await httpRelayProvider.execute(
+        { name, query: query || undefined, baseUrl: relayBase },
+        { sessionId: "relay", traceId: "relay", callerLayer: 1, addEffect: () => "e", emit: () => {}, getState: () => undefined, setState: () => {}, call: (() => { throw new Error("relay ctx 不支持 call"); }) } as never,
       );
-      if (rows.length === 0 || !(await verifyPassword(password, rows[0].password_hash))) {
-        const after = loginLimiter.fail(lockKey);
-        void writeAudit(email, "login.fail", email,
-          `ip=${ip}` + (after.remaining > 0 ? ` 还可尝试 ${after.remaining} 次` : " (触发锁定)"));
-        return json(res, 401, { error: after.remaining > 0 ? `邮箱或密码错误 (还可尝试 ${after.remaining} 次)` : "邮箱或密码错误" });
-      }
-      loginLimiter.reset(lockKey);
-      const token = signToken(rows[0].id);
-      const isAdmin = Boolean(rows[0].is_admin) || adminEmails().includes(email);
-      setAuthCookie(res, token);
-      void writeAudit(email, "login", email, `ip=${ip}${isAdmin ? " (管理员)" : ""}`);
-      return json(res, 200, { token, user: { id: rows[0].id, email: rows[0].email, isAdmin } });
-    }
-
-    // 登出: 清除 httpOnly cookie (前端同时清 sessionStorage)
-    if (method === "POST" && path === "/app/auth/logout") {
-      res.setHeader("Set-Cookie", "hall_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
-      return json(res, 200, { ok: true });
-    }
-
-    // 当前登录者信息 (前端启动时校验 token / 拿管理员身份)
-    if (method === "GET" && path === "/app/auth/me") {
-      const userId = bearerUser(req);
-      if (!userId) return json(res, 401, { error: "未登录" });
-      const { rows } = await pool.query("SELECT id, email FROM users WHERE id = $1", [userId]);
-      if (rows.length === 0) return json(res, 401, { error: "用户不存在" });
-      return json(res, 200, {
-        user: { id: rows[0].id, email: rows[0].email, isAdmin: await isAdminUser(userId) },
-      });
-    }
-
-    // ── 管理员: 用户管理 + 审计查询 (专门的用户管理应用使用) ──
-    if (path.startsWith("/app/admin/")) {
-      const adminId = bearerUser(req);
-      if (!adminId) return json(res, 401, { error: "未授权: 请先登录" });
-      if (!(await isAdminUser(adminId))) return json(res, 403, { error: "需要管理员权限" });
-
-      if (method === "GET" && path === "/app/admin/users") {
-        const { rows } = await pool.query(
-          `SELECT u.id, u.email, u.is_admin, u.created_at,
-                  (SELECT count(*)::int FROM app_members m WHERE m.user_id = u.id) AS member_count,
-                  (SELECT count(*)::int FROM apps a WHERE a.owner_id = u.id) AS app_count
-           FROM users u ORDER BY u.created_at`);
-        return json(res, 200, { users: rows });
-      }
-
-      if (method === "GET" && path === "/app/admin/audit") {
-        const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit") ?? 100)));
-        const { rows } = await pool.query(
-          "SELECT actor, action, target, detail, created_at FROM audit_log ORDER BY created_at DESC LIMIT $1",
-          [limit]);
-        return json(res, 200, { entries: rows });
-      }
-
-      // 全部应用内账号 (跨应用统一视图, 用户管理页使用)
-      if (method === "GET" && path === "/app/admin/app-accounts") {
-        const { rows } = await pool.query(
-          `SELECT a.id, a.app_id, a.username, a.note, a.created_at,
-                  COALESCE((SELECT count(*)::int FROM app_keys k
-                            WHERE k.app_id = a.app_id AND k.revoked = false), 0) AS key_count
-           FROM app_accounts a ORDER BY a.app_id, a.created_at`);
-        return json(res, 200, { accounts: rows });
-      }
-
-      const adminUserMatch = path.match(/^\/app\/admin\/users\/([^/]+)(?:\/([a-z]+))?$/);
-      if (adminUserMatch) {
-        const targetId = decodeURIComponent(adminUserMatch[1]);
-        const sub = adminUserMatch[2] ?? "";
-        const adminEmail = await emailOf(adminId);
-
-        if (method === "GET" && sub === "memberships") {
-          const { rows } = await pool.query(
-            "SELECT app_id, added_at FROM app_members WHERE user_id = $1 ORDER BY added_at",
-            [targetId]);
-          return json(res, 200, { memberships: rows });
-        }
-
-        if (method === "PUT" && sub === "admin") {
-          const body = await readBody(req);
-          if (targetId === adminId && body.is_admin !== true) {
-            return json(res, 400, { error: "不能撤销自己的管理员身份" });
-          }
-          // 撤销管理员时, 必须还存在其他管理员
-          const { rowCount } = await pool.query(
-            `UPDATE users SET is_admin = $2 WHERE id = $1
-             AND ($2 = true OR (SELECT count(*) FROM users WHERE is_admin AND id <> $1) > 0)`,
-            [targetId, Boolean(body.is_admin)]);
-          if (rowCount === 0) {
-            return json(res, body.is_admin ? 404 : 400,
-              body.is_admin ? { error: "用户不存在" } : { error: "至少要保留一名管理员" });
-          }
-          void writeAudit(adminEmail, "user.set_admin", await emailOf(targetId),
-            body.is_admin ? "设为管理员" : "取消管理员");
-          return json(res, 200, { ok: true });
-        }
-
-        if (method === "PUT" && sub === "password") {
-          const body = await readBody(req);
-          const newPassword = String(body.newPassword ?? "");
-          if (newPassword.length < 6) return json(res, 400, { error: "新密码至少 6 位" });
-          const hash = await hashPassword(newPassword);
-          const { rowCount } = await pool.query(
-            "UPDATE users SET password_hash = $2 WHERE id = $1", [targetId, hash]);
-          if (rowCount === 0) return json(res, 404, { error: "用户不存在" });
-          void writeAudit(adminEmail, "user.reset_password", await emailOf(targetId));
-          return json(res, 200, { ok: true });
-        }
-
-        if (method === "DELETE" && sub === "member") {
-          const appId = String(new URL(req.url ?? "/", "http://x").searchParams.get("app") ?? "");
-          if (!appId) return json(res, 400, { error: "缺少 app 参数" });
-          await pool.query("DELETE FROM app_members WHERE user_id = $1 AND app_id = $2",
-            [targetId, appId]);
-          void writeAudit(adminEmail, "app.member_remove", appId, `移出 ${await emailOf(targetId)}`);
-          return json(res, 200, { ok: true });
-        }
-
-        if (method === "DELETE" && sub === "") {
-          if (targetId === adminId) return json(res, 400, { error: "不能删除自己的账号" });
-          const { rows: owned } = await pool.query(
-            "SELECT count(*)::int AS n FROM apps WHERE owner_id = $1", [targetId]);
-          if (owned[0].n > 0) {
-            return json(res, 409, { error: `该用户名下还有 ${owned[0].n} 个应用, 请先处理应用归属再删除` });
-          }
-          await pool.query("DELETE FROM app_members WHERE user_id = $1", [targetId]);
-          const { rowCount } = await pool.query("DELETE FROM users WHERE id = $1", [targetId]);
-          if (rowCount === 0) return json(res, 404, { error: "用户不存在" });
-          void writeAudit(adminEmail, "user.delete", await emailOf(targetId));
-          return json(res, 200, { ok: true });
-        }
-      }
-      return json(res, 404, { error: "admin: not found" });
-    }
-
-    // ── 管理员: DSH 插件管理 (cordis 插件注册/配置/加载) ──
-    if (path.startsWith("/app/dsh/plugins")) {
-      const adminId = bearerUser(req);
-      if (!adminId) return json(res, 401, { error: "未授权: 请先登录" });
-      if (!(await isAdminUser(adminId))) return json(res, 403, { error: "需要管理员权限" });
-      const adminEmail = await emailOf(adminId);
-
-      // 机密配置项 (apikey/token/...) 回给前端时掩码; 保存时值为 •••• 开头 = 保持不变
-      const SECRET_RE = /key|secret|token|password/i;
-      const maskConfig = (cfg: Record<string, unknown>) => {
-        const out: Record<string, string> = {};
-        for (const [k, v] of Object.entries(cfg ?? {})) {
-          const s = String(v ?? "");
-          out[k] = SECRET_RE.test(k) ? (s ? "••••" + s.slice(-4) : "") : s;
-        }
-        return out;
-      };
-
-      if (method === "GET" && path === "/app/dsh/plugins") {
-        const { rows } = await pool.query(
-          "SELECT name, package, export_name, description, enabled, config FROM dsh_plugins ORDER BY name");
-        return json(res, 200, {
-          plugins: rows.map((r) => ({ ...r, config: maskConfig(r.config ?? {}) })),
-          runtime: dshStatus(),
-        });
-      }
-
-      // 注册新插件
-      if (method === "POST" && path === "/app/dsh/plugins") {
-        const body = await readBody(req);
-        const name = String(body.name ?? "").trim();
-        const pkg = String(body.package ?? "").trim();
-        if (!name || !pkg) return json(res, 400, { error: "name 和 package 必填" });
-        try {
-          await pool.query(
-            `INSERT INTO dsh_plugins (name, package, export_name, description, config)
-             VALUES ($1,$2,$3,$4,$5::jsonb)`,
-            [name, pkg, String(body.exportName ?? "").trim(), String(body.description ?? "").trim(),
-             JSON.stringify(body.config ?? {})]);
-        } catch (e: any) {
-          if (String(e?.code) === "23505") return json(res, 409, { error: "同名插件已存在" });
-          throw e;
-        }
-        void writeAudit(adminEmail, "dsh.plugin_register", name, pkg);
-        return json(res, 201, { ok: true });
-      }
-
-      const dshMatch = path.match(/^\/app\/dsh\/plugins\/([^/]+)$/);
-      const dshAction = path.match(/^\/app\/dsh\/plugins\/([^/]+)\/(load|unload)$/);
-      if (dshMatch || dshAction) {
-        const name = decodeURIComponent((dshAction ?? dshMatch)![1]);
-
-        const fetchRec = async () => {
-          const { rows } = await pool.query(
-            "SELECT name, package, export_name, description, enabled, config FROM dsh_plugins WHERE name = $1",
-            [name]);
-          return rows[0];
-        };
-
-        // 启用/停用 + 保存配置
-        if (method === "PUT" && dshMatch) {
-          const rec = await fetchRec();
-          if (!rec) return json(res, 404, { error: "插件不存在" });
-          const body = await readBody(req);
-          const enabled = body.enabled !== undefined ? Boolean(body.enabled) : rec.enabled;
-          let config = rec.config ?? {};
-          if (typeof body.configText === "string") {
-            const parsed = parseEnvText(body.configText);
-            const merged: Record<string, unknown> = { ...config };
-            for (const [k, v] of Object.entries(parsed)) {
-              // 掩码值 (•••• 开头) = 保持原值不变
-              merged[k] = v.startsWith("••••") ? merged[k] ?? "" : v;
-            }
-            config = merged;
-          }
-          await pool.query(
-            "UPDATE dsh_plugins SET enabled = $2, config = $3::jsonb, updated_at = now() WHERE name = $1",
-            [name, enabled, JSON.stringify(config)]);
-          // timem 配置热生效: 原地更新认知层读取的环境变量 (无需重启)
-          if (name === "timem") {
-            if (config.apiKey) process.env.TIMEM_API_KEY = String(config.apiKey);
-            if (config.baseUrl) process.env.TIMEM_BASE_URL = String(config.baseUrl);
-            if (config.defaultDomain) process.env.TIMEM_DEFAULT_DOMAIN = String(config.defaultDomain);
-          }
-          void writeAudit(adminEmail, "dsh.plugin_config", name,
-            [body.enabled !== undefined ? `enabled=${enabled}` : null, body.configText !== undefined ? "配置已保存" : null]
-              .filter(Boolean).join(", "));
-          return json(res, 200, { ok: true });
-        }
-
-        // 加载 (手动; 未启用的也可以手动试载)
-        if (method === "POST" && dshAction && dshAction[2] === "load") {
-          const rec = await fetchRec();
-          if (!rec) return json(res, 404, { error: "插件不存在" });
-          const result = await dshLoadPlugin({
-            name: rec.name, package: rec.package, export_name: rec.export_name, config: rec.config ?? {},
-          });
-          void writeAudit(adminEmail, "dsh.plugin_load", name, result.ok ? "加载成功" : `失败: ${result.error}`);
-          return json(res, result.ok ? 200 : 500, result);
-        }
-
-        // 停用 = 重建宿主, 只加载其余启用的插件
-        if (method === "POST" && dshAction && dshAction[2] === "unload") {
-          const { rows } = await pool.query(
-            "SELECT name, package, export_name, config FROM dsh_plugins WHERE enabled = true AND name <> $1",
-            [name]);
-          const results = await dshLoadEnabled(rows.map((r) => ({
-            name: r.name, package: r.package, export_name: r.export_name, config: r.config ?? {},
-          })));
-          void writeAudit(adminEmail, "dsh.plugin_unload", name);
-          return json(res, 200, { ok: true, reloaded: results });
-        }
-      }
-
-      const dshDel = path.match(/^\/app\/dsh\/plugins\/([^/]+)$/);
-      if (method === "DELETE" && dshDel) {
-        const name = decodeURIComponent(dshDel[1]);
-        await pool.query("DELETE FROM dsh_plugins WHERE name = $1", [name]);
-        const { rows } = await pool.query(
-          "SELECT name, package, export_name, config FROM dsh_plugins WHERE enabled = true");
-        await dshLoadEnabled(rows.map((r) => ({
-          name: r.name, package: r.package, export_name: r.export_name, config: r.config ?? {},
-        })));
-        void writeAudit(adminEmail, "dsh.plugin_delete", name);
-        return json(res, 200, { ok: true });
-      }
-
-      return json(res, 404, { error: "dsh: not found" });
+      if (!relay.ok) return json(res, 400, { error: relay.error });
+      res.writeHead(200, { "Content-Type": relay.value.contentType || "text/plain; charset=utf-8" });
+      res.end(relay.value.body);
+      return;
     }
 
     // ── 报修工单 (登录用户: 自己的工单; 管理员: 全部) ──
@@ -791,6 +371,32 @@ export async function appBackendHandler(
     }
 
     // ── 应用管理: 账号 / API Key / LLM 用量 (需登录用户) ──
+    // ── 聊天历史云端持久化 (登录用户级: 退出/换浏览器/清本地存储都不丢) ──
+    if (path === "/app/hall/chat-history") {
+      const auth = req.headers.authorization ?? "";
+      const userId = auth.startsWith("Bearer ") ? verifyToken(auth.slice(7)) : null;
+      if (!userId) return json(res, 401, { error: "未授权: 请先登录" });
+      if (method === "GET") {
+        const convKey = String(new URL(req.url ?? "/", "http://x").searchParams.get("key") ?? "");
+        if (!convKey) return json(res, 400, { error: "缺少 key" });
+        const { rows } = await pool.query(
+          "SELECT messages FROM chat_history WHERE user_id = $1 AND conv_key = $2", [userId, convKey]);
+        return json(res, 200, { messages: rows[0]?.messages ?? [] });
+      }
+      if (method === "PUT") {
+        const body = await readBody(req);
+        const convKey = String(body.key ?? "");
+        const msgs = Array.isArray(body.messages) ? body.messages.slice(-60) : [];
+        if (!convKey) return json(res, 400, { error: "缺少 key" });
+        await pool.query(
+          `INSERT INTO chat_history (user_id, conv_key, messages, updated_at)
+           VALUES ($1, $2, $3::jsonb, now())
+           ON CONFLICT (user_id, conv_key) DO UPDATE SET messages=$3::jsonb, updated_at=now()`,
+          [userId, convKey, JSON.stringify(msgs)]);
+        return json(res, 200, { ok: true });
+      }
+    }
+
     if (path.startsWith("/app/hall/manage") || path === "/app/usage/collect") {
       // 用量收集: 仅限内网网关 (共享密钥), 无用户 token
       if (path === "/app/usage/collect" && method === "POST") {
@@ -1306,24 +912,8 @@ export async function ensureAppKey(appId: string, userId: string): Promise<strin
 }
 
 /** LLM base URL 归一化: 去尾斜杠; 兼容误填完整补全路径 (.../chat/completions) */
-function normalizeLlmBase(url: string): string {
-  let u = url.trim().replace(/\/$/, "");
-  if (u.toLowerCase().endsWith("/chat/completions")) u = u.slice(0, -"/chat/completions".length);
-  return u;
-}
 
 // .env 文本 <-> 对象 (KEY=VALUE, 每行一条, # 开头为注释)
-function parseEnvText(text: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const line of String(text ?? "").split(/\r?\n/)) {
-    const t = line.trim();
-    if (!t || t.startsWith("#")) continue;
-    const eq = t.indexOf("=");
-    if (eq <= 0) continue;
-    out[t.slice(0, eq).trim()] = t.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
-  }
-  return out;
-}
 function envToText(env: Record<string, unknown>): string {
   return Object.entries(env ?? {})
     .map(([k, v]) => `${k}=${String(v)}`)
@@ -1363,5 +953,26 @@ export async function initAppBackend(): Promise<void> {
     if (!process.env.TIMEM_BASE_URL && cfg.baseUrl) process.env.TIMEM_BASE_URL = String(cfg.baseUrl);
     if (!process.env.TIMEM_DEFAULT_DOMAIN && cfg.defaultDomain) process.env.TIMEM_DEFAULT_DOMAIN = String(cfg.defaultDomain);
   } catch { /* 无 timem 行不影响启动 */ }
+
+  // 全局 LLM 平台配置: 种子/应用逻辑在 admin-modules/llm-config.ts (管理界面插件化)
+  await initLlmConfig();
+
+  // 数据转发目标种子: 全局 APPBASE_RELAY_TARGETS 里的目标写入对应应用 .env (用户可在管理抽屉改)
+  try {
+    for (const [tName, tUrl] of Object.entries(relayTargets())) {
+      await pool.query(
+        `INSERT INTO app_llm_config (app_id, url, key, model, env, updated_at)
+         VALUES ($1, '', '', '', $2::jsonb, now())
+         ON CONFLICT (app_id) DO UPDATE SET env = $2::jsonb, updated_at = now()`,
+        [`${tName}.html`, JSON.stringify({ ["RELAY_" + tName.toUpperCase()]: tUrl })]);
+    }
+  } catch (e) {
+    console.error("[relay] target env seed failed(忽略):", e);
+  }
   console.log(`AppBase 后端已就绪 (PG ${PG_CONFIG.host}:${PG_CONFIG.port}/${PG_CONFIG.database})`);
 }
+// ── 兼容 re-export: 原语已迁至 admin-modules/context.ts (管理界面插件化) ──
+export {
+  verifyToken, bearerUser, pageUserId, isAdminUser, writeAudit, emailOf,
+  setAuthCookie, loginLockKey, pool, PG_CONFIG, parseEnvText,
+} from "./admin-modules/context.js";

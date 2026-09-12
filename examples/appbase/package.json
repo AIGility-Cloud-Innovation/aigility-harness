@@ -2,7 +2,7 @@
   "name": "@aigility-harness/appbase",
   "version": "0.1.0",
   "private": true,
-  "description": "AppBase 产品装配：多功能对话厅 + Codex 网页应用生成器 + AI 网关",
+  "description": "AppBase 产品装配：多功能对话厅 + Codex 网页应用开发员 + AI 网关",
   "type": "module",
   "main": "./src/index.ts",
   "scripts": {
