@@ -199,6 +199,8 @@ async function handleChat(
     ...(typeof body.app === "string" && body.app ? { cwd: body.app } : {}),
     ...(body.session_state !== undefined && body.session_state !== null ? { session_state: body.session_state } : {}),
     ...(role.system ? { system: role.system } : {}),
+    // 动态上下文: 当前实际注册的角色清单 (客服等角色据此回答"有哪些角色", 不靠手写清单)
+    hall_roles: roles.map((r) => ({ id: r.id, name: r.name, emoji: r.emoji })),
   };
   try {
     const result = await ctx.call({ id: role.id, versionRange: "^1.0.0" }, payload);
