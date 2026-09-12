@@ -33,13 +33,14 @@
 │║  ┌──────────────────────────────────────────────────────────────┐║    │
 │║  │D4 编排规划层 (layer-orchestration) — 小脑                    │║    │
 │║  │   @orchestration/workflow-engine · codex-agent               │║    │
+│║  │   timem-project-task(需求缓冲延时汇总) · guided-design       │║    │
 │║  └──────────────────────────────────────────────────────────────┘║    │
 │║        │ 依赖 D2 + D1（D3 与 D4 平级，互不依赖）                 ║    │
 │║        ▼                                                         ║    │
 │║  ┌──────────────────────────────────────────────────────────────┐║    │
 │║  │D3 角色人格层 (layer-persona)                                 │║    │
-│║  │   sales-chat / plugin-helper / coder / advisory-chat         │║    │
-│║  │   harness-guide / timem-support / speech-to-text             │║    │
+│║  │   sales-chat / repair-chat / app-dev / coding-coach          │║    │
+│║  │   plugin-helper / advisory-chat / harness-guide / timem-*    │║    │
 │║  └──────────────────────────────────────────────────────────────┘║    │
 │║        │ 依赖 D2 + D1                                            ║    │
 │║        ▼                                                         ║    │
@@ -53,7 +54,7 @@
 │║  │D1 底座基础层 (layer-infrastructure) — 地基                   │║    │
 │║  │   dependsOn:[] 最先加载 · 外部入口唯一收口（ingress）        │║    │
 │║  │   http-ingress / wecom-ingress / protocol-adapter            │║    │
-│║  │   config / logging / PgBusBridge                             │║    │
+│║  │   http-relay(具名目标转发) / config / logging / PgBusBridge  │║    │
 │║  └──────────────────────────────────────────────────────────────┘║    │
 │╚══════════════════════════════════════════════════════════════════╝    │
 │                                                                        │
@@ -105,10 +106,10 @@ flowchart TB
     subgraph KERNEL["内核 kernel-dsh (DSH-Cordis) — 五域以插件形态运行其上"]
         direction TB
         D5["D5 行动执行层 layer-action<br/>text-to-speech / 工具执行"]
-        D4["D4 编排规划层 layer-orchestration<br/>workflow-engine / codex-agent"]
-        D3["D3 角色人格层 layer-persona<br/>sales-chat / coder / harness-guide / timem-support"]
+        D4["D4 编排规划层 layer-orchestration<br/>workflow-engine / codex-agent / timem-project-task / guided-design"]
+        D3["D3 角色人格层 layer-persona<br/>sales-chat / repair-chat / app-dev / coding-coach / harness-guide / timem-support"]
         D2["D2 认知算力层 layer-cognitive<br/>llm-inference / memory"]
-        D1["D1 底座基础层 layer-infrastructure<br/>http-ingress / wecom-ingress / protocol-adapter / PgBusBridge"]
+        D1["D1 底座基础层 layer-infrastructure<br/>http-ingress / wecom-ingress / http-relay / protocol-adapter / PgBusBridge"]
         D5 -->|依赖| D4
         D4 -->|依赖| D2
         D3 -->|依赖| D2
@@ -187,7 +188,7 @@ flowchart TB
 |----|------|------|---------|--------------------------|
 | D1 | **底座基础域**（地基） | 通信、契约、安全、观测基础设施 | 全局消息总线、统一消息契约、MCP/A2A 协议桥接、鉴权/限流/熔断、全链路追踪、自动切换控制器 | 全部独立网络服务，不属于 DSH 进程 |
 | D2 | **认知算力域**（电站） | 算力供应、稳定保障、兼容供给；不承载规划/验收等任何业务用法（见 3.3） | LLM 模型适配器、多模型算力路由、记忆引擎、会话/身份上下文 | DSH 进程内插件 → 算力路由 + 记忆抽离为独立网络服务 |
-| D3 | **角色人格域**（Persona） | 特性打包为可交互角色：性格 + 信息接收/表达方式 | 具名角色：销售客服（sales-chat）、插件安装助手（plugin-helper）、编码助手（coder）、就业顾问（advisory-chat）、框架介绍员（harness-guide）、TiMEM 客服（timem-support）；输入/输出形态（文本/语音，ASR/TTS）、按角色定制 | 附属子进程 → 本机独立守护进程 → 网络服务集群 |
+| D3 | **角色人格域**（Persona） | 特性打包为可交互角色：性格 + 信息接收/表达方式 | 具名角色：平台客服（sales-chat）、应用报修客服（repair-chat，延时汇总建单）、网页应用开发员（app-dev，动手生成应用）、编码教练（coding-coach，只引导）、插件安装助手（plugin-helper）、就业顾问（advisory-chat）、框架介绍员（harness-guide）、TiMEM 客服（timem-support）；输入/输出形态（文本/语音，ASR/TTS）、按角色定制 | 附属子进程 → 本机独立守护进程 → 网络服务集群 |
 | D4 | **编排规划域**（小脑） | 任务调度、思考循环、多智能体协作 | Agent 主思考循环（ReAct/PlanExecute）、任务规划/复盘、SubAgent 调度、定时/长任务 | DSH 插件线程 → 复杂子 Agent 拆独立 Worker 进程/服务 |
 | D5 | **行动执行域**（手脚） | 产生真实外部副作用；含 agent 工人（见 3.2） | 代码沙箱、文档/文件操作、系统资源管控、IoT/机器人控制、Agent 工人（codex-executor 等） | 附属子进程 → 独立守护进程/远程隔离服务 |
 
@@ -332,9 +333,26 @@ pnpm --filter @aigility-harness/example-openai-gateway start
 |------|------|------|
 | **销售客服** | `POST /api/chat` | 业务对话（销售客服角色 → 工作流回复） |
 | **插件安装助手** | `POST /api/plugin-helper` | 开箱引导安装：问"怎么加插件/RAG/记忆" → 真实扫描插件清单 → 返回接入指引 |
-| **编码助手** | `POST /api/coder` | 编码对话（coder 角色 → codex-agent → Codex 真实干活） |
+| **网页应用开发员** | `POST /api/coder` | 编码对话（app-dev 角色 → codex-agent → 编码 CLI 真实干活） |
 
 agent 路径→角色映射可配置（`agentRoutes`），未命中路径回退 `perceptionId`。
+
+### 产品装配：AppBase 应用大厅（推荐体验入口）
+
+```bash
+cd examples/appbase
+# 1. 复制 start-appbase.cmd.example 为 start-appbase.cmd 并填 BIGMODEL_API_KEY
+#    (或直接设置环境变量 APPBASE_PG_PASSWORD / BIGMODEL_API_KEY / APPBASE_GATEWAY_KEY / APPBASE_RELAY_TARGETS)
+pnpm start
+```
+
+| 页面 | 地址 | 说明 |
+|------|------|------|
+| 应用大厅 | `/hall` | 角色对话 + 应用网格（首个注册用户自动成为管理员） |
+| 管理中心 | `/admin` | 四标签：账号 / 全局 LLM 配置(热生效) / DSH 插件 / 框架层插件 |
+| 对话流图 | `/hall/flows` | 五个对话角色的真实流转图 |
+
+内置角色：🎧 平台客服、🔧 应用报修客服（延时汇总建单）、🪶 网页应用开发员（zcode/codex/claude 驱动，生成单文件 HTML 应用）、🧩 插件助手、👨‍💻 编码教练。聊天历史云端持久化；LLM 配置多平台热切换。
 
 ### 特色案例：企业微信 → Codex
 
@@ -348,7 +366,7 @@ pnpm --filter wecom-coder start
 # 3. 企微 @机器人: 「帮我写个冒泡排序」 → codex 干活 → 群里回结果
 ```
 
-链路：企微 WebSocket 长连接（`@wecom/aibot-node-sdk`）→ `@infrastructure/wecom-ingress` → `@persona/coder` → `@orchestration/codex-agent` → Codex（经框架认知层供能）。支持流式"思考中…"占位与 Markdown 回复。
+链路：企微 WebSocket 长连接（`@wecom/aibot-node-sdk`）→ `@infrastructure/wecom-ingress` → `@persona/app-dev` → `@orchestration/codex-agent` → 编码 CLI（经框架认知层供能）。支持流式"思考中…"占位与 Markdown 回复。
 
 ### 现有验证案例（均为可替换示例）
 
@@ -358,10 +376,13 @@ pnpm --filter wecom-coder start
 | 编码 Agent | `codex-agent`（codex CLI → localhost:4000） | 任意符合契约的 Agent Provider |
 | 协议适配 | `protocol-adapter`（api-router 协议翻译） | 任意协议桥接实现 |
 | HTTP 入口 + 流式 | `http-ingress` + `sse.ts`（`/v1/chat/completions` 支持 `stream:true` → SSE 帧流） | 任意传输实现（Hono 备件换装时 import 同款 sse helper） |
-| **角色对话** | `sales-chat`（销售客服角色, 由 chat-agent 正名而来） | 任意 D3 角色（特性打包为 persona 插件） |
+| **角色对话** | `sales-chat`（平台客服）/ `repair-chat`（报修延时汇总）/ `coding-coach`（引导教练） | 任意 D3 角色（特性打包为 persona 插件） |
+| **网页应用开发员** | `app-dev`（沙箱内生成/修改单文件应用，编码 CLI 可换 zcode/codex/claude） | 任意符合契约的编码 Agent |
+| **需求缓冲延时汇总** | `timem-project-task`（聊天期只记录 → 汇总去重/冲突 → 确认 → 拓扑排序执行） | 任意编排策略 |
+| **产品装配 AppBase** | 应用大厅 + 管理中心(/admin 四标签) + 全局 LLM 配置热生效 + 对话流图 | 任意产品壳 |
 | **开箱引导安装** | `plugin-helper` 角色 → `plugin-install` 工作流（扫描 py-plugins.json + packages → 契约匹配 → 接入指引） | 任意安装/引导工作流 |
 | **最小 Web UI** | http-ingress `GET /` / `/ui`（单文件 HTML, 双角色页签, 零依赖） | 任意前端 |
-| **企业微信入口（特色案例）** | `wecom-ingress`（aibot-node-sdk WebSocket 长连接 → 角色路由 → replyStream）+ 三个开箱案例：`wecom-coder`（@机器人 → coder → codex）/ `wecom-guide`（框架介绍员）/ `wecom-timem`（TiMEM 客服） | 任意 IM 通道（钉钉/飞书/微信，同构接入） |
+| **企业微信入口（特色案例）** | `wecom-ingress`（aibot-node-sdk WebSocket 长连接 → 角色路由 → replyStream）+ 三个开箱案例：`wecom-coder`（@机器人 → app-dev → codex）/ `wecom-guide`（框架介绍员）/ `wecom-timem`（TiMEM 客服） | 任意 IM 通道（钉钉/飞书/微信，同构接入） |
 | **框架介绍员** | `harness-guide` 角色 → `@orchestration/workflow-engine-timem`（YAML 工作流经 py-bridge 驱动 aigility LangGraph） | 任意引导/编排流程 |
 | **TiMEM 记忆客服** | `timem-support` 角色（TiMEM 记忆作对话上下文）+ BM25 检索增强（`aigility.retrieval.bm25` 经 py-bridge） | 任意记忆/检索服务 |
 | TTS | `text-to-speech` | 任意 TTS 引擎 |
@@ -475,12 +496,13 @@ aigility-harness/
 │   ├── core/                      # 核心契约：LayerId / CarrierKind / ServiceDefinition / Seam
 │   │                              #   Provider / Consumer / LayerPlugin / KernelAdapter
 │   │                              #   LlmInference 契约（llm-contract.ts）/ BusBridge / TaskQueue / VectorStore
+│   │                              #   PluginManifest.adminPanels 管理面板贡献点 / SeamRegistry.listAllServices
 │   ├── kernel-dsh/                # DSH-Cordis 内核适配器（Seam Registry / Effect Manager / Carrier Manager）
 │   ├── layer-cognitive/           # D2 认知算力层（LLM 推理：stub + litellm + timem-memory-provider）
-│   ├── layer-persona/            # D3 角色人格层（sales-chat / plugin-helper / coder / advisory-chat / harness-guide / timem-support / speech-to-text）
-│   ├── layer-orchestration/       # D4 编排规划层（任务规划 + plugin-install + codex-agent）
+│   ├── layer-persona/            # D3 角色人格层（sales-chat / repair-chat / app-dev / coding-coach / plugin-helper / advisory-chat / harness-guide / timem-support / speech-to-text）
+│   ├── layer-orchestration/       # D4 编排规划层（任务规划 + plugin-install + codex-agent/zcode-agent/claude-agent + timem-project-task 需求缓冲工作流 + guided-design）
 │   ├── layer-action/              # D5 行动执行层（TTS）
-│   ├── layer-infrastructure/      # D1 底座基础层（config/logging/protocol-adapter/http-ingress/wecom-ingress/PgBusBridge）
+│   ├── layer-infrastructure/      # D1 底座基础层（config/logging/protocol-adapter/http-ingress/wecom-ingress/http-relay/PgBusBridge）
 │   │   └── src/
 │   │       ├── protocol-adapter.ts    # 协议翻译（Anthropic/OpenAI/Responses → 内部标准，类型取自 core 契约）
 │   │       ├── http-ingress.ts        # HTTP 唯一入口（dev/agent 双链路 + SSE 流式 + 最小 UI）
@@ -497,10 +519,12 @@ aigility-harness/
 │   │       └── py_bridge_worker.py  # 通用 Python worker（纯 Python 运行，不依赖 TS）
 │   └── prototype-mode/            # 原型演示入口（InMemoryKernel → 五域插件装配）
 ├── examples/                      # 可替换示例装配（各自独立 pnpm 包）
+│   ├── appbase/                   # 产品装配：应用大厅 + 网页应用开发员 + 管理中心(/admin) + AI 网关 + 对话流图
+│   ├── feishu-timem/              # 飞书 @机器人 → timem-project-assistant → timem-project-task 三段式工作流
 │   ├── dsh-timem-demo/            # DSH 内核 TiMEM 插件演示
 │   ├── openai-gateway-composition/ # OpenAI 兼容网关组合示例
 │   ├── http-gateway-alternative/  # 备件式 HTTP 网关（换装演示）
-│   ├── wecom-coder/               # 企微 @机器人 → coder → codex
+│   ├── wecom-coder/               # 企微 @机器人 → app-dev → codex
 │   ├── wecom-guide/               # 企微 → harness-guide 框架介绍员
 │   └── wecom-timem/               # 企微 → timem-support TiMEM 客服
 ├── config/
