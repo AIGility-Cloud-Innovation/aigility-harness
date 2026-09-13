@@ -27,6 +27,8 @@ import {
 } from "./protocol-adapter.js";
 import { rateLimitService, rateLimitProvider } from "./rate-limit.js";
 import { auditService, auditProvider } from "./audit.js";
+import { tokenMeteringService, tokenMeteringProvider } from "./token-metering.js";
+import { creditService, creditProvider } from "./credit.js";
 
 // ── 服务定义 ─────────────────────────────────────────────────────
 
@@ -113,9 +115,9 @@ const configProvider: Provider<ConfigRequest, ConfigResponse> = {
 export const manifest: PluginManifest = {
   name: "@infrastructure/logging-config",
   layer: LayerId.Infrastructure,
-  description: "底座基础层：控制台日志 + 内存配置 + 协议适配 + 限流 + 审计",
+  description: "底座基础层：控制台日志 + 内存配置 + 协议适配 + 限流 + 审计 + Token 计量 + 积分账务",
   version: "0.3.0",
-  provides: [loggingService, configService, protocolAdapterService, rateLimitService, auditService, httpRelayService],
+  provides: [loggingService, configService, protocolAdapterService, rateLimitService, auditService, tokenMeteringService, creditService, httpRelayService],
   consumes: [llmInferenceRef],
   preferredCarrier: CarrierKind.Thread,
 };
@@ -133,7 +135,7 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [loggingProvider, configProvider, createProtocolAdapterProvider(), httpIngressProvider, hallProvider, rateLimitProvider, auditProvider, httpRelayProvider];
+    return [loggingProvider, configProvider, createProtocolAdapterProvider(), httpIngressProvider, hallProvider, rateLimitProvider, auditProvider, tokenMeteringProvider, creditProvider, httpRelayProvider];
   },
   getState(): PluginState {
     return pluginState;
@@ -252,6 +254,53 @@ export type {
   AuditResponse,
   MemoryAuditLog,
 } from "./audit.js";
+
+// Token 用量计量（按用户/会话/模型聚合；Provider 上报 + 管理面板取数）
+export {
+  tokenMeteringService,
+  tokenMeteringProvider,
+  tokenMeteringManifest,
+  createMemoryUsageLedger,
+  sharedUsageLedger,
+} from "./token-metering.js";
+export type {
+  UsageRecord,
+  UsageSummary,
+  UsageSummaryParams,
+  UsageGroup,
+  TokenMeteringRequest,
+  TokenMeteringResponse,
+  MemoryUsageLedger,
+} from "./token-metering.js";
+
+// 积分账务（人民币↔token 计价中介；汇率/倍率定价 + 预检实扣 + 流水，可换装 PG）
+export {
+  creditService,
+  creditProvider,
+  creditManifest,
+  creditPricing,
+  resolveCreditPricing,
+  computeCredits,
+  modelRates,
+  createMemoryCreditStore,
+  createPgCreditStore,
+  configureCreditStore,
+  getCreditStore,
+  sharedCreditStore,
+  creditSetupSql,
+} from "./credit.js";
+export type {
+  CreditPricingConfig,
+  PricedUsage,
+  CreditStore,
+  CreditAccount,
+  CreditTx,
+  CreditTxType,
+  CreditAdjustMeta,
+  CreditRequest,
+  CreditResponse,
+  PgCreditStoreOptions,
+} from "./credit.js";
 
 // 多功能对话厅（框架自带基本前端，多角色对话入口）
 export {

@@ -125,6 +125,7 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
     <div class="accbar">
       <span class="who" id="whoami"></span>
       <button id="tkBadge" onclick="openRoleChat('repair'); setTimeout(function(){ if (document.getElementById('ticketPanel').style.display !== 'block') toggleTicketPanel(); }, 150)" style="display:none"></button>
+      <button onclick="location.href='/me'">👤 个人中心</button>
       <button id="llmCfgBtn" onclick="location.href='/admin'" style="display:none">⚙ 平台设置</button>
       <button onclick="logout()">退出登录</button>
     </div>

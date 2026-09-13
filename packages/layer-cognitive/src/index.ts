@@ -20,6 +20,7 @@ import type {
   PluginManifest,
   Result,
   HealthStatus,
+  CapabilityRef,
 } from "@aigility-harness/core";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -61,6 +62,107 @@ export const llmInferenceService: ServiceDefinition<
     "LLM 推理能力（OpenAI Chat 内部标准），两个 Provider：stub + litellm",
 };
 
+// ── Token 估算与用量上报 ─────────────────────────────────────────
+// 上游未返回 usage 时按字符粗估（中英混合 ~2 字符/token），仅作量级参考；
+// 真实成本核算以上游实测（source: measured）为准。计量归因键 userId 优先，
+// 缺失退回 sessionId（按用户统计的准确性取决于调用方是否携带身份）。
+
+function estimateTokens(s: string): number {
+  return Math.ceil(s.length / 2);
+}
+
+/** 输入 token 估算 (预检与 usage 兜底共用) */
+function estimatePromptTokens(request: LlmInferenceRequest): number {
+  return request.messages.reduce(
+    (n, m) => n + estimateTokens(String(m.content ?? "")),
+    0,
+  );
+}
+
+function estimateUsage(
+  request: LlmInferenceRequest,
+  text: string,
+): LlmInferenceResponse["usage"] {
+  const promptTokens = estimatePromptTokens(request);
+  const completionTokens = estimateTokens(text);
+  return {
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: promptTokens + completionTokens,
+  };
+}
+
+const tokenMeteringRef: CapabilityRef = {
+  id: "@infrastructure/token-metering",
+  versionRange: "^1.0.0",
+};
+
+const creditRef: CapabilityRef = {
+  id: "@infrastructure/credit",
+  versionRange: "^1.0.0",
+};
+
+/**
+ * 余额预检: 仅显式带 userId 的请求; 估算消耗按"输入 ×2"保守估计 (输出长度
+ * 未知)。积分服务缺失/异常时 fail-open 放行, 不阻断推理; 明确余额不足才拒绝。
+ */
+async function precheckCredit(
+  ctx: SeamContext,
+  request: LlmInferenceRequest,
+): Promise<string | null> {
+  if (!request.userId) return null;
+  try {
+    const promptTokens = estimatePromptTokens(request);
+    const res = await ctx.call(creditRef, {
+      action: "check",
+      userId: request.userId,
+      model: request.model,
+      promptTokens,
+      completionTokens: promptTokens,
+    });
+    if (!res.ok) return null; // 积分服务不可用 → 放行
+    const v = res.value as { allowed?: boolean; balance?: number; estCredits?: number };
+    if (v.allowed === false) {
+      return `积分不足: 当前余额 ${v.balance ?? 0} 积分, 本次调用预计消耗约 ${v.estCredits ?? "?"} 积分 (模型 ${request.model})。请充值后再试。`;
+    }
+  } catch {
+    // fail-open
+  }
+  return null;
+}
+
+/** 用量上报：emit 事件 + ctx.call 计量插件（尽力而为，失败不影响推理主链路） */
+function reportUsage(
+  ctx: SeamContext,
+  providerName: string,
+  request: LlmInferenceRequest,
+  model: string,
+  usage: LlmInferenceResponse["usage"],
+  source: "measured" | "estimated",
+): void {
+  const record = {
+    userId: request.userId ?? ctx.sessionId,
+    attribution: request.userId ? ("user" as const) : ("session" as const),
+    sessionId: ctx.sessionId,
+    traceId: ctx.traceId,
+    provider: providerName,
+    model,
+    source,
+    promptTokens: usage.prompt_tokens,
+    completionTokens: usage.completion_tokens,
+    totalTokens: usage.total_tokens,
+  };
+  ctx.emit({
+    type: "llm.usage",
+    layer: LayerId.Cognitive,
+    payload: record,
+    traceId: ctx.traceId,
+  });
+  void ctx
+    .call(tokenMeteringRef, { action: "record", record })
+    .catch(() => {});
+}
+
 // ── Provider A：原型占位 ─────────────────────────────────────────
 
 const stubProvider: Provider<LlmInferenceRequest, LlmInferenceResponse> = {
@@ -69,16 +171,22 @@ const stubProvider: Provider<LlmInferenceRequest, LlmInferenceResponse> = {
   state: PluginState.Active,
   async execute(
     request: LlmInferenceRequest,
-    _ctx: SeamContext,
+    ctx: SeamContext,
   ): Promise<Result<LlmInferenceResponse>> {
+    const insufficient = await precheckCredit(ctx, request);
+    if (insufficient) return err(insufficient);
     const lastMsg = request.messages[request.messages.length - 1];
     const text = String(lastMsg?.content ?? "(empty)");
+    // stub 不产生真实消耗: usage 为按字符口径的估算值 (estimated), 供计量
+    // 链路在零依赖原型模式下跑通; 相对量级可信, 绝对数值与成本核算无意义
+    const usage = estimateUsage(request, text);
+    reportUsage(ctx, "cognitive-llm-inference-stub", request, "stub-llm@0.1.0", usage, "estimated");
     return ok({
       text,
       message: { role: "assistant", content: text },
       model: "stub-llm@0.1.0",
       finish_reason: "stop",
-      usage: { prompt_tokens: 0, completion_tokens: text.length, total_tokens: text.length },
+      usage,
     });
   },
   async health(): Promise<HealthStatus> {
@@ -182,6 +290,8 @@ const litellmProvider: Provider<LlmInferenceRequest, LlmInferenceResponse> = {
     request: LlmInferenceRequest,
     ctx: SeamContext,
   ): Promise<Result<LlmInferenceResponse>> {
+    const insufficient = await precheckCredit(ctx, request);
+    if (insufficient) return err(insufficient);
     const payload: Record<string, unknown> = {
       model: request.model,
       messages: request.messages,
@@ -241,16 +351,32 @@ const litellmProvider: Provider<LlmInferenceRequest, LlmInferenceResponse> = {
       return err(`LiteLLM: no choices[0].message in response`);
     }
 
+    const text = choice.message.content ?? "";
+    const model = raw.model ?? request.model;
+    // 上游实测优先; 上游未回 usage 时按字符估算兜底 (estimated), 不再记 0
+    const usage =
+      raw.usage && (raw.usage.total_tokens > 0 || raw.usage.completion_tokens > 0)
+        ? raw.usage
+        : estimateUsage(request, text);
+    reportUsage(
+      ctx,
+      "cognitive-llm-inference-litellm",
+      request,
+      model,
+      usage,
+      raw.usage ? "measured" : "estimated",
+    );
+
     return ok({
-      text: choice.message.content ?? "",
+      text,
       message: {
         role: "assistant" as const,
         content: choice.message.content ?? null,
         tool_calls: choice.message.tool_calls,
       },
-      model: raw.model ?? request.model,
+      model,
       finish_reason: choice.finish_reason,
-      usage: raw.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      usage,
     });
   },
   async health(): Promise<HealthStatus> {

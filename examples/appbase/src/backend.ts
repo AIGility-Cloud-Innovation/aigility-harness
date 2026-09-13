@@ -931,6 +931,9 @@ export async function isKnownGatewayKey(key: string): Promise<boolean> {
 
 export async function initAppBackend(): Promise<void> {
   await ensureSchema();
+  // 积分账务换装 PG (首笔扣费前; 内存账本仅零依赖原型兜底) —— 钱必须持久
+  const { configureCreditStore } = await import("@aigility-harness/layer-infrastructure");
+  configureCreditStore({ pool });
   // 预置已知的 DSH 插件 (不启用, 由管理员在插件管理页配置后启用)
   await pool.query(
     `INSERT INTO dsh_plugins (name, package, export_name, description, enabled, config)

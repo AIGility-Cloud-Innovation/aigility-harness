@@ -183,6 +183,12 @@ async function main(): Promise<void> {
       res.end(APP_HALL_HTML);
       return;
     }
+    // 用户个人中心 (登录用户; 余额/用量/流水 — 页面自身用 cookie 鉴权, 未登录显示登录引导)
+    if (req.method === "GET" && (req.url === "/me" || req.url === "/me/" || req.url?.startsWith("/me?"))) {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(ME_HTML);
+      return;
+    }
     // 统一管理壳页 (管理员专用; 标签: 账号/LLM 配置/DSH 插件/框架层插件)
     if (req.method === "GET" && (req.url === "/admin" || req.url?.startsWith("/admin?"))) {
       const backend = await import("./backend.js");
@@ -481,6 +487,8 @@ const WORKBENCH_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url))
 // 用户管理页 (管理员专用)
 const FLOWS_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "flows.html"), "utf-8");
 const ADMIN_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "admin.html"), "utf-8");
+// 用户个人中心 (登录用户; 余额/用量/流水, 对所有网页应用通用)
+const ME_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "me.html"), "utf-8");
 // DSH 插件管理页 (管理员专用)
 const DSH_ADMIN_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "dsh-admin.html"), "utf-8");
 

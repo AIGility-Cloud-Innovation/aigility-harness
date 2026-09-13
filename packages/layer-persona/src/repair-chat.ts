@@ -250,6 +250,7 @@ const repairChatProvider: Provider<RepairChatRequest, RepairChatResponse> = {
       merchant_id: "default",
       customer_id: memUserId,
       session_id: request.session_id ?? ctx.sessionId,
+      user_key: request.user_key ?? memUserId,
       agent_name: agentName,
       system_prompt: REPAIR_SUPPORT_PROMPT + memoryBlock,
       ...(request.history?.length ? { history: request.history } : {}),

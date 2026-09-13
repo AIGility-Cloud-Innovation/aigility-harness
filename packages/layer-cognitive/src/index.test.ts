@@ -54,3 +54,54 @@ describe("layer-cognitive exports", () => {
     expect(res.finish_reason).toBe("stop");
   });
 });
+
+describe("stub provider usage 估算", () => {
+  it("usage 不再是假数据: prompt 按 messages 估算, prompt+completion=total, 且上报计量", async () => {
+    const stub = plugin
+      .getProviders()
+      .find((p) => p.name === "cognitive-llm-inference-stub");
+    expect(stub).toBeTruthy();
+
+    const emitted: Array<{ type: string; payload: unknown }> = [];
+    const meteringCalls: unknown[] = [];
+    const ctx = {
+      sessionId: "s-1",
+      traceId: "t-1",
+      callerLayer: "cognitive",
+      addEffect: () => "e",
+      emit: (e: { type: string; payload: unknown }) => emitted.push(e),
+      getState: () => undefined,
+      setState: () => {},
+      call: async (ref: { id: string }, req: unknown) => {
+        meteringCalls.push({ ref: ref.id, req });
+        return { ok: true, value: {} } as never;
+      },
+    } as never;
+
+    const result = await stub!.execute(
+      {
+        model: "stub-llm@0.1.0",
+        messages: [
+          { role: "system", content: "sys" },
+          { role: "user", content: "你好世界hello" }, // 7 字符 → 4 token (ceil)
+        ],
+      },
+      ctx,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const usage = result.value.usage;
+    expect(usage.prompt_tokens).toBeGreaterThan(0);
+    expect(usage.completion_tokens).toBeGreaterThan(0);
+    expect(usage.total_tokens).toBe(usage.prompt_tokens + usage.completion_tokens);
+    expect(result.value.model).toBe("stub-llm@0.1.0");
+
+    // 用量上报: emit llm.usage 事件 + ctx.call token-metering record
+    expect(emitted.some((e) => e.type === "llm.usage")).toBe(true);
+    const rec = meteringCalls[0] as { ref: string; req: { action: string; record: { source: string; userId: string } } };
+    expect(rec.ref).toBe("@infrastructure/token-metering");
+    expect(rec.req.action).toBe("record");
+    expect(rec.req.record.source).toBe("estimated");
+    expect(rec.req.record.userId).toBe("s-1"); // 未带 userId 时退回 sessionId
+  });
+});

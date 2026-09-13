@@ -32,6 +32,11 @@ export interface LlmInferenceRequest {
   stream?: boolean;
   tools?: Array<Record<string, unknown>>;
   tool_choice?: unknown;
+  /**
+   * 归因身份（平台账号/角色 user_key）：计量插件按用户聚合用量时使用。
+   * 缺失时计量退回按 sessionId 归因。调用方知道用户身份时应始终携带。
+   */
+  userId?: string;
 }
 
 export interface LlmInferenceResponse {

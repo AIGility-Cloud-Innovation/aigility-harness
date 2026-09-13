@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AppBase · 个人中心</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root { --ink:#1e293b; --ink2:#64748b; --line:#e8ecf4; --accent:#4f46e5; --soft:#eef0fe; --green:#10b981; --green-soft:#e7f8f1; --rose:#b91c1c; }
+body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; background:#f4f6fb; color:var(--ink); min-height:100vh; padding:28px 22px 70px; -webkit-font-smoothing:antialiased; }
+.shell { max-width:1080px; margin:0 auto; }
+.hero { background:linear-gradient(120deg,#312e81,#4f46e5 55%,#7c3aed); border-radius:22px; padding:26px 32px; color:#fff; box-shadow:0 10px 36px rgba(49,46,129,.35); display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.hero h1 { font-size:22px; }
+.hero p { font-size:12.5px; color:rgba(255,255,255,.75); flex:1; min-width:200px; }
+.hero button { border:none; background:rgba(255,255,255,.2); color:#fff; border-radius:10px; padding:7px 16px; font-size:12.5px; cursor:pointer; font-weight:600; font-family:inherit; }
+.hero button:hover { background:rgba(255,255,255,.32); }
+.card { background:#fff; border:1px solid var(--line); border-radius:16px; margin-top:18px; overflow:hidden; }
+.chead { display:flex; align-items:center; padding:12px 16px; border-bottom:1px solid var(--line); }
+.chead b { font-size:14px; flex:1; }
+.chead .sub { margin-right:10px; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th { text-align:left; padding:11px 14px; font-size:12px; color:var(--ink2); border-bottom:1px solid var(--line); background:#fafbfe; }
+td { padding:11px 14px; border-bottom:1px solid #f0f2f8; vertical-align:middle; }
+tr:last-child td { border-bottom:none; }
+.chip { display:inline-block; padding:2px 9px; border-radius:10px; font-size:11px; font-weight:600; }
+.chip.admin { background:var(--green-soft); color:var(--green); }
+.chip.user { background:#f1f4f9; color:var(--ink2); }
+.chip.ok { background:var(--green-soft); color:var(--green); }
+.chip.acc { background:var(--soft); color:var(--accent); }
+.sub { font-size:11.5px; color:var(--ink2); }
+.mono { font-family:Consolas,monospace; }
+.balance { display:flex; gap:12px; flex-wrap:wrap; padding:16px; align-items:baseline; }
+.balance .big { font-size:34px; font-weight:700; color:var(--accent); }
+.balance .unit { font-size:13px; color:var(--ink2); margin-left:4px; }
+.empty { text-align:center; padding:36px; color:var(--ink2); }
+.recharge { padding:14px 16px; border-top:1px solid var(--line); background:#fafbfe; font-size:12.5px; color:var(--ink2); display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.recharge a { color:var(--accent); font-weight:600; }
+#loginGate { max-width:420px; margin:80px auto; text-align:center; background:#fff; border:1px solid var(--line); border-radius:16px; padding:36px 28px; }
+#loginGate button { margin-top:16px; border:none; background:var(--accent); color:#fff; border-radius:10px; padding:9px 22px; font-size:13.5px; cursor:pointer; font-weight:600; font-family:inherit; }
+</style>
+</head>
+<body>
+<div id="loginGate" style="display:none">
+  <h2 style="font-size:18px">请先登录</h2>
+  <p class="sub" style="margin-top:8px">个人中心需要登录后访问</p>
+  <button onclick="location.href='/hall'">前往应用大厅登录</button>
+</div>
+
+<div class="shell" id="shellWrap" style="display:none">
+  <div class="hero">
+    <h1>👤 个人中心</h1>
+    <p>余额 · 用量 · 流水，对所有网页应用通用<br><small style="opacity:.65" id="meEmail"></small></p>
+    <button onclick="location.href='/hall'">← 返回大厅</button>
+    <button id="adminBtn" onclick="location.href='/admin'" style="display:none">⚙ 平台设置</button>
+  </div>
+
+  <div class="card">
+    <div class="chead"><b>💰 积分余额</b><span class="sub" id="balHint"></span></div>
+    <div class="balance" id="balBox"></div>
+    <div class="recharge" id="rechargeBox"></div>
+    <table>
+      <thead><tr><th>模型</th><th>倍率</th><th>输入价 (积分/1M token)</th><th>输出价 (积分/1M token)</th></tr></thead>
+      <tbody id="priceBody"><tr><td colspan="4" class="empty">加载中…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="chead"><b>📊 我的 Token 用量</b><span class="sub" id="useHint"></span></div>
+    <div class="balance" id="useBox" style="padding:12px 16px"></div>
+    <table>
+      <thead><tr><th>时间</th><th>模型</th><th>口径</th><th>输入 / 输出 / 合计 tokens</th></tr></thead>
+      <tbody id="useBody"><tr><td colspan="4" class="empty">加载中…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="chead"><b>🧾 我的积分流水</b><span class="sub" id="txHint"></span></div>
+    <table>
+      <thead><tr><th>时间</th><th>类型</th><th>变动 (积分)</th><th>变动后余额</th><th>说明</th></tr></thead>
+      <tbody id="txBody"><tr><td colspan="5" class="empty">加载中…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+var TOKEN = sessionStorage.getItem('hall_token') || '';
+function ah() { return TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {}; }
+function esc(s) {
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmt(n) { return Number(n || 0).toLocaleString('zh-CN', { maximumFractionDigits: 2 }); }
+function fmtTime(s) { return new Date(s).toLocaleString('zh-CN', {year:'2-digit',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}); }
+function fetchJSON(url, opts) {
+  opts = Object.assign({}, opts);
+  opts.headers = Object.assign({}, ah(), opts.headers || {});
+  return fetch(url, opts).then(function(r) {
+    return r.json().catch(function() { return {}; }).then(function(d) {
+      if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      return d;
+    });
+  });
+}
+var TX_NAMES = { grant: '赠送', recharge: '充值', consume: '消耗', adjust: '调整' };
+var APP_READY = false;
+
+// 鉴权走 cookie (httpOnly, 同源自动携带) — /me 可在新标签页直接打开;
+// sessionStorage token 仅作同标签页的 Bearer 增强
+fetch('/app/me/profile', { headers: ah() }).then(function(r) {
+  return r.json().then(function(d) {
+    if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+    return d;
+  });
+}).then(function(me) {
+  APP_READY = true;
+  document.getElementById('loginGate').style.display = 'none';
+  document.getElementById('shellWrap').style.display = 'block';
+  document.getElementById('meEmail').textContent = me.email || '';
+  if (me.isAdmin) document.getElementById('adminBtn').style.display = '';
+
+  return fetchJSON('/app/credits/me').then(function(c) {
+  document.getElementById('balHint').textContent = '汇率 1 元 = ' + fmt(c.creditPerYuan) + ' 积分 · 消耗按模型倍率计价';
+  document.getElementById('balBox').innerHTML =
+    '<span class="big">' + fmt(c.balance) + '</span><span class="unit">积分</span>'
+    + '<span class="chip ok">≈ ¥ ' + fmt(c.balance / (c.creditPerYuan || 100)) + '</span>'
+    + '<span class="chip user">新户赠送 ' + fmt(c.newUserGrant) + ' 积分</span>';
+  document.getElementById('rechargeBox').innerHTML = me.isAdmin
+    ? '你是管理员，可在 <a href="/admin?tab=credits">平台设置 · 积分账务</a> 直接调整余额。'
+    : '积分不足或需要充值？请联系平台管理员为账户充值。';
+  var models = (c.pricing && c.pricing.models) || [];
+  document.getElementById('priceBody').innerHTML = models.length
+    ? models.map(function(m) {
+        return '<tr>'
+          + '<td class="mono">' + esc(m.model) + '</td>'
+          + '<td>×' + m.multiplier + '</td>'
+          + '<td>' + fmt(m.input) + '</td>'
+          + '<td>' + fmt(m.output) + '</td>'
+          + '</tr>';
+      }).join('')
+    : '<tr><td colspan="4" class="empty">价目表为空</td></tr>';
+
+  loadUsage();
+  loadTx();
+  }).catch(function(e) {
+    if (!APP_READY) {
+      document.getElementById('loginGate').style.display = 'block';
+      document.getElementById('shellWrap').style.display = 'none';
+      document.querySelector('#loginGate p').textContent = String(e.message).indexOf('401') !== -1 || String(e.message).indexOf('未授权') !== -1
+        ? '个人中心需要登录后访问'
+        : '加载失败: ' + e.message;
+    }
+  });
+}).catch(function(e) {
+  // /app/me/profile 失败 (未登录/网络): 显示登录门
+  document.getElementById('loginGate').style.display = 'block';
+  document.getElementById('shellWrap').style.display = 'none';
+  document.querySelector('#loginGate p').textContent = String(e.message).indexOf('401') !== -1 || String(e.message).indexOf('未授权') !== -1
+    ? '个人中心需要登录后访问'
+    : '加载失败: ' + e.message;
+});
+
+function loadUsage() {
+  fetchJSON('/app/me/usage').then(function(d) {
+    var s = d.summary || {};
+    document.getElementById('useHint').textContent =
+      '实测 ' + fmt(s.measuredCalls) + ' 次 / 估算 ' + fmt(s.estimatedCalls) + ' 次（估算 = stub 或上游未回 usage，仅供量级参考）';
+    document.getElementById('useBox').innerHTML =
+      '<span class="chip acc">调用 ' + fmt(s.calls) + ' 次</span>'
+      + '<span class="chip user">输入 ' + fmt(s.promptTokens) + '</span>'
+      + '<span class="chip user">输出 ' + fmt(s.completionTokens) + '</span>'
+      + '<span class="chip admin">合计 ' + fmt(s.totalTokens) + ' tokens</span>';
+    var recent = d.recent || [];
+    document.getElementById('useBody').innerHTML = recent.length
+      ? recent.map(function(r) {
+          return '<tr>'
+            + '<td class="sub">' + esc(fmtTime(r.at)) + '</td>'
+            + '<td class="mono">' + esc(r.model) + '</td>'
+            + '<td><span class="chip ' + (r.source === 'measured' ? 'ok' : 'user') + '">' + (r.source === 'measured' ? '实测' : '估算') + '</span></td>'
+            + '<td class="sub">' + fmt(r.promptTokens) + ' / ' + fmt(r.completionTokens) + ' / <b>' + fmt(r.totalTokens) + '</b></td>'
+            + '</tr>';
+        }).join('')
+      : '<tr><td colspan="4" class="empty">还没有用量记录，去大厅聊一句就有了</td></tr>';
+  }).catch(function(e) {
+    document.getElementById('useBody').innerHTML = '<tr><td colspan="4" class="empty">' + esc(e.message) + '</td></tr>';
+  });
+}
+
+function loadTx() {
+  fetchJSON('/app/me/transactions').then(function(d) {
+    var txs = d.transactions || [];
+    document.getElementById('txHint').textContent = '最近 ' + txs.length + ' 笔';
+    document.getElementById('txBody').innerHTML = txs.length
+      ? txs.map(function(t) {
+          var neg = t.credits < 0;
+          return '<tr>'
+            + '<td class="sub">' + esc(fmtTime(t.at)) + '</td>'
+            + '<td><span class="chip ' + (neg ? 'user' : 'ok') + '">' + esc(TX_NAMES[t.type] || t.type) + '</span></td>'
+            + '<td style="color:' + (neg ? 'var(--rose)' : 'var(--green)') + ';font-weight:600">' + (neg ? '' : '+') + fmt(t.credits) + '</td>'
+            + '<td>' + fmt(t.balanceAfter) + '</td>'
+            + '<td class="sub">' + esc(t.note || '') + (t.model ? ' · ' + esc(t.model) : '') + '</td>'
+            + '</tr>';
+        }).join('')
+      : '<tr><td colspan="5" class="empty">暂无流水（首次消耗或充值后建立账户）</td></tr>';
+  }).catch(function(e) {
+    document.getElementById('txBody').innerHTML = '<tr><td colspan="5" class="empty">' + esc(e.message) + '</td></tr>';
+  });
+}
+</script>
+</body>
+</html>

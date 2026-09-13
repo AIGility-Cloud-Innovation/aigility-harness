@@ -357,7 +357,8 @@ pnpm start
 | 页面 | 地址 | 说明 |
 |------|------|------|
 | 应用大厅 | `/hall` | 角色对话 + 应用网格（首个注册用户自动成为管理员） |
-| 管理中心 | `/admin` | 四标签：账号 / 全局 LLM 配置(热生效) / DSH 插件 / 框架层插件 |
+| 管理中心 | `/admin` | 六标签：账号 / 全局 LLM 配置(热生效) / DSH 插件 / 框架层插件 / Token 用量(按用户·模型·日) / 积分账务(汇率·倍率·充值·流水) |
+| 用户个人中心 | `/me` | 余额·价目·我的用量·我的流水 (登录即可, 所有网页应用通用; 大厅导航进入) |
 | 对话流图 | `/hall/flows` | 五个对话角色的真实流转图 |
 
 内置角色：🎧 平台客服、🔧 应用报修客服（延时汇总建单）、🪶 网页应用开发员（zcode/codex/claude 驱动，生成单文件 HTML 应用）、🧩 插件助手、👨‍💻 编码教练。聊天历史云端持久化；LLM 配置多平台热切换。
@@ -389,7 +390,7 @@ pnpm --filter wecom-coder start
 | **角色对话** | `sales-chat`（平台客服）/ `repair-chat`（报修延时汇总）/ `coding-coach`（引导教练） | 任意 D3 角色（特性打包为 persona 插件） |
 | **网页应用开发员** | `app-dev`（沙箱内生成/修改单文件应用，编码 CLI 可换 zcode/codex/claude） | 任意符合契约的编码 Agent |
 | **需求缓冲延时汇总** | `timem-project-task`（聊天期只记录 → 汇总去重/冲突 → 确认 → 拓扑排序执行） | 任意编排策略 |
-| **产品装配 AppBase** | 应用大厅 + 管理中心(/admin 四标签) + 全局 LLM 配置热生效 + 对话流图 | 任意产品壳 |
+| **产品装配 AppBase** | 应用大厅 + 管理中心(/admin 六标签) + 全局 LLM 配置热生效 + 对话流图 | 任意产品壳 |
 | **开箱引导安装** | `plugin-helper` 角色 → `plugin-install` 工作流（扫描 py-plugins.json + packages → 契约匹配 → 接入指引） | 任意安装/引导工作流 |
 | **最小 Web UI** | http-ingress `GET /` / `/ui`（单文件 HTML, 双角色页签, 零依赖） | 任意前端 |
 | **企业微信入口（特色案例）** | `wecom-ingress`（aibot-node-sdk WebSocket 长连接 → 角色路由 → replyStream）+ 三个开箱案例：`wecom-coder`（@机器人 → app-dev → codex）/ `wecom-guide`（框架介绍员）/ `wecom-timem`（TiMEM 客服） | 任意 IM 通道（钉钉/飞书/微信，同构接入） |

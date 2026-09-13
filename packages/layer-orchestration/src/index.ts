@@ -116,6 +116,8 @@ export interface WorkflowEngineRequest {
   merchant_id?: string;
   customer_id?: string;
   session_id?: string;
+  /** 归因身份（平台账号/角色 user_key），透传给 LLM 计量按用户聚合 */
+  user_key?: string;
   agent_name?: string;
   /** 角色专属系统提示词 (persona 注入) */
   system_prompt?: string;
@@ -201,6 +203,7 @@ const workflowEngineProvider: Provider<
           model: process.env.LLM_MODEL ?? "glm-4.6",
           messages,
           temperature: 0.7,
+          userId: request.user_key ?? request.customer_id ?? request.merchant_id,
         },
       )) as Result<LlmInferenceResponse>;
       if (llmRes.ok && llmRes.value?.text) {

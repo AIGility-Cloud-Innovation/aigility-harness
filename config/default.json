@@ -2,5 +2,21 @@
   "litellm": {
     "url": "http://127.0.0.1:48724",
     "key": "sk-1234"
+  },
+  "credits": {
+    "creditPerYuan": 100,
+    "baseCreditsPerMTok": 200,
+    "outputFactor": 4,
+    "defaultMultiplier": 1,
+    "newUserGrant": 1000,
+    "modelMultipliers": {
+      "glm-4.6": 1,
+      "glm-4.5": 1,
+      "glm-4.5-air": 0.2,
+      "glm-4-flash": 0.1,
+      "deepseek-chat": 0.5,
+      "deepseek-reasoner": 1,
+      "stub-llm@0.1.0": 0.1
+    }
   }
 }

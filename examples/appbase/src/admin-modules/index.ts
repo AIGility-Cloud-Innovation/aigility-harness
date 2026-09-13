@@ -10,6 +10,9 @@ import * as usersMod from "./users.js";
 import * as llmConfigMod from "./llm-config.js";
 import * as dshPluginsMod from "./dsh-plugins.js";
 import * as harnessPluginsMod from "./harness-plugins.js";
+import * as tokenUsageMod from "./token-usage.js";
+import * as creditsMod from "./credits.js";
+import * as meMod from "./me.js";
 export { setAdminKernel, setAdminManifests } from "./kernel-ref.js";
 
 export interface AdminModuleDef {
@@ -19,12 +22,19 @@ export interface AdminModuleDef {
   /** 标签顺序 (小在前) */
   order: number;
   handle: (req: IncomingMessage, res: ServerResponse, path: string, method: string) => Promise<boolean>;
+  /** true = 只参与分发, 不在 /admin 壳页出标签 (如用户自读的 /app/me/*) */
+  hidden?: boolean;
 }
 
 // 数组顺序 = 分发顺序 (精确路径的模块在前, 防止宽前缀拦截);
 // 标签展示顺序由 order 字段决定, 与分发顺序无关
+// 数组顺序 = 分发顺序 (精确路径的模块在前, 防止宽前缀拦截);
+// 标签展示顺序由 order 字段决定, 与分发顺序无关
 const MODULES: AdminModuleDef[] = [
   { id: "harness-plugins", title: "框架层插件", icon: "⚙", order: 40, handle: harnessPluginsMod.handle },
+  { id: "token-usage", title: "Token 用量", icon: "📊", order: 50, handle: tokenUsageMod.handle },
+  { id: "credits", title: "积分账务", icon: "💰", order: 60, handle: creditsMod.handle },
+  { id: "me", title: "个人中心", icon: "👤", order: 90, hidden: true, handle: meMod.handle }, // /app/me/* 用户自读接口, 无壳页标签
   { id: "users", title: "账号与用户", icon: "👥", order: 10, handle: usersMod.handle },
   { id: "llm-config", title: "LLM 配置", icon: "🌐", order: 20, handle: llmConfigMod.handle },
   { id: "dsh-plugins", title: "DSH 插件", icon: "🧩", order: 30, handle: dshPluginsMod.handle },
@@ -32,7 +42,8 @@ const MODULES: AdminModuleDef[] = [
 
 /** 面板清单 (供壳页渲染标签) */
 export function adminPanelList(): Array<{ id: string; title: string; icon: string; order: number }> {
-  return MODULES.map((m) => ({ id: m.id, title: m.title, icon: m.icon, order: m.order }))
+  return MODULES.filter((m) => !m.hidden)
+    .map((m) => ({ id: m.id, title: m.title, icon: m.icon, order: m.order }))
     .sort((a, b) => a.order - b.order);
 }
 

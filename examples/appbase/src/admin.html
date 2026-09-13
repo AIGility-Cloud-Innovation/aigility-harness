@@ -186,6 +186,78 @@ textarea.minput { min-height:96px; font-family:Consolas,monospace; }
       </table>
     </div>
   </div>
+
+  <!-- 📊 Token 用量 -->
+  <div class="tabpane" id="pane-token-usage">
+    <div class="card">
+      <div style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)">
+        <b style="font-size:14px;flex:1">📊 Token 用量（按用户 / 模型 / 日）</b>
+        <span class="sub" style="margin-right:10px" id="tuSourceHint"></span>
+        <input id="tuUser" placeholder="按用户过滤 (可选)" style="border:1.5px solid var(--line);border-radius:8px;padding:6px 10px;font-family:inherit;width:180px">
+        <button class="b-pwd" style="margin-left:8px" onclick="loadUsage()">⟳ 刷新</button>
+      </div>
+      <div id="tuSummary" style="display:flex;gap:12px;flex-wrap:wrap;padding:12px 14px"></div>
+      <table>
+        <thead><tr><th>用户 (归因键)</th><th>调用次数</th><th>输入 tokens</th><th>输出 tokens</th><th>合计 tokens</th></tr></thead>
+        <tbody id="tuUserBody"><tr><td colspan="5" class="empty">加载中…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)">
+        <b style="font-size:14px;flex:1">按模型</b>
+      </div>
+      <table>
+        <thead><tr><th>模型</th><th>调用次数</th><th>输入 tokens</th><th>输出 tokens</th><th>合计 tokens</th></tr></thead>
+        <tbody id="tuModelBody"><tr><td colspan="5" class="empty">加载中…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)">
+        <b style="font-size:14px;flex:1">最近调用明细</b>
+      </div>
+      <table>
+        <thead><tr><th>时间</th><th>用户</th><th>模型</th><th>口径</th><th>输入/输出/合计</th></tr></thead>
+        <tbody id="tuRecentBody"><tr><td colspan="5" class="empty">加载中…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 💰 积分账务 -->
+  <div class="tabpane" id="pane-credits">
+    <div class="card">
+      <div style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)">
+        <b style="font-size:14px;flex:1">💰 积分账务</b>
+        <span class="sub" style="margin-right:10px" id="crHint"></span>
+        <button class="b-pwd" onclick="loadCredits()">⟳ 刷新</button>
+      </div>
+      <div id="crPricing" style="padding:12px 14px;display:flex;gap:12px;flex-wrap:wrap"></div>
+      <table>
+        <thead><tr><th>模型</th><th>倍率</th><th>输入价 (积分/1M)</th><th>输出价 (积分/1M)</th></tr></thead>
+        <tbody id="crModelBody"><tr><td colspan="4" class="empty">加载中…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)">
+        <b style="font-size:14px;flex:1">用户余额</b>
+        <span class="sub" style="margin-right:10px">充值 = 加积分, 负数 = 扣减调整</span>
+      </div>
+      <table>
+        <thead><tr><th>用户 (归因键)</th><th>余额 (积分)</th><th>≈ 人民币 (元)</th><th>充值 / 调整</th></tr></thead>
+        <tbody id="crAccountBody"><tr><td colspan="4" class="empty">加载中…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)">
+        <b style="font-size:14px;flex:1">最近流水</b>
+        <input id="crTxUser" placeholder="按用户过滤 (可选)" style="border:1.5px solid var(--line);border-radius:8px;padding:6px 10px;font-family:inherit;width:180px">
+        <button class="b-pwd" style="margin-left:8px" onclick="loadCredits()">⟳</button>
+      </div>
+      <table>
+        <thead><tr><th>时间</th><th>用户</th><th>类型</th><th>变动 (积分)</th><th>扣后余额</th><th>说明</th></tr></thead>
+        <tbody id="crTxBody"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 <div id="msg"></div>
 
@@ -607,6 +679,122 @@ function loadHarness() {
   });
 }
 
+// ── 📊 Token 用量 ──
+function fmtInt(n) { return Number(n || 0).toLocaleString('zh-CN'); }
+function usageGroupRows(items) {
+  return (items || []).length
+    ? items.map(function(g) {
+        return '<tr>'
+          + '<td style="font-family:Consolas,monospace">' + esc(g.key) + '</td>'
+          + '<td>' + fmtInt(g.calls) + '</td>'
+          + '<td>' + fmtInt(g.promptTokens) + '</td>'
+          + '<td>' + fmtInt(g.completionTokens) + '</td>'
+          + '<td><b>' + fmtInt(g.totalTokens) + '</b></td>'
+          + '</tr>';
+      }).join('')
+    : '<tr><td colspan="5" class="empty">无记录</td></tr>';
+}
+function loadUsage() {
+  var u = document.getElementById('tuUser').value.trim();
+  var qs = u ? ('?userId=' + encodeURIComponent(u)) : '';
+  fetchJSON('/app/admin/token-usage' + qs).then(function(d) {
+    var s = d.summary || {};
+    document.getElementById('tuSourceHint').textContent =
+      '实测 ' + fmtInt(s.measuredCalls) + ' 次 / 估算 ' + fmtInt(s.estimatedCalls) + ' 次（stub 或上游未回 usage 时为估算口径）';
+    document.getElementById('tuSummary').innerHTML =
+      '<span class="chip ok">调用 ' + fmtInt(s.calls) + ' 次</span>'
+      + '<span class="chip user">输入 ' + fmtInt(s.promptTokens) + '</span>'
+      + '<span class="chip user">输出 ' + fmtInt(s.completionTokens) + '</span>'
+      + '<span class="chip admin">合计 ' + fmtInt(s.totalTokens) + ' tokens</span>';
+    document.getElementById('tuUserBody').innerHTML = usageGroupRows(s.byUser);
+    document.getElementById('tuModelBody').innerHTML = usageGroupRows(s.byModel);
+    var recent = (d.recent || []).slice(0, 20);
+    document.getElementById('tuRecentBody').innerHTML = recent.length
+      ? recent.map(function(r) {
+          return '<tr>'
+            + '<td class="sub">' + esc(new Date(r.at).toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'})) + '</td>'
+            + '<td style="font-family:Consolas,monospace">' + esc(r.userId) + '</td>'
+            + '<td class="sub" style="font-family:Consolas,monospace">' + esc(r.model) + '</td>'
+            + '<td><span class="chip ' + (r.source === 'measured' ? 'ok' : 'user') + '">' + (r.source === 'measured' ? '实测' : '估算') + '</span></td>'
+            + '<td class="sub">' + fmtInt(r.promptTokens) + ' / ' + fmtInt(r.completionTokens) + ' / <b>' + fmtInt(r.totalTokens) + '</b></td>'
+            + '</tr>';
+        }).join('')
+      : '<tr><td colspan="5" class="empty">暂无调用（对话一次后刷新可见）</td></tr>';
+  }).catch(function(e) {
+    ['tuUserBody','tuModelBody','tuRecentBody'].forEach(function(id) {
+      document.getElementById(id).innerHTML = '<tr><td colspan="5" class="empty">' + esc(e.message) + '</td></tr>';
+    });
+  });
+}
+
+// ── 💰 积分账务 ──
+function fmtCredits(n) { return Number(n || 0).toLocaleString('zh-CN', { maximumFractionDigits: 2 }); }
+var CR_TX_NAMES = { grant: '赠送', recharge: '充值', consume: '消耗', adjust: '调整' };
+function loadCredits() {
+  var u = document.getElementById('crTxUser').value.trim();
+  var qs = u ? ('?userId=' + encodeURIComponent(u)) : '';
+  fetchJSON('/app/admin/credits' + qs).then(function(d) {
+    var p = d.pricing || {};
+    document.getElementById('crHint').textContent =
+      '汇率 1 元 = ' + fmtCredits(p.creditPerYuan) + ' 积分 · 存储 ' + (p.store === 'pg' ? 'PostgreSQL' : '内存(原型)') + ' · 新户赠送 ' + fmtCredits(p.newUserGrant);
+    document.getElementById('crPricing').innerHTML =
+      '<span class="chip admin">基准价 ' + fmtCredits(p.baseCreditsPerMTok) + ' 积分/1M 输入</span>'
+      + '<span class="chip user">输出系数 ×' + p.outputFactor + '</span>'
+      + '<span class="chip user">表外模型默认倍率 ×' + p.defaultMultiplier + '</span>';
+    var models = p.models || [];
+    document.getElementById('crModelBody').innerHTML = models.length
+      ? models.map(function(m) {
+          return '<tr>'
+            + '<td style="font-family:Consolas,monospace">' + esc(m.model) + '</td>'
+            + '<td>×' + m.multiplier + '</td>'
+            + '<td>' + fmtCredits(m.input) + '</td>'
+            + '<td>' + fmtCredits(m.output) + '</td>'
+            + '</tr>';
+        }).join('')
+      : '<tr><td colspan="4" class="empty">价目表为空</td></tr>';
+    var accs = d.accounts || [];
+    document.getElementById('crAccountBody').innerHTML = accs.length
+      ? accs.map(function(a) {
+          return '<tr>'
+            + '<td style="font-family:Consolas,monospace">' + esc(a.userId) + '</td>'
+            + '<td><b>' + fmtCredits(a.balance) + '</b></td>'
+            + '<td class="sub">¥ ' + fmtCredits(a.balance / (p.creditPerYuan || 100)) + '</td>'
+            + '<td><input id="crAmt-' + esc(a.userId) + '" placeholder="±积分" style="width:90px;border:1.5px solid var(--line);border-radius:8px;padding:5px 8px;font-family:inherit">'
+            + '<button class="b-pwd" style="margin-left:6px" onclick="grantCredits(\'' + esc(a.userId) + '\')">确认</button></td>'
+            + '</tr>';
+        }).join('')
+      : '<tr><td colspan="4" class="empty">暂无账户 (用户发生首次对话/充值后建立)</td></tr>';
+    var txs = d.transactions || [];
+    document.getElementById('crTxBody').innerHTML = txs.length
+      ? txs.map(function(t) {
+          var neg = t.credits < 0;
+          return '<tr>'
+            + '<td class="sub">' + esc(new Date(t.at).toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'})) + '</td>'
+            + '<td style="font-family:Consolas,monospace">' + esc(t.userId) + '</td>'
+            + '<td><span class="chip ' + (neg ? 'user' : 'ok') + '">' + esc(CR_TX_NAMES[t.type] || t.type) + '</span></td>'
+            + '<td style="color:' + (neg ? '#b91c1c' : '#047857') + '">' + (neg ? '' : '+') + fmtCredits(t.credits) + '</td>'
+            + '<td>' + fmtCredits(t.balanceAfter) + '</td>'
+            + '<td class="sub">' + esc(t.note || '') + (t.model ? ' · ' + esc(t.model) : '') + '</td>'
+            + '</tr>';
+        }).join('')
+      : '<tr><td colspan="6" class="empty">暂无流水</td></tr>';
+  }).catch(function(e) {
+    ['crModelBody','crAccountBody','crTxBody'].forEach(function(id) {
+      document.getElementById(id).innerHTML = '<tr><td colspan="4" class="empty">' + esc(e.message) + '</td></tr>';
+    });
+  });
+}
+function grantCredits(userId) {
+  var el = document.getElementById('crAmt-' + userId);
+  var amt = Number(el && el.value);
+  if (!Number.isFinite(amt) || amt === 0) { toast('请输入非 0 积分数'); return; }
+  fetchJSON('/app/admin/credits/grant', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId: userId, credits: amt, note: '管理面板操作' })
+  }).then(function(d) { toast('✓ 已调整, 余额 ' + fmtCredits(d.balanceAfter)); loadCredits(); })
+    .catch(function(e) { toast('✗ ' + e.message); });
+}
+
 // ── 启动: 面板清单驱动标签 → 按需加载 ──
 fetchJSON('/app/hall/admin-panels').then(function(d) {
   initTabs(d.panels || []);
@@ -615,6 +803,8 @@ fetchJSON('/app/hall/admin-panels').then(function(d) {
   loadLlmGlobal();
   loadPlugins();
   loadHarness();
+  loadUsage();
+  loadCredits();
 }).catch(function(e) {
   document.getElementById('tabs').innerHTML = '<span class="sub">面板加载失败: ' + esc(e.message) + ' · <a href="/hall">回大厅</a></span>';
 });
