@@ -493,9 +493,11 @@ harness (TS)                          Python (子进程)
 | **阶段 1.5**（✅ 已完成） | 跨语言桥接 | py-bridge 通用 Python 对接器，aigility ADK 端到端验证通过 |
 | **阶段 1.75**（✅ 已完成） | 开箱可用 | sales-chat/plugin-helper 角色 + plugin-install 引导工作流 + 最小 Web UI（`GET /` `/ui`）+ agent 路径→角色路由 |
 | **阶段 2**（✅ 已完成） | 桥接层开发 | BusBridge 契约 + BusEnvelope 信封 + RemoteEventBus 跨进程事件桥 + `PgBusBridge` 实现（LISTEN/NOTIFY + event_log）；`PgTaskQueue`（FOR UPDATE SKIP LOCKED）+ `PgVectorStore`（pgvector HNSW）；真实总线可更换（pgmq/pgvector/NATS/Milvus 按部署选定） |
-| **阶段 3**（⏳ 未实现） | 进程载体封装 | 守护进程管理、多载体统一抽象 |
-| **阶段 4**（⏳ 未实现） | 智能调度与自动替换 | 健康探测、指标采集、自动切换控制器 |
-| **阶段 5**（⏳ 未实现） | 生产加固 | 安全、鉴权、全链路追踪、状态迁移、熔断降级 |
+| **阶段 3**（🔶 抽象已就位） | 进程载体封装 | `CarrierKind` 四载体契约 + kernel-dsh `CarrierManager`（Thread 全支持、Subprocess 进程内模拟、migrate/health/stop 生命周期齐）；注意 layer-action/layer-persona/py-bridge 已声明 `preferredCarrier: Subprocess` 但被静默降级为进程内；**缺**：真 Subprocess/Daemon 拉起与守护、NetworkService 载体 |
+| **阶段 4**（🔶 进程内闭环已就位） | 智能调度与自动替换 | `InProcessScheduler` 健康轮询（provider 级探测 + 插件载体告警）→ `rebind` 决策真实执行：绑定 provider 连续失败自动切健康同级（`SeamRegistry.rebind` 显式绑定覆盖，两内核实现，默认绑定恢复后自动 failback），决策经 `scheduler.*` 事件发布；bootstrap 接线 `healthCheckIntervalMs` + `autoHotSwap`（appbase 已开启）；**缺**：指标采集、NATS 健康事件、跨机 failover、restart（载体级重载，归阶段 3） |
+| **阶段 5**（🔶 零散就位） | 生产加固 | 已有：登录限流（rate-limit）、审计（audit）、平台账号 + 按应用授权 + httpOnly cookie 鉴权（appbase）、traceId 全链路贯穿、LLM 降级标记（degraded）、按用户计量/积分/流水；**缺**：统一追踪后端（OTel 类）、熔断器组件、状态迁移、系统性安全加固 |
+
+**功能线进度（路线图之外的另一条轴——产品能力，均已可用）**：appbase 产品装配（应用大厅 + 管理中心六标签 + 工单系统 + `/me` 个人中心）、AI 网关（3418 OpenAI 兼容入口 + 网关密钥）、api-router 协议适配 + LiteLLM/bigmodel 真实推理（插件接入设计清单已全部落地）、企微/飞书机器人入口、TiMEM 记忆、LangGraph 工作流（py-bridge）、按用户 Token 计量 + 积分账务（汇率/倍率/预检实扣）。
 
 ---
 

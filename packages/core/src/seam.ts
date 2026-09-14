@@ -152,6 +152,15 @@ export interface SeamRegistry {
   /** Resolve a consumer to its currently-bound provider */
   resolve<TReq, TRes>(ref: CapabilityRef): Promise<Result<Provider<TReq, TRes>>>;
 
+  /**
+   * Failover binding (scheduler / auto hot-swap): pin the preferred provider
+   * for a capability.  `resolve` must return the preferred provider whenever
+   * it is registered and satisfies the version range, else fall back to the
+   * kernel's default selection (insertion order / highest version).
+   * Pass `null` to clear the override (fail back to default).
+   */
+  rebind(ref: CapabilityRef, preferredProvider: string | null): Promise<Result<void>>;
+
   /** List all registered providers for a given capability */
   listProviders(id: CapabilityId): Provider[];
 

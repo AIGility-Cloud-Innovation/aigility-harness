@@ -16,6 +16,7 @@ import type {
   ServiceDefinition,
   SeamContext,
   SeamRegistry,
+  SeamRegistryEvent,
 } from "@aigility-harness/core";
 import {
   DshKernelAdapter,
@@ -184,6 +185,39 @@ describe("CordisSeamRegistry", () => {
     const registry = new CordisSeamRegistry(ctx);
     const resolved = await registry.resolve({ id: "@none/x", versionRange: "^1.0.0" });
     expect(resolved.ok).toBe(false);
+  });
+
+  it("rebind 覆盖默认最高版本选择, rebind(null) 回落", async () => {
+    const ctx = new Context();
+    const registry = new CordisSeamRegistry(ctx);
+    const s1 = makeService("@cog/f", "1.0.0");
+    const s2 = makeService("@cog/f", "1.2.0");
+    await registry.register(s1, makeProvider(s1, "f-old"));
+    await registry.register(s2, makeProvider(s2, "f-new"));
+
+    // 默认: 最高版本
+    const r0 = await registry.resolve({ id: "@cog/f", versionRange: "^1.0.0" });
+    expect(r0.ok && r0.value.name).toBe("f-new");
+
+    // pin 住低版本 provider (故障转移)
+    const events: SeamRegistryEvent[] = [];
+    registry.onEvent((e) => events.push(e));
+    const rb = await registry.rebind({ id: "@cog/f", versionRange: "^1.0.0" }, "f-old");
+    expect(rb.ok).toBe(true);
+    const r1 = await registry.resolve({ id: "@cog/f", versionRange: "^1.0.0" });
+    expect(r1.ok && r1.value.name).toBe("f-old");
+    expect(events.some((e) => e.type === "rebound" && e.toProvider === "f-old")).toBe(true);
+
+    // 未知 provider → err, 绑定不变
+    const bad = await registry.rebind({ id: "@cog/f", versionRange: "^1.0.0" }, "nope");
+    expect(bad.ok).toBe(false);
+    const r2 = await registry.resolve({ id: "@cog/f", versionRange: "^1.0.0" });
+    expect(r2.ok && r2.value.name).toBe("f-old");
+
+    // 清除覆盖 → 回落默认最高版本
+    await registry.rebind({ id: "@cog/f", versionRange: "^1.0.0" }, null);
+    const r3 = await registry.resolve({ id: "@cog/f", versionRange: "^1.0.0" });
+    expect(r3.ok && r3.value.name).toBe("f-new");
   });
 });
 

@@ -66,7 +66,9 @@ async function main(): Promise<void> {
   const kernelConfig: KernelConfig = {
     mode: RunMode.Prototype,
     profile: "default",
-    autoHotSwap: false,
+    // P1 调度闭环: 同能力多 Provider 时, 健康失败自动 rebind 到健康同级,
+    // 默认绑定恢复后自动回切 (决策经 EventBus 发布 scheduler.* 事件可观测)
+    autoHotSwap: true,
     healthCheckIntervalMs: 10_000,
   };
   const scheduler = new InProcessScheduler(kernel, kernel.registry);

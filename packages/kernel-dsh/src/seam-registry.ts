@@ -43,6 +43,8 @@ export class CordisSeamRegistry implements SeamRegistry {
   private readonly byName = new Map<string, ProviderEntry>();
   /** service id → provider names (insertion order) */
   private readonly byService = new Map<CapabilityId, string[]>();
+  /** 故障转移绑定覆盖 (serviceId → pin 住的 provider 名) */
+  private readonly preferred = new Map<CapabilityId, string>();
   private readonly listeners = new Set<(event: SeamRegistryEvent) => void>();
 
   constructor(private readonly ctx: Context) {}
@@ -107,24 +109,60 @@ export class CordisSeamRegistry implements SeamRegistry {
   async resolve<TReq, TRes>(
     ref: CapabilityRef,
   ): Promise<Result<Provider<TReq, TRes>>> {
-    const names = this.byService.get(ref.id) ?? [];
-    let best: { provider: Provider; version: string } | undefined;
-
-    for (const name of names) {
-      const entry = this.byName.get(name)!;
-      if (!satisfies(entry.service.version, ref.versionRange)) continue;
-      if (
-        !best ||
-        compareVersions(entry.service.version, best.version) > 0
-      ) {
-        best = { provider: entry.provider, version: entry.service.version };
+    // 故障转移绑定优先 (scheduler.rebind pin 住的 provider); 不满足版本区间
+    // 或不在册则回落默认选择
+    const preferredName = this.preferred.get(ref.id);
+    if (preferredName) {
+      const entry = this.byName.get(preferredName);
+      if (entry && entry.service.id === ref.id && satisfies(entry.service.version, ref.versionRange)) {
+        return ok(entry.provider as Provider<TReq, TRes>);
       }
     }
 
+    const best = this.pickDefault(ref);
     if (!best) {
       return err(`no provider satisfies ${ref.id}@${ref.versionRange}`);
     }
     return ok(best.provider as Provider<TReq, TRes>);
+  }
+
+  /** 默认选择: 满足版本区间的最高版本 provider (无覆盖时的绑定语义) */
+  private pickDefault(ref: CapabilityRef): ProviderEntry | undefined {
+    let best: ProviderEntry | undefined;
+    for (const name of this.byService.get(ref.id) ?? []) {
+      const entry = this.byName.get(name)!;
+      if (!satisfies(entry.service.version, ref.versionRange)) continue;
+      if (!best || compareVersions(entry.service.version, best.service.version) > 0) {
+        best = entry;
+      }
+    }
+    return best;
+  }
+
+  async rebind(
+    ref: CapabilityRef,
+    preferredProvider: string | null,
+  ): Promise<Result<void>> {
+    const from = this.preferred.get(ref.id) ?? this.pickDefault(ref)?.provider.name ?? "";
+    if (preferredProvider === null) {
+      this.preferred.delete(ref.id);
+    } else {
+      const entry = this.byName.get(preferredProvider);
+      if (!entry || entry.service.id !== ref.id) {
+        return err(`provider ${preferredProvider} not registered for ${ref.id}`);
+      }
+      this.preferred.set(ref.id, preferredProvider);
+    }
+    const to = preferredProvider ?? this.pickDefault(ref)?.provider.name ?? "";
+    if (from !== to || preferredProvider === null) {
+      this.emitEvent({
+        type: "rebound",
+        ref: { id: ref.id, versionRange: ref.versionRange },
+        fromProvider: from,
+        toProvider: to,
+      });
+    }
+    return ok(undefined);
   }
 
   listProviders(id: CapabilityId): Provider[] {

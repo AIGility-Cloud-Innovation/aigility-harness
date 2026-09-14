@@ -139,8 +139,10 @@ export async function bootstrap(
     }
   }
 
-  // 4. Start the scheduler
+  // 4. Start the scheduler (装配的健康检查间隔 + autoHotSwap 决策开关)
   if (scheduler) {
+    scheduler.setPolicy({ intervalMs: kernelConfig.healthCheckIntervalMs });
+    scheduler.setAutoApply(kernelConfig.autoHotSwap);
     scheduler.start();
   }
 

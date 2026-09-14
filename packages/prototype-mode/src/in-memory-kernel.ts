@@ -42,6 +42,8 @@ import type { LayerPlugin } from "@aigility-harness/core";
 
 class InMemorySeamRegistry implements SeamRegistry {
   private providersByService = new Map<string, Provider[]>();
+  /** 故障转移绑定覆盖 (serviceId → pin 住的 provider 名) */
+  private preferred = new Map<string, string>();
   private listeners = new Set<(e: SeamRegistryEvent) => void>();
 
   async register<TReq, TRes>(
@@ -84,8 +86,37 @@ class InMemorySeamRegistry implements SeamRegistry {
     if (!list || list.length === 0) {
       return err(`No provider registered for capability ${ref.id}`);
     }
+    // 故障转移绑定优先 (scheduler.rebind pin 住的 provider); 不在册则回退默认
+    const preferredName = this.preferred.get(ref.id);
+    if (preferredName) {
+      const pinned = list.find((p) => p.name === preferredName);
+      if (pinned) return ok(pinned as Provider<TReq, TRes>);
+    }
     // 取第一个可用 provider（原型模式不做复杂版本协商）
     return ok(list[0] as Provider<TReq, TRes>);
+  }
+
+  async rebind(
+    ref: { id: string; versionRange: string },
+    preferredProvider: string | null,
+  ): Promise<Result<void>> {
+    const list = this.providersByService.get(ref.id) ?? [];
+    const from = this.preferred.get(ref.id) ?? list[0]?.name ?? "";
+    if (preferredProvider === null) {
+      this.preferred.delete(ref.id);
+    } else {
+      if (!list.some((p) => p.name === preferredProvider)) {
+        return err(`Provider ${preferredProvider} not registered for ${ref.id}`);
+      }
+      this.preferred.set(ref.id, preferredProvider);
+    }
+    const to = preferredProvider ?? list[0]?.name ?? "";
+    if (from !== to || preferredProvider === null) {
+      for (const cb of this.listeners) {
+        cb({ type: "rebound", ref: { id: ref.id, versionRange: ref.versionRange }, fromProvider: from, toProvider: to });
+      }
+    }
+    return ok(undefined);
   }
 
   listProviders(id: string): Provider[] {
