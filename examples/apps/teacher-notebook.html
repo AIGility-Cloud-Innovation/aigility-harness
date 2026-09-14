@@ -310,6 +310,12 @@ tbody tr:last-child td { border-bottom: none; }
         <button class="cloud-chip" id="cloudChip" onclick="openCloudModal()"><span class="dot"></span><span id="cloudText">未登录 · 点击登录</span></button>
         <h1>📚 班主任小本本</h1>
         <div class="sub">原生 AI 班级管理 —— 每一次观察，都沉淀为学生的成长记忆</div>
+        <div id="spaceBar" style="display:none;margin-top:14px;align-items:center;gap:10px;flex-wrap:wrap">
+            <span style="font-size:12.5px;color:rgba(255,255,255,.75)">我的班级</span>
+            <select id="spaceSelect" onchange="spaceSwitch(this.value)" style="border:none;border-radius:9px;padding:6px 10px;font-family:inherit;font-size:13px;background:rgba(255,255,255,.92);color:#1e293b;cursor:pointer"></select>
+            <button id="spaceRoleChip" style="display:none;border:none;border-radius:9px;padding:5px 11px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;background:rgba(255,255,255,.2);color:#fff"></button>
+            <button onclick="openSpaceManage()" style="border:none;border-radius:9px;padding:5px 11px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;background:rgba(255,255,255,.2);color:#fff">⚙ 班级管理</button>
+        </div>
         <div class="meta">
             <div><b id="mStudents">0</b>学生</div>
             <div><b id="mMemories">0</b>记忆条目</div>
@@ -331,7 +337,7 @@ tbody tr:last-child td { border-bottom: none; }
     <div id="view-roster" class="view active">
         <div class="card">
             <div class="toolbar">
-                <button class="btn btn-primary" onclick="openStudentModal()">＋ 添加学生</button>
+                <button class="btn btn-primary" data-owner-only onclick="openStudentModal()">＋ 添加学生</button>
                 <button class="btn btn-ghost" onclick="openImportModal()">📥 批量导入名册</button>
                 <div class="grow"><input id="studentSearch" placeholder="搜索姓名 / 学号…" style="width:100%" oninput="filterStudents()"></div>
             </div>
@@ -362,7 +368,7 @@ tbody tr:last-child td { border-bottom: none; }
         <div class="card">
             <div class="section-title">
                 <div><h2>🧠 记忆本</h2><div class="hint" style="margin:4px 0 0">日常行为 · 课堂纪律 · 考试成绩 · 交际事件 —— AI 自动结构化，随时抽取做画像分析</div></div>
-                <button class="btn btn-primary" onclick="openMemoryModal()">✨ AI 记一笔</button>
+                <button class="btn btn-primary" data-owner-only onclick="openMemoryModal()">✨ AI 记一笔</button>
             </div>
             <div class="toolbar" style="margin-bottom:14px">
                 <select id="memFilterStudent" style="flex:1;min-width:150px" onchange="renderMemories()"></select>
@@ -419,7 +425,7 @@ tbody tr:last-child td { border-bottom: none; }
 </div>
 
 <!-- 全局悬浮按钮: 记一笔 -->
-<button class="fab" onclick="openMemoryModal()" title="AI 记一笔">🧠<span>记一笔</span></button>
+<button class="fab" data-owner-only onclick="openMemoryModal()" title="AI 记一笔">🧠<span>记一笔</span></button>
 
 <!-- 学生模态框 -->
 <div class="modal" id="studentModal">
@@ -481,6 +487,14 @@ tbody tr:last-child td { border-bottom: none; }
     </div>
 </div>
 
+<!-- 班级管理模态框 (班主任: 建班/邀请任课老师; 任课: 查看班级信息) -->
+<div class="modal" id="spaceModal">
+    <div class="modal-box" style="max-width:560px">
+        <div class="modal-head"><h3>🏫 班级管理</h3><button class="modal-x" onclick="closeModal('spaceModal')">✕</button></div>
+        <div id="spaceManageBody">加载中…</div>
+    </div>
+</div>
+
 <!-- AI 记一笔模态框 -->
 <div class="modal" id="memoryModal">
     <div class="modal-box">
@@ -501,16 +515,17 @@ tbody tr:last-child td { border-bottom: none; }
 
 <script>
 // ═══════════════ 数据层 ═══════════════
+// localStorage 键按空间隔离 (见 saveLocal); KEYS 仅作未登录本地模式兜底
 const KEYS = {
     STUDENTS: 'teacherNotebook_students',
     ATTENDANCE: 'teacherNotebook_attendance',
     SCORES: 'teacherNotebook_scores',
     MEMORIES: 'teacherNotebook_memories'
 };
-let students  = JSON.parse(localStorage.getItem(KEYS.STUDENTS)  || '[]');
-let attendance = JSON.parse(localStorage.getItem(KEYS.ATTENDANCE) || '{}');
-let scores    = JSON.parse(localStorage.getItem(KEYS.SCORES)   || '[]');
-let memories  = JSON.parse(localStorage.getItem(KEYS.MEMORIES)  || '[]');
+let students  = [];
+let attendance = {};
+let scores    = [];
+let memories  = [];
 
 const CATS = {
     behavior:   { label: '日常行为', icon: '🌱' },
@@ -526,19 +541,30 @@ let pickedCat = 'behavior';
 let pickedSenti = 'neu';
 let profileStudentId = '';
 
-// ═══════════════ 云端同步 (AppBase PG 后端) ═══════════════
-// 四个集合各存为 /app/data/notebook 下的一行; localStorage 为离线缓存。
+// ═══════════════ 云端同步 (AppBase PG 后端 · 数据空间版) ═══════════════
+// 每个班级 = 一个数据空间 (space): 班主任=空间负责人(全权), 任课老师=成员(按角色策略:
+// 名册/记忆本只读, 考勤/积分可写)。四个集合各存为空间内独立表; localStorage 按空间隔离缓存。
 // API 基址用同源相对路径 (本页由 AppBase 伺服); 历史 localStorage 存的 127.0.0.1 一律视为过期忽略。
 const savedApiBase = localStorage.getItem('teacherNotebook_apiBase');
 const DATA_APP = 'teacher-notebook.html';
+const ROLE_POLICY = { roles: { teacher: {
+    readTables: ['students', 'attendance', 'scores', 'memories'],
+    writeTables: ['attendance', 'scores'],
+} } };
 const CLOUD = {
     base: (savedApiBase && !/127\.0\.0\.1|localhost/.test(savedApiBase)) ? savedApiBase : '',
     get user() { return localStorage.getItem('teacherNotebook_user') || ''; },
     set user(v) { v ? localStorage.setItem('teacherNotebook_user', v) : localStorage.removeItem('teacherNotebook_user'); },
-    get rowIds() { return JSON.parse(localStorage.getItem('teacherNotebook_rowIds') || '{}'); },
-    set rowIds(v) { localStorage.setItem('teacherNotebook_rowIds', JSON.stringify(v)); }
+    get spaceId() { return localStorage.getItem('teacherNotebook_space') || ''; },
+    set spaceId(v) { v ? localStorage.setItem('teacherNotebook_space', v) : localStorage.removeItem('teacherNotebook_space'); },
+    get rowIds() { return JSON.parse(localStorage.getItem('teacherNotebook_rowIds_' + (CLOUD.spaceId || 'x')) || '{}'); },
+    set rowIds(v) { localStorage.setItem('teacherNotebook_rowIds_' + (CLOUD.spaceId || 'x'), JSON.stringify(v)); }
 };
 const COLLECTIONS = ['students', 'attendance', 'scores', 'memories'];
+
+// 当前用户在当前空间的角色: 'owner'(班主任) | 'teacher'(任课) | null
+let mySpaceRole = null;
+const amOwner = () => mySpaceRole === 'owner';
 
 async function apiCall(method, path, body) {
     const resp = await fetch(CLOUD.base + path, {
@@ -551,10 +577,148 @@ async function apiCall(method, path, body) {
     return data;
 }
 
+// ── 空间生命周期 ──────────────────────────────────────────────
+
+async function spaceList() {
+    return (await apiCall('GET', '/app/spaces?app=' + encodeURIComponent(DATA_APP))).spaces || [];
+}
+
+async function spaceCreate(name) {
+    const sp = await apiCall('POST', '/app/spaces', { app: DATA_APP, name, rolePolicy: ROLE_POLICY });
+    CLOUD.spaceId = sp.id;
+    mySpaceRole = 'owner';
+    return sp;
+}
+
+/** 当前空间详情 (含成员表); 刷新 mySpaceRole */
+async function spaceRefresh() {
+    if (!CLOUD.spaceId) return null;
+    try {
+        const d = await apiCall('GET', '/app/spaces/' + encodeURIComponent(CLOUD.spaceId));
+        mySpaceRole = d.my_role;
+        return d;
+    } catch (e) {
+        CLOUD.spaceId = '';
+        mySpaceRole = null;
+        return null;
+    }
+}
+
+/** 空间数据 API: /app/data/<table>?space=<id> */
+const dataUrl = (table) => '/app/data/' + table + '?space=' + encodeURIComponent(CLOUD.spaceId);
+
 function cloudRenderChip(state, text) {
     const chip = document.getElementById('cloudChip');
     document.getElementById('cloudText').textContent = text;
     chip.classList.toggle('ok', state === 'ok');
+}
+
+/** hero 班级条: 下拉切换 + 我在当前班的角色徽章 */
+async function renderSpaceBar() {
+    const bar = document.getElementById('spaceBar');
+    if (!CLOUD.user) { bar.style.display = 'none'; return; }
+    try {
+        const spaces = await spaceList();
+        const sel = document.getElementById('spaceSelect');
+        sel.innerHTML = spaces.map(s => `<option value="${s.id}" ${s.id === CLOUD.spaceId ? 'selected' : ''}>${esc(s.name)}${s.archived ? ' (已归档)' : ''}</option>`).join('');
+        const roleChip = document.getElementById('spaceRoleChip');
+        roleChip.style.display = '';
+        roleChip.textContent = amOwner() ? '👑 班主任' : '🎓 任课老师';
+        bar.style.display = 'flex';
+    } catch (e) {
+        bar.style.display = 'none';
+    }
+    applyRoleUI();
+}
+
+/** 班级管理弹窗: owner 可建班/邀请任课老师(带科目)/移除; member 只读成员表 */
+async function openSpaceManage() {
+    document.getElementById('spaceModal').classList.add('show');
+    await renderSpaceManage();
+}
+
+async function renderSpaceManage() {
+    const box = document.getElementById('spaceManageBody');
+    if (!CLOUD.spaceId) { box.innerHTML = '<div class="hint">尚未加入任何班级</div>'; return; }
+    let d;
+    try {
+        d = await apiCall('GET', '/app/spaces/' + encodeURIComponent(CLOUD.spaceId));
+    } catch (e) {
+        box.innerHTML = '<div class="hint">加载失败: ' + esc(e.message) + '</div>';
+        return;
+    }
+    mySpaceRole = d.my_role;
+    const owner = amOwner();
+    const memberRows = d.members.map(m => `
+        <tr>
+            <td>${esc(m.email)}</td>
+            <td>${esc((m.meta && m.meta.subject) || '-')}</td>
+            <td><span class="tag">${m.role === 'teacher' ? '任课老师' : esc(m.role)}</span></td>
+            <td>${owner ? `<button class="btn btn-sm btn-danger-soft" onclick="spaceRemoveMember('${m.user_id}')">移除</button>` : ''}</td>
+        </tr>`).join('');
+    box.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <b style="font-size:15px">${esc(d.space.name)}</b>
+            <span class="tag">${owner ? '我是班主任 👑' : '我是任课老师 🎓'}</span>
+            <span class="hint" style="flex:1">负责人: ${esc(d.owner.email)}</span>
+        </div>
+        ${owner ? `
+        <div style="margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:12px">
+            <div style="font-size:13px;font-weight:600;margin-bottom:8px">邀请任课老师（平台账号邮箱）</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <input id="invEmail" placeholder="teacher@school.cn" style="flex:1;min-width:170px">
+                <input id="invSubject" placeholder="任教科目, 如: 数学" style="width:150px">
+                <button class="btn btn-primary btn-sm" onclick="spaceInvite()">邀请</button>
+            </div>
+            <div class="hint" style="margin-top:6px">任课老师可记考勤/积分; 学生名册与成长记忆为只读</div>
+        </div>
+        <div style="margin-top:12px;padding:14px;border:1px solid var(--line);border-radius:12px">
+            <div style="font-size:13px;font-weight:600;margin-bottom:8px">新建班级（我当班主任）</div>
+            <div style="display:flex;gap:8px">
+                <input id="newClassName" placeholder="如: 三年级二班" style="flex:1">
+                <button class="btn btn-primary btn-sm" onclick="spaceCreateFromModal()">创建</button>
+            </div>
+        </div>` : ''}
+        <div style="margin-top:14px">
+            <div style="font-size:13px;font-weight:600;margin-bottom:6px">任课老师（${d.members.length}）</div>
+            <table style="width:100%;border-collapse:collapse;font-size:13px">
+                <thead><tr style="text-align:left;color:var(--ink-3)">
+                    <th style="padding:6px 8px">账号</th><th style="padding:6px 8px">科目</th><th style="padding:6px 8px">角色</th><th style="padding:6px 8px"></th>
+                </tr></thead>
+                <tbody>${memberRows || `<tr><td colspan="4" class="hint" style="padding:10px 8px">暂无任课老师</td></tr>`}</tbody>
+            </table>
+        </div>`;
+}
+
+async function spaceInvite() {
+    const email = document.getElementById('invEmail').value.trim();
+    const subject = document.getElementById('invSubject').value.trim();
+    if (!email) { alert('请填写老师邮箱'); return; }
+    try {
+        await apiCall('POST', '/app/spaces/' + encodeURIComponent(CLOUD.spaceId) + '/members',
+            { email, role: 'teacher', meta: subject ? { subject } : {} });
+        renderSpaceManage();
+    } catch (e) { alert('邀请失败: ' + e.message); }
+}
+
+async function spaceRemoveMember(uid) {
+    if (!confirm('确定移除该任课老师?')) return;
+    try {
+        await apiCall('DELETE', '/app/spaces/' + encodeURIComponent(CLOUD.spaceId) + '/members/' + encodeURIComponent(uid));
+        renderSpaceManage();
+    } catch (e) { alert('移除失败: ' + e.message); }
+}
+
+async function spaceCreateFromModal() {
+    const name = document.getElementById('newClassName').value.trim();
+    if (!name) { alert('请填写班级名'); return; }
+    try {
+        await spaceCreate(name);
+        closeModal('spaceModal');
+        students = []; attendance = {}; scores = []; memories = [];
+        saveLocal(); renderAll(); switchView('roster');
+        renderSpaceBar();
+    } catch (e) { alert('创建失败: ' + e.message); }
 }
 
 const TEACHER_KEY = 'teacherNotebook_teacher';
@@ -577,11 +741,12 @@ function cloudRefreshUI() {
         document.getElementById('cloudForm').style.display = 'none';
         document.getElementById('cloudActions').style.display = 'block';
         document.getElementById('cloudInfo').innerHTML =
-            `已登录 <b>${esc(CLOUD.user)}</b> · 数据实时保存到云端 PostgreSQL，同应用授权成员共享，换设备登录即可恢复。`;
+            `已登录 <b>${esc(CLOUD.user)}</b> · 数据实时保存到云端 PostgreSQL。班级内共享：班主任全权，任课老师可记考勤/积分（名册与成长记忆只读），换设备登录即可恢复。`;
         if (document.getElementById('teacherName')) {
             document.getElementById('teacherName').value = t.name || '';
             document.getElementById('teacherSubject').value = t.subject || '';
         }
+        renderSpaceBar();
     } else {
         cloudRenderChip('off', '☁ 未登录 · 去大厅登录');
         document.getElementById('cloudForm').style.display = 'block';
@@ -602,18 +767,48 @@ async function cloudIdentify() {
         if (!resp.ok) throw new Error('未登录');
         const d = await resp.json();
         CLOUD.user = d.user.email;
+        await spaceInit();
         cloudRefreshUI();
-        const rows = await apiCall('GET', '/app/data/notebook?app=' + DATA_APP);
-        if (rows.rows.length) {
-            await cloudPull();
-        } else {
-            await cloudPush();
-        }
         loadAppEnv();
     } catch (e) {
         CLOUD.user = '';
         cloudRefreshUI();
     }
+}
+
+/** 空间初始化: 取我的班级清单, 恢复上次班级或选第一个, 拉数据 */
+async function spaceInit() {
+    let spaces = await spaceList();
+    if (spaces.length === 0) {
+        // 独立打开(未经迁移)且无班级 → 建默认班级
+        try {
+            await spaceCreate('我的班级');
+            spaces = await spaceList();
+        } catch (e) {
+            // 应用成员身份缺失等 → 保持本地模式
+            console.warn('space create failed:', e.message);
+            return;
+        }
+    }
+    const saved = CLOUD.spaceId;
+    const cur = spaces.find(s => s.id === saved) || spaces[0];
+    CLOUD.spaceId = cur.id;
+    await spaceRefresh();
+    await cloudPull();
+    renderSpaceBar();
+}
+
+/** 切换班级: 清运行态 → 拉新空间数据 */
+async function spaceSwitch(id) {
+    if (id === CLOUD.spaceId) return;
+    CLOUD.spaceId = id;
+    students = []; attendance = {}; scores = []; memories = [];
+    saveLocal();
+    await spaceRefresh();
+    await cloudPull();
+    renderSpaceBar();
+    renderAll();
+    switchView('roster');
 }
 
 async function cloudLogout() {
@@ -622,35 +817,42 @@ async function cloudLogout() {
 }
 
 async function cloudPull() {
-    const data = await apiCall('GET', '/app/data/notebook?app=' + DATA_APP);
+    if (!CLOUD.spaceId) return;
     const rowIds = {};
-    for (const row of data.rows) {
-        const key = row.data.collection;
-        if (!COLLECTIONS.includes(key)) continue;
-        rowIds[key] = row.id;
-        const val = row.data.payload;
-        // 空负载 (云端行存在但无数据) 不覆盖本地, 稍后本地数据会推送上去
-        if (val === null || val === undefined || (Array.isArray(val) && !val.length) ||
-            (typeof val === 'object' && !Array.isArray(val) && !Object.keys(val).length)) continue;
-        if (key === 'students') students = Array.isArray(val) ? val : [];
-        else if (key === 'attendance') attendance = val && typeof val === 'object' ? val : {};
-        else if (key === 'scores') scores = Array.isArray(val) ? val : [];
-        else if (key === 'memories') memories = Array.isArray(val) ? val : [];
+    for (const key of COLLECTIONS) {
+        try {
+            const data = await apiCall('GET', dataUrl(key));
+            const row = data.rows && data.rows[0];
+            if (!row) continue;
+            rowIds[key] = row.id;
+            const val = row.data && row.data.payload;
+            // 空负载 (云端行存在但无数据) 不覆盖本地, 稍后本地数据会推送上去
+            if (val === null || val === undefined || (Array.isArray(val) && !val.length) ||
+                (typeof val === 'object' && !Array.isArray(val) && !Object.keys(val).length)) continue;
+            if (key === 'students') students = Array.isArray(val) ? val : [];
+            else if (key === 'attendance') attendance = val && typeof val === 'object' ? val : {};
+            else if (key === 'scores') scores = Array.isArray(val) ? val : [];
+            else if (key === 'memories') memories = Array.isArray(val) ? val : [];
+        } catch (e) {
+            console.warn('cloud pull failed:', key, e.message);
+        }
     }
     CLOUD.rowIds = rowIds;
     saveLocal(); renderAll();
 }
 
 async function cloudPush() {
-    if (!CLOUD.user) return;
+    if (!CLOUD.user || !CLOUD.spaceId) return;
     const rowIds = CLOUD.rowIds;
     for (const key of COLLECTIONS) {
+        // 任课老师只推自己有写权限的表 (服务端同样强制, 这里避免无谓 403)
+        if (!amOwner() && !ROLE_POLICY.roles.teacher.writeTables.includes(key)) continue;
         const payload = key === 'attendance' ? attendance : ({ students, scores, memories })[key];
-        const body = { data: { collection: key, payload } };
+        const body = { data: { payload } };
         try {
-            if (rowIds[key]) await apiCall('PUT', '/app/data/notebook/' + rowIds[key] + '?app=' + DATA_APP, body);
+            if (rowIds[key]) await apiCall('PUT', '/app/data/' + key + '/' + rowIds[key] + '?space=' + encodeURIComponent(CLOUD.spaceId), body);
             else {
-                const created = await apiCall('POST', '/app/data/notebook?app=' + DATA_APP, body);
+                const created = await apiCall('POST', dataUrl(key), body);
                 rowIds[key] = created.id;
             }
         } catch (e) {
@@ -664,10 +866,11 @@ async function cloudPush() {
 
 
 function saveLocal() {
-    localStorage.setItem(KEYS.STUDENTS, JSON.stringify(students));
-    localStorage.setItem(KEYS.ATTENDANCE, JSON.stringify(attendance));
-    localStorage.setItem(KEYS.SCORES, JSON.stringify(scores));
-    localStorage.setItem(KEYS.MEMORIES, JSON.stringify(memories));
+    const suffix = CLOUD.spaceId ? '_' + CLOUD.spaceId : '';
+    localStorage.setItem('teacherNotebook_students' + suffix, JSON.stringify(students));
+    localStorage.setItem('teacherNotebook_attendance' + suffix, JSON.stringify(attendance));
+    localStorage.setItem('teacherNotebook_scores' + suffix, JSON.stringify(scores));
+    localStorage.setItem('teacherNotebook_memories' + suffix, JSON.stringify(memories));
     renderHeroStats();
 }
 
@@ -684,6 +887,14 @@ const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
 const studentById = id => students.find(s => s.id === id);
 
 // ═══════════════ 导航 ═══════════════
+/** 任课老师收口: 名册编辑/记忆本增删/批量导入入口隐藏 (服务端同时强制表级权限) */
+function applyRoleUI() {
+    const editable = amOwner() || !CLOUD.user;
+    document.querySelectorAll('[data-owner-only]').forEach(el => {
+        el.style.display = editable ? '' : 'none';
+    });
+}
+
 function switchView(id, btn) {
     btn = btn || document.querySelector(`.nav button[data-view="${id}"]`);
     document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
@@ -699,6 +910,7 @@ function switchView(id, btn) {
     if (id === 'scores') renderScoreList();
     if (id === 'attendance') loadAttendance();
     if (id === 'roster') renderStudentList();
+    applyRoleUI(); // 渲染动态生成 owner-only 按钮, 每次切视图后重收口
 }
 
 function renderHeroStats() {
@@ -732,8 +944,8 @@ function renderStudentList() {
             <td><span class="tag">${memCount} 条</span></td>
             <td>
                 <button class="btn btn-ghost btn-sm" onclick="viewProfile('${st.id}')">画像</button>
-                <button class="btn btn-ghost btn-sm" onclick="editStudent('${st.id}')">编辑</button>
-                <button class="btn btn-danger-soft btn-sm" onclick="deleteStudent('${st.id}')">删除</button>
+                <button class="btn btn-ghost btn-sm" data-owner-only onclick="editStudent('${st.id}')">编辑</button>
+                <button class="btn btn-danger-soft btn-sm" data-owner-only onclick="deleteStudent('${st.id}')">删除</button>
             </td>`;
         tbody.appendChild(tr);
     });
@@ -1034,7 +1246,7 @@ function renderMemories() {
                 ${sentiBadge}
                 <span class="date">${esc(st ? st.name : m.studentName || '')} · ${esc(m.date)}</span>
                 <span style="flex:1"></span>
-                <button class="btn btn-danger-soft btn-sm" onclick="deleteMemory('${m.id}')">删除</button>
+                <button class="btn btn-danger-soft btn-sm" data-owner-only onclick="deleteMemory('${m.id}')">删除</button>
             </div>
             ${m.content ? `<div class="body">${esc(m.content)}</div>` : ''}
             ${m.tags.length ? `<div style="margin-top:6px">${m.tags.map(t => `<span class="tag">#${esc(t)}</span>`).join('')}</div>` : ''}
@@ -1132,7 +1344,7 @@ function renderProfile() {
                     <span>积极/消极 <b style="color:var(--green)">${posN}</b>/<b style="color:var(--rose)">${negN}</b></span>
                 </div>
             </div>
-            <button class="btn btn-primary" onclick="openMemoryModal('${st.id}')">＋ 为 TA AI 记一笔</button>
+            <button class="btn btn-primary" data-owner-only onclick="openMemoryModal('${st.id}')">＋ 为 TA AI 记一笔</button>
         </div>
 
         <div class="dim" style="margin-top:6px">

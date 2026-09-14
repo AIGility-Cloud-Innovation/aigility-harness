@@ -112,6 +112,27 @@ async function ensureSchema(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_app_rows_table ON app_rows(table_id);
+    -- 数据空间 (通用协作单元): 一个班/一个项目组 = 一个空间。
+    -- owner = 班主任/项目负责人; 成员角色与业务属性由应用自定义 (role + meta JSONB),
+    -- 角色的表级读写策略由建空间时的 role_policy 声明 (null = 成员全权, 与 ?app= 语义一致)。
+    CREATE TABLE IF NOT EXISTS app_spaces (
+      id          TEXT PRIMARY KEY,
+      app_id      TEXT NOT NULL,
+      name        TEXT NOT NULL,
+      owner_id    TEXT NOT NULL,
+      role_policy JSONB,
+      archived    BOOLEAN NOT NULL DEFAULT false,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_app_spaces_app ON app_spaces(app_id);
+    CREATE TABLE IF NOT EXISTS app_space_members (
+      space_id   TEXT NOT NULL REFERENCES app_spaces(id) ON DELETE CASCADE,
+      user_id    TEXT NOT NULL,
+      role       TEXT NOT NULL DEFAULT 'member',
+      meta       JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (space_id, user_id)
+    );
     CREATE TABLE IF NOT EXISTS classes (
       code       TEXT PRIMARY KEY,
       name       TEXT NOT NULL,
@@ -786,6 +807,146 @@ export async function appBackendHandler(
       }
     }
 
+    // ── 数据空间 (通用协作单元: 班级/项目组等同构; owner=负责人, 成员角色应用自定义) ──
+    if (!userId) return json(res, 401, { error: "未授权: 需要 Bearer token" });
+    if (path === "/app/spaces" && method === "POST") {
+      const body = await readBody(req);
+      const appId = String(body.app ?? "").trim();
+      const name = String(body.name ?? "").trim();
+      if (!appId || !name) return json(res, 400, { error: "app 与 name 必填" });
+      const { rows: appRow } = await pool.query("SELECT owner_id FROM apps WHERE id = $1", [appId]);
+      if (appRow.length === 0) return json(res, 404, { error: "应用不存在: " + appId });
+      const isOwner = appRow[0].owner_id === userId;
+      const isMember = isOwner
+        ? true
+        : (await pool.query("SELECT 1 FROM app_members WHERE app_id = $1 AND user_id = $2", [appId, userId])).rowCount! > 0;
+      if (!isOwner && !isMember && !(await isAdminUser(userId))) {
+        return json(res, 403, { error: "只有应用成员可以创建空间" });
+      }
+      const id = randomUUID();
+      await pool.query(
+        "INSERT INTO app_spaces (id, app_id, name, owner_id, role_policy) VALUES ($1,$2,$3,$4,$5)",
+        [id, appId, name, userId, body.rolePolicy ? JSON.stringify(body.rolePolicy) : null],
+      );
+      void writeAudit(await emailOf(userId), "space.create", appId, name);
+      return json(res, 201, { id, name, my_role: "owner" });
+    }
+
+    if (path === "/app/spaces" && method === "GET") {
+      // 我的空间: 我是 owner 或成员 (含我的角色/业务属性), 供应用做空间切换
+      const appId = new URL(req.url ?? "/", "http://x").searchParams.get("app") ?? "";
+      const { rows } = await pool.query(
+        `SELECT s.id, s.app_id, s.name, s.archived, s.created_at,
+                (s.owner_id = $1) AS is_owner,
+                CASE WHEN s.owner_id = $1 THEN 'owner' ELSE m.role END AS my_role,
+                CASE WHEN s.owner_id = $1 THEN '{}'::jsonb ELSE m.meta END AS my_meta,
+                (SELECT count(*)::int FROM app_space_members x WHERE x.space_id = s.id) AS member_count
+         FROM app_spaces s
+         LEFT JOIN app_space_members m ON m.space_id = s.id AND m.user_id = $1
+         WHERE s.owner_id = $1 OR m.user_id = $1
+         ORDER BY s.created_at ASC`,
+        [userId],
+      );
+      return json(res, 200, { spaces: appId ? rows.filter((r) => r.app_id === appId) : rows });
+    }
+
+    const spaceMatch = path.match(/^\/app\/spaces\/([^/]+)$/);
+    if (spaceMatch) {
+      const spaceId = decodeURIComponent(spaceMatch[1]);
+      const { rows: sp } = await pool.query("SELECT * FROM app_spaces WHERE id = $1", [spaceId]);
+      if (sp.length === 0) return json(res, 404, { error: "空间不存在" });
+      const space = sp[0];
+      const isSpaceOwner = space.owner_id === userId;
+      const isMember = !isSpaceOwner
+        ? (await pool.query("SELECT 1 FROM app_space_members WHERE space_id = $1 AND user_id = $2", [spaceId, userId])).rowCount! > 0
+        : false;
+      const admin = await isAdminUser(userId);
+
+      if (method === "GET") {
+        if (!isSpaceOwner && !isMember && !admin) return json(res, 403, { error: "不是该空间的成员" });
+        const { rows: members } = await pool.query(
+          `SELECT m.user_id, m.role, m.meta, m.created_at, u.email
+           FROM app_space_members m JOIN users u ON u.id = m.user_id
+           WHERE m.space_id = $1 ORDER BY m.created_at ASC`,
+          [spaceId],
+        );
+        const { rows: ownerRow } = await pool.query("SELECT email FROM users WHERE id = $1", [space.owner_id]);
+        return json(res, 200, {
+          space: { id: space.id, app_id: space.app_id, name: space.name, archived: space.archived, role_policy: space.role_policy },
+          owner: { user_id: space.owner_id, email: ownerRow[0]?.email ?? "" },
+          my_role: isSpaceOwner ? "owner" : (members.find((m) => m.user_id === userId)?.role ?? null),
+          members,
+        });
+      }
+      if (method === "PATCH") {
+        if (!isSpaceOwner && !admin) return json(res, 403, { error: "仅空间负责人可修改" });
+        const body = await readBody(req);
+        const name = body.name !== undefined ? String(body.name).trim() : null;
+        const archived = body.archived !== undefined ? Boolean(body.archived) : null;
+        if (name !== null || archived !== null) {
+          await pool.query(
+            "UPDATE app_spaces SET name = COALESCE($2, name), archived = COALESCE($3, archived) WHERE id = $1",
+            [spaceId, name, archived],
+          );
+        }
+        return json(res, 200, { ok: true });
+      }
+      if (method === "DELETE") {
+        if (!isSpaceOwner && !admin) return json(res, 403, { error: "仅空间负责人可删除" });
+        // 空间数据 (app_tables/app_rows 挂 space:<id>) 一并清理
+        await pool.query("DELETE FROM app_rows WHERE owner_id = $1", ["space:" + spaceId]);
+        await pool.query("DELETE FROM app_tables WHERE owner_id = $1", ["space:" + spaceId]);
+        await pool.query("DELETE FROM app_space_members WHERE space_id = $1", [spaceId]);
+        await pool.query("DELETE FROM app_spaces WHERE id = $1", [spaceId]);
+        void writeAudit(await emailOf(userId), "space.delete", space.app_id, space.name);
+        return json(res, 200, { ok: true });
+      }
+    }
+
+    const spaceMemberMatch = path.match(/^\/app\/spaces\/([^/]+)\/members(?:\/([^/]+))?$/);
+    if (spaceMemberMatch) {
+      const spaceId = decodeURIComponent(spaceMemberMatch[1]);
+      const { rows: sp } = await pool.query("SELECT * FROM app_spaces WHERE id = $1", [spaceId]);
+      if (sp.length === 0) return json(res, 404, { error: "空间不存在" });
+      const isSpaceOwner = sp[0].owner_id === userId;
+      if (!isSpaceOwner && !(await isAdminUser(userId))) {
+        return json(res, 403, { error: "仅空间负责人可管理成员" });
+      }
+      const memberUid = spaceMemberMatch[2] ? decodeURIComponent(spaceMemberMatch[2]) : null;
+
+      if (method === "POST" && !memberUid) {
+        const body = await readBody(req);
+        const email = String(body.email ?? "").trim().toLowerCase();
+        const role = String(body.role ?? "member").trim() || "member";
+        if (!email) return json(res, 400, { error: "email 必填" });
+        const { rows: u } = await pool.query("SELECT id FROM users WHERE email = $1", [email]);
+        if (u.length === 0) return json(res, 404, { error: "用户未注册: " + email });
+        if (u[0].id === sp[0].owner_id) return json(res, 409, { error: "该用户已是空间负责人" });
+        await pool.query(
+          `INSERT INTO app_space_members (space_id, user_id, role, meta)
+           VALUES ($1,$2,$3,$4)
+           ON CONFLICT (space_id, user_id) DO UPDATE SET role = $3, meta = $4`,
+          [spaceId, u[0].id, role, body.meta ? JSON.stringify(body.meta) : "{}"],
+        );
+        void writeAudit(await emailOf(userId), "space.member.add", email, role);
+        return json(res, 201, { ok: true });
+      }
+
+      if (method === "PATCH" && memberUid) {
+        const body = await readBody(req);
+        await pool.query(
+          "UPDATE app_space_members SET role = COALESCE($3, role), meta = COALESCE($4, meta) WHERE space_id = $1 AND user_id = $2",
+          [spaceId, memberUid, body.role ?? null, body.meta ? JSON.stringify(body.meta) : null],
+        );
+        return json(res, 200, { ok: true });
+      }
+
+      if (method === "DELETE" && memberUid) {
+        await pool.query("DELETE FROM app_space_members WHERE space_id = $1 AND user_id = $2", [spaceId, memberUid]);
+        return json(res, 200, { ok: true });
+      }
+    }
+
     // ── 应用数据 (账号统一改造: 数据归属应用虚拟 owner `app:<appId>`, 授权成员共享读写) ──
     const dataMatch = path.match(/^\/app\/data\/([^/]+)(?:\/([^/]+))?$/);
     if (dataMatch) {
@@ -795,11 +956,46 @@ export async function appBackendHandler(
       const dataUid = pageUserId(req) ?? userId;
       if (!dataUid) return json(res, 401, { error: "未授权: 请先登录" });
 
+      const dq = new URL(req.url ?? "/", "http://x");
       // 应用归属: 带 ?app=<appId> 的请求 → 数据挂 `app:<appId>` (成员共享, 参照 class: 虚拟 owner 先例);
-      // 未带 app → 按用户隔离 (兼容班级等旧链路)
-      const dataAppId = String(new URL(req.url ?? "/", "http://x").searchParams.get("app") ?? "");
+      // 带 ?space=<spaceId> → 数据挂 `space:<id>` (数据空间: 班主任/负责人全权, 成员按 role_policy);
+      // 都不带 → 按用户隔离 (兼容旧链路)
+      const dataAppId = String(dq.searchParams.get("app") ?? "");
+      const dataSpaceId = String(dq.searchParams.get("space") ?? "");
       let dataOwner: string;
-      if (dataAppId) {
+      if (dataSpaceId) {
+        const { rows: sp } = await pool.query(
+          "SELECT owner_id, role_policy, archived FROM app_spaces WHERE id = $1",
+          [dataSpaceId],
+        );
+        if (sp.length === 0) return json(res, 404, { error: "空间不存在" });
+        let myRole: string | null = sp[0].owner_id === dataUid ? "owner" : null;
+        if (!myRole) {
+          const m = await pool.query(
+            "SELECT role FROM app_space_members WHERE space_id = $1 AND user_id = $2",
+            [dataSpaceId, dataUid],
+          );
+          myRole = m.rows[0]?.role ?? null;
+        }
+        if (!myRole && !(await isAdminUser(dataUid))) {
+          return json(res, 403, { error: "你不是该空间的成员, 请联系负责人添加" });
+        }
+        if (sp[0].archived && method !== "GET") {
+          return json(res, 403, { error: "空间已归档, 只读" });
+        }
+        // 角色策略 (owner 旁路): roles.<role>.readTables/writeTables, "*" 通配;
+        // 未声明策略 → 成员全权 (与 ?app= 成员语义一致)
+        if (myRole && myRole !== "owner" && sp[0].role_policy?.roles) {
+          const rule = sp[0].role_policy.roles[myRole];
+          const isRead = method === "GET";
+          if (!rule) return json(res, 403, { error: `角色 ${myRole} 未定义访问策略` });
+          const list: string[] = isRead ? (rule.readTables ?? []) : (rule.writeTables ?? []);
+          if (!list.includes("*") && !list.includes(tableName)) {
+            return json(res, 403, { error: `角色 ${myRole} 无权${isRead ? "读取" : "写入"} ${tableName}` });
+          }
+        }
+        dataOwner = "space:" + dataSpaceId;
+      } else if (dataAppId) {
         // 应用访问权: owner ∪ 成员 ∪ 管理员
         const { rows: appRow } = await pool.query("SELECT owner_id FROM apps WHERE id = $1", [dataAppId]);
         if (appRow.length === 0) return json(res, 404, { error: "应用不存在: " + dataAppId });
@@ -972,6 +1168,49 @@ export async function initAppBackend(): Promise<void> {
     console.log("[migrate] 应用数据归属已迁移至 app:<appId> 虚拟 owner");
   } catch (e) {
     console.error("[migrate] 应用数据归属迁移失败(忽略):", e);
+  }
+
+  // 数据空间迁移 (2026-09-14): teacher-notebook 的共享 notebook 单表四集合行,
+  // 迁入默认空间 "我的班级" (owner = 应用创建者), 并按集合拆成四张表。
+  // 幂等: 应用已存在任何空间则跳过; 旧 app: 数据保留作回滚备份。
+  try {
+    const { rows: nbApps } = await pool.query(
+      "SELECT id, owner_id FROM apps WHERE id = 'teacher-notebook.html'");
+    for (const app of nbApps) {
+      const { rows: ex } = await pool.query("SELECT id FROM app_spaces WHERE app_id = $1", [app.id]);
+      if (ex.length > 0) continue;
+      const oldOwner = "app:" + app.id;
+      const spaceId = randomUUID();
+      await pool.query(
+        "INSERT INTO app_spaces (id, app_id, name, owner_id, role_policy) VALUES ($1,$2,$3,$4,$5)",
+        [spaceId, app.id, "我的班级", app.owner_id,
+         JSON.stringify({ roles: { teacher: {
+           readTables: ["students", "attendance", "scores", "memories"],
+           writeTables: ["attendance", "scores"],
+         } } })],
+      );
+      const newOwner = "space:" + spaceId;
+      for (const col of ["students", "attendance", "scores", "memories"]) {
+        const tblId = randomUUID();
+        await pool.query(
+          "INSERT INTO app_tables (id, owner_id, table_name) VALUES ($1,$2,$3) ON CONFLICT (owner_id, table_name) DO NOTHING",
+          [tblId, newOwner, col]);
+        await pool.query(
+          `INSERT INTO app_rows (id, table_id, owner_id, data)
+           SELECT gen_random_uuid()::text, $1, $2,
+                  jsonb_build_object('payload', r.data->'payload')
+           FROM app_rows r JOIN app_tables t ON r.table_id = t.id
+           WHERE t.owner_id = $3 AND t.table_name = 'notebook'
+             AND r.data->>'collection' = $4
+             AND r.data ? 'payload'
+             AND NOT EXISTS (SELECT 1 FROM app_rows x JOIN app_tables xt ON x.table_id = xt.id
+                             WHERE xt.owner_id = $2 AND xt.table_name = $4)`,
+          [tblId, newOwner, oldOwner, col]);
+      }
+      console.log("[migrate] teacher-notebook 共享数据已迁入默认数据空间 (我的班级)");
+    }
+  } catch (e) {
+    console.error("[migrate] 数据空间迁移失败(忽略):", e);
   }
 
   // 数据转发目标种子: 全局 APPBASE_RELAY_TARGETS 里的目标写入对应应用 .env (用户可在管理抽屉改)
