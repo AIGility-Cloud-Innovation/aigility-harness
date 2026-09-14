@@ -90,6 +90,14 @@ export type {
 } from "./layer-plugin.js";
 export { LAYER_DESCRIPTORS } from "./layer-plugin.js";
 
+// ── HarnessInterop（家族中立能力底座契约, harness 可替换） ────────
+export type {
+  CapabilityDescriptor,
+  CapabilityMountResult,
+  HarnessVersionInfo,
+  HarnessInterop,
+} from "./harness-interop.js";
+
 // ── Bootstrap ─────────────────────────────────────────────────────
 export type { BootstrapConfig } from "./bootstrap.js";
 export { bootstrap, shutdown } from "./bootstrap.js";

@@ -2,12 +2,12 @@
  * @action/codex-agent — 编码代理行动能力（骨架，验证可行性）
  *
  * 通过 `codex exec --json` 子进程协议驱动 Codex CLI，
- * 把「编码代理任务」作为行动层的一等能力暴露给上层（D5 工人：领活 → 执行 → 交产出）。
+ * 把「编码代理任务」作为行动层的一等能力暴露给上层（D3 工人：领活 → 执行 → 交产出）。
  *
  * 薄适配原则：不复刻 Codex app-server 的原始 JSON-RPC 帧协议，
  * 只消费 CLI 的 JSONL 事件流 —— 与官方 @openai/codex-sdk 同一路径。
  *
- * 落位：D5 行动执行层（编码工人, spawn CLI 子进程产生真实副作用）。
+ * 落位：D3 行动执行层（编码工人, spawn CLI 子进程产生真实副作用）。
  *
  * JSONL 事件流契约（每行一个 JSON 对象，已验证）：
  *   {"type":"thread.started","thread_id":"01a02c17-..."}
