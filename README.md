@@ -25,28 +25,28 @@
 │║   KernelAdapter / Seam Registry / Event Bus / Carrier            ║    │
 │╠══════════════════════════════════════════════════════════════════╣    │
 │║  ┌──────────────────────────────────────────────────────────────┐║    │
-│║  │D5 行动执行层 (layer-action) — 手脚                           │║    │
-│║  │   @action/codex-agent/zcode-agent/claude-agent 编码工人      │║    │
-│║  │   @action/text-to-speech · 工具执行 / 多渠道输出             │║    │
+│║  │D5 角色人格层 (layer-persona) — 与用户直接交互                │║    │
+│║  │   sales-chat / repair-chat / app-dev / coding-coach          │║    │
+│║  │   plugin-helper / advisory-chat / harness-guide / timem-*    │║    │
 │║  └──────────────────────────────────────────────────────────────┘║    │
-│║        │ 依赖 D4 + D1                                            ║    │
+│║        │ 依赖 D4 + D2 + D1                                       ║    │
 │║        ▼                                                         ║    │
 │║  ┌──────────────────────────────────────────────────────────────┐║    │
 │║  │D4 编排规划层 (layer-orchestration) — 小脑                    │║    │
 │║  │   @orchestration/workflow-engine · 任务规划/引导设计          │║    │
 │║  │   timem-project-task(需求缓冲延时汇总) · guided-design       │║    │
 │║  └──────────────────────────────────────────────────────────────┘║    │
-│║        │ 依赖 D2 + D1（D3 与 D4 平级，互不依赖）                 ║    │
+│║        │ 依赖 D3 + D2 + D1                                       ║    │
 │║        ▼                                                         ║    │
 │║  ┌──────────────────────────────────────────────────────────────┐║    │
-│║  │D3 角色人格层 (layer-persona)                                 │║    │
-│║  │   sales-chat / repair-chat / app-dev / coding-coach          │║    │
-│║  │   plugin-helper / advisory-chat / harness-guide / timem-*    │║    │
+│║  │D3 行动执行层 (layer-action) — 手脚                           │║    │
+│║  │   @action/codex-agent/zcode-agent/claude-agent 编码工人      │║    │
+│║  │   @action/text-to-speech · 工具执行 / 多渠道输出             │║    │
 │║  └──────────────────────────────────────────────────────────────┘║    │
-│║        │ 依赖 D2 + D1                                            ║    │
+│║        │ 依赖 D1                                                 ║    │
 │║        ▼                                                         ║    │
 │║  ┌──────────────────────────────────────────────────────────────┐║    │
-│║  │D2 认知算力层 (layer-cognitive) — 电站，D3/D4 共同依赖        │║    │
+│║  │D2 认知算力层 (layer-cognitive) — 电站，D4/D5 共同依赖        │║    │
 │║  │   @cognitive/llm-inference · @cognitive/memory               │║    │
 │║  └──────────────────────────────────────────────────────────────┘║    │
 │║        │ 依赖 D1                                                 ║    │
@@ -67,38 +67,38 @@
 │                                                                        │
 │外部接入: LLM 网关/LiteLLM ↔ D2 · TiMEM Engine ↔ timem 插件/@cognitive/*│
 │          HTTP/企业微信/IM ↔ D1 入口 · Python 生态 ↔ py-bridge          │
-│依赖方向: 每域只依赖比自己小的域号（D2→D1; D3,D4→D1+D2; D5→D1+D4）      │
-│调用时序: 外部信号 → D1 收口 → ①L3 → ②L4 → ③L2 → ④L5 → 响应             │
-│          （调用流 ≠ 依赖流 — 运行时序见下方时序图，与上图解耦）        │
+│依赖方向: 每域只依赖比自己小的域号（D2→D1; D3→D1; D4→D1+D2+D3; D5→D1+D2+D4）      │
+│调用时序: 外部信号 → D1 收口 → ①L5 → ②L4 → ③L2 → ④L3 → 响应             │
+│          （调用流域号严格递减 5→4→2→3，与依赖序同向）        │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 运行时调用时序（与依赖序解耦）
 
 ```text
-外部信号 → D1 ingress 收口 → ① D3 人格 → ② D4 编排 → ③ D2 认知 → ④ D5 行动 → 响应
+外部信号 → D1 ingress 收口 → ① D5 人格 → ② D4 编排 → ③ D2 认知 → ④ D3 行动 → 响应
 ```
 
 ```mermaid
 sequenceDiagram
     participant EXT as 外部信号<br/>(HTTP/企微/Web)
     participant D1 as D1 底座<br/>(ingress 收口)
-    participant D3 as D3 人格
+    participant D5 as D5 人格
     participant D4 as D4 编排
     participant D2 as D2 认知
-    participant D5 as D5 行动
+    participant D3 as D3 行动
     EXT->>D1: 原始信号
-    D1->>D3: ① 标准化输入 (PersonaInput)
-    D3->>D4: ② ctx.call (@orchestration/*)
+    D1->>D5: ① 标准化输入 (PersonaInput)
+    D5->>D4: ② ctx.call (@orchestration/*)
     D4->>D2: ③ 推理/检索 (@cognitive/*)
     D2-->>D4: 决策结果回传
-    D4->>D5: ④ 执行 (@action/*)
-    D5-->>D1: 多渠道输出
+    D4->>D3: ④ 执行 (@action/*)
+    D3-->>D1: 多渠道输出
     D1-->>EXT: 响应 (SSE / IM 回复)
 ```
 
-> 调用流（D3→D4→D2→D5）是 OSI 式 zigzag，与依赖序（每域只依赖更小域号）本就不同——
-> 前者看纵轴时间，后者看堆叠位置，两张图各管一件事。
+> 调用流（D5→D4→D2→D3）域号严格递减，与依赖序（每域只依赖更小域号）完全同向——
+> 2026-09 人格/行动域号对调后，调用序与栈序不再 zigzag。
 
 ### 详细架构（Mermaid 依赖图）
 
@@ -106,23 +106,25 @@ sequenceDiagram
 flowchart TB
     subgraph KERNEL["内核 kernel-dsh (DSH-Cordis) — 五域以插件形态运行其上"]
         direction TB
-        D5["D5 行动执行层 layer-action<br/>codex/zcode/claude 编码代理工人 / text-to-speech / 工具执行"]
+        D5["D5 角色人格层 layer-persona<br/>sales-chat / repair-chat / app-dev / coding-coach / harness-guide / timem-support"]
         D4["D4 编排规划层 layer-orchestration<br/>workflow-engine / timem-project-task / guided-design"]
-        D3["D3 角色人格层 layer-persona<br/>sales-chat / repair-chat / app-dev / coding-coach / harness-guide / timem-support"]
+        D3["D3 行动执行层 layer-action<br/>codex/zcode/claude 编码代理工人 / text-to-speech / 工具执行"]
         D2["D2 认知算力层 layer-cognitive<br/>llm-inference / memory"]
         D1["D1 底座基础层 layer-infrastructure<br/>http-ingress / wecom-ingress / http-relay / protocol-adapter / PgBusBridge"]
         D5 -->|依赖| D4
+        D5 -->|依赖| D2
         D4 -->|依赖| D2
-        D3 -->|依赖| D2
+        D4 -->|依赖| D3
+        D3 -->|依赖| D1
         D2 -->|依赖| D1
-        D5 -.->|直接依赖| D1
     end
     PYB["py-bridge（独立包）<br/>只依赖 core · 能力可声明挂任意层"]
     PYB -.->|core 契约| KERNEL
 ```
 
-> 依赖边按真实 DAG 绘制（源码 `LAYER_DESCRIPTORS.dependsOn`）：D3 与 D4 平级互不依赖，
-> 两者都只依赖 D1+D2；D5 依赖 D4 与 D1；D1 无依赖、最先加载。
+> 依赖边按真实 DAG 绘制（源码 `LAYER_DESCRIPTORS.dependsOn`，2026-09 域号对调后）：
+> 人格(D5) 依赖 编排(D4)+认知(D2)+底座(D1)；编排(D4) 依赖 行动(D3)+认知(D2)+底座(D1)；
+> 行动(D3) 只依赖 底座(D1)；D1 无依赖、最先加载——每域只依赖更小域号。
 
 ---
 
@@ -138,7 +140,7 @@ flowchart TB
 
 | # | 创新点 | 说明 |
 |---|--------|------|
-| 1 | **五域模型** | 底座 / 认知 / 人格 / 编排 / 行动——逻辑归属、依赖单向；域随角色走，不随二进制走 |
+| 1 | **五域模型** | 底座 / 认知 / 行动 / 编排 / 人格——逻辑归属、依赖单向；域随角色走，不随二进制走 |
 | 2 | **四种运行载体统一抽象** | 子线程 / 附属子进程 / 本机守护进程 / 独立端口网络服务，可逐域动态切换 |
 | 3 | **原型 ↔ 生产双形态** | 同一套代码，原型单体 ↔ 生产分布式，上层业务零改动 |
 | 4 | **Seam 契约自动热替换** | 基于 Capability Seam 能力接缝，健康探测 + 负载/显存/故障指标驱动运行时无感切换 |
@@ -181,7 +183,7 @@ flowchart TB
 
 ---
 
-## 三、五域：底座 · 认知 · 人格 · 编排 · 行动
+## 三、五域：底座 · 认知 · 行动 · 编排 · 人格
 
 所有 AI 能力按五域归属，**依赖单向**。「域」是逻辑归属，不是依次渐进的楼层（见 3.1）：
 
@@ -189,24 +191,24 @@ flowchart TB
 |----|------|------|---------|--------------------------|
 | D1 | **底座基础域**（地基） | 通信、契约、安全、观测基础设施 | 全局消息总线、统一消息契约、MCP/A2A 协议桥接、鉴权/限流/熔断、全链路追踪、自动切换控制器 | 全部独立网络服务，不属于 DSH 进程 |
 | D2 | **认知算力域**（电站） | 算力供应、稳定保障、兼容供给；不承载规划/验收等任何业务用法（见 3.3） | LLM 模型适配器、多模型算力路由、记忆引擎、会话/身份上下文 | DSH 进程内插件 → 算力路由 + 记忆抽离为独立网络服务 |
-| D3 | **角色人格域**（Persona） | 特性打包为可交互角色：性格 + 信息接收/表达方式 | 具名角色：平台客服（sales-chat）、应用报修客服（repair-chat，延时汇总建单）、网页应用开发员（app-dev，动手生成应用）、编码教练（coding-coach，只引导）、插件安装助手（plugin-helper）、就业顾问（advisory-chat）、框架介绍员（harness-guide）、TiMEM 客服（timem-support）；输入/输出形态（文本/语音，ASR/TTS）、按角色定制 | 附属子进程 → 本机独立守护进程 → 网络服务集群 |
+| D3 | **行动执行域**（手脚） | 产生真实外部副作用；含 agent 工人（见 3.2） | 代码沙箱、文档/文件操作、系统资源管控、IoT/机器人控制、Agent 工人（codex-executor 等） | 附属子进程 → 独立守护进程/远程隔离服务 |
 | D4 | **编排规划域**（小脑） | 任务调度、思考循环、多智能体协作 | Agent 主思考循环（ReAct/PlanExecute）、任务规划/复盘、SubAgent 调度、定时/长任务 | DSH 插件线程 → 复杂子 Agent 拆独立 Worker 进程/服务 |
-| D5 | **行动执行域**（手脚） | 产生真实外部副作用；含 agent 工人（见 3.2） | 代码沙箱、文档/文件操作、系统资源管控、IoT/机器人控制、Agent 工人（codex-executor 等） | 附属子进程 → 独立守护进程/远程隔离服务 |
+| D5 | **角色人格域**（Persona） | 特性打包为可交互角色：性格 + 信息接收/表达方式 | 具名角色：平台客服（sales-chat）、应用报修客服（repair-chat，延时汇总建单）、网页应用开发员（app-dev，动手生成应用）、编码教练（coding-coach，只引导）、插件安装助手（plugin-helper）、就业顾问（advisory-chat）、框架介绍员（harness-guide）、TiMEM 客服（timem-support）；输入/输出形态（文本/语音，ASR/TTS）、按角色定制 | 附属子进程 → 本机独立守护进程 → 网络服务集群 |
 
 ### 各域运行特征
 
 - **D1 底座域**：全局唯一、所有模块依赖、完全与业务解耦。
 - **D2 认知域**：Always-On 核心常驻，强状态、强一致性、不可随意重启；只供算力，不载业务。
-- **D3 人格域**：延迟敏感、与用户直接交互；主人格唯一（见 3.2），纯信号转换与角色形象，无核心决策。
+- **D5 人格域**：延迟敏感、与用户直接交互；主人格唯一（见 3.2），纯信号转换与角色形象，无核心决策。
 - **D4 编排域**：流程驱动、状态机复杂、多分支多迭代，不直接操作硬件。
-- **D5 行动域**：高风险、高权限、崩溃影响外部环境，必须强隔离、强沙箱、强故障域；工人产出汇回主人格署名交付。
+- **D3 行动域**：高风险、高权限、崩溃影响外部环境，必须强隔离、强沙箱、强故障域；工人产出汇回主人格署名交付。
 
 ### 3.1 为什么叫「域」而不叫「层」
 
 五个域不是依次渐进的楼层，而是**你中有我、我中有你的逻辑归属**。「域」回答的是「这个能力属于哪类问题」——不预设顺序、不预设进程、不预设技术栈。任何工具（无论是否 dsh 插件、何种语言、独立进程还是库）都按它回答的问题归入五域之一。
 
 - 编号 D1–D5 仅保留**依赖序**语义（每域只依赖比自己小的域号），不表达重要性或叙事先后。
-- 叙述信息流时讲「底座 → 认知 → 人格 → 编排 → 行动」没有问题——那是故事顺序，不是栈序。
+- 叙述调用流时讲「人格 → 编排 → 认知 → 行动」没有问题——那是调用顺序（域号 5→4→2→3 递减）；自底向上装配序是 D1→D2→D3→D4→D5，两者是同一座栈的两个方向。
 - 代码中 `layer-*` 目录名与配置字段 `layer` 属历史命名，与 D 编号一一对应（如 `layer-cognitive` = D2），不随文档改名。
 
 ### 3.2 域随角色走，不随二进制走
@@ -217,8 +219,8 @@ flowchart TB
 
 | codex 的帽子 | 归属 | 说明 |
 |---|---|---|
-| codex-executor / codex-agent | **D5 行动域** | agent 团队内的实际打工人，给主人格办事，不直接面对用户 |
-| codex 以独立主体向用户汇报 | **D3 人格域** | 需显式创建角色人格：实现为主人格名下的**子人格/分身**，会话仍走主人格，防止 N 个 agent 各开 DM 各自汇报 |
+| codex-executor / codex-agent | **D3 行动域** | agent 团队内的实际打工人，给主人格办事，不直接面对用户 |
+| codex 以独立主体向用户汇报 | **D5 人格域** | 需显式创建角色人格：实现为主人格名下的**子人格/分身**，会话仍走主人格，防止 N 个 agent 各开 DM 各自汇报 |
 | codex 内部的 LLM 调用 | 消费 D2 认知域 | 编排域与行动域都是认知域算力的**客户** |
 
 - **工人契约**：harness 对行动域工人定义与实现无关的契约——**领活 → 执行 → 交产出 → 受验收判定**。codex、claude-code、opencode 或任何未来安装的 agent CLI 都是该契约的可替换实现，切换时主人格无感。
@@ -389,7 +391,7 @@ pnpm --filter wecom-coder start
 | 编码 Agent | `codex-agent`（codex CLI → localhost:4000） | 任意符合契约的 Agent Provider |
 | 协议适配 | `protocol-adapter`（api-router 协议翻译） | 任意协议桥接实现 |
 | HTTP 入口 + 流式 | `http-ingress` + `sse.ts`（`/v1/chat/completions` 支持 `stream:true` → SSE 帧流） | 任意传输实现（Hono 备件换装时 import 同款 sse helper） |
-| **角色对话** | `sales-chat`（平台客服）/ `repair-chat`（报修延时汇总）/ `coding-coach`（引导教练） | 任意 D3 角色（特性打包为 persona 插件） |
+| **角色对话** | `sales-chat`（平台客服）/ `repair-chat`（报修延时汇总）/ `coding-coach`（引导教练） | 任意 D5 角色（特性打包为 persona 插件） |
 | **网页应用开发员** | `app-dev`（沙箱内生成/修改单文件应用，编码 CLI 可换 zcode/codex/claude） | 任意符合契约的编码 Agent |
 | **需求缓冲延时汇总** | `timem-project-task`（聊天期只记录 → 汇总去重/冲突 → 确认 → 拓扑排序执行） | 任意编排策略 |
 | **产品装配 AppBase** | 应用大厅 + 管理中心(/admin 六标签) + 全局 LLM 配置热生效 + 对话流图 | 任意产品壳 |
@@ -514,9 +516,9 @@ aigility-harness/
 │   │                              #   PluginManifest.adminPanels 管理面板贡献点 / SeamRegistry.listAllServices
 │   ├── kernel-dsh/                # DSH-Cordis 内核适配器（Seam Registry / Effect Manager / Carrier Manager）
 │   ├── layer-cognitive/           # D2 认知算力层（LLM 推理：stub + litellm + timem-memory-provider）
-│   ├── layer-persona/            # D3 角色人格层（sales-chat / repair-chat / app-dev / coding-coach / plugin-helper / advisory-chat / harness-guide / timem-support / speech-to-text）
+│   ├── layer-persona/            # D5 角色人格层（sales-chat / repair-chat / app-dev / coding-coach / plugin-helper / advisory-chat / harness-guide / timem-support / speech-to-text）
 │   ├── layer-orchestration/       # D4 编排规划层（任务规划 + plugin-install + timem-project-task 需求缓冲工作流 + guided-design）
-│   ├── layer-action/              # D5 行动执行层（编码代理工人 codex/zcode/claude + TTS + 沙箱快照）
+│   ├── layer-action/              # D3 行动执行层（编码代理工人 codex/zcode/claude + TTS + 沙箱快照）
 │   ├── layer-infrastructure/      # D1 底座基础层（config/logging/protocol-adapter/http-ingress/wecom-ingress/http-relay/PgBusBridge）
 │   │   └── src/
 │   │       ├── protocol-adapter.ts    # 协议翻译（Anthropic/OpenAI/Responses → 内部标准，类型取自 core 契约）
@@ -601,5 +603,14 @@ await root.timem.recallRules({ scene: "简历评估" });        // 规则
 
 插件本体: [`dsh-plugin-timem`](https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem)
 （cordis 插件库, 协议对齐 timem-sdk-python: X-API-Key + /api/v1/*)
+
+## 十四、dsh 生态对齐（进行中）
+
+本项目围绕 DeepSeek Harness 生态建设，但 **harness 本身可替换**：core 定义家族中立的 `HarnessInterop` 契约，dsh 只是它的当前实现。加入完整 dsh 的目的只有一个——借其能力；换其他家族的 harness 时，提供一个同契约的 `<family>-interop` 包即可，上层无感。
+
+- **契约**：`@aigility-harness/core` 的 `HarnessInterop`（`family` / `versions()` / `mount()`）——家族中立，不出现任何 dsh 概念。
+- **互操作实现**：`@aigility-harness/dsh-interop`——官方套件在 workspace 的**唯一落脚点**：`@deepseek-ai/dsh@0.1.5-rc.2` + `@dsh-base@0.1.5-rc.2` 精确锁定（pre-1.0 禁止 `^` 漂移）；`DshInterop` 实现契约，并导出 dsh 专用的 `dshSuiteVersions()`（cordis 实例对齐保险丝）与 `mountDshRow()`（官方 patch 行装载器）。
+- **纯内核**：`@aigility-harness/kernel-dsh` 只依赖 cordis，零家族套件依赖——不需要 dsh 的下游不被增重。
+- **路线图**：资产 → `dsh-plugin-*` 打包映射、反向引入短名单、版本/发布策略、M1–M4 里程碑见 [`docs/dsh-生态共建规划.md`](docs/dsh-生态共建规划.md)。
 
 ---

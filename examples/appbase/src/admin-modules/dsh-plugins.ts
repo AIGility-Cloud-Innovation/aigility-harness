@@ -4,11 +4,22 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { dshLoadPlugin, dshLoadEnabled, dshStatus } from "../dsh-host.js";
+import { dshBaseRows, dshSuiteVersions, isJsExpr } from "@aigility-harness/dsh-interop";
 import { json, readBody, pool, bearerUser, isAdminUser, writeAudit, emailOf, parseEnvText } from "./context.js";
+
+/** 把 config 里的 JsExpr 原文渲染成 js(...) 字符串 (供展示, 不求值) */
+function renderConfig(v: unknown): unknown {
+  if (isJsExpr(v)) return `js(${v.__jsExpr})`;
+  if (Array.isArray(v)) return v.map(renderConfig);
+  if (typeof v === "object" && v !== null) {
+    return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, renderConfig(x)]));
+  }
+  return v ?? null;
+}
 
 /** dsh 路由处理; 返回 true = 已响应 */
 export async function handle(req: IncomingMessage, res: ServerResponse, path: string, method: string): Promise<boolean> {
-  if (!path.startsWith("/app/dsh/plugins")) return false;
+  if (!path.startsWith("/app/dsh/")) return false;
     // 响应追踪: 块内 return json(...) 只退出 IIFE, 由"是否已 writeHead"判定 handled
     let responded = false;
     const __wh = res.writeHead.bind(res);
@@ -18,6 +29,23 @@ export async function handle(req: IncomingMessage, res: ServerResponse, path: st
     };
   try {
     await (async () => {
+    // ── 管理员: 官方能力目录 (dsh-base patch 行清单, 只读展示, 不求值) ──
+    if (method === "GET" && path === "/app/dsh/catalog") {
+      const adminId = bearerUser(req);
+      if (!adminId) return json(res, 401, { error: "未授权: 请先登录" });
+      if (!(await isAdminUser(adminId))) return json(res, 403, { error: "需要管理员权限" });
+      const rows = dshBaseRows().map((r) => ({
+        id: r.id ?? null,
+        name: r.name,
+        disabled: r.disabled ?? false,
+        // js(...) 原文条件 / 静态禁用都算「不默认启用」展示态
+        disabledText: isJsExpr(r.disabled) ? `js(${r.disabled.__jsExpr})` : r.disabled === true ? "默认禁用" : null,
+        notes: (r.notes ?? "").length > 300 ? (r.notes ?? "").slice(0, 300) + "…" : (r.notes ?? ""),
+        config: renderConfig(r.config ?? null),
+      }));
+      return json(res, 200, { versions: dshSuiteVersions(), total: rows.length, rows });
+    }
+
     // ── 管理员: DSH 插件管理 (cordis 插件注册/配置/加载) ──
     if (path.startsWith("/app/dsh/plugins")) {
       const adminId = bearerUser(req);

@@ -47,6 +47,12 @@ textarea.minput:focus, input.minput:focus { border-color:var(--accent); }
 .srcs a { color:var(--accent); font-weight:600; text-decoration:none; }
 .srcs a:hover { text-decoration:underline; }
 .srcs .w { color:var(--ink2); }
+.catbox { max-height:460px; overflow-y:auto; margin-top:8px; }
+.catrow { padding:9px 2px; border-bottom:1px dashed var(--line); }
+.catrow:last-child { border-bottom:none; }
+.catrow .cid { font-family:Consolas,monospace; font-weight:700; font-size:12.5px; }
+.catnotes { font-size:11.5px; color:var(--ink2); margin-top:3px; line-height:1.55; }
+.cathead { font-size:11.5px; color:var(--ink2); margin-top:6px; }
 </style>
 </head>
 <body>
@@ -67,6 +73,16 @@ textarea.minput:focus, input.minput:focus { border-color:var(--accent); }
   </div>
 
   <div id="pluginList"></div>
+
+  <div class="card">
+    <div class="chead">
+      <b class="nm">📚 官方能力目录</b>
+      <span class="hint" id="catMeta"></span>
+      <div class="ops"><button class="b-save" onclick="loadCatalog()">⟳ 刷新</button></div>
+    </div>
+    <div class="cathead">官方 dsh-base 清单里的全部能力行（只读展示；<code>js(...)</code> 为官方清单原文表达式，服务端不执行）。点「注册插件」可用对应包名把其中任意行接入运行时。</div>
+    <div class="catbox" id="catBox"><div class="hint">加载中…</div></div>
+  </div>
 
   <div class="card">
     <div class="chead"><b class="nm">🔎 插件从哪里找</b></div>
@@ -251,8 +267,36 @@ function registerPlugin() {
     document.getElementById('rgExport').value = ''; document.getElementById('rgDesc').value = '';
     loadPlugins();
   }).catch(function(e) { toast('✗ ' + e.message); });
+function loadCatalog() {
+  fetchJSON('/app/dsh/catalog').then(function(d) {
+    var v = d.versions || {};
+    var aligned = v.cordisAligned !== false;
+    document.getElementById('catMeta').innerHTML =
+      'dsh ' + esc(v.dsh || '?') + ' · cordis ' + esc(v.cordis || '?') +
+      ' · <span class="chip ' + (aligned ? 'on' : 'err') + '">' + (aligned ? '实例对齐 ✓' : '实例未对齐 ✗') + '</span>' +
+      ' · 共 ' + (d.total || 0) + ' 行';
+    var rows = d.rows || [];
+    if (!rows.length) {
+      document.getElementById('catBox').innerHTML = '<div class="hint">官方清单为空？检查 dsh-interop 安装。</div>';
+      return;
+    }
+    document.getElementById('catBox').innerHTML = rows.map(function(r) {
+      var badge = '';
+      if (r.disabledText === '默认禁用') badge = '<span class="chip off">默认禁用</span>';
+      else if (r.disabledText) badge = '<span class="chip off" title="' + esc(r.disabledText) + '">条件禁用</span>';
+      return '<div class="catrow">'
+        + '<span class="cid">' + esc(r.id || '—') + '</span> '
+        + '<span class="pkg">' + esc(r.name) + '</span> '
+        + badge
+        + (r.notes ? '<div class="catnotes" title="' + esc(r.notes) + '">' + esc(r.notes) + '</div>' : '')
+        + '</div>';
+    }).join('');
+  }).catch(function(e) {
+    document.getElementById('catBox').innerHTML = '<div class="hint">无法加载官方目录: ' + esc(e.message) + '</div>';
+  });
 }
 loadPlugins();
+loadCatalog();
 </script>
 </body>
 </html>
