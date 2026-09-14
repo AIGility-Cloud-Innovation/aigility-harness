@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>aigility-harness · 系统架构总览</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --card:#1c2333; --line:#2d3748;
+    --ink:#e6edf3; --sub:#8b949e; --brand:#58a6ff; --green:#3fb950;
+    --orange:#d29922; --purple:#bc8cff; --pink:#ff7b72; --teal:#39c5cf;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:"Microsoft YaHei","Segoe UI",system-ui,sans-serif;padding:34px 40px 60px;font-size:13px}
+  a{color:var(--brand);text-decoration:none}
+  a:hover{text-decoration:underline}
+  h1{font-size:22px;letter-spacing:.5px}
+  h1 small{font-size:12px;color:var(--sub);font-weight:400;margin-left:12px}
+  .sub{color:var(--sub);margin:6px 0 18px;line-height:1.7;max-width:1240px}
+  .sub b{color:var(--ink)}
+  .topbar{display:flex;align-items:center;flex-wrap:wrap;gap:10px;max-width:1240px;margin:0 auto}
+  .topbar .grow{flex:1}
+  .topbar button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:9px;padding:7px 14px;font-size:12px;cursor:pointer;font-family:inherit}
+  .topbar button:hover{border-color:var(--brand)}
+  .keys{display:flex;gap:10px;flex-wrap:wrap;max-width:1240px;margin:0 auto 18px}
+  .key{flex:1;min-width:240px;background:linear-gradient(135deg,#13203a,#1a1633);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .key b{display:block;font-size:12.5px;margin-bottom:4px;color:var(--brand)}
+  .key span{color:var(--sub);font-size:11px;line-height:1.6;display:block}
+  .band{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:0 auto;max-width:1240px}
+  .band h2{font-size:13px;color:var(--brand);margin-bottom:10px;letter-spacing:1px}
+  .band h2 .tag{font-size:11px;color:var(--sub);font-weight:400;margin-left:8px}
+  .cards{display:flex;flex-wrap:wrap;gap:10px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;flex:1;min-width:150px}
+  .card b{display:block;font-size:12.5px;margin-bottom:4px}
+  .card span{color:var(--sub);font-size:11px;line-height:1.5;display:block}
+  .card.hl{border-color:var(--brand);box-shadow:0 0 0 1px rgba(88,166,255,.25)}
+  .card.dsh{border-color:#bc8cff;box-shadow:0 0 0 1px rgba(188,140,255,.22)}
+  .card.dsh b{color:#d2b9ff}
+  .arrow{ text-align:center;color:var(--sub);font-size:14px;line-height:1;padding:7px 0;max-width:1240px;margin:0 auto}
+  .arrow small{font-size:10.5px;margin-left:8px;color:#58708a}
+  .gap{height:14px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .chip{border-radius:20px;padding:3px 10px;font-size:11px;border:1px solid var(--line);background:#131a2a;color:var(--sub)}
+  .chip.qa{border-color:#ff7b72;color:#ff9b93}.chip.review{border-color:#d29922;color:#e3b341}
+  .chip.draft{border-color:#3fb950;color:#7ee787}.chip.kb{border-color:#39c5cf;color:#7de3ea}
+  .chip.insight{border-color:#bc8cff;color:#d2b9ff}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .grid2 .card{min-width:200px}
+  .note{color:#8b949e;font-size:11px;display:block;margin-top:8px;line-height:1.6}
+  .legend{display:flex;gap:14px;max-width:1240px;margin:18px auto 0;color:var(--sub);font-size:11px;flex-wrap:wrap}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  table{width:100%;border-collapse:collapse;font-size:11px;margin-top:6px}
+  td,th{border:1px solid var(--line);padding:4px 8px;text-align:left;color:var(--ink)}
+  th{color:var(--sub);background:#131a2a}
+  @media (max-width:900px){ body{padding:22px 14px 50px} .grid2{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>aigility-harness · 系统架构总览 <small>五域插件底座 + AppBase 产品壳 + DSH 生态 · 2026-09</small></h1>
+  <span class="grow"></span>
+  <button onclick="location.href='/hall'">← 返回大厅</button>
+  <button onclick="location.href='/hall/flows'">对话流图 →</button>
+</div>
+<p class="sub">一句话：<b>aigility-harness 是一套什么都能插的智能体运行底座，AppBase 是它的产品壳</b>。现在框架上挂着的 Codex、LiteLLM、DeepSeek Harness（DSH）都只是验证案例——<b>契约是主体，插件是过客；接口永久不变，实现任意替换</b>。</p>
+
+<div class="keys">
+  <div class="key"><b>① 五域插拔架构</b><span>底座 → 认知 → 行动 → 编排 → 人格，域号＝依赖序（每域只依赖更小域号）；运行时调用经 Capability Seam 扁平化</span></div>
+  <div class="key"><b>② 一切皆插件 · DSH 生态</b><span>内核用 DeepSeek Harness 的 cordis 运行时；官方 dsh 套件按「行」借力（工具/会话/沙箱/压缩…约 60 行能力）</span></div>
+  <div class="key"><b>③ 契约永固 · Harness 可替换</b><span>core 定义家族中立的 HarnessInterop 契约，dsh 只是当前实现；换其他 harness 家族 = 换一个 interop 包，上层无感</span></div>
+</div>
+
+<!-- 访问入口 -->
+<div class="band">
+  <h2>从哪里进入 &nbsp;<span class="tag">你现在看到的这个系统</span></h2>
+  <div class="cards">
+    <div class="card hl"><b>应用大厅 /hall</b><span>角色对话 + 应用网格（本页的上层入口，:3419）</span></div>
+    <div class="card"><b>对话流图 /hall/flows</b><span>五个对话角色的真实请求流转图</span></div>
+    <div class="card"><b>架构总览 /hall/architecture</b><span>本页 · 系统可视化介绍</span></div>
+    <div class="card"><b>管理壳 /admin</b><span>六标签：账号与用户 · LLM 配置 · DSH 插件 · 框架层插件 · Token 用量 · 积分账务</span></div>
+    <div class="card dsh"><b>DSH 插件 /admin?tab=dsh</b><span>插件注册/装载 + 官方能力目录（dsh-base 全部能力行可视化）</span></div>
+    <div class="card"><b>个人中心 /me</b><span>余额 / 用量 / 流水</span></div>
+    <div class="card"><b>AI 网关 :3418</b><span>http-ingress · OpenAI 兼容 / SSE / Bearer</span></div>
+  </div>
+</div>
+<div class="arrow">▼ 页面调用后端 API（JSON over HTTP · cookie/Bearer）</div>
+
+<!-- L5 产品壳 -->
+<div class="band">
+  <h2>AppBase 产品壳 &nbsp;<span class="tag">这一层是「产品」，下面四层是「底座」——壳可换，底座不动</span></h2>
+  <div class="cards">
+    <div class="card hl"><b>多角色对话厅 + 应用网格</b><span>AI 生成的单文件网页应用即开即用；账号与 LLM 配置统一管理</span></div>
+    <div class="card"><b>数据空间</b><span>多协作单元通用底座（示例：班主任小本本多班协作）</span></div>
+    <div class="card"><b>账号体系</b><span>首个注册用户自动成为管理员；审计留痕</span></div>
+    <div class="card"><b>全局 LLM 配置热生效</b><span>PG 持久化，改完即生效不重启；机密服务端掩码</span></div>
+    <div class="card"><b>Token 计量 + 积分账务</b><span>按用户计量 → 积分账户 → /me 可查流水</span></div>
+  </div>
+</div>
+<div class="arrow">▼ 角色（ctx.call）</div>
+
+<!-- D5 -->
+<div class="band">
+  <h2>D5 角色人格域 &nbsp;<span class="tag">构建主体形象，委托 D4 编排</span></h2>
+  <div class="cards">
+    <div class="card"><b>sales-chat</b><span>平台客服形象 · 平台能力问答</span></div>
+    <div class="card"><b>coding-coach</b><span>编码教练 · 教学讲解不动手；动手的是 app-dev</span></div>
+    <div class="card"><b>app-dev</b><span>网页应用开发员 · 沙箱内生成/修改单文件应用</span></div>
+    <div class="card"><b>repair-chat</b><span>报修客服 · 工单受理 · 需求进 D4 缓冲</span></div>
+    <div class="card"><b>plugin-helper</b><span>插件安装引导 · 扫描+契约匹配+接入指引</span></div>
+    <div class="card"><b>policy-chat 等</b><span>业务角色形象 · 语音输入经 D3 的 STT 能力（实现暂居本域，待迁移）</span></div>
+  </div>
+</div>
+<div class="arrow">▼ ctx.call(ref, request)</div>
+
+<!-- D4 -->
+<div class="band">
+  <h2>D4 编排规划域 &nbsp;<span class="tag">决定调什么工具、走什么流程</span></h2>
+  <div class="cards">
+    <div class="card"><b>workflow-engine</b><span>TS 实现，py-bridge 可热切换 LangGraph(YAML)</span></div>
+    <div class="card"><b>timem-project-task</b><span>需求缓冲：聊天期只记录 → 汇总去重/冲突 → 确认 → 拓扑排序执行</span></div>
+    <div class="card"><b>scheduler</b><span>调度闭环：rebind 决策真实执行 + failback</span></div>
+    <div class="card"><b>guided-design</b><span>多阶段引导式设计（编码教练用）· 决定委托哪个编码驱动、带什么任务</span></div>
+    <div class="card"><b>policy-review</b><span>审查编排 13 模块（见下方切片章节）</span></div>
+  </div>
+  <span class="note">注：编码 Agent 驱动（zcode/codex/claude）是<b>被调执行器</b>，代码实居 D3 行动执行域 —— 本域只做「何时调、调谁、带什么上下文」的委托决策。</span>
+</div>
+<div class="arrow">▼ capability 调用</div>
+
+<!-- D2 -->
+<div class="band">
+  <h2>D2 认知算力域 &nbsp;<span class="tag">电站：只供算力，不载业务</span></h2>
+  <div class="cards">
+    <div class="card hl"><b>llm-inference</b><span>LiteLLM 网关(:48724) / bigmodel 直连 / stub 三 Provider；DB 配置优先、失败自动降级</span></div>
+    <div class="card"><b>timem-memory / write（记忆引擎）</b><span>TiMEM 长期记忆：尽力而为召回与沉淀 · README 列为本域典型模块，代码实居 layer-cognitive</span></div>
+  </div>
+  <span class="note">边界说明：policy-parser（制度解析＝被调工具）与 policy-kb（台账＝业务数据资产）是制度切片的业务能力，不属本域——见下方切片章节。本域只回答「算力从哪来」：LLM 适配与路由、记忆引擎、会话/身份上下文。</span>
+</div>
+<div class="arrow">▼</div>
+
+<!-- D3 -->
+<div class="band">
+  <h2>D3 行动执行域 &nbsp;<span class="tag">工具（被调）与外设（主动触发）</span></h2>
+  <div class="cards">
+    <div class="card"><b>text-to-speech</b><span>msedge-tts · 由角色/编排经 ctx.call 调用</span></div>
+    <div class="card"><b>speech-to-text</b><span>vosk / whisper · 语音转写；与 TTS 同属模态工具（现状: 代码暂居 layer-persona，语义归属本域，待迁移）</span></div>
+    <div class="card hl"><b>编码 Agent 驱动</b><span>zcode / codex / claude 可插拔（dsh headless 预留接缝）· 沙箱快照备份回滚 · 由 D4 委托执行</span></div>
+    <div class="card"><b>tool-execution（占位）</b><span>通用工具执行 · 二期 doc-parse / docx 批注等入驻</span></div>
+    <div class="card"><b>外设触发源</b><span>定时任务 · 消息推送 · watcher（现状由 ingress 承担触发）</span></div>
+  </div>
+</div>
+<div class="arrow">▼</div>
+
+<!-- D1 + dsh 生态 -->
+<div class="band">
+  <h2>D1 底座兼容域 + DSH 生态 &nbsp;<span class="tag">内核无关：一切皆是插件；官方能力按行借力</span></h2>
+  <div class="grid2">
+    <div class="card"><b>kernel-dsh（cordis 4.0.2）</b><span>KernelAdapter 契约的 DSH 内核适配：SeamRegistry · 载体（线程/子进程）· 事件总线 · 可逆副作用。纯内核包，零家族套件依赖</span></div>
+    <div class="card"><b>InMemoryKernelAdapter</b><span>原型内核（AppBase 装配用）· bootstrap 按层拓扑排序</span></div>
+    <div class="card"><b>py-bridge</b><span>声明式 Python 插件 · JSON-RPC over stdio · 反向 call_ts_capability（LangGraph / RAG）</span></div>
+    <div class="card"><b>基建 + ingress</b><span>config / logging / audit / rate-limit 四件套；边缘入口：hall(:3419) · http-ingress(:3418) · 飞书 · 企微</span></div>
+  </div>
+  <div class="cards" style="margin-top:10px">
+    <div class="card dsh" style="flex-basis:100%">
+      <b>DSH 生态对齐（契约 → interop → 官方套件）</b>
+      <span style="font-size:11.5px;color:var(--ink);line-height:1.7">
+        core 的 <b>HarnessInterop</b> 契约（family / versions / mount，家族中立）→
+        <b>@aigility-harness/dsh-interop</b> 当前实现（官方套件在本工程的唯一落脚点）→
+        官方 <b>@deepseek-ai/dsh + dsh-base 0.1.5-rc.2</b> 精确锁定。
+        官方能力按 <b>cordis.patch.yml 行清单</b>编址（约 60 行：agent 循环 · 工具族 · 会话 · 沙箱审批 · 上下文压缩 · 子代理…），
+        <b>dshBaseRows()</b> 只读解析成「官方能力目录」（管理页可视化），<b>mountDshRow()</b> 按行装载进运行时；
+        <b>cordisAligned</b> 校验两侧 cordis 为同一物理模块（单运行时保险丝）。
+        换 harness 家族 = 新增一个 <b>&lt;family&gt;-interop</b> 包实现同一契约，core / 五域 / AppBase 全部无感。
+      </span>
+      <span class="note">管理入口：/admin → 「DSH 插件」标签 → 官方能力目录 · 设计与路线图见 docs/dsh-生态共建规划.md</span>
+    </div>
+  </div>
+</div>
+
+<div class="gap"></div>
+
+<!-- 数据与外部 -->
+<div class="band">
+  <h2>数据与外部依赖</h2>
+  <div class="cards">
+    <div class="card"><b>🐘 PostgreSQL（appbase）</b><span>users · apps · dsh_plugins · app_llm_config · token 计量 · 积分账务 · 审计 · 工单 · 数据空间</span></div>
+    <div class="card"><b>☁️ TiMEM Cloud</b><span>长期记忆 / 经验规则 · @timem/dsh-plugin-timem（cordis 插件，已验证进程内装载）</span></div>
+    <div class="card"><b>🧠 LLM 上游</b><span>LiteLLM 网关(:48724) 或 bigmodel 直连；AppBase 全局配置存 PG 热生效</span></div>
+    <div class="card"><b>📦 官方 dsh 套件</b><span>@deepseek-ai/dsh 全家（CLI 可用）· 仅经 dsh-interop 消费，不散落引用</span></div>
+  </div>
+</div>
+
+<div class="gap"></div>
+
+<!-- 垂直切片 -->
+<div class="band">
+  <h2>垂直切片示例：制度流程管理智能体 &nbsp;<span class="tag">policy-agent(:3430) · 验证五域架构的完整业务切片</span></h2>
+  <div class="cards">
+    <div class="card hl" style="flex:2.2;min-width:320px">
+      <b>policy-review · 审查编排（13 模块：规则打底 + LLM 增强 + 全量降级）</b>
+      <div class="chips">
+        <span class="chip qa">13 智能问答</span>
+        <span class="chip review">9 规范性检查</span><span class="chip review">10 合规性审查</span>
+        <span class="chip review">11 一致性</span><span class="chip review">12 审查分层</span>
+        <span class="chip review">7 内容概述</span><span class="chip review">1 思维导图</span>
+        <span class="chip draft">4 制度起草</span><span class="chip draft">5 流程图</span>
+        <span class="chip draft">6 控制文档</span><span class="chip draft">8 业务逻辑五查</span>
+        <span class="chip kb">3 上位变动提醒</span><span class="chip kb">14 库更新</span>
+        <span class="chip insight">15 数据沉淀</span>
+      </div>
+    </div>
+    <div class="card"><b>种子制度（合成，可演示全模块）</b>
+      <table><tr><th>编号</th><th>演示点</th></tr>
+        <tr><td>JT-ZB-2024-001 v1/v2</td><td>两级版本比对</td></tr>
+        <tr><td>JT-GY-2024-002</td><td>跨制度对撞</td></tr>
+        <tr><td>JT-SJ-2023-003</td><td>依据并列/审批主体</td></tr>
+        <tr><td>JT-TAN-2024-004</td><td>时限无起算</td></tr></table>
+    </div>
+    <div class="card"><b>policy-parser · 条款解析器</b><span>章/节/条锚点切片 · 引用识别 · 条款树 diff —— 文本解析属被调工具（与 D3 行动域的 doc-parse 同族，二期可下沉）</span></div>
+    <div class="card"><b>policy-kb · 知识库台账</b><span>统一字段入库 · 版本归档 · 检索/词族 · 统计缺口 —— 业务数据资产，非认知算力</span></div>
+    <div class="card"><b>真实语料</b><span>· 高频依据小库 10 条（原文待补录不编造）<br>· 审查意见语料 15 条（代表性子集）<br>· 定性映射：四级口径反推 + 采纳三态判例</span></div>
+  </div>
+</div>
+
+<div class="legend">
+  <span><i style="background:#58a6ff"></i>蓝框 = 高亮要点</span>
+  <span><i style="background:#bc8cff"></i>紫框 = DSH 生态（新增）</span>
+  <span><i class="qa" style="border-radius:50%"></i>红 = 首页</span>
+  <span><i class="review" style="border-radius:50%"></i>黄 = 审查</span>
+  <span><i class="draft" style="border-radius:50%"></i>绿 = 起草</span>
+  <span><i class="kb" style="border-radius:50%"></i>青 = 知识库</span>
+  <span><i class="insight" style="border-radius:50%"></i>紫 = 洞察</span>
+  <span>人机边界：模型产出审查线索，三级审查与签发权限在人</span>
+</div>
+
+</body>
+</html>

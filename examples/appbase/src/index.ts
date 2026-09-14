@@ -173,6 +173,12 @@ async function main(): Promise<void> {
       res.end(FLOWS_HTML);
       return;
     }
+    // 系统架构总览页 (公开只读)
+    if (req.method === "GET" && (req.url === "/hall/architecture" || req.url?.startsWith("/hall/architecture?"))) {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(ARCH_HTML);
+      return;
+    }
     // 应用大厅页 (替代原对话厅首页; 对话 API /hall/chat 不受影响)
     if (req.method === "GET" && (req.url === "/hall" || req.url === "/hall/")) {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -488,6 +494,8 @@ const APP_HALL_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)),
 const WORKBENCH_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "workbench.html"), "utf-8");
 // 用户管理页 (管理员专用)
 const FLOWS_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "flows.html"), "utf-8");
+// 系统架构总览页 (公开只读, 可视化介绍)
+const ARCH_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "architecture.html"), "utf-8");
 const ADMIN_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "admin.html"), "utf-8");
 // 用户个人中心 (登录用户; 余额/用量/流水, 对所有网页应用通用)
 const ME_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "me.html"), "utf-8");
