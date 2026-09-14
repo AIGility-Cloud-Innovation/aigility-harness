@@ -21,3 +21,4 @@ examples/appbase/start-appbase.cmd
 
 # ZCode CLI 在仓库内运行时的产物
 .zcode/
+examples/timem-live-test/
