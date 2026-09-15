@@ -87,6 +87,11 @@ body {
 .card h2 { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
 .card .hint { font-size: 12.5px; color: var(--ink-3); margin-bottom: 16px; }
 .section-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.stu-chip { display:inline-flex; align-items:center; gap:4px; font-size:12.5px; padding:4px 10px; border-radius:999px; background:var(--soft, #eef1f6); color:var(--ink-2); cursor:default; }
+.stu-chip.has { background:var(--green-soft, #e7f8f1); color:var(--ink); }
+.stu-chip.has b { color:var(--green); }
+.stu-chip:hover { filter:brightness(.96); }
+.stu-chip input { text-align:center; }
 .section-title h2 { font-size: 16px; }
 
 .btn {
@@ -328,6 +333,7 @@ tbody tr:last-child td { border-bottom: none; }
         <button class="active" data-view="roster" onclick="switchView('roster', this)">👥 名册</button>
         <button data-view="attendance" onclick="switchView('attendance', this)">📅 考勤</button>
         <button data-view="memory" onclick="switchView('memory', this)">🧠 记忆本</button>
+        <button data-view="exams" onclick="switchView('exams', this)">📈 考试成绩</button>
         <button data-view="profile" onclick="switchView('profile', this)">📊 学生画像</button>
         <button data-view="scores" onclick="switchView('scores', this)">⭐ 积分</button>
     </div>
@@ -383,6 +389,25 @@ tbody tr:last-child td { border-bottom: none; }
                 <input id="memFilterText" placeholder="搜索内容 / 标签…" style="flex:1;min-width:150px" oninput="renderMemories()">
             </div>
             <div id="memoryList"></div>
+        </div>
+    </div>
+
+    <!-- ═══ 考试成绩 ═══ -->
+    <div id="view-exams" class="view">
+        <div class="card">
+            <div class="toolbar">
+                <button class="btn btn-primary" data-owner-only onclick="openExamModal()">＋ 添加考试</button>
+                <button class="btn btn-ghost" data-owner-only onclick="openExamImportModal()">📥 批量导入成绩</button>
+                <div class="grow"></div>
+                <label style="font-size:12.5px;color:var(--ink-2)">成绩趋势
+                    <select id="trendStudent" onchange="renderExamTrend()" style="width:auto;padding:5px 8px"><option value="">选择学生</option></select>
+                </label>
+            </div>
+            <div id="examList"></div>
+        </div>
+        <div class="card" id="trendCard" style="display:none">
+            <div class="section-title"><div><h2>📈 成绩趋势</h2><div class="hint" style="margin:4px 0 0">按考试时间排列, 折线展示变化, 右侧列出与上次的进退步</div></div></div>
+            <div id="examTrendBody"></div>
         </div>
     </div>
 
@@ -500,6 +525,45 @@ tbody tr:last-child td { border-bottom: none; }
     </div>
 </div>
 
+<!-- 添加考试模态框 -->
+<div class="modal" id="examModal">
+    <div class="modal-box" style="max-width:420px">
+        <div class="modal-head"><h3>📝 添加考试</h3><button class="modal-x" onclick="editingExamId=null;closeModal('examModal')">✕</button></div>
+        <input id="examName" placeholder="考试名称, 如: 期中考试" style="width:100%">
+        <label style="display:block;margin-top:10px;font-size:12.5px;color:var(--ink-3)">考试日期
+            <input type="date" id="examDate" style="margin-left:6px;padding:4px 6px;font-family:inherit">
+        </label>
+        <div style="margin-top:10px;font-size:12.5px;color:var(--ink-3)">考试学科（勾选；也可输入自定义学科后添加）</div>
+        <div id="examSubjectBox" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"></div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+            <input id="newSubjectInput" placeholder="自定义学科, 如: 计算机" style="flex:1;padding:6px 8px;font-size:12.5px">
+            <button class="btn btn-ghost btn-sm" onclick="addNewSubject()">添加学科</button>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:14px">
+            <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="saveExam()">创建</button>
+            <button class="btn btn-ghost" onclick="closeModal('examModal')">取消</button>
+        </div>
+    </div>
+</div>
+
+<!-- 批量导入成绩模态框 -->
+<div class="modal" id="examImportModal">
+    <div class="modal-box" style="max-width:460px">
+        <div class="modal-head"><h3>📥 批量导入成绩</h3><button class="modal-x" onclick="closeModal('examImportModal')">✕</button></div>
+        <div class="hint" style="font-size:12.5px;color:var(--ink-3);margin:4px 0 8px">
+            导入到考试：<b id="importExamName" style="color:var(--ink)"></b>
+            · 学科：<select id="importSubject" style="padding:4px 6px"></select>
+            <br>每行一条：<code>姓名 分数</code>（姓名需与名册一致）。
+        </div>
+        <textarea id="examImportText" style="width:100%;min-height:140px" placeholder="张三 95&#10;李四 88&#10;王五 76"></textarea>
+        <div id="examImportMsg" class="hint" style="margin-top:6px;min-height:16px"></div>
+        <div style="display:flex;gap:10px;margin-top:10px">
+            <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="doExamImport()">导入</button>
+            <button class="btn btn-ghost" onclick="closeModal('examImportModal')">取消</button>
+        </div>
+    </div>
+</div>
+
 <!-- 班级管理模态框 (班主任: 建班/邀请任课老师; 任课: 查看班级信息) -->
 <div class="modal" id="spaceModal">
     <div class="modal-box" style="max-width:560px">
@@ -564,12 +628,14 @@ const KEYS = {
     STUDENTS: 'teacherNotebook_students',
     ATTENDANCE: 'teacherNotebook_attendance',
     SCORES: 'teacherNotebook_scores',
-    MEMORIES: 'teacherNotebook_memories'
+    MEMORIES: 'teacherNotebook_memories',
+    EXAMS: 'teacherNotebook_exams'
 };
 let students  = [];
 let attendance = {};
 let scores    = [];
 let memories  = [];
+let exams     = [];
 
 const CATS = {
     behavior:   { label: '日常行为', icon: '🌱' },
@@ -592,7 +658,7 @@ let profileStudentId = '';
 const savedApiBase = localStorage.getItem('teacherNotebook_apiBase');
 const DATA_APP = 'teacher-notebook.html';
 const ROLE_POLICY = { roles: { teacher: {
-    readTables: ['students', 'attendance', 'scores', 'memories'],
+    readTables: ['students', 'attendance', 'scores', 'memories', 'exams'],
     writeTables: ['attendance', 'scores'],
 } } };
 const CLOUD = {
@@ -604,7 +670,7 @@ const CLOUD = {
     get rowIds() { return JSON.parse(localStorage.getItem('teacherNotebook_rowIds_' + (CLOUD.spaceId || 'x')) || '{}'); },
     set rowIds(v) { localStorage.setItem('teacherNotebook_rowIds_' + (CLOUD.spaceId || 'x'), JSON.stringify(v)); }
 };
-const COLLECTIONS = ['students', 'attendance', 'scores', 'memories'];
+const COLLECTIONS = ['students', 'attendance', 'scores', 'memories', 'exams'];
 
 // 当前用户在当前空间的角色: 'owner'(班主任) | 'teacher'(任课) | null
 let mySpaceRole = null;
@@ -759,7 +825,7 @@ async function spaceCreateFromModal() {
     try {
         await spaceCreate(name);
         closeModal('spaceModal');
-        students = []; attendance = {}; scores = []; memories = [];
+        students = []; attendance = {}; scores = []; memories = []; exams = [];
         saveLocal(); renderAll(); switchView('roster');
         renderSpaceBar();
     } catch (e) { alert('创建失败: ' + e.message); }
@@ -877,6 +943,7 @@ async function cloudPull() {
             else if (key === 'attendance') attendance = val && typeof val === 'object' ? val : {};
             else if (key === 'scores') scores = Array.isArray(val) ? val : [];
             else if (key === 'memories') memories = Array.isArray(val) ? val : [];
+            else if (key === 'exams') exams = Array.isArray(val) ? val : [];
         } catch (e) {
             console.warn('cloud pull failed:', key, e.message);
         }
@@ -891,7 +958,7 @@ async function cloudPush() {
     for (const key of COLLECTIONS) {
         // 任课老师只推自己有写权限的表 (服务端同样强制, 这里避免无谓 403)
         if (!amOwner() && !ROLE_POLICY.roles.teacher.writeTables.includes(key)) continue;
-        const payload = key === 'attendance' ? attendance : ({ students, scores, memories })[key];
+        const payload = key === 'attendance' ? attendance : ({ students, scores, memories, exams })[key];
         const body = { data: { payload } };
         try {
             if (rowIds[key]) await apiCall('PUT', '/app/data/' + key + '/' + rowIds[key] + '?space=' + encodeURIComponent(CLOUD.spaceId), body);
@@ -915,6 +982,7 @@ function saveLocal() {
     localStorage.setItem('teacherNotebook_attendance' + suffix, JSON.stringify(attendance));
     localStorage.setItem('teacherNotebook_scores' + suffix, JSON.stringify(scores));
     localStorage.setItem('teacherNotebook_memories' + suffix, JSON.stringify(memories));
+    localStorage.setItem('teacherNotebook_exams' + suffix, JSON.stringify(exams));
     renderHeroStats();
 }
 
@@ -946,6 +1014,7 @@ function switchView(id, btn) {
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.getElementById('view-' + id).classList.add('active');
     if (id === 'memory') { fillStudentFilter('memFilterStudent', true); renderMemories(); }
+    if (id === 'exams') { renderExams(); }
     if (id === 'profile') {
         fillStudentFilter('profileStudent', false);
         if (!profileStudentId) document.getElementById('profileStudent').value = ''; // 无指定学生 → 先看名卡
@@ -1289,6 +1358,288 @@ function saveManualMemory() {
     saveData(); renderMemories(); renderScoreList(); loadAttendance();
     closeModal('memoryModal');
     alert(`已保存「${st.name}」的记忆到记忆本`);
+}
+
+// ═══════════════ 考试成绩 (exams: [{id,name,date,subjects:[],scores:{studentId:{subject:number}}}]) ═══════════════
+const COMMON_SUBJECTS = ['语文', '数学', '英语', '物理', '化学', '生物', '政治', '历史', '地理'];
+// 兼容旧数据: 老结构 scores[studentId] 为数字 → 视作 "总分" 学科
+const subjOf = (e, sid) => {
+    const v = e.scores[sid];
+    if (v === null || v === undefined) return {};
+    return typeof v === 'number' ? { '总分': v } : v;
+};
+// 每张考试卡片当前查看的学科
+const cardSubject = {};
+const sortedExams = () => [...exams].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+const examSubjects = e => {
+    const set = new Set(e.subjects && e.subjects.length ? e.subjects : []);
+    Object.keys(e.scores).forEach(sid => Object.keys(subjOf(e, sid)).forEach(s => set.add(s)));
+    return [...set];
+};
+const examSubjectAvg = (e, subject) => {
+    const vals = students.filter(s => !s.archived).map(s => subjOf(e, s.id)[subject]).filter(v => typeof v === 'number');
+    return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length) : null;
+};
+const examSubjectStats = (e, subject) => {
+    const vals = students.filter(s => !s.archived).map(s => subjOf(e, s.id)[subject]).filter(v => typeof v === 'number');
+    return { avg: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null,
+             max: vals.length ? Math.max(...vals) : null, count: vals.length };
+};
+
+let pendingSubjects = [];
+let editingExamId = null;
+function openExamModal(id = null) {
+    editingExamId = id;
+    const e = id ? exams.find(x => x.id === id) : null;
+    document.getElementById('examName').value = e ? e.name : '';
+    document.getElementById('examDate').value = e ? e.date : todayStr();
+    document.getElementById('newSubjectInput').value = '';
+    pendingSubjects = e ? examSubjects(e) : ['语文', '数学', '英语'];
+    renderSubjectPicker();
+    document.querySelector('#examModal .modal-head h3').textContent = e ? '📝 编辑考试' : '📝 添加考试';
+    document.querySelector('#examModal .btn-primary').textContent = e ? '保存' : '创建';
+    document.getElementById('examModal').classList.add('show');
+}
+function renderSubjectPicker() {
+    const pool = [...new Set([...COMMON_SUBJECTS, ...pendingSubjects, ...exams.flatMap(e => e.subjects || [])])];
+    document.getElementById('examSubjectBox').innerHTML = pool.map(s =>
+        `<label style="display:inline-flex;align-items:center;gap:4px;font-size:12.5px;cursor:pointer;border:1px solid var(--line);border-radius:8px;padding:4px 9px">
+            <input type="checkbox" ${pendingSubjects.includes(s) ? 'checked' : ''} onchange="togglePendingSubject('${esc(s)}', this.checked)">${esc(s)}
+        </label>`).join('');
+}
+function togglePendingSubject(s, on) {
+    if (on) { if (!pendingSubjects.includes(s)) pendingSubjects.push(s); }
+    else pendingSubjects = pendingSubjects.filter(x => x !== s);
+}
+function addNewSubject() {
+    const v = document.getElementById('newSubjectInput').value.trim();
+    if (!v) return;
+    if (!pendingSubjects.includes(v)) pendingSubjects.push(v);
+    document.getElementById('newSubjectInput').value = '';
+    renderSubjectPicker();
+}
+function saveExam() {
+    const name = document.getElementById('examName').value.trim();
+    const date = document.getElementById('examDate').value || todayStr();
+    if (!name) return alert('请填写考试名称');
+    if (!pendingSubjects.length) return alert('请至少保留一个学科');
+    if (editingExamId) {
+        const e = exams.find(x => x.id === editingExamId);
+        if (!e) return closeModal('examModal');
+        // 学科收窄时, 被移除学科的成绩一并删除 (有已录成绩时需确认)
+        const removed = examSubjects(e).filter(s => !pendingSubjects.includes(s));
+        const removedHasScores = removed.some(s =>
+            Object.keys(e.scores).some(sid => typeof subjOf(e, sid)[s] === 'number'));
+        if (removedHasScores && !confirm(`学科「${removed.join('、')}」已有录入的成绩, 移除后这些成绩将一并删除。确定？`)) return;
+        e.name = name; e.date = date; e.subjects = [...pendingSubjects];
+        if (removed.length) {
+            for (const sid of Object.keys(e.scores)) {
+                const m = subjOf(e, sid);
+                removed.forEach(s => delete m[s]);
+                if (!Object.keys(m).length) delete e.scores[sid];
+            }
+        }
+    } else {
+        exams.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), name, date, subjects: [...pendingSubjects], scores: {} });
+    }
+    editingExamId = null;
+    saveData(); renderExams(); closeModal('examModal');
+}
+function deleteExam(id) {
+    const e = exams.find(x => x.id === id);
+    if (!e || !confirm(`删除「${e.name}」？该次所有学科成绩将一并删除。`)) return;
+    exams = exams.filter(x => x.id !== id);
+    saveData(); renderExams();
+}
+let importExamId = null, importSubject = null;
+function openExamImportModal(id) {
+    const e = exams.find(x => x.id === id);
+    if (!e) return;
+    importExamId = id;
+    const subs = examSubjects(e);
+    importSubject = cardSubject[id] && subs.includes(cardSubject[id]) ? cardSubject[id] : subs[0];
+    document.getElementById('importExamName').textContent = `${e.name} (${e.date})`;
+    document.getElementById('importSubject').innerHTML = subs.map(s =>
+        `<option ${s === importSubject ? 'selected' : ''}>${esc(s)}</option>`).join('');
+    document.getElementById('importSubject').onchange = function() { importSubject = this.value; };
+    document.getElementById('examImportText').value = '';
+    document.getElementById('examImportMsg').textContent = '';
+    document.getElementById('examImportModal').classList.add('show');
+}
+function doExamImport() {
+    const e = exams.find(x => x.id === importExamId);
+    if (!e || !importSubject) return;
+    const lines = document.getElementById('examImportText').value.split('\n').map(l => l.trim()).filter(Boolean);
+    if (!lines.length) return alert('请粘贴成绩行');
+    let okCount = 0; const missed = [];
+    for (const line of lines) {
+        const m = line.match(/^(.+?)[\s,，\t]+(-?\d+(?:\.\d+)?)$/);
+        if (!m) { missed.push(line); continue; }
+        const name = m[1].trim();
+        const st = students.find(s => !s.archived && (s.name === name || s.number === name))
+            || students.find(s => !s.archived && s.name.includes(name));
+        if (!st) { missed.push(line); continue; }
+        (e.scores[st.id] = subjOf(e, st.id))[importSubject] = parseFloat(m[2]);
+        if (!e.subjects?.includes(importSubject)) (e.subjects = e.subjects || []).push(importSubject);
+        okCount++;
+    }
+    saveData(); renderExams();
+    closeModal('examImportModal');
+    alert(`已导入 ${importSubject} ${okCount} 条` + (missed.length ? `；未识别 ${missed.length} 条（姓名不在名册或格式不对）：\n` + missed.join('\n') : ''));
+}
+function setExamScore(examId, studentId, subject, val) {
+    const e = exams.find(x => x.id === examId);
+    if (!e) return;
+    const m = subjOf(e, studentId);
+    const v = parseFloat(val);
+    if (val === '' || isNaN(v)) delete m[subject];
+    else m[subject] = v;
+    e.scores[studentId] = m;
+    saveData();
+    renderExamStats(examId);
+    renderExamTrend();
+}
+function renderExamStats(examId) {
+    const e = exams.find(x => x.id === examId);
+    const box = document.getElementById('examStats-' + examId);
+    if (!e || !box) return;
+    const subject = cardSubject[examId] || examSubjects(e)[0] || '';
+    const st = examSubjectStats(e, subject);
+    box.textContent = `${subject} · 均分 ${st.avg === null ? '-' : st.avg.toFixed(1)} · 最高 ${st.max ?? '-'} · 已录 ${st.count}/${students.filter(s => !s.archived).length} 人`;
+}
+function renderExams() {
+    const box = document.getElementById('examList');
+    const active = students.filter(s => !s.archived);
+    // 趋势学生下拉同步 (保留当前选择)
+    const sel = document.getElementById('trendStudent');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">选择学生</option>' + active.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+    if (cur && active.some(s => s.id === cur)) sel.value = cur;
+
+    if (!exams.length) {
+        box.innerHTML = `<div class="empty"><div class="icon">📝</div><h3>还没有考试</h3><p>点击「添加考试」创建(可多选学科), 再录入或批量导入成绩</p></div>`;
+        document.getElementById('trendCard').style.display = 'none';
+        renderExamTrend();
+        return;
+    }
+    const rows = sortedExams().reverse().map(e => {
+        const subs = examSubjects(e);
+        if (!cardSubject[e.id] || !subs.includes(cardSubject[e.id])) cardSubject[e.id] = subs[0];
+        const subject = cardSubject[e.id];
+        return `<div class="card" style="margin-top:12px;box-shadow:none">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:2px 0">
+                <b style="font-size:15px">${esc(e.name)}</b>
+                <span class="tag">${esc(e.date)}</span>
+                <span style="display:flex;gap:5px;flex-wrap:wrap">
+                    ${subs.map(s => `<button class="btn btn-sm ${s === subject ? 'btn-primary' : 'btn-ghost'}"
+                        onclick="cardSubject['${e.id}']='${esc(s)}';renderExams()">${esc(s)}</button>`).join('')}
+                </span>
+                <span class="sub" id="examStats-${e.id}"></span>
+                <span style="flex:1"></span>
+                <button class="btn btn-ghost btn-sm" data-owner-only onclick="openExamModal('${e.id}')">编辑</button>
+                <button class="btn btn-ghost btn-sm" data-owner-only onclick="openExamImportModal('${e.id}')">导入</button>
+                <button class="btn btn-danger-soft btn-sm" data-owner-only onclick="deleteExam('${e.id}')">删除</button>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+                ${active.map(s => {
+                    const v = subjOf(e, s.id)[subject];
+                    const has = typeof v === 'number';
+                    return `<span class="stu-chip ${has ? 'has' : ''}" title="${has ? subject + ' ' + v : '未录入, 点击录入'}"
+                        onclick="editChipScore('${e.id}','${s.id}',this)">${esc(s.name)}${has ? ` <b>${v}</b>` : ''}</span>`;
+                }).join('')}
+            </div>
+            <div class="hint" style="font-size:11.5px;margin-top:8px">点击姓名标签录入/修改当前学科（${esc(subject)}）成绩</div>
+        </div>`;
+    }).join('');
+    box.innerHTML = rows;
+    exams.forEach(e => renderExamStats(e.id));
+    renderExamTrend();
+}
+// 点击学生标签 → 原地变输入框录分 (Esc/失焦还原)
+function editChipScore(examId, studentId, chipEl) {
+    if (!amOwner()) return;
+    const e = exams.find(x => x.id === examId);
+    const st = studentById(studentId);
+    const subject = cardSubject[examId];
+    if (!e || !st || !subject) return;
+    const old = chipEl.innerHTML;
+    chipEl.innerHTML = `<input type="number" step="0.5" value="${subjOf(e, studentId)[subject] ?? ''}" placeholder="-"
+        style="width:56px;padding:1px 4px;font-size:12px;border:none;outline:none;background:transparent;font-family:inherit">`;
+    const input = chipEl.querySelector('input');
+    input.focus(); input.select();
+    const commit = () => { setExamScore(examId, studentId, subject, input.value); };
+    input.addEventListener('keydown', ev => {
+        if (ev.key === 'Enter') commit();
+        if (ev.key === 'Escape') { chipEl.innerHTML = old; }
+    });
+    input.addEventListener('blur', () => { if (chipEl.isConnected && chipEl.querySelector('input')) commit(); });
+}
+function renderExamTrend() {
+    const card = document.getElementById('trendCard');
+    const sid = document.getElementById('trendStudent').value;
+    const body = document.getElementById('examTrendBody');
+    const st = studentById(sid);
+    if (!st) { card.style.display = 'none'; body.innerHTML = ''; return; }
+    card.style.display = 'block';
+    // 收集该学生所有「有分数」的 (考试, 学科) 记录, 按学科分线
+    const bySubject = {};   // subject -> [{name,date,score}]
+    for (const e of sortedExams()) {
+        for (const [subject, v] of Object.entries(subjOf(e, sid))) {
+            if (typeof v !== 'number') continue;
+            (bySubject[subject] = bySubject[subject] || []).push({ id: e.id, name: e.name, date: e.date, score: v });
+        }
+    }
+    const subjects = Object.keys(bySubject);
+    if (!subjects.length) {
+        body.innerHTML = `<div class="hint" style="padding:10px 0">「${esc(st.name)}」还没有任何考试成绩, 在上方考试卡片的姓名标签点一下即可录入。</div>`;
+        return;
+    }
+    const COLORS = ['#4f46e5', '#10b981', '#f97316', '#0ea5e9', '#e11d48', '#8b5cf6', '#ca8a04', '#0d9488'];
+    // SVG: x 轴按考试日期统一排列, 每学科一条折线
+    const allDates = [...new Set(sortedExams().map(e => e.date))].sort();
+    const W = 640, H = 240, padL = 40, padB = 46, padT = 16, padR = 16;
+    const allVals = subjects.flatMap(s => bySubject[s].map(x => x.score));
+    let min = Math.min(...allVals), max = Math.max(...allVals);
+    if (max - min < 10) { min = Math.max(0, min - 5); max = max + 5; }
+    else { min = Math.max(0, min - 3); max = max + 3; }
+    const px = i => allDates.length === 1 ? (W - padL - padR) / 2 + padL : padL + i * (W - padL - padR) / (allDates.length - 1);
+    const py = v => padT + (H - padT - padB) * (1 - (v - min) / (max - min || 1));
+    const colorOf = s => COLORS[subjects.indexOf(s) % COLORS.length];
+    let svg = [0, 0.5, 1].map(t => {
+        const v = min + (max - min) * (1 - t); const y = padT + (H - padT - padB) * t;
+        return `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="var(--line)" />
+                <text x="${padL - 6}" y="${y + 4}" font-size="10" text-anchor="end" fill="var(--ink-3)">${v.toFixed(0)}</text>`;
+    }).join('');
+    allDates.forEach((d, i) => {
+        svg += `<text x="${px(i)}" y="${H - padB + 16}" font-size="10" text-anchor="middle" fill="var(--ink-3)">${esc(d.slice(5))}</text>`;
+    });
+    for (const subject of subjects) {
+        const pts = bySubject[subject].map(x => `${px(allDates.indexOf(x.date))},${py(x.score)}`).join(' ');
+        if (bySubject[subject].length > 1) svg += `<polyline points="${pts}" fill="none" stroke="${colorOf(subject)}" stroke-width="2" />`;
+        svg += bySubject[subject].map(x => `<circle cx="${px(allDates.indexOf(x.date))}" cy="${py(x.score)}" r="3.5" fill="${colorOf(subject)}">
+            <title>${esc(subject)} · ${esc(x.name)}: ${x.score}</title></circle>
+            <text x="${px(allDates.indexOf(x.date))}" y="${py(x.score) - 8}" font-size="10" text-anchor="middle" fill="${colorOf(subject)}">${x.score}</text>`).join('');
+    }
+    body.innerHTML = `
+        <svg viewBox="0 0 ${W} ${H}" style="width:100%;max-height:280px">${svg}</svg>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:4px">
+            ${subjects.map(s => `<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--ink-2)">
+                <span style="width:14px;height:3px;background:${colorOf(s)};border-radius:2px"></span>${esc(s)}</span>`).join('')}
+        </div>
+        <table style="margin-top:8px"><thead><tr><th>日期</th><th>考试</th><th>学科</th><th>成绩</th><th>较上次</th><th>班级均分</th></tr></thead><tbody>
+        ${subjects.flatMap(subject => bySubject[subject].map((x, i) => {
+            const prev = i > 0 ? bySubject[subject][i - 1].score : null;
+            const diff = prev === null ? null : x.score - prev;
+            const e = exams.find(e2 => e2.id === x.id);
+            const avg = e ? examSubjectAvg(e, subject) : null;
+            return `<tr><td class="sub">${esc(x.date)}</td><td>${esc(x.name)}</td>
+                <td><span class="tag" style="--c:${colorOf(subject)};--c-soft:#eef0fe">${esc(subject)}</span></td>
+                <td><b>${x.score}</b></td>
+                <td>${diff === null ? '<span class="sub">首次</span>'
+                    : `<b style="color:${diff > 0 ? 'var(--green)' : diff < 0 ? 'var(--rose)' : 'var(--ink-3)'}">${diff > 0 ? '↑ +' : diff < 0 ? '↓ ' : '± '}${diff}</b>`}</td>
+                <td class="sub">${avg === null ? '-' : avg.toFixed(1)}</td></tr>`;
+        })).join('')}
+        </tbody></table>`;
 }
 
 async function aiStructure() {
