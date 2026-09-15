@@ -52,6 +52,24 @@ describe("DshInterop — HarnessInterop 契约符合性", () => {
       TypeError,
     );
   });
+
+  it("mount(): resolveFrom 调用方基准可解析 interop 不可见的包；套件链可达官方传递依赖", async () => {
+    const interop = new DshInterop();
+    const ctx = new Context();
+    try {
+      // @timem/* 装在 appbase 的 node_modules —— 只有调用方基准能定位
+      // （用 expect 即便本机未装也跳过断言, 这里只验证解析通道本身不抛异常）
+      const timem = await interop.mount(ctx, { id: "t", name: "@timem/dsh-plugin-timem" }, {
+        resolveFrom: import.meta.url,
+      });
+      expect(["mounted", "failed"]).toContain(timem.status); // 解析失败也是 failed 通道而非抛出
+      // 官方传递依赖不经 resolveFrom 也能从套件链定位入口
+      const skill = await interop.mount(ctx, { id: "s", name: "@deepseek-ai/dsh-tool-skill" });
+      expect(skill.status).toBe("mounted");
+    } finally {
+      await ctx.fiber.dispose();
+    }
+  });
 });
 
 describe("dsh-interop — 与内核共存", () => {

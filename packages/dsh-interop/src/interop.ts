@@ -16,6 +16,7 @@
 import { createRequire } from "node:module";
 import { realpathSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import type { Context } from "@deepseek-ai/cordis";
 import type {
   CapabilityDescriptor,
@@ -122,19 +123,34 @@ function assertCordisContext(ctx: unknown): asserts ctx is Context {
 }
 
 /**
- * 把一行官方风格的插件行装载到 Context 上。与 AppBase 侧 dsh-host 的
- * 懒装载同构；这里只做行级原语，profile 组合器（多行/覆盖顺序/!!js 求值）
- * 属于后续生态共建的规划范围。
+ * 把一行官方风格的插件行装载到 Context 上。
+ *
+ * 包定位按三级解析基准依次尝试（隔离布局下互不可见，必须多基准）：
+ *   1. opts.resolveFrom —— 调用方模块标识（appbase 装的第三方插件如 @timem/*）
+ *   2. 官方套件链（dsh-base 的解析环境）—— 官方传递依赖（dsh-tool-* 等）
+ *   3. interop 自身 —— 兜底
+ * 命中后按物理入口文件 pathToFileURL import，绕开包名解析限制。
  */
 export async function mountDshRow(
   ctx: Context,
   row: CapabilityDescriptor,
+  opts?: { resolveFrom?: string },
 ): Promise<CapabilityMountResult> {
   if (row.disabled) {
     return { status: "skipped", id: row.id, reason: "disabled" };
   }
   try {
-    const mod = (await import(row.name)) as Record<string, unknown>;
+    const bases: NodeRequire[] = [];
+    if (opts?.resolveFrom) bases.push(createRequire(opts.resolveFrom));
+    bases.push(suiteRequire(), localRequire);
+    let entry: string | null = null;
+    for (const req of bases) {
+      try {
+        entry = pathToFileURL(req.resolve(row.name)).href;
+        break;
+      } catch { /* 下一个基准 */ }
+    }
+    const mod = (entry ? await import(entry) : await import(row.name)) as Record<string, unknown>;
     const plugin = pickPluginExport(mod, row.exportName);
     if (!plugin) {
       throw new Error(
@@ -152,6 +168,17 @@ export async function mountDshRow(
       error: String((e as Error)?.message ?? e),
     };
   }
+}
+
+/** 官方套件解析环境（dsh-base 的 require 链，可达整个 .pnpm 内部树） */
+let _suiteRequire: NodeRequire | null = null;
+function suiteRequire(): NodeRequire {
+  if (!_suiteRequire) {
+    _suiteRequire = createRequire(
+      localRequire.resolve("@deepseek-ai/dsh-base/package.json"),
+    );
+  }
+  return _suiteRequire;
 }
 
 /**
@@ -177,8 +204,9 @@ export class DshInterop implements HarnessInterop {
   async mount(
     ctx: unknown,
     capability: CapabilityDescriptor,
+    opts?: { resolveFrom?: string },
   ): Promise<CapabilityMountResult> {
     assertCordisContext(ctx);
-    return mountDshRow(ctx, capability);
+    return mountDshRow(ctx, capability, opts);
   }
 }

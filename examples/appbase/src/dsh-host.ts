@@ -69,12 +69,13 @@ async function ensureHost(): Promise<AnyCtx> {
 
 export async function dshLoadPlugin(rec: DshPluginRecord): Promise<{ ok: boolean; error?: string }> {
   const ctx = await ensureHost();
+  // resolveFrom = 本模块: 让 appbase 的依赖 (如 @timem/*) 在调用方解析环境定位
   const r = await interop.mount(ctx as unknown, {
     id: rec.name,
     name: rec.package,
     exportName: rec.export_name || undefined,
     config: rec.config ?? {},
-  });
+  }, { resolveFrom: import.meta.url });
   if (r.status === "mounted") {
     host!.plugins.set(rec.name, { at: new Date().toISOString() });
     return { ok: true };

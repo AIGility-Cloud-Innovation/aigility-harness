@@ -47,9 +47,14 @@ export interface HarnessInterop {
   /**
    * 把一个家族内能力挂到家族内核 substrate 上。能力缺失/包不可达等
    * 运行期问题返回 failed；substrate 类型不符抛 TypeError。
+   *
+   * opts.resolveFrom: 调用方模块标识（如 import.meta.url），供实现把
+   * capability.name 在「调用方的解析环境」里定位——隔离布局
+   * （pnpm）下调用方依赖对 interop 包不可见，必须由调用方提供基准。
    */
   mount(
     ctx: unknown,
     capability: CapabilityDescriptor,
+    opts?: { resolveFrom?: string },
   ): Promise<CapabilityMountResult>;
 }
