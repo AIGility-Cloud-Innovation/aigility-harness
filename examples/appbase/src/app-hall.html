@@ -87,7 +87,6 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
 .proto-card { background:#fff; border-radius:20px; padding:18px 18px 12px; width:560px; max-width:92vw; display:flex; flex-direction:column; box-shadow:0 24px 70px rgba(0,0,0,.4); }
 .proto-card h2 { font-size:20px; }
 .proto-card .lsub { font-size:12.5px; color:var(--ink2); margin:6px 0 12px; }
-.proto-frame { flex:1; width:100%; min-height:400px; border:0; border-radius:12px; background:#0b1220; }
 .proto-note { font-size:11px; color:var(--ink2); margin-top:8px; opacity:.8; }
 .proto-note code { background:var(--soft); border-radius:5px; padding:1px 6px; }
 @media (max-width:1060px) { .proto-card { display:none; } }
@@ -112,8 +111,9 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
     <div class="proto-card">
       <h2>🧪 原型演示（免登录）</h2>
       <div class="lsub">五域 Agent 最小 Web UI —— 游客即点即聊<br><small style="opacity:.6">注册登录后可进应用大厅，体验多角色与完整功能</small></div>
-      <iframe class="proto-frame" src="http://127.0.0.1:3399/ui" title="aigility-harness 原型演示"></iframe>
-      <div class="proto-note">若上方空白，请先在本机启动原型：<code>pnpm example:prototype</code></div>
+      <button class="mbtn g" style="width:100%; padding:12px 0; font-size:14px" onclick="openProtoDemo(this)">▶ 打开原型演示</button>
+      <div class="proto-note">需先在本机启动原型服务：<code>pnpm example:prototype</code></div>
+      <div class="proto-msg" id="protoMsg" style="display:none; margin-top:8px; font-size:12.5px; color:var(--rose); min-height:16px"></div>
     </div>
   </div>
 </div>
@@ -298,6 +298,23 @@ function logout() {
   fetch('/app/auth/logout', { method: 'POST' }).catch(function() {});
   sessionStorage.removeItem('hall_token');
   location.reload();
+}
+// 原型演示按钮: 探测 127.0.0.1:3399 是否在跑, 在跑则新标签打开, 否则提示先启动
+function openProtoDemo(btn) {
+  var msg = document.getElementById('protoMsg');
+  msg.style.display = 'block';
+  msg.style.color = 'var(--ink2)';
+  msg.textContent = '正在检测原型服务…';
+  fetch('http://127.0.0.1:3399/ui', { mode: 'no-cors' })
+    .then(function() {
+      msg.textContent = '';
+      msg.style.display = 'none';
+      window.open('http://127.0.0.1:3399/ui', '_blank');
+    })
+    .catch(function() {
+      msg.style.color = 'var(--rose)';
+      msg.textContent = '✗ 原型服务未启动：请先在本机仓库根目录运行 pnpm example:prototype，启动后重试';
+    });
 }
 document.getElementById('lgPassword').addEventListener('keydown', function(e) {
   if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) doLogin(false);
