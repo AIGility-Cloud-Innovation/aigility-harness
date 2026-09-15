@@ -216,22 +216,11 @@ async function main(): Promise<void> {
       res.end();
       return;
     }
+    // DSH 插件管理页 (管理员专用; 非管理员跳回大厅; 浏览器导航靠 httpOnly cookie 识别)
+    // 注: /dsh 独立页已并入 /admin?tab=dsh-plugins 统一管理壳 (原 dsh-admin.html 已删除, 功能并入壳页)
     if (req.method === "GET" && (req.url === "/dsh" || req.url?.startsWith("/dsh?"))) {
       res.writeHead(302, { Location: "/admin?tab=dsh-plugins" });
       res.end();
-      return;
-    }
-    // DSH 插件管理页 (管理员专用; 非管理员跳回大厅; 浏览器导航靠 httpOnly cookie 识别)
-    if (req.method === "GET" && (req.url === "/dsh" || req.url?.startsWith("/dsh?"))) {
-      const backend = await import("./backend.js");
-      const uid = backend.pageUserId(req);
-      if (!uid || !(await backend.isAdminUser(uid))) {
-        res.writeHead(302, { Location: "/hall" });
-        res.end();
-        return;
-      }
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(DSH_ADMIN_HTML);
       return;
     }
     // hall 路由 (由 hall 返回的 handler 处理); 对话 API 同样需要先登录
@@ -500,7 +489,6 @@ const ADMIN_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "a
 // 用户个人中心 (登录用户; 余额/用量/流水, 对所有网页应用通用)
 const ME_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "me.html"), "utf-8");
 // DSH 插件管理页 (管理员专用)
-const DSH_ADMIN_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "dsh-admin.html"), "utf-8");
 
 // 首页 (跳转对话厅 + 产品简介)
 const INDEX_HTML = `<!DOCTYPE html>
