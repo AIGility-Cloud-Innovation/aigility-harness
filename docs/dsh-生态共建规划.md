@@ -86,7 +86,7 @@
 ## 七、里程碑
 
 - **M1（✅ 已完成）**：依赖精确锁定 + 桥接原语（版本对齐、行装载）+ 冒烟测试。
-- **M2（进行中）**：① 官方能力库存——`dshBaseRows()` 只读解析 dsh-base 行清单（`!!js` 原文保留不求值）+ admin「DSH 插件」页的「官方能力目录」展示（✅ 已完成）；② profile 组合器——解析官方清单后按 last-write-wins 合并、依赖感知成组装载（待做）；③ 第一个插件 `dsh-plugin-persona-coach` 在官方 dsh（`npx @deepseek-ai/dsh web`）可装载可对话（待做）。
+- **M2（✅ 已完成）**：① 官方能力库存——`dshBaseRows()` 只读解析 dsh-base 行清单（`!!js` 原文保留不求值）+ admin「DSH 插件」页的「官方能力目录」展示（✅）；② profile 组合器——镜像官方 `applyEntryPatches` 语义（insert / 按 id 覆盖，last-write-wins），bundle 按 `dsh.bundle.patch` 读层，遥测默认硬关闭；`!!js` 白名单求值器（递归下降、只认官方清单出现的形态、不用 eval）；`mountComposedProfile` 按 provide/inject 拓扑序成组装载 + cordis 服务唯一去重（✅，27 测试）；③ 第一个插件 `@aigility-harness/dsh-plugin-persona-coach`——编码教练 system-prompt section + `/coach` 命令，五阶段逐字对齐 AppBase guided-design；headless profile 装载已验证直通 LLM 调用环节，真跑对话验收待 bigmodel 密钥轮换后 `pnpm --filter @aigility-harness/dsh-plugin-persona-coach run smoke`（✅ 装载 / ⏳ 对话验收）。
 - **M3**：角色族 + app-dev + timem-task 插件化；metering 挂接 `dsh-token-meter`；npm 首发 + 生态 demo。
 - **M4**：数据空间 + installer 插件化；评估是否以官方 dsh 为壳做「开发者发行版」。
 
