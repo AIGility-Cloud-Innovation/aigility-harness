@@ -1,14 +1,23 @@
 @echo off
+setlocal
 chcp 65001 >nul
 rem ============================================================
-rem  AppBase 一键启动 (模板)
-rem  复制为 start-appbase.cmd (该文件已被 .gitignore 忽略, 可放心填密钥)
-rem  并把下面所有【填】项填好
+rem  AppBase one-click start (TEMPLATE).
+rem  Copy to start-appbase.cmd (git-ignored, safe for secrets),
+rem  then fill every [FILL: ...] value below.
+rem
+rem  NOTE: keep this file ASCII-only with CRLF line endings.
+rem  A .cmd saved as UTF-8 with Chinese comments breaks cmd.exe:
+rem  it decodes lines with the OEM codepage (GBK on zh-CN systems)
+rem  and `chcp 65001` mid-file re-syncs byte offsets, so every line
+rem  after the switch turns into garbage commands.
 rem ============================================================
 
-rem ---- PostgreSQL (Docker: 容器 appbase-pg, 宿主 5433, 与代码默认端口对齐) ----
-set APPBASE_PG_PASSWORD=【填:容器 POSTGRES_PASSWORD】
-rem 首次在新机器: 容器不存在时自动创建 (named volume appbase_pg_data 持久化数据)
+rem ---- PostgreSQL (Docker container appbase-pg, host port 5433,
+rem ---- aligned with the default PG port in code) ----
+set "APPBASE_PG_PASSWORD=[FILL: container POSTGRES_PASSWORD]"
+rem First run on a new machine: container missing -> auto-create it
+rem (named volume appbase_pg_data keeps data persistent across restarts)
 docker start appbase-pg 2>nul
 if errorlevel 1 (
   docker run -d --name appbase-pg --restart unless-stopped ^
@@ -17,31 +26,39 @@ if errorlevel 1 (
     -v appbase_pg_data:/var/lib/postgresql/data postgres:16-alpine
 )
 
-rem ---- LLM 上游 (必填; 不填则页面能开, 对话/AI 报"该应用尚未配置 LLM") ----
-set BIGMODEL_API_KEY=【填:智谱开放平台 API Key】
+rem ---- LLM upstream (required; without any key the pages load but
+rem ---- chat/AI replies "app LLM not configured". The admin UI
+rem ---- "LLM config" page persists to PG and always wins over env) ----
+set "BIGMODEL_API_KEY=[FILL: zhipu BigModel API key]"
 
-rem ---- 编码代理驱动: zcode / codex (默认 codex) ----
-set APPBASE_RELAY_TARGETS=look_log=http://【填:日志服务地址:端口】/look_log
-set AGENT_DRIVER=zcode
-rem 可选, 一般无需设置 (默认 node + C:/Program Files/ZCode/resources/glm/zcode.cjs):
-rem set ZCODE_NODE_BIN=D:\Program Files\nodejs\node.exe
-rem set ZCODE_CLI_PATH=C:\Program Files\ZCode\resources\glm\zcode.cjs
+rem ---- coding agent driver: zcode / codex (default codex) ----
+set "APPBASE_RELAY_TARGETS=look_log=http://[FILL: log service host:port]/look_log"
+set "AGENT_DRIVER=zcode"
+rem optional, usually not needed (defaults: node + zcode.cjs under Program Files):
+rem set "ZCODE_NODE_BIN=D:\Program Files\nodejs\node.exe"
+rem set "ZCODE_CLI_PATH=C:\Program Files\ZCode\resources\glm\zcode.cjs"
 
-rem ---- 固定网关密钥 (不设则每次启动随机生成并打印在控制台, 外部调用方要跟着换) ----
-set APPBASE_GATEWAY_KEY=【填:随机长串, 如 openssl rand -hex 24 的输出】
+rem ---- fixed AI gateway key (if unset, a random key is generated and
+rem ---- printed to console at every start; external callers must follow)
+set "APPBASE_GATEWAY_KEY=[FILL: long random string, e.g. openssl rand -hex 24]"
 
-rem ---- 登录 token 签名: 默认用 src\.token-secret 文件持久化, 重启不失效, 无需设置 ----
-rem set APPBASE_TOKEN_SECRET=
+rem ---- login token signing: persisted in src\.token-secret by default,
+rem ---- survives restarts, no need to set.
+rem set "APPBASE_TOKEN_SECRET="
 
-rem ---- 管理员账号 (可选): 逗号分隔的邮箱白名单, 与库内 is_admin 列取并集;
-rem      都不设时, 首个注册的用户自动成为管理员; 也可 SQL 提拔:
+rem ---- admin accounts (optional): comma-separated email whitelist,
+rem ---- UNIONed with the is_admin column in DB. When neither is set,
+rem ---- the first registered user becomes admin. SQL promotion:
 rem      UPDATE users SET is_admin=true WHERE email='...'
-rem set APPBASE_ADMIN_EMAILS=admin@example.com
+rem set "APPBASE_ADMIN_EMAILS=admin@example.com"
 
-rem ---- 注册开关 (可选): 设为 false 后仅已有账号可登录 (默认允许注册) ----
-rem set APPBASE_ALLOW_REGISTER=false
+rem ---- registration switch (optional): set false to allow login only
+rem ---- for existing accounts (default: registration open)
+rem set "APPBASE_ALLOW_REGISTER=false"
 
-rem ---- 登录限流: 内建, 同 IP+邮箱 5 次失败锁 15 分钟, 无需配置 ----
+rem ---- login rate limit: built in, 5 failures per IP+email locks for
+rem ---- 15 minutes, no configuration needed ----
 
-cd /d %~dp0
+cd /d "%~dp0"
+echo [start-appbase] starting AppBase via pnpm start ...
 pnpm start
