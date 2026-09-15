@@ -76,6 +76,16 @@ textarea.minput:focus, input.minput:focus { border-color:var(--accent); }
 
   <div class="card">
     <div class="chead">
+      <b class="nm">📦 已安装的 DSH 插件包</b>
+      <span class="hint" id="instMeta"></span>
+      <div class="ops"><button class="b-save" onclick="loadInstalled()">⟳ 刷新</button></div>
+    </div>
+    <div class="cathead">本机 node_modules 里实际安装的官方 dsh 套件包（递归依赖树盘点，版本为实装版本）。「插件」= 出现在官方能力清单中的行；「支撑库」= 套件内部的非插件包。点包名可预填到下方注册表单。</div>
+    <div class="catbox" id="instBox"><div class="hint">加载中…</div></div>
+  </div>
+
+  <div class="card">
+    <div class="chead">
       <b class="nm">📚 官方能力目录</b>
       <span class="hint" id="catMeta"></span>
       <div class="ops"><button class="b-save" onclick="loadCatalog()">⟳ 刷新</button></div>
@@ -267,6 +277,14 @@ function registerPlugin() {
     document.getElementById('rgExport').value = ''; document.getElementById('rgDesc').value = '';
     loadPlugins();
   }).catch(function(e) { toast('✗ ' + e.message); });
+function prefillReg(name) {
+  document.getElementById('rgPkg').value = name;
+  var shortName = name.split('/').pop().replace(/^dsh-/, '');
+  document.getElementById('rgName').value = shortName;
+  var bar = document.getElementById('regBar');
+  if (bar) { bar.classList.add('show'); bar.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  toast('已预填 ' + name + ' —— 可补充描述后点「注册」');
+}
 function loadCatalog() {
   fetchJSON('/app/dsh/catalog').then(function(d) {
     var v = d.versions || {};
@@ -295,8 +313,37 @@ function loadCatalog() {
     document.getElementById('catBox').innerHTML = '<div class="hint">无法加载官方目录: ' + esc(e.message) + '</div>';
   });
 }
+function loadInstalled() {
+  fetchJSON('/app/dsh/installed').then(function(d) {
+    document.getElementById('instMeta').innerHTML =
+      'dsh ' + esc(d.suite || '?') + ' · 共 ' + (d.total || 0) + ' 包 · 插件 ' + (d.pluginCount || 0);
+    var rows = d.packages || [];
+    var plugins = rows.filter(function(p){ return p.isPlugin; });
+    var libs = rows.filter(function(p){ return !p.isPlugin; });
+    function rowHtml(p) {
+      return '<div class="catrow">'
+        + '<a href="https://www.npmjs.com/package/' + encodeURIComponent(p.name) + '" target="_blank" rel="noopener" class="cid">' + esc(p.name) + '</a> '
+        + '<span class="pkg">' + esc(p.version) + '</span> '
+        + (p.isPlugin ? '<span class="chip ok">插件' + (p.officialRowIds.length > 1 ? '×' + p.officialRowIds.length : '') + '</span>' : '<span class="chip off">支撑库</span>')
+        + (p.officialRowIds.length ? '<span class="hint"> 行: ' + esc(p.officialRowIds.join(', ')) + '</span>' : '')
+        + (p.description ? '<div class="catnotes">' + esc(p.description) + '</div>' : '')
+        + '<div class="ops" style="margin-top:4px"><button class="b-en" onclick="prefillReg(\'' + esc(p.name) + '\')">➕ 注册到运行时</button></div>'
+        + '</div>';
+    }
+    function group(title, list) {
+      if (!list.length) return '';
+      return '<div style="margin:6px 0 2px;font-weight:700;font-size:12px">' + title + '（' + list.length + '）</div>'
+        + list.map(rowHtml).join('');
+    }
+    document.getElementById('instBox').innerHTML =
+      group('插件', plugins) + group('支撑库', libs);
+  }).catch(function(e) {
+    document.getElementById('instBox').innerHTML = '<div class="hint">无法加载安装盘点: ' + esc(e.message) + '</div>';
+  });
+}
 loadPlugins();
 loadCatalog();
+loadInstalled();
 </script>
 </body>
 </html>

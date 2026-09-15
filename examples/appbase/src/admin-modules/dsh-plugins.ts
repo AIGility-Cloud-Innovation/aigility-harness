@@ -4,7 +4,7 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { dshLoadPlugin, dshLoadEnabled, dshStatus } from "../dsh-host.js";
-import { dshBaseRows, dshSuiteVersions, isJsExpr } from "@aigility-harness/dsh-interop";
+import { dshBaseRows, dshSuiteVersions, isJsExpr, installedDshPackages } from "@aigility-harness/dsh-interop";
 import { json, readBody, pool, bearerUser, isAdminUser, writeAudit, emailOf, parseEnvText } from "./context.js";
 
 /** 把 config 里的 JsExpr 原文渲染成 js(...) 字符串 (供展示, 不求值) */
@@ -44,6 +44,28 @@ export async function handle(req: IncomingMessage, res: ServerResponse, path: st
         config: renderConfig(r.config ?? null),
       }));
       return json(res, 200, { versions: dshSuiteVersions(), total: rows.length, rows });
+    }
+
+    // ── 管理员: 已安装的官方 dsh 插件包 (依赖树实装盘点, 与清单对齐) ──
+    if (method === "GET" && path === "/app/dsh/installed") {
+      const adminId = bearerUser(req);
+      if (!adminId) return json(res, 401, { error: "未授权: 请先登录" });
+      if (!(await isAdminUser(adminId))) return json(res, 403, { error: "需要管理员权限" });
+      const versions = dshSuiteVersions();
+      const pkgs = installedDshPackages().map((p) => ({
+        name: p.name,
+        version: p.version,
+        description: p.description.length > 160 ? p.description.slice(0, 160) + "…" : p.description,
+        officialRowIds: p.officialRowIds,
+        isPlugin: p.isPlugin,
+      }));
+      return json(res, 200, {
+        suite: versions.dsh,
+        cordis: versions.cordis,
+        total: pkgs.length,
+        pluginCount: pkgs.filter((p) => p.isPlugin).length,
+        packages: pkgs,
+      });
     }
 
     // ── 管理员: DSH 插件管理 (cordis 插件注册/配置/加载) ──
