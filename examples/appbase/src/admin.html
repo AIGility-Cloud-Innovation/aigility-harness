@@ -30,6 +30,13 @@ tr:last-child td { border-bottom:none; }
 .chip.admin, .chip.on, .chip.ok { background:var(--green-soft); color:var(--green); }
 .chip.user, .chip.off { background:#f1f4f9; color:var(--ink2); }
 .chip.err { background:var(--rose-soft); color:var(--rose); }
+.pkg { font-family:Consolas,monospace; font-size:11.5px; color:var(--ink2); background:#f1f4f9; padding:2px 7px; border-radius:6px; }
+.catbox { max-height:460px; overflow-y:auto; margin-top:8px; }
+.catrow { padding:9px 2px; border-bottom:1px dashed var(--line); }
+.catrow:last-child { border-bottom:none; }
+.catrow .cid { font-family:Consolas,monospace; font-weight:700; font-size:12.5px; }
+.catnotes { font-size:11.5px; color:var(--ink2); margin-top:3px; line-height:1.55; }
+.cathead { font-size:11.5px; color:var(--ink2); margin-top:6px; }
 td button, .regbar button, .cbtn { border:none; border-radius:8px; padding:5px 10px; font-size:11.5px; cursor:pointer; font-weight:600; font-family:inherit; margin-right:5px; }
 .b-admin { background:var(--green-soft); color:var(--green); }
 .b-demote { background:#fff3e6; color:#d97706; }
@@ -145,6 +152,24 @@ textarea.minput { min-height:96px; font-family:Consolas,monospace; }
       <div class="hint">插件包在本机需已安装（node_modules 可解析）。加载即把插件插入服务进程内的 cordis 运行时；保存配置后需重新加载生效。</div>
     </div>
     <div id="pluginList"></div>
+    <div class="card pad">
+      <div class="chead">
+        <b class="nm">📦 已安装的 DSH 插件包</b>
+        <span class="hint" id="instMeta"></span>
+        <div class="ops"><button class="b-save" onclick="loadInstalled()">⟳ 刷新</button></div>
+      </div>
+      <div class="cathead">本机 node_modules 里实际安装的官方 dsh 套件包（递归依赖树盘点，版本为实装版本）。「插件」= 出现在官方能力清单中的行；「支撑库」= 套件内部非插件包。「注册到运行时」一键预填下方表单。</div>
+      <div class="catbox" id="instBox"><div class="hint">加载中…</div></div>
+    </div>
+    <div class="card pad">
+      <div class="chead">
+        <b class="nm">📚 官方能力目录</b>
+        <span class="hint" id="catMeta"></span>
+        <div class="ops"><button class="b-save" onclick="loadCatalog()">⟳ 刷新</button></div>
+      </div>
+      <div class="cathead">官方 dsh-base 清单里的全部能力行（只读展示；<code>js(...)</code> 为官方清单原文表达式，服务端不执行）。</div>
+      <div class="catbox" id="catBox"><div class="hint">加载中…</div></div>
+    </div>
     <div class="card pad">
       <div class="chead"><b class="nm">🔎 插件从哪里找</b></div>
       <div class="srcs">
@@ -652,6 +677,69 @@ function registerPlugin() {
   }).catch(function(e) { toast('✗ ' + e.message); });
 }
 
+function prefillReg(name) {
+  document.getElementById('rgPkg').value = name;
+  var shortName = name.split('/').pop().replace(/^dsh-/, '');
+  document.getElementById('rgName').value = shortName;
+  var bar = document.getElementById('regBar');
+  if (bar) { bar.classList.add('show'); bar.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  toast('已预填 ' + name + ' —— 可补充描述后点「注册」');
+}
+
+function loadInstalled() {
+  fetchJSON('/app/dsh/installed').then(function(d) {
+    document.getElementById('instMeta').innerHTML =
+      'dsh ' + esc(d.suite || '?') + ' · 共 ' + (d.total || 0) + ' 包 · 插件 ' + (d.pluginCount || 0);
+    var rows = d.packages || [];
+    var plugins = rows.filter(function(p){ return p.isPlugin; });
+    var libs = rows.filter(function(p){ return !p.isPlugin; });
+    function rowHtml(p) {
+      return '<div class="catrow">'
+        + '<a href="https://www.npmjs.com/package/' + encodeURIComponent(p.name) + '" target="_blank" rel="noopener" class="cid">' + esc(p.name) + '</a> '
+        + '<span class="pkg">' + esc(p.version) + '</span> '
+        + (p.isPlugin ? '<span class="chip ok">插件' + (p.officialRowIds.length > 1 ? '×' + p.officialRowIds.length : '') + '</span>' : '<span class="chip off">支撑库</span>')
+        + (p.officialRowIds.length ? '<span class="hint"> 行: ' + esc(p.officialRowIds.join(', ')) + '</span>' : '')
+        + (p.description ? '<div class="catnotes">' + esc(p.description) + '</div>' : '')
+        + '<div style="margin-top:4px"><button class="b-en" onclick="prefillReg(\'' + esc(p.name) + '\')">➕ 注册到运行时</button></div>'
+        + '</div>';
+    }
+    function group(title, list) {
+      if (!list.length) return '';
+      return '<div style="margin:6px 0 2px;font-weight:700;font-size:12px">' + title + '（' + list.length + '）</div>'
+        + list.map(rowHtml).join('');
+    }
+    document.getElementById('instBox').innerHTML =
+      group('插件', plugins) + group('支撑库', libs);
+  }).catch(function(e) {
+    document.getElementById('instBox').innerHTML = '<div class="hint">无法加载安装盘点: ' + esc(e.message) + '</div>';
+  });
+}
+
+function loadCatalog() {
+  fetchJSON('/app/dsh/catalog').then(function(d) {
+    var v = d.versions || {};
+    var aligned = v.cordisAligned !== false;
+    document.getElementById('catMeta').innerHTML =
+      'dsh ' + esc(v.dsh || '?') + ' · cordis ' + esc(v.cordis || '?') +
+      ' · <span class="chip ' + (aligned ? 'ok' : 'err') + '">' + (aligned ? '实例对齐 ✓' : '实例未对齐 ✗') + '</span>' +
+      ' · 共 ' + (d.total || 0) + ' 行';
+    var rows = d.rows || [];
+    document.getElementById('catBox').innerHTML = rows.map(function(r) {
+      var badge = '';
+      if (r.disabledText === '默认禁用') badge = '<span class="chip off">默认禁用</span>';
+      else if (r.disabledText) badge = '<span class="chip off" title="' + esc(r.disabledText) + '">条件禁用</span>';
+      return '<div class="catrow">'
+        + '<span class="cid">' + esc(r.id || '—') + '</span> '
+        + '<span class="pkg">' + esc(r.name) + '</span> '
+        + badge
+        + (r.notes ? '<div class="catnotes" title="' + esc(r.notes) + '">' + esc(r.notes) + '</div>' : '')
+        + '</div>';
+    }).join('');
+  }).catch(function(e) {
+    document.getElementById('catBox').innerHTML = '<div class="hint">无法加载官方目录: ' + esc(e.message) + '</div>';
+  });
+}
+
 // ── ⚙ 框架层插件 ──
 var LAYER_NAMES = {
   infrastructure: 'L1 基础设施', cognitive: 'L2 认知', orchestration: 'L4 编排',
@@ -802,6 +890,8 @@ fetchJSON('/app/hall/admin-panels').then(function(d) {
   loadAudit();
   loadLlmGlobal();
   loadPlugins();
+  loadInstalled();
+  loadCatalog();
   loadHarness();
   loadUsage();
   loadCredits();
