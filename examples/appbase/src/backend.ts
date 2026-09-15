@@ -1212,6 +1212,19 @@ export async function initAppBackend(): Promise<void> {
     console.error("[migrate] 数据空间迁移失败(忽略):", e);
   }
 
+  // 角色策略补列 (2026-09-15): 既有空间的 teacher readTables 追加 exams (考试成绩对任课老师只读可见)。
+  // 幂等: 已含 exams 的不动; 新建空间由应用自带的新 ROLE_POLICY 覆盖。
+  try {
+    await pool.query(
+      `UPDATE app_spaces
+       SET role_policy = jsonb_set(role_policy, '{roles,teacher,readTables}',
+           (role_policy->'roles'->'teacher'->'readTables') || '"exams"'::jsonb)
+       WHERE role_policy->'roles'->'teacher'->'readTables' IS NOT NULL
+         AND NOT (role_policy->'roles'->'teacher'->'readTables') @> '"exams"'::jsonb`);
+  } catch (e) {
+    console.error("[migrate] teacher 角色补 exams 读权限失败(忽略):", e);
+  }
+
   // 数据转发目标种子: 全局 APPBASE_RELAY_TARGETS 里的目标写入对应应用 .env (用户可在管理抽屉改)
   try {
     for (const [tName, tUrl] of Object.entries(relayTargets())) {
