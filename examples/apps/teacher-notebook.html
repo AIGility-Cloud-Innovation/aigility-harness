@@ -550,9 +550,13 @@ tbody tr:last-child td { border-bottom: none; }
 <div class="modal" id="examImportModal">
     <div class="modal-box" style="max-width:460px">
         <div class="modal-head"><h3>📥 批量导入成绩</h3><button class="modal-x" onclick="closeModal('examImportModal')">✕</button></div>
+        <div id="importExamPick" style="display:none;margin-bottom:8px">
+            <span class="hint" style="font-size:12.5px;color:var(--ink-3)">选择考试：</span>
+            <select id="importExamSelect" onchange="onImportExamChange()" style="padding:4px 6px"></select>
+        </div>
         <div class="hint" style="font-size:12.5px;color:var(--ink-3);margin:4px 0 8px">
-            导入到考试：<b id="importExamName" style="color:var(--ink)"></b>
-            · 学科：<select id="importSubject" style="padding:4px 6px"></select>
+            <span id="importExamPrefix">导入到考试：</span><b id="importExamName" style="color:var(--ink)"></b>
+            <span id="importSubjectWrap"> · 学科：<select id="importSubject" style="padding:4px 6px"></select></span>
             <br>每行一条：<code>姓名 分数</code>（姓名需与名册一致）。
         </div>
         <textarea id="examImportText" style="width:100%;min-height:140px" placeholder="张三 95&#10;李四 88&#10;王五 76"></textarea>
@@ -1452,19 +1456,38 @@ function deleteExam(id) {
     saveData(); renderExams();
 }
 let importExamId = null, importSubject = null;
-function openExamImportModal(id) {
-    const e = exams.find(x => x.id === id);
-    if (!e) return;
+// 工具栏入口(不带 id) → 弹出考试下拉; 卡片入口(带 id) → 锁定该考试
+function openExamImportModal(id = null) {
+    if (!id && !exams.length) return alert('请先创建考试');
+    if (!id && exams.length === 1) id = exams[0].id;
     importExamId = id;
+    const fixed = Boolean(id);
+    document.getElementById('importExamPick').style.display = fixed ? 'none' : 'block';
+    document.getElementById('importExamPrefix').style.display = fixed ? 'inline' : 'none';
+    if (!fixed) {
+        const sel = document.getElementById('importExamSelect');
+        const ordered = sortedExams().reverse();
+        sel.innerHTML = ordered.map(e => `<option value="${e.id}">${esc(e.name)} (${esc(e.date)})</option>`).join('');
+        importExamId = ordered[0].id;
+    }
+    document.getElementById('examImportModal').classList.add('show');
+    refreshImportSubjects();
+}
+function onImportExamChange() {
+    importExamId = document.getElementById('importExamSelect').value || null;
+    refreshImportSubjects();
+}
+function refreshImportSubjects() {
+    const e = exams.find(x => x.id === importExamId);
+    if (!e) return;
     const subs = examSubjects(e);
-    importSubject = cardSubject[id] && subs.includes(cardSubject[id]) ? cardSubject[id] : subs[0];
+    importSubject = cardSubject[e.id] && subs.includes(cardSubject[e.id]) ? cardSubject[e.id] : subs[0];
     document.getElementById('importExamName').textContent = `${e.name} (${e.date})`;
     document.getElementById('importSubject').innerHTML = subs.map(s =>
         `<option ${s === importSubject ? 'selected' : ''}>${esc(s)}</option>`).join('');
     document.getElementById('importSubject').onchange = function() { importSubject = this.value; };
     document.getElementById('examImportText').value = '';
     document.getElementById('examImportMsg').textContent = '';
-    document.getElementById('examImportModal').classList.add('show');
 }
 function doExamImport() {
     const e = exams.find(x => x.id === importExamId);
