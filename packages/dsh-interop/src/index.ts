@@ -9,7 +9,7 @@
  */
 
 export { DshInterop } from "./interop.js";
-export { dshSuiteVersions, mountDshRow } from "./interop.js";
+export { dshSuiteVersions, mountDshRow, resolvePluginModule } from "./interop.js";
 export type { DshSuiteVersions } from "./interop.js";
 export { dshBaseRows, isJsExpr } from "./base-rows.js";
 export type { DshBaseRow, JsExpr } from "./base-rows.js";
@@ -17,3 +17,21 @@ export { installedDshPackages, disabledToText } from "./installed.js";
 export type { InstalledDshPackage } from "./installed.js";
 export { dshAgentHeadless } from "./headless.js";
 export type { DshHeadlessOptions, DshHeadlessResult } from "./headless.js";
+export { evaluateJsExpr, evaluateDeep } from "./js-expr.js";
+export type { JsExprEvalContext } from "./js-expr.js";
+export {
+  TELEMETRY_ROW_ID,
+  composeProfileRows,
+  mountComposedProfile,
+  orderRowIndices,
+} from "./profile-composer.js";
+export type {
+  ComposeProfileOptions,
+  ComposeResult,
+  ComposedRow,
+  DshPatchEntry,
+  MountProfileOptions,
+  MountProfileResult,
+  ProfileRowResult,
+  RowDependencyMeta,
+} from "./profile-composer.js";

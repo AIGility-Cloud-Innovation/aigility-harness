@@ -96,7 +96,7 @@ export function dshSuiteVersions(): DshSuiteVersions {
 }
 
 /** 从包模块里挑出 cordis 插件：exportName > default > apply(整模块) > 首个函数 */
-function pickPluginExport(
+export function pickPluginExport(
   mod: Record<string, unknown>,
   exportName?: string,
 ): unknown {
@@ -140,17 +140,7 @@ export async function mountDshRow(
     return { status: "skipped", id: row.id, reason: "disabled" };
   }
   try {
-    const bases: NodeRequire[] = [];
-    if (opts?.resolveFrom) bases.push(createRequire(opts.resolveFrom));
-    bases.push(suiteRequire(), localRequire);
-    let entry: string | null = null;
-    for (const req of bases) {
-      try {
-        entry = pathToFileURL(req.resolve(row.name)).href;
-        break;
-      } catch { /* 下一个基准 */ }
-    }
-    const mod = (entry ? await import(entry) : await import(row.name)) as Record<string, unknown>;
+    const mod = await resolvePluginModule(row.name, opts);
     const plugin = pickPluginExport(mod, row.exportName);
     if (!plugin) {
       throw new Error(
@@ -179,6 +169,35 @@ function suiteRequire(): NodeRequire {
     );
   }
   return _suiteRequire;
+}
+
+/**
+ * 按三级解析基准定位并 import 一个插件包模块（mountDshRow 与组合器共用）：
+ *   1. resolveFrom —— 调用方模块标识（隔离布局下互不可见，必须多基准）
+ *   2. 官方套件链（dsh-base 的解析环境）—— 官方传递依赖（dsh-tool-* 等）
+ *   3. interop 自身 —— 兜底
+ * 命中后按物理入口文件 pathToFileURL import，绕开包名解析限制。
+ */
+export async function resolvePluginModule(
+  name: string,
+  opts?: { resolveFrom?: string },
+): Promise<Record<string, unknown>> {
+  const bases: NodeRequire[] = [];
+  if (opts?.resolveFrom) bases.push(createRequire(opts.resolveFrom));
+  bases.push(suiteRequire(), localRequire);
+  let entry: string | null = null;
+  for (const req of bases) {
+    try {
+      entry = pathToFileURL(req.resolve(name)).href;
+      break;
+    } catch {
+      /* 下一个基准 */
+    }
+  }
+  return (entry ? await import(entry) : await import(name)) as Record<
+    string,
+    unknown
+  >;
 }
 
 /**

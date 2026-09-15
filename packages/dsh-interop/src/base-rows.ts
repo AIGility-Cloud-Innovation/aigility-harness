@@ -42,8 +42,9 @@ export function isJsExpr(v: unknown): v is JsExpr {
 /**
  * 解析官方清单：顶层是操作条目（`- insert:` 等），行清单挂在操作键下；
  * `!!js` 标签折叠为 {__jsExpr} 原文，不执行。
+ * 供 dshBaseRows（展平成行）与 profile 组合器（保留操作语义）共用。
  */
-function parsePatchYml(raw: string): Array<Record<string, unknown>> {
+export function parsePatchEntries(raw: string): Array<Record<string, unknown>> {
   const jsType = new yaml.Type("tag:yaml.org,2002:js", {
     kind: "scalar",
     resolve: () => true,
@@ -53,15 +54,7 @@ function parsePatchYml(raw: string): Array<Record<string, unknown>> {
   const doc = yaml.load(raw, { schema });
   const out: Array<Record<string, unknown>> = [];
   for (const op of Array.isArray(doc) ? doc : []) {
-    if (typeof op !== "object" || op === null) continue;
-    for (const [, rows] of Object.entries(op as Record<string, unknown>)) {
-      if (!Array.isArray(rows)) continue;
-      for (const row of rows) {
-        if (typeof row === "object" && row !== null && "name" in row) {
-          out.push(row as Record<string, unknown>);
-        }
-      }
-    }
+    if (typeof op === "object" && op !== null) out.push(op as Record<string, unknown>);
   }
   return out;
 }
@@ -93,7 +86,18 @@ export function dshBaseRows(): DshBaseRow[] {
   const ymlPath = localRequire.resolve("@deepseek-ai/dsh-base/cordis.patch.yml");
   const raw = readFileSync(ymlPath, "utf8");
   const notesById = associateNotes(raw);
-  return parsePatchYml(raw).map((r) => {
+  const rows: Array<Record<string, unknown>> = [];
+  for (const op of parsePatchEntries(raw)) {
+    for (const [, v] of Object.entries(op)) {
+      if (!Array.isArray(v)) continue;
+      for (const row of v) {
+        if (typeof row === "object" && row !== null && "name" in row) {
+          rows.push(row as Record<string, unknown>);
+        }
+      }
+    }
+  }
+  return rows.map((r) => {
     const id = typeof r.id === "string" ? r.id : undefined;
     return {
       id,
