@@ -54,20 +54,52 @@ function dshBinJs(): string {
   return path.join(path.dirname(pkgPath), rel);
 }
 
-/** 幂等写入 headless profile 的用户补丁层（模型覆盖） */
-function ensureHeadlessPatch(dshHome: string, model: string): void {
+/** 用户补丁层里本包管辖的行 id（模型覆盖） */
+export const HEADLESS_MODEL_ROW_ID = "agent-default-model";
+
+/**
+ * 幂等写入 headless profile 的用户补丁层（模型覆盖）。
+ * 按 id 合并而非整文件覆写——用户层可能还有其他行（如 persona-coach 插件行），
+ * 必须原样保留；本包只增删自己的 agent-default-model 行。
+ */
+export function ensureHeadlessPatch(dshHome: string, model: string): void {
   const profileDir = path.join(dshHome, "profiles", "headless");
   const patchPath = path.join(profileDir, "cordis.patch.yml");
   mkdirSync(profileDir, { recursive: true });
+
+  const raw = existsSync(patchPath) ? readFileSync(patchPath, "utf8") : "";
+  // 逐行剔除本包管辖块（"- id: agent-default-model" 起到下一个顶层条目/EOF）
+  const kept: string[] = [];
+  let skipping = false;
+  for (const line of raw.split(/\r?\n/)) {
+    if (/^- id: agent-default-model\s*$/.test(line)) {
+      skipping = true;
+      continue;
+    }
+    if (skipping) {
+      if (/^- /.test(line)) {
+        skipping = false;
+        kept.push(line);
+      }
+      continue;
+    }
+    kept.push(line);
+  }
+  while (kept.length > 0 && kept[kept.length - 1].trim() === "") kept.pop();
+
+  const header = kept.some((l) => l.startsWith("# managed by"))
+    ? []
+    : [`# managed by @aigility-harness/dsh-interop (扁平 {id, config} 部分覆盖)`];
   const want = [
-    `# managed by @aigility-harness/dsh-interop (扁平 {id, config} 部分覆盖)`,
-    `- id: agent-default-model`,
+    ...header,
+    ...kept,
+    `- id: ${HEADLESS_MODEL_ROW_ID}`,
     `  config:`,
     `    provider: deepseek-official`,
     `    model: ${model}`,
     ``,
   ].join("\n");
-  if (!existsSync(patchPath) || readFileSync(patchPath, "utf8") !== want) {
+  if (raw !== want) {
     writeFileSync(patchPath, want, "utf8");
   }
 }
