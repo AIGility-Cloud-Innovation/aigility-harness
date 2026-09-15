@@ -22,3 +22,6 @@ examples/appbase/start-appbase.cmd
 # ZCode CLI 在仓库内运行时的产物
 .zcode/
 examples/timem-live-test/
+
+# dsh headless agent home (profiles/sessions/credentials cache, 可重建但体积大)
+examples/.dsh-home/

@@ -3,7 +3,7 @@
  * 从 backend.ts 迁出 (管理界面插件化)。宿主见 ../dsh-host.ts。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { dshLoadPlugin, dshLoadEnabled, dshStatus } from "../dsh-host.js";
+import { dshLoadPlugin, dshLoadEnabled, dshStatus, dshAgentRun } from "../dsh-host.js";
 import { dshBaseRows, dshSuiteVersions, isJsExpr, installedDshPackages } from "@aigility-harness/dsh-interop";
 import { json, readBody, pool, bearerUser, isAdminUser, writeAudit, emailOf, parseEnvText } from "./context.js";
 
@@ -66,6 +66,20 @@ export async function handle(req: IncomingMessage, res: ServerResponse, path: st
         pluginCount: pkgs.filter((p) => p.isPlugin).length,
         packages: pkgs,
       });
+    }
+
+    // ── 管理员: Agent 冒烟通道 (官方 headless agent, LLM 上游=兼容网关) ──
+    if (method === "POST" && path === "/app/dsh/agent/run") {
+      const adminId = bearerUser(req);
+      if (!adminId) return json(res, 401, { error: "未授权: 请先登录" });
+      if (!(await isAdminUser(adminId))) return json(res, 403, { error: "需要管理员权限" });
+      const body = await readBody(req);
+      const task = String(body.task ?? "").trim();
+      if (!task) return json(res, 400, { error: "task 必填" });
+      const adminEmail = await emailOf(adminId);
+      const result = await dshAgentRun(task);
+      void writeAudit(adminEmail, "dsh.agent_run", task.slice(0, 40), result.ok ? `ok ${result.durationMs}ms` : `失败: ${result.error?.slice(0, 80)}`);
+      return json(res, result.ok ? 200 : 502, result);
     }
 
     // ── 管理员: DSH 插件管理 (cordis 插件注册/配置/加载) ──

@@ -171,6 +171,18 @@ textarea.minput { min-height:96px; font-family:Consolas,monospace; }
     <div id="pluginList"></div>
     <div class="card pad">
       <div class="chead">
+        <b class="nm">🤖 Agent 通道 (官方 headless)</b>
+        <span class="hint" id="agMeta"></span>
+      </div>
+      <div class="cathead">用官方 dsh headless profile 跑一次真实 agent（完整服务图：推理 + 官方工具 + Skill）。LLM 上游为 OpenAI 兼容网关，权限 read-only。</div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <input class="minput" id="agTask" placeholder="任务，如：读一下当前目录有哪些文件" style="flex:1;margin-top:0">
+        <button class="b-load" style="white-space:nowrap" onclick="runAgent()">▶ 运行</button>
+      </div>
+      <div class="catbox" id="agOut" style="font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap;display:none"></div>
+    </div>
+    <div class="card pad">
+      <div class="chead">
         <b class="nm">📦 已安装的 DSH 插件包</b>
         <span class="hint" id="instMeta"></span>
         <div class="ops"><button class="b-save" onclick="loadInstalled()">⟳ 刷新</button></div>
@@ -719,8 +731,29 @@ function registerPlugin() {
   }).catch(function(e) { toast('✗ ' + e.message); });
 }
 
-function prefillReg(name) {
-  document.getElementById('rgPkg').value = name;
+async function runAgent() {
+  var btn = event && event.target;
+  var task = document.getElementById('agTask').value.trim();
+  if (!task) return toast('✗ 请输入任务');
+  var out = document.getElementById('agOut');
+  out.style.display = 'block';
+  out.textContent = '⏳ agent 运行中（最长 180s）…';
+  if (btn) btn.disabled = true;
+  try {
+    var d = await fetchJSON('/app/dsh/agent/run', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task: task })
+    }, 200000);
+    document.getElementById('agMeta').textContent = '耗时 ' + (d.durationMs / 1000).toFixed(1) + 's';
+    out.textContent = d.ok ? (d.output || '(空回复)') : ('✗ ' + (d.error || '失败') + '\n' + (d.output || ''));
+    if (d.ok) toast('✓ agent 完成');
+  } catch (e) {
+    out.textContent = '✗ ' + e.message;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+function prefillReg(name) {  document.getElementById('rgPkg').value = name;
   var shortName = name.split('/').pop().replace(/^dsh-/, '');
   document.getElementById('rgName').value = shortName;
   var bar = document.getElementById('regBar');

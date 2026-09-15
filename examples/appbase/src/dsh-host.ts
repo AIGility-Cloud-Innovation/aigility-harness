@@ -15,7 +15,11 @@
  *  - 插件包是 TS 源码入口也没关系: 服务器跑在 tsx 下, 动态 import 时即时编译
  */
 
-import { DshInterop, dshSuiteVersions } from "@aigility-harness/dsh-interop";
+import { DshInterop, dshSuiteVersions, dshAgentHeadless } from "@aigility-harness/dsh-interop";
+import type { DshHeadlessResult } from "@aigility-harness/dsh-interop";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { mkdirSync } from "node:fs";
 
 type AnyCtx = {
   plugin: (p: unknown, cfg: unknown) => Promise<void> | void;
@@ -102,4 +106,32 @@ export async function dshLoadEnabled(records: DshPluginRecord[]): Promise<Record
     out[rec.name] = await dshLoadPlugin(rec);
   }
   return out;
+}
+
+// ── Agent 通道 (headless) ─────────────────────────────────────────
+// 官方 dsh headless profile 组装完整服务图 (llm/agent/tools/skill/会话/沙箱),
+// LLM 上游经环境变量指向 OpenAI 兼容网关 (bigmodel)。这是应用消费 dsh
+// agent 能力 (含 Skill) 的可靠通道; 进程内服务图组装属 M2 profile 组合器。
+
+// 家目录固定在 examples/.dsh-home: 首次 headless 运行时官方已在
+// profiles/ 下装好整套依赖树 (pnpm nodeLinker=hoisted), 复用避免重新装配
+const APP_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const DSH_AGENT_HOME = join(APP_ROOT, "..", ".dsh-home");
+
+export async function dshAgentRun(task: string): Promise<DshHeadlessResult> {
+  const apiKey = process.env.BIGMODEL_API_KEY ?? "";
+  if (!apiKey) {
+    return { ok: false, output: "", error: "未配置 BIGMODEL_API_KEY (启动环境)", durationMs: 0 };
+  }
+  mkdirSync(DSH_AGENT_HOME, { recursive: true });
+  return dshAgentHeadless({
+    task,
+    dshHome: DSH_AGENT_HOME,
+    apiKey,
+    baseURL: process.env.DSH_LLM_BASE_URL ?? "https://open.bigmodel.cn/api/paas/v4",
+    model: process.env.DSH_LLM_MODEL ?? "glm-4-flash",
+    timeoutMs: 180_000,
+    // 只读权限: 冒烟通道不给写盘/执行审批面, 后续按需放宽
+    env: { DSH_PERMISSION_MODE: "read-only" },
+  });
 }

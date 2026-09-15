@@ -15,3 +15,5 @@ export { dshBaseRows, isJsExpr } from "./base-rows.js";
 export type { DshBaseRow, JsExpr } from "./base-rows.js";
 export { installedDshPackages, disabledToText } from "./installed.js";
 export type { InstalledDshPackage } from "./installed.js";
+export { dshAgentHeadless } from "./headless.js";
+export type { DshHeadlessOptions, DshHeadlessResult } from "./headless.js";
