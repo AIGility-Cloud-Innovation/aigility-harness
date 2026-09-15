@@ -277,6 +277,7 @@ function registerPlugin() {
     document.getElementById('rgExport').value = ''; document.getElementById('rgDesc').value = '';
     loadPlugins();
   }).catch(function(e) { toast('✗ ' + e.message); });
+}
 function prefillReg(name) {
   document.getElementById('rgPkg').value = name;
   var shortName = name.split('/').pop().replace(/^dsh-/, '');
