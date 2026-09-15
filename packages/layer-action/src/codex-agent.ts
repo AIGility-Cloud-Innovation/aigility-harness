@@ -88,9 +88,9 @@ export interface CodexAgentRequest {
   /** 整体超时（毫秒），默认 300_000（5 分钟） */
   timeoutMs?: number;
   /**
-   * 续接历史线程 ID（resume 子命令）。
-   * TODO: resume 模式下 stdin 语义不同，骨架阶段暂不实现，
-   * 传入则会返回 err 并提示边界。
+   * 续接历史线程（codex exec resume <threadId>）。
+   * 续接时 prompt 仍经 stdin 注入：resume 子命令的 PROMPT 位置参数传 `-`
+   * 即从 stdin 读取（codex 0.153+ 语义，拆包实测）。
    */
   threadId?: string;
   /**
@@ -181,17 +181,28 @@ function isMetadataFallbackError(item: CodexAgentItem): boolean {
   );
 }
 
-/** 构造 codex exec 命令行参数 */
+/** 构造 codex exec / exec resume 命令行参数 */
 function buildArgs(request: CodexAgentRequest): string[] {
-  const args: string[] = [
-    "exec",
+  const args: string[] = ["exec"];
+  if (request.threadId) {
+    // resume 子命令选项集是 exec 的子集 (实测 0.153.4): 无 -s/--sandbox、
+    // -C/--cd —— 沙箱/审批/工作目录由原会话恢复; 仅 -c/-m/--json 等可用
+    args.push("resume", request.threadId, "--json");
+    if (request.model) {
+      args.push("-m", request.model);
+    }
+    // PROMPT 位置参数: `-` = 从 stdin 读取续接指令
+    args.push("--skip-git-repo-check", "-");
+    return args;
+  }
+  args.push(
     "--json",
     "--skip-git-repo-check",
     "-c",
     `approval_policy="${request.approvalPolicy ?? DEFAULT_APPROVAL_POLICY}"`,
     "-s",
     request.sandboxMode ?? DEFAULT_SANDBOX_MODE,
-  ];
+  );
   if (request.cwd) {
     args.push("-C", request.cwd);
   }
@@ -246,7 +257,14 @@ function processLine(state: TurnState, line: string): void {
     }
     case "turn.failed": {
       state.failed = true;
-      state.errorMessage = event.error as string;
+      // error 可能是字符串或 {message} 形态, 统一提取避免 "[object Object]"
+      const e = event.error;
+      state.errorMessage =
+        typeof e === "string"
+          ? e
+          : typeof (e as { message?: unknown })?.message === "string"
+            ? (e as { message: string }).message
+            : JSON.stringify(e);
       break;
     }
     default:
@@ -272,11 +290,6 @@ const codexAgentProviderImpl: Provider<
     const prompt = request.prompt?.trim();
     if (!prompt) {
       return err("codex-agent: request.prompt is required and must be non-empty");
-    }
-    if (request.threadId) {
-      return err(
-        "codex-agent: thread resume not yet implemented in skeleton (resume has different stdin semantics)"
-      );
     }
 
     const timeoutMs = request.timeoutMs ?? DEFAULT_TIMEOUT_MS;
