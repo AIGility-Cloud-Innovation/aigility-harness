@@ -744,9 +744,8 @@ export async function appBackendHandler(
     }
 
     // ── auth 中间件 (以下全部需要 token; /app/data 除外 —— 数据路由内做 Bearer/cookie 双轨鉴权) ──
-    const auth = req.headers.authorization ?? "";
-    const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-    const userId = token ? verifyToken(token) : null;
+    // 双轨身份: Bearer 优先, 回落 httpOnly cookie (应用新标签页/裸 fetch 靠 cookie)
+    const userId = pageUserId(req);
     if (!userId && !path.startsWith("/app/data/")) {
       return json(res, 401, { error: "未授权: 需要 Bearer token" });
     }

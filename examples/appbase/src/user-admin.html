@@ -45,6 +45,20 @@ td button { border:none; border-radius:8px; padding:5px 10px; font-size:11.5px; 
     <button onclick="location.href='/hall'">← 返回大厅</button>
   </div>
   <div class="card">
+    <div style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)">
+      <b style="font-size:14px;flex:1">👤 登录账号</b>
+      <span class="sub" style="margin-right:10px">平台登录账号（邮箱+密码）</span>
+      <button class="b-admin" onclick="toggleUserAdd()">➕ 添加用户</button>
+    </div>
+    <div id="userAddBar" style="display:none;padding:12px 14px;background:#fafbfe;border-bottom:1px solid var(--line)">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input id="nuEmail" placeholder="邮箱, 如 wanglaoshi@school.cn" style="width:220px;padding:6px 9px;border:1.5px solid var(--line);border-radius:8px;font-size:12.5px;outline:none">
+        <input id="nuPass" placeholder="初始密码(至少6位)" style="width:150px;padding:6px 9px;border:1.5px solid var(--line);border-radius:8px;font-size:12.5px;outline:none">
+        <button class="b-admin" onclick="createUser()">创建</button>
+        <button class="b-mem" onclick="document.getElementById('userAddBar').style.display='none'">收起</button>
+      </div>
+      <div id="nuMsg" class="sub" style="margin-top:6px;min-height:14px"></div>
+    </div>
     <table>
       <thead><tr><th>邮箱</th><th>身份</th><th>注册时间</th><th>应用归属</th><th>成员关系</th><th>操作</th></tr></thead>
       <tbody id="tbody"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody>
@@ -327,6 +341,27 @@ function openAccAdd() {
     }).join('');
     document.getElementById('accAddBar').style.display = 'block';
   });
+}
+// ── 管理员代建平台登录账号 (邮箱+初始密码) ──
+function toggleUserAdd() {
+  var bar = document.getElementById('userAddBar');
+  bar.style.display = bar.style.display === 'none' ? 'block' : 'none';
+  if (bar.style.display === 'block') document.getElementById('nuEmail').focus();
+}
+function createUser() {
+  var email = document.getElementById('nuEmail').value.trim().toLowerCase();
+  var pw = document.getElementById('nuPass').value;
+  var msg = document.getElementById('nuMsg');
+  msg.textContent = '';
+  if (!email || pw.length < 6) { msg.textContent = '✗ 邮箱必填, 初始密码至少 6 位'; return; }
+  fetchJSON('/app/admin/users', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: email, password: pw })
+  }).then(function() {
+    toast('✓ 已创建 ' + email);
+    document.getElementById('nuEmail').value = ''; document.getElementById('nuPass').value = '';
+    load();
+  }).catch(function(e) { msg.textContent = '✗ ' + e.message; });
 }
 load();
 loadAudit();

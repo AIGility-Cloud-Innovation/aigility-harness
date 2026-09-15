@@ -79,6 +79,23 @@ textarea.minput { min-height:96px; font-family:Consolas,monospace; }
   <!-- 👥 账号与用户 -->
   <div class="tabpane" id="pane-users">
     <div class="card">
+      <div style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)">
+        <b style="font-size:14px;flex:1">👥 用户列表</b>
+        <button class="b-load" onclick="toggleAddUser()">➕ 添加用户</button>
+      </div>
+      <div class="regbar" id="addUserBar">
+        <div class="row2">
+          <input class="minput" id="auEmail" placeholder="邮箱 (如 teacher@school.edu)">
+          <input class="minput" id="auPassword" type="password" placeholder="初始密码 (至少6位)">
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+          <label style="font-size:12.5px;cursor:pointer;display:flex;align-items:center;gap:5px">
+            <input type="checkbox" id="auAdmin"> 设为管理员
+          </label>
+          <button class="b-load" onclick="submitAddUser()" style="margin-left:auto">创建用户</button>
+          <button class="b-mem" onclick="toggleAddUser()">取消</button>
+        </div>
+      </div>
       <table>
         <thead><tr><th>邮箱</th><th>身份</th><th>注册时间</th><th>应用归属</th><th>成员关系</th><th>操作</th></tr></thead>
         <tbody id="tbody"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody>
@@ -419,6 +436,31 @@ function delUser(id) {
   fetchJSON('/app/admin/users/' + id, { method: 'DELETE' })
     .then(function() { toast('✓ 已删除 ' + u.email); loadUsers(); })
     .catch(function(e) { toast('✗ ' + e.message); });
+}
+
+function toggleAddUser() {
+  var bar = document.getElementById('addUserBar');
+  bar.classList.toggle('show');
+  if (bar.classList.contains('show')) document.getElementById('auEmail').focus();
+}
+function submitAddUser() {
+  var email = document.getElementById('auEmail').value.trim();
+  var password = document.getElementById('auPassword').value;
+  var isAdmin = document.getElementById('auAdmin').checked;
+  if (!email) return toast('✗ 请输入邮箱');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return toast('✗ 邮箱格式不正确');
+  if (password.length < 6) return toast('✗ 密码至少 6 位');
+  fetchJSON('/app/admin/users', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: email, password: password, is_admin: isAdmin })
+  }).then(function(d) {
+    toast('✓ 已创建用户 ' + d.user.email);
+    document.getElementById('auEmail').value = '';
+    document.getElementById('auPassword').value = '';
+    document.getElementById('auAdmin').checked = false;
+    document.getElementById('addUserBar').classList.remove('show');
+    loadUsers();
+  }).catch(function(e) { toast('✗ ' + e.message); });
 }
 function loadAudit() {
   fetchJSON('/app/admin/audit?limit=100').then(function(d) {

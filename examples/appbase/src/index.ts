@@ -180,7 +180,7 @@ async function main(): Promise<void> {
       return;
     }
     // 应用大厅页 (替代原对话厅首页; 对话 API /hall/chat 不受影响)
-    if (req.method === "GET" && (req.url === "/hall" || req.url === "/hall/")) {
+    if (req.method === "GET" && (req.url === "/hall" || req.url === "/hall/" || req.url?.startsWith("/hall?"))) {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(APP_HALL_HTML);
       return;

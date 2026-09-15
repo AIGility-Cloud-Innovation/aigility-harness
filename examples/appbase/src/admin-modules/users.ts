@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   json, readBody, pool, hashPassword, verifyPassword, signToken, setAuthCookie,
-  bearerUser, isAdminUser, writeAudit, emailOf, loginLimiter, loginLockKey, adminEmails,
+  bearerUser, pageUserId, isAdminUser, writeAudit, emailOf, loginLimiter, loginLockKey, adminEmails,
 } from "./context.js";
 
 /** auth + /app/admin 路由处理; 返回 true = 已响应 (未命中前缀返回 false) */
@@ -93,7 +93,8 @@ export async function handle(req: IncomingMessage, res: ServerResponse, path: st
 
     // 当前登录者信息 (前端启动时校验 token / 拿管理员身份)
     if (method === "GET" && path === "/app/auth/me") {
-      const userId = bearerUser(req);
+      // 双轨身份: Bearer 或 httpOnly cookie (应用页裸 fetch 靠 cookie 识别)
+      const userId = pageUserId(req);
       if (!userId) return json(res, 401, { error: "未登录" });
       const { rows } = await pool.query("SELECT id, email FROM users WHERE id = $1", [userId]);
       if (rows.length === 0) return json(res, 401, { error: "用户不存在" });
@@ -115,6 +116,33 @@ export async function handle(req: IncomingMessage, res: ServerResponse, path: st
                   (SELECT count(*)::int FROM apps a WHERE a.owner_id = u.id) AS app_count
            FROM users u ORDER BY u.created_at`);
         return json(res, 200, { users: rows });
+      }
+
+      // 管理员直接创建用户（不受注册开关限制，可指定身份）
+      if (method === "POST" && path === "/app/admin/users") {
+        const body = await readBody(req);
+        const email = String(body.email ?? "").trim().toLowerCase();
+        const password = String(body.password ?? "");
+        const makeAdmin = Boolean(body.is_admin);
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          return json(res, 400, { error: "请输入有效的邮箱地址" });
+        }
+        if (password.length < 6) {
+          return json(res, 400, { error: "密码至少 6 位" });
+        }
+        const id = randomUUID();
+        const hash = await hashPassword(password);
+        try {
+          await pool.query(
+            "INSERT INTO users (id, email, password_hash, is_admin) VALUES ($1, $2, $3, $4)",
+            [id, email, hash, makeAdmin]);
+        } catch (e: any) {
+          if (String(e?.code) === "23505") return json(res, 409, { error: "邮箱已存在" });
+          throw e;
+        }
+        const adminEmail = await emailOf(adminId);
+        void writeAudit(adminEmail, "user.create", email, makeAdmin ? "(管理员)" : "");
+        return json(res, 201, { user: { id, email, is_admin: makeAdmin } });
       }
 
       if (method === "GET" && path === "/app/admin/audit") {

@@ -289,6 +289,10 @@ function doLogin(register) {
     userEmail = d.user.email;
     isAdmin = !!d.user.isAdmin;
     sessionStorage.setItem('hall_token', d.token);
+    // 登录门前 ?next= 回跳: 仅接受站内相对路径 (防开放重定向)
+    var m = /[?&]next=([^&]+)/.exec(location.search);
+    var next = m ? decodeURIComponent(m[1]) : '';
+    if (next && next.startsWith('/') && !next.startsWith('//')) { location.href = next; return; }
     enterHall();
   }).catch(function(e) { msg.textContent = '✗ ' + e.message; });
 }
