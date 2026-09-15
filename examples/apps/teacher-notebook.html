@@ -329,7 +329,6 @@ tbody tr:last-child td { border-bottom: none; }
         <button data-view="attendance" onclick="switchView('attendance', this)">📅 考勤</button>
         <button data-view="memory" onclick="switchView('memory', this)">🧠 记忆本</button>
         <button data-view="profile" onclick="switchView('profile', this)">📊 学生画像</button>
-        <button data-view="random" onclick="switchView('random', this)">🎲 点名</button>
         <button data-view="scores" onclick="switchView('scores', this)">⭐ 积分</button>
     </div>
 
@@ -339,6 +338,7 @@ tbody tr:last-child td { border-bottom: none; }
             <div class="toolbar">
                 <button class="btn btn-primary" data-owner-only onclick="openStudentModal()">＋ 添加学生</button>
                 <button class="btn btn-ghost" onclick="openImportModal()">📥 批量导入名册</button>
+                <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--ink-2);cursor:pointer"><input type="checkbox" id="showArchived" onchange="renderStudentList()"> 显示已归档</label>
                 <div class="grow"><input id="studentSearch" placeholder="搜索姓名 / 学号…" style="width:100%" oninput="filterStudents()"></div>
             </div>
             <div id="studentList"></div>
@@ -469,7 +469,7 @@ tbody tr:last-child td { border-bottom: none; }
                 请从大厅登录后再打开本应用，数据将自动关联你的账号。
             </div>
             <div style="display:flex;gap:10px;margin-top:10px">
-                <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="location.href='/hall'">去大厅登录</button>
+                <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="location.href='/hall?next=' + encodeURIComponent('/apps/teacher-notebook.html')">去大厅登录</button>
             </div>
         </div>
         <div id="cloudActions" style="display:none">
@@ -487,6 +487,19 @@ tbody tr:last-child td { border-bottom: none; }
     </div>
 </div>
 
+<!-- 转班模态框 -->
+<div class="modal" id="transferModal">
+    <div class="modal-box" style="max-width:420px">
+        <div class="modal-head"><h3>🔄 转入其它班级</h3><button class="modal-x" onclick="closeModal('transferModal')">✕</button></div>
+        <div id="transferInfo" class="hint" style="margin-bottom:10px"></div>
+        <div id="transferTarget" style="border:1px solid var(--line);border-radius:10px;padding:6px 10px;max-height:220px;overflow:auto"></div>
+        <div style="display:flex;gap:10px;margin-top:14px">
+            <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="doTransferStudent()">确认转班</button>
+            <button class="btn btn-ghost" onclick="closeModal('transferModal')">取消</button>
+        </div>
+    </div>
+</div>
+
 <!-- 班级管理模态框 (班主任: 建班/邀请任课老师; 任课: 查看班级信息) -->
 <div class="modal" id="spaceModal">
     <div class="modal-box" style="max-width:560px">
@@ -498,13 +511,44 @@ tbody tr:last-child td { border-bottom: none; }
 <!-- AI 记一笔模态框 -->
 <div class="modal" id="memoryModal">
     <div class="modal-box">
-        <div class="modal-head"><h3>✨ AI 记一笔</h3><button class="modal-x" onclick="closeModal('memoryModal')">✕</button></div>
-        <div class="hint" style="font-size:12.5px;color:var(--ink-3);margin:4px 0 10px">把观察到的情况写成一段话（可含多名学生、多件事），AI 自动识别学生并结构化为条目，确认后入库。</div>
+        <div class="modal-head"><h3>✨ 记一笔</h3><button class="modal-x" onclick="closeModal('memoryModal')">✕</button></div>
+        <div class="hint" style="font-size:12.5px;color:var(--ink-3);margin:4px 0 10px">把观察到的情况写成一段话，AI 自动识别学生并结构化；AI 不可用时点「手动输入」直接填写。</div>
         <textarea id="aiText" style="width:100%;min-height:110px" placeholder="例：今天数学课上张三和同桌讲话，提醒后改正；午休时张三主动帮王五讲错题；李四这次月考进步了10名。"></textarea>
         <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
             <button class="btn btn-primary" onclick="aiStructure()">✨ AI 结构化</button>
+            <button class="btn btn-ghost" onclick="toggleManualMemory()">✍️ 手动输入</button>
             <span id="aiStatus" style="font-size:12.5px;color:var(--ink-3)"></span>
             <span style="flex:1"></span>
+        </div>
+        <div id="manualMemoryForm" style="display:none;margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:13px">
+                <select id="mmStudent" style="flex:1;min-width:120px;padding:6px 8px"></select>
+                <select id="mmCategory" style="width:128px;padding:6px 8px">
+                    <option value="behavior">🌱 日常行为</option>
+                    <option value="discipline">📢 课堂纪律</option>
+                    <option value="exam">📝 考试成绩</option>
+                    <option value="social">🤝 交际事件</option>
+                </select>
+                <select id="mmSenti" style="width:88px;padding:6px 8px">
+                    <option value="pos">积极</option>
+                    <option value="neu" selected>中性</option>
+                    <option value="neg">消极</option>
+                </select>
+            </div>
+            <input id="mmTitle" placeholder="概括标题（不超过12字）" style="width:100%;margin-top:8px;font-size:13.5px;font-weight:600">
+            <textarea id="mmContent" placeholder="详细客观的记录…" style="width:100%;margin-top:6px;min-height:64px;font-size:13px"></textarea>
+            <div style="display:flex;gap:10px;align-items:center;margin-top:8px;font-size:12.5px;color:var(--ink-3);flex-wrap:wrap">
+                <label>日期 <input type="date" id="mmDate" style="padding:4px 6px;font-family:inherit"></label>
+                <label>关联积分 <input type="number" id="mmScore" value="0" style="width:70px;padding:4px 6px">（正加负减, 0 不加分）</label>
+                <label>考勤 <select id="mmAtt" style="padding:4px 6px">
+                    <option value="">不涉及</option>
+                    <option value="present">出勤</option>
+                    <option value="late">迟到</option>
+                    <option value="leave">请假</option>
+                    <option value="absent">缺勤</option>
+                </select></label>
+            </div>
+            <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:10px" onclick="saveManualMemory()">保存到记忆本</button>
         </div>
         <div id="aiPreview"></div>
         <div id="aiSaveBar" style="display:none;margin-top:16px">
@@ -914,7 +958,7 @@ function switchView(id, btn) {
 }
 
 function renderHeroStats() {
-    document.getElementById('mStudents').textContent = students.length;
+    document.getElementById('mStudents').textContent = students.filter(s => !s.archived).length;
     document.getElementById('mMemories').textContent = memories.length;
     const t = attendance[todayStr()] || {};
     document.getElementById('mToday').textContent = students.length ? Object.values(t).filter(s => s === 'present').length : '-';
@@ -929,22 +973,35 @@ function renderStudentList() {
         box.innerHTML = `<div class="empty"><div class="icon">👨‍🎓</div><h3>名册还是空的</h3><p>点击「添加学生」或「批量导入名册」开始</p></div>`;
         return;
     }
+    const showArchived = document.getElementById('showArchived') && document.getElementById('showArchived').checked;
+    const active = students.filter(s => !s.archived);
+    const archived = students.filter(s => s.archived);
+    if (!showArchived && !active.length) {
+        box.innerHTML = `<div class="empty"><div class="icon">👨‍🎓</div><h3>名册还是空的</h3><p>点击「添加学生」或「批量导入名册」开始</p></div>`;
+        return;
+    }
     box.innerHTML = `<table><thead><tr>
-        <th>学号</th><th>姓名</th><th>座位</th><th>积分</th><th>记忆</th><th style="width:190px">操作</th>
+        <th>学号</th><th>姓名</th><th>座位</th><th>积分</th><th>记忆</th><th style="width:250px">操作</th>
     </tr></thead><tbody id="studentTableBody"></tbody></table>`;
     const tbody = document.getElementById('studentTableBody');
     students.forEach(st => {
+        if (st.archived && !showArchived) return;
         const memCount = memories.filter(m => m.studentId === st.id).length;
         const tr = document.createElement('tr');
+        if (st.archived) tr.style.opacity = '.55';
         tr.innerHTML = `
             <td style="color:var(--ink-3)">${esc(st.number)}</td>
-            <td><b>${esc(st.name)}</b></td>
+            <td><b>${esc(st.name)}</b>${st.archived ? ' <span class="tag" style="color:var(--ink-3)">已归档</span>' : ''}</td>
             <td>${esc(st.seat || '-')}</td>
             <td><b style="color:${(st.score||0) >= 0 ? 'var(--green)' : 'var(--rose)'}">${st.score || 0}</b></td>
             <td><span class="tag">${memCount} 条</span></td>
             <td>
                 <button class="btn btn-ghost btn-sm" onclick="viewProfile('${st.id}')">画像</button>
-                <button class="btn btn-ghost btn-sm" data-owner-only onclick="editStudent('${st.id}')">编辑</button>
+                ${st.archived
+                    ? `<button class="btn btn-ghost btn-sm" data-owner-only onclick="toggleArchiveStudent('${st.id}', false)">恢复</button>`
+                    : `<button class="btn btn-ghost btn-sm" data-owner-only onclick="editStudent('${st.id}')">编辑</button>
+                       <button class="btn btn-ghost btn-sm" data-owner-only onclick="toggleArchiveStudent('${st.id}', true)">归档</button>
+                       <button class="btn btn-ghost btn-sm" data-owner-only onclick="openTransferModal('${st.id}')">转班</button>`}
                 <button class="btn btn-danger-soft btn-sm" data-owner-only onclick="deleteStudent('${st.id}')">删除</button>
             </td>`;
         tbody.appendChild(tr);
@@ -985,6 +1042,97 @@ function deleteStudent(id) {
     if (!confirm('删除该学生？其记忆与积分记录将保留在库中。')) return;
     students = students.filter(s => s.id !== id);
     saveData(); renderStudentList();
+}
+// ── 归档 / 恢复: 仅打标记, 名册默认不显示, 数据与关联记录原样保留 ──
+function toggleArchiveStudent(id, archive) {
+    const st = students.find(s => s.id === id);
+    if (!st) return;
+    if (archive && !confirm(`归档「${st.name}」？名册默认不再显示, 可随时在「显示已归档」中恢复。`)) return;
+    st.archived = archive || undefined;
+    if (!archive) delete st.archived;
+    saveData(); renderStudentList();
+}
+// ── 转班: 学生及其积分/记忆/考勤记录整体迁入目标班级 ──
+let transferStudentId = null;
+async function openTransferModal(id) {
+    const st = students.find(s => s.id === id);
+    if (!st) return;
+    transferStudentId = id;
+    let spaces = [];
+    try { spaces = (await spaceList()).filter(s => s.id !== CLOUD.spaceId); } catch (e) {}
+    const box = document.getElementById('transferTarget');
+    if (!spaces.length) {
+        box.innerHTML = '<div class="hint" style="padding:8px 0">没有其它可转入的班级（需先在「班级管理」里新建, 或被加入其它班级）</div>';
+    } else {
+        box.innerHTML = spaces.map(s =>
+            `<label style="display:flex;align-items:center;gap:8px;padding:7px 4px;font-size:13.5px;cursor:pointer">
+                <input type="radio" name="transferTarget" value="${esc(s.id)}" ${s.id === spaces[0].id ? 'checked' : ''}>
+                ${esc(s.name)} <span class="tag">${s.my_role === 'owner' ? '我是班主任' : '任课'}</span>
+            </label>`).join('');
+    }
+    document.getElementById('transferInfo').innerHTML =
+        `将把 <b>${esc(st.name)}</b> 连同其积分、成长记忆、考勤记录一并转入所选班级, 当前班级不再保留。`;
+    document.getElementById('transferModal').classList.add('show');
+}
+async function doTransferStudent() {
+    const st = students.find(s => s.id === transferStudentId);
+    const target = document.querySelector('input[name="transferTarget"]:checked');
+    if (!st || !target) { closeModal('transferModal'); return; }
+    const targetSpace = target.value;
+    const qs = '?space=' + encodeURIComponent(targetSpace);
+    try {
+        // 1. 读目标班级各集合现状 (含服务端行 id)
+        const targetRows = {};
+        for (const key of COLLECTIONS) {
+            try {
+                const d = await apiCall('GET', '/app/data/' + key + qs);
+                targetRows[key] = (d.rows && d.rows[0]) || null;
+            } catch { targetRows[key] = null; }
+        }
+        const pick = (row, fallback) => {
+            const v = row && row.data && row.data.payload;
+            return (v === null || v === undefined) ? fallback : v;
+        };
+        const tStudents = pick(targetRows.students, []) || [];
+        const tScores = pick(targetRows.scores, []) || [];
+        const tMemories = pick(targetRows.memories, []) || [];
+        const tAtt = pick(targetRows.attendance, {}) || {};
+        // 2. 摘出该学生的关联记录
+        const relScores = scores.filter(x => x.studentId === st.id);
+        const relMemories = memories.filter(m => m.studentId === st.id);
+        const moved = { ...st }; delete moved.archived;
+        // 3. 写入目标班级
+        const tRowIds = {};
+        for (const key of COLLECTIONS) {
+            let payload, row = targetRows[key];
+            if (key === 'students') payload = [...tStudents, moved];
+            else if (key === 'scores') payload = [...tScores, ...relScores];
+            else if (key === 'memories') payload = [...tMemories, ...relMemories];
+            else {
+                payload = tAtt;
+                for (const d of Object.keys(attendance)) {
+                    if (attendance[d] && attendance[d][st.id] !== undefined) {
+                        (payload[d] = payload[d] || {})[st.id] = attendance[d][st.id];
+                    }
+                }
+            }
+            const body = { data: { payload } };
+            if (row && row.id) { await apiCall('PUT', '/app/data/' + key + '/' + row.id + qs, body); tRowIds[key] = row.id; }
+            else { const c = await apiCall('POST', '/app/data/' + key + qs, body); tRowIds[key] = c.id; }
+        }
+        // 4. 从当前班级移除
+        students = students.filter(s => s.id !== st.id);
+        scores = scores.filter(x => x.studentId !== st.id);
+        memories = memories.filter(m => m.studentId !== st.id);
+        for (const d of Object.keys(attendance)) {
+            if (attendance[d]) delete attendance[d][st.id];
+        }
+        closeModal('transferModal');
+        saveData(); renderAll();
+        alert(`已将「${st.name}」转入目标班级。`);
+    } catch (e) {
+        alert('转班失败: ' + e.message + '（若提示未授权, 需要你是目标班级的班主任或成员）');
+    }
 }
 function viewProfile(id) {
     profileStudentId = id;
@@ -1032,7 +1180,7 @@ function loadAttendance() {
     }
     box.innerHTML = `<table><thead><tr><th>学号</th><th>姓名</th><th>状态</th><th>操作</th></tr></thead><tbody></tbody></table>`;
     const tbody = box.querySelector('tbody');
-    students.forEach(st => {
+    students.filter(st => !st.archived).forEach(st => {
         const status = day[st.id] || 'absent';
         if (status === 'present') present++; else if (status === 'late') late++; else if (status === 'leave') leave++; else absent++;
         const styleMap = { present:['var(--green)','var(--green-soft)','出勤'], late:['#f97316','#ffedd5','迟到'], leave:['var(--amber)','var(--amber-soft)','请假'], absent:['var(--rose)','var(--rose-soft)','缺勤'] };
@@ -1064,7 +1212,7 @@ function markAll(status) {
     if (!students.length) return;
     const date = document.getElementById('attendanceDate').value;
     attendance[date] = {};
-    students.forEach(st => attendance[date][st.id] = status);
+    students.filter(st => !st.archived).forEach(st => attendance[date][st.id] = status);
     saveData(); loadAttendance();
 }
 
@@ -1098,7 +1246,49 @@ function openMemoryModal() {
     document.getElementById('aiPreview').innerHTML = '';
     document.getElementById('aiSaveBar').style.display = 'none';
     document.getElementById('aiStatus').textContent = '';
+    document.getElementById('manualMemoryForm').style.display = 'none';
     document.getElementById('memoryModal').classList.add('show');
+}
+// ── 手动输入 (AI 结构化失败时的兜底): 直接填写一条结构化记忆 ──
+function toggleManualMemory() {
+    const form = document.getElementById('manualMemoryForm');
+    const show = form.style.display === 'none';
+    form.style.display = show ? 'block' : 'none';
+    if (show) {
+        const sel = document.getElementById('mmStudent');
+        const cur = sel.value;
+        sel.innerHTML = students.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+        if (cur && students.some(s => s.id === cur)) sel.value = cur;
+        document.getElementById('mmDate').value = todayStr();
+        document.getElementById('mmTitle').focus();
+    }
+}
+function saveManualMemory() {
+    const studentId = document.getElementById('mmStudent').value;
+    const st = students.find(s => s.id === studentId);
+    if (!st) return alert('请先在名册中添加学生');
+    const title = document.getElementById('mmTitle').value.trim();
+    const content = document.getElementById('mmContent').value.trim();
+    if (!title && !content) return alert('请至少填写标题或记录内容');
+    const category = document.getElementById('mmCategory').value;
+    const senti = document.getElementById('mmSenti').value;
+    const date = document.getElementById('mmDate').value || todayStr();
+    const score = parseInt(document.getElementById('mmScore').value) || 0;
+    const att = document.getElementById('mmAtt').value;
+    memories.push({
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+        studentId, studentName: st.name,
+        category, senti,
+        title: title || content.slice(0, 12),
+        content: content || title,
+        tags: [], date,
+        createdAt: new Date().toISOString()
+    });
+    if (score) applyScore(studentId, score, title || content.slice(0, 20), true, category, '手动记录', true);
+    if (att) (attendance[date] = attendance[date] || {})[studentId] = att;
+    saveData(); renderMemories(); renderScoreList(); loadAttendance();
+    closeModal('memoryModal');
+    alert(`已保存「${st.name}」的记忆到记忆本`);
 }
 
 async function aiStructure() {
