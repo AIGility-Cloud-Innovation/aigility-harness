@@ -13,6 +13,15 @@ rem  and `chcp 65001` mid-file re-syncs byte offsets, so every line
 rem  after the switch turns into garbage commands.
 rem ============================================================
 
+rem ---- Port guard: refuse to start twice (EADDRINUSE stack traces are unhelpful) ----
+netstat -ano | findstr ":3419" | findstr "LISTENING" >nul 2>nul
+if errorlevel 1 goto port_ok
+echo [start-appbase] AppBase is ALREADY RUNNING (port 3419 in use).
+echo   Stop it first:  stop-appbase.cmd
+echo   Then start again.
+exit /b 1
+:port_ok
+
 rem ---- PostgreSQL (Docker container appbase-pg, host port 5433,
 rem ---- aligned with the default PG port in code) ----
 set "APPBASE_PG_PASSWORD=[FILL: container POSTGRES_PASSWORD]"
