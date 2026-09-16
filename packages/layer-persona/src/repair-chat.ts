@@ -230,7 +230,7 @@ const repairChatProvider: Provider<RepairChatRequest, RepairChatResponse> = {
     let memoryBlock = "";
     try {
       const mem = await ctx.call(
-        { id: "@cognitive/timem-memory", versionRange: "^1.0.0" },
+        { id: "@action/timem-memory", versionRange: "^1.0.0" },
         { query: request.user_input.slice(0, 200), user_id: memUserId, agent_id: "repair-chat", limit: 3 },
       );
       const value = (mem as { value?: { ok?: boolean; results?: Array<{ content: string }>; error?: string } }).value;
@@ -286,7 +286,7 @@ const repairChatProvider: Provider<RepairChatRequest, RepairChatResponse> = {
     if ((result as { ok: boolean }).ok && !wfValue?.degraded) {
       try {
         const w = await ctx.call(
-          { id: "@cognitive/timem-memory-write", versionRange: "^1.0.0" },
+          { id: "@action/timem-memory-write", versionRange: "^1.0.0" },
           {
             content: `报修对话 (${new Date().toISOString().slice(0, 10)}): 用户描述「${request.user_input.slice(0, 150)}」; 客服答复要点: ${response.slice(0, 200)}`,
             user_id: memUserId,

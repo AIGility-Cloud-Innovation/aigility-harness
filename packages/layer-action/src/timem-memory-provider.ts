@@ -1,12 +1,12 @@
 /**
- * @cognitive/timem-memory — harness Seam Provider (封装 dsh-plugin-timem 的 TimemClient)
+ * @action/timem-memory — harness Seam Provider (封装 dsh-plugin-timem 的 TimemClient)
  *
  * 让 workflow (Python py-bridge) 通过 Seam 回调调用 TiMEM 记忆管理。
  * 复用 dsh-plugin-timem 的 TimemClient (零 cordis 依赖, 纯 HTTP)。
  *
  * 提供服务:
- *   - @cognitive/timem-memory      只读检索 (回答前召回用户记忆)
- *   - @cognitive/timem-memory-write 记忆写入 (回答后保存问答)
+ *   - @action/timem-memory      只读检索 (回答前召回用户记忆)
+ *   - @action/timem-memory-write 记忆写入 (回答后保存问答)
  *
  * 均按 user_id + agent_id 隔离, 区分不同用户/不同 agent 的记忆。
  */
@@ -45,9 +45,9 @@ export const timemMemoryService: ServiceDefinition<
   TimemMemorySearchRequest,
   TimemMemorySearchResponse
 > = {
-  id: "@cognitive/timem-memory",
+  id: "@action/timem-memory",
   version: "1.0.0",
-  layer: LayerId.Cognitive,
+  layer: LayerId.Action,
   description: "TiMEM 记忆检索 (只读, 按 user_id+agent_id 隔离, 基于 dsh-plugin-timem TimemClient)",
 };
 
@@ -74,9 +74,9 @@ export const timemMemoryWriteService: ServiceDefinition<
   TimemMemoryWriteRequest,
   TimemMemoryWriteResponse
 > = {
-  id: "@cognitive/timem-memory-write",
+  id: "@action/timem-memory-write",
   version: "1.0.0",
-  layer: LayerId.Cognitive,
+  layer: LayerId.Action,
   description: "TiMEM 记忆写入 (回答后保存, 按 user_id+agent_id 隔离)",
 };
 

@@ -127,7 +127,7 @@ const salesChatProvider: Provider<SalesChatRequest, SalesChatResponse> = {
     // 3. TiMEM 记忆召回 (尽力而为): agent_id 按角色隔离, 只召回平台客服域的记忆
     try {
       const mem = await ctx.call(
-        { id: "@cognitive/timem-memory", versionRange: "^1.0.0" },
+        { id: "@action/timem-memory", versionRange: "^1.0.0" },
         { query: request.user_input.slice(0, 200), user_id: memUserId, agent_id: "sales-chat", limit: 3 },
       );
       const value = (mem as { value?: { ok?: boolean; results?: Array<{ content: string }>; error?: string } }).value;
@@ -169,7 +169,7 @@ const salesChatProvider: Provider<SalesChatRequest, SalesChatResponse> = {
     if ((result as { ok: boolean }).ok && !wfValue?.degraded) {
       try {
         const w = await ctx.call(
-          { id: "@cognitive/timem-memory-write", versionRange: "^1.0.0" },
+          { id: "@action/timem-memory-write", versionRange: "^1.0.0" },
           {
             content: `平台客服对话 (${new Date().toISOString().slice(0, 10)}): 用户问「${request.user_input.slice(0, 150)}」; 答复要点: ${response.slice(0, 200)}`,
             user_id: memUserId,
