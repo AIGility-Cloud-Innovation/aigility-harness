@@ -30,6 +30,7 @@ import {
   pageUserId, PG_CONFIG,
 } from "./admin-modules/context.js";
 import { adminDispatch, adminPanelList } from "./admin-modules/index.js";
+import { getAdminKernel } from "./admin-modules/kernel-ref.js";
 import { initLlmConfig, normalizeLlmBase } from "./admin-modules/llm-config.js";
 import { httpRelayProvider, relayTargets } from "@aigility-harness/layer-infrastructure";
 import { parseEnvText } from "./admin-modules/context.js";
@@ -255,6 +256,33 @@ export async function appBackendHandler(
       res.writeHead(200, { "Content-Type": relay.value.contentType || "text/plain; charset=utf-8" });
       res.end(relay.value.body);
       return;
+    }
+
+    // ── 班班助理 (薄路由): 业务在角色域 @persona/banban-chat (提示词/流内记忆编排), 这里只鉴权与转发 ──
+    if (path === "/app/banban/chat" && method === "POST") {
+      const bbUserId = pageUserId(req);
+      if (!bbUserId) return json(res, 401, { error: "未授权: 请先登录" });
+      const kernel = getAdminKernel();
+      if (!kernel) return json(res, 503, { error: "内核未就绪" });
+      const body = await readBody(req);
+      const question = String(body.question ?? "").trim();
+      if (!question) return json(res, 400, { error: "question 必填" });
+      const bbCtx = kernel.createContext(`banban-${bbUserId}`, "persona");
+      const chat = await kernel.registry.resolve<unknown, { response?: string; degraded?: boolean }>(
+        { id: "@persona/banban-chat", versionRange: "^1.0.0" });
+      if (!chat.ok) return json(res, 503, { error: chat.error || "班班助理能力未注册" });
+      const r = await chat.value.execute(
+        {
+          user_input: question,
+          session_id: `banban-${bbUserId}`,
+          user_key: await emailOf(bbUserId),
+          class_context: String(body.context ?? "").slice(0, 12000),
+          history: Array.isArray(body.history) ? body.history.slice(-12) : [],
+        },
+        bbCtx,
+      );
+      if (!r.ok) return json(res, 502, { error: r.error ?? "班班助理执行失败" });
+      return json(res, 200, { response: r.value?.response ?? "", degraded: Boolean(r.value?.degraded) });
     }
 
     // ── 报修工单 (登录用户: 自己的工单; 管理员: 全部) ──
