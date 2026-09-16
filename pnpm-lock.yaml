@@ -353,6 +353,9 @@ importers:
       '@aigility-harness/core':
         specifier: workspace:*
         version: link:../core
+      '@timem/dsh-plugin-timem':
+        specifier: git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git
+        version: git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git#0c22f23876c5e7429908f282a1c64ac2ca2c3212(@deepseek-ai/cordis@4.0.2)
       msedge-tts:
         specifier: ^2.0.7
         version: 2.0.7
@@ -372,9 +375,6 @@ importers:
       '@aigility-harness/core':
         specifier: workspace:*
         version: link:../core
-      '@timem/dsh-plugin-timem':
-        specifier: git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git
-        version: git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git#0c22f23876c5e7429908f282a1c64ac2ca2c3212(@deepseek-ai/cordis@4.0.2)
     devDependencies:
       '@types/node':
         specifier: ^20.14.0

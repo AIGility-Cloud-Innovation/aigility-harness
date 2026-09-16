@@ -2116,5 +2116,142 @@ document.addEventListener('DOMContentLoaded', () => {
     cloudIdentify();
 });
 </script>
+
+<!-- ═══ 班班助理 (角色域 @persona/banban-chat; TiMEM 记忆按老师隔离) ═══ -->
+<style>
+.banban-fab { position:fixed; right:20px; bottom:20px; z-index:900; border:none; border-radius:999px; padding:12px 20px; font-family:inherit; font-size:14px; font-weight:700; cursor:pointer; color:#fff; background:linear-gradient(120deg,#4f46e5,#7c3aed); box-shadow:0 8px 24px rgba(79,70,229,.4); }
+.banban-fab:hover { filter:brightness(1.1); }
+.banban-drawer { position:fixed; right:20px; bottom:76px; z-index:901; width:400px; max-width:calc(100vw - 32px); height:540px; max-height:calc(100vh - 120px); background:#fff; border-radius:18px; box-shadow:0 24px 70px rgba(15,23,42,.35); display:none; flex-direction:column; overflow:hidden; }
+.banban-drawer.show { display:flex; }
+.banban-head { display:flex; align-items:center; gap:8px; padding:12px 14px; background:linear-gradient(120deg,#312e81,#4f46e5); color:#fff; }
+.banban-head b { font-size:14px; flex:1; }
+.banban-head button { border:none; background:rgba(255,255,255,.2); color:#fff; border-radius:8px; padding:4px 9px; font-size:12px; cursor:pointer; font-family:inherit; }
+.banban-msgs { flex:1; overflow-y:auto; padding:12px; background:#f6f7fb; display:flex; flex-direction:column; gap:8px; }
+.banban-msg { max-width:86%; padding:8px 12px; border-radius:12px; font-size:13px; line-height:1.65; white-space:pre-wrap; word-break:break-word; }
+.banban-msg.user { align-self:flex-end; background:var(--accent,#4f46e5); color:#fff; border-bottom-right-radius:4px; }
+.banban-msg.bot { align-self:flex-start; background:#fff; color:var(--ink,#1e293b); border:1px solid var(--line,#e8ecf4); border-bottom-left-radius:4px; }
+.banban-input { display:flex; gap:8px; padding:10px 12px; border-top:1px solid var(--line,#e8ecf4); background:#fff; }
+.banban-input textarea { flex:1; min-height:44px; max-height:110px; resize:none; border:1.5px solid var(--line,#e8ecf4); border-radius:10px; padding:8px 10px; font-family:inherit; font-size:13px; outline:none; }
+.banban-input button { border:none; border-radius:10px; padding:0 16px; font-family:inherit; font-size:13px; font-weight:600; cursor:pointer; color:#fff; background:var(--accent,#4f46e5); }
+.banban-input button:disabled { opacity:.5; cursor:default; }
+</style>
+<button class="banban-fab" id="banbanFab" onclick="toggleBanban()">🤖 班班助理</button>
+<div class="banban-drawer" id="banbanDrawer">
+    <div class="banban-head">
+        <b>🤖 班班助理</b>
+        <button onclick="clearBanban()" title="清空对话">🗑</button>
+        <button onclick="toggleBanban()">✕</button>
+    </div>
+    <div class="banban-msgs" id="banbanMsgs"></div>
+    <div class="banban-input">
+        <textarea id="banbanText" placeholder="问问学生情况, 如: 张三最近成绩怎么样?&#10;这个月哪些学生被扣过分?"></textarea>
+        <button id="banbanSendBtn" onclick="sendBanban()">发送</button>
+    </div>
+</div>
+<script>
+// ── 班班助理前端: 组装班级实时上下文 → /app/banban/chat (薄路由) ──
+let banbanHistory = [];
+let banbanOpen = false;
+const banbanStoreKey = () => 'banban_chat_' + (CLOUD.spaceId || 'local');
+
+function toggleBanban() {
+    banbanOpen = !banbanOpen;
+    document.getElementById('banbanDrawer').classList.toggle('show', banbanOpen);
+    if (banbanOpen) {
+        banbanHistory = [];
+        try { banbanHistory = JSON.parse(localStorage.getItem(banbanStoreKey()) || '[]') || []; } catch (e) {}
+        renderBanban();
+        if (!banbanHistory.length) addBanbanMsg('bot',
+            '你好，我是班班助理 🤖\n我可以基于当前班级的名册、记忆本、考试成绩和考勤回答你的问题，比如：\n· 张三最近成绩怎么样？\n· 这个月哪些学生被扣过分？\n· 对比一下李四和王五的近况。\n(对话要点会存入长期记忆, 下次可接着聊)',
+            false);
+        document.getElementById('banbanText').focus();
+    }
+}
+function addBanbanMsg(role, text, save = true) {
+    const box = document.getElementById('banbanMsgs');
+    const div = document.createElement('div');
+    div.className = 'banban-msg ' + role;
+    div.textContent = text;
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+    if (save) {
+        banbanHistory.push({ role: role === 'user' ? 'user' : 'assistant', content: text });
+        try { localStorage.setItem(banbanStoreKey(), JSON.stringify(banbanHistory.slice(-60))); } catch (e) {}
+    }
+}
+function renderBanban() {
+    const box = document.getElementById('banbanMsgs');
+    box.innerHTML = '';
+    banbanHistory.forEach(m => {
+        const div = document.createElement('div');
+        div.className = 'banban-msg ' + (m.role === 'user' ? 'user' : 'bot');
+        div.textContent = m.content;
+        box.appendChild(div);
+    });
+    box.scrollTop = box.scrollHeight;
+}
+function clearBanban() {
+    if (!banbanHistory.length || !confirm('清空班班助理对话记录？')) return;
+    banbanHistory = [];
+    localStorage.removeItem(banbanStoreKey());
+    renderBanban();
+}
+// 班级实时上下文快照 (控制在 ~10KB)
+function buildBanbanContext() {
+    const active = students.filter(s => !s.archived);
+    const L = [];
+    L.push('【名册】(' + active.length + '人)');
+    active.forEach(s => L.push(`- ${s.number} ${s.name}${s.seat ? ' 座位' + s.seat : ''}, 积分${s.score || 0}`));
+    const mems = memories.slice(-30);
+    if (mems.length) {
+        L.push('【记忆本·最近' + mems.length + '条】');
+        mems.forEach(m => L.push(`- ${m.date || ''} ${m.studentName || (studentById(m.studentId) || {}).name || '?'} [${(CATS[m.category] || {}).label || m.category}] ${m.title || ''}: ${(m.content || '').slice(0, 80)}`));
+    }
+    if (exams.length) {
+        L.push('【考试成绩】');
+        sortedExams().forEach(e => {
+            const parts = active.map(s => { const v = subjOf(e, s.id); const entries = Object.entries(v); return entries.length ? `${s.name}(${entries.map(([sub, sc]) => sub + sc).join('/')})` : null; }).filter(Boolean);
+            L.push(`- ${e.name} (${e.date}): ` + (parts.join('; ') || '未录入'));
+        });
+    }
+    const today = attendance[todayStr()] || {};
+    const todayRows = active.filter(s => today[s.id]).map(s => `${s.name}:${{ present: '出勤', late: '迟到', leave: '请假', absent: '缺勤' }[today[s.id]] || today[s.id]}`);
+    if (todayRows.length) L.push('【今日考勤】' + todayRows.join(', '));
+    return L.join('\n').slice(0, 10000);
+}
+async function sendBanban() {
+    const ta = document.getElementById('banbanText');
+    const btn = document.getElementById('banbanSendBtn');
+    const q = ta.value.trim();
+    if (!q || btn.disabled) return;
+    if (!CLOUD.user) { addBanbanMsg('bot', '请先通过大厅登录后再使用班班助理 (需要云端 AI 与长期记忆)。', false); return; }
+    ta.value = '';
+    addBanbanMsg('user', q);
+    btn.disabled = true;
+    addBanbanMsg('bot', '思考中…', false);
+    try {
+        const d = await apiCall('POST', '/app/banban/chat', {
+            question: q,
+            context: buildBanbanContext(),
+            history: banbanHistory.slice(-10),
+        });
+        removeLastBanbanDom();
+        addBanbanMsg('bot', d.response || '(空回复)');
+    } catch (e) {
+        removeLastBanbanDom();
+        addBanbanMsg('bot', '✗ 请求失败: ' + e.message + (/401/.test(e.message) ? ' (请回大厅重新登录)' : ''), false);
+    } finally {
+        btn.disabled = false;
+        ta.focus();
+    }
+}
+function removeLastBanbanDom() {
+    const box = document.getElementById('banbanMsgs');
+    if (box.lastChild) box.removeChild(box.lastChild);
+}
+document.getElementById('banbanText').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.isComposing && !e.shiftKey) { e.preventDefault(); sendBanban(); }
+});
+</script>
 </body>
 </html>
