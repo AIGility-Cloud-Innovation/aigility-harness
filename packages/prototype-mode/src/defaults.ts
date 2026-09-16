@@ -7,4 +7,4 @@
  *   置空可去掉提示条。
  */
 process.env.LLM_PROVIDER ??= "stub";
-process.env.APPBASE_URL ??= "http://127.0.0.1:3419/hall";
+process.env.APPBASE_URL ??= "http://127.0.0.1:1231/hall";

@@ -14,9 +14,9 @@ rem  after the switch turns into garbage commands.
 rem ============================================================
 
 rem ---- Port guard: refuse to start twice (EADDRINUSE stack traces are unhelpful) ----
-netstat -ano | findstr ":3419" | findstr "LISTENING" >nul 2>nul
+netstat -ano | findstr ":1231" | findstr "LISTENING" >nul 2>nul
 if errorlevel 1 goto port_ok
-echo [start-appbase] AppBase is ALREADY RUNNING (port 3419 in use).
+echo [start-appbase] AppBase is ALREADY RUNNING (port 1231 in use).
 echo   Stop it first:  stop-appbase.cmd
 echo   Then start again.
 exit /b 1

@@ -1293,10 +1293,10 @@ function markAll(status) {
 const AI_CFG_KEY = 'teacherNotebook_aiCfg';
 let aiDraft = [];
 
-// 网关端口 (3418) 与本页伺服端口 (3419) 不同, 用 location.hostname 动态推导, 不写死主机名;
+// 网关端口 (1232) 与本页伺服端口 (1231) 不同, 用 location.hostname 动态推导, 不写死主机名;
 // 历史 localStorage 存的 127.0.0.1/localhost 地址同样视为过期忽略。
 function gatewayEndpoint() {
-    return location.protocol + '//' + location.hostname + ':3418/v1/chat/completions';
+    return location.protocol + '//' + location.hostname + ':1232/v1/chat/completions';
 }
 function aiCfg() {
     const c = JSON.parse(localStorage.getItem(AI_CFG_KEY) || '{}');

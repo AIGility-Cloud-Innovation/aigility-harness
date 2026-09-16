@@ -34,7 +34,7 @@
 
 1. **上报点**：`http-ingress.ts` dev 链路（`/v1/chat/completions` 等）LLM 调用成功后，
    若配置 `usageReportUrl`，fire-and-forget `POST {key, model, usage}`。
-   appbase 启动时已传入 `http://127.0.0.1:3419/app/usage/collect`。
+   appbase 启动时已传入 `http://127.0.0.1:1231/app/usage/collect`。
 2. **存储**：`llm_usage` 表（key / model / prompt_tokens / completion_tokens / total_tokens / created_at）。
 3. **聚合查询**：`GET /app/hall/manage` 已返回 `usage`（最近 100 条明细）和 `agg`
    （按账号/Key 聚合的调用次数与 token 总数）。

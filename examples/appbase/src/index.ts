@@ -8,9 +8,9 @@
  *   3. AI 网关 (@infrastructure/http-ingress + protocol-adapter + llm-inference)
  *
  * 运行: cd examples/appbase && pnpm start
- * 访问: http://127.0.0.1:3419/hall  (对话厅)
- *       http://127.0.0.1:3419/app/apps  (后端 API)
- *       http://127.0.0.1:3418/v1/chat/completions  (AI 网关)
+ * 访问: http://127.0.0.1:1231/hall  (对话厅)
+ *       http://127.0.0.1:1231/app/apps  (后端 API)
+ *       http://127.0.0.1:1232/v1/chat/completions  (AI 网关)
  */
 
 import {
@@ -37,8 +37,8 @@ import { plugin as orchestrationPlugin } from "@aigility-harness/layer-orchestra
 import { plugin as actionPlugin } from "@aigility-harness/layer-action";
 import { appBackendHandler, initAppBackend, isKnownGatewayKey } from "./backend.js";
 
-const APP_PORT = 3419;
-const GATEWAY_PORT = 3418;
+const APP_PORT = 1231;
+const GATEWAY_PORT = 1232;
 
 async function main(): Promise<void> {
   console.log("=== AppBase（对话厅 + 网页应用开发员 + 后端 API + AI 网关）===\n");
@@ -89,7 +89,7 @@ async function main(): Promise<void> {
   setAdminKernel(kernel);
   setAdminManifests(plugins.map((p) => p.manifest));
 
-  // 4. 统一 HTTP server (3419): hall + 后端 API 同源
+  // 4. 统一 HTTP server (1231): hall + 后端 API 同源
   let hallHandler: ((req: any, res: any) => Promise<void>) | null = null;
   const server = createServer(async (req, res) => {
     // CORS: 允许生成的网页应用从浏览器跨域调用后端 API
@@ -270,12 +270,12 @@ async function main(): Promise<void> {
   const hallValue = hallStart.value as { handler?: (req: any, res: any) => Promise<void> };
   hallHandler = hallValue.handler ?? null;
 
-  // 6. 监听 3419
+  // 6. 监听 1231
   await new Promise<void>((resolve) => server.listen(APP_PORT, "0.0.0.0", () => resolve()));
   console.log(`AppBase 已就绪: http://127.0.0.1:${APP_PORT}/hall (对话厅)`);
   console.log(`                http://127.0.0.1:${APP_PORT}/app/apps (后端 API)`);
 
-  // 7. 启动 AI 网关 (http-ingress, 3418)
+  // 7. 启动 AI 网关 (http-ingress, 1232)
   const gwCtx = kernel.createContext("appbase-gateway", LayerId.Infrastructure);
   const gwResolved = await kernel.registry.resolve({
     id: "@infrastructure/http-ingress",

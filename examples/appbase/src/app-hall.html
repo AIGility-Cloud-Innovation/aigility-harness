@@ -318,17 +318,17 @@ function logout() {
   sessionStorage.removeItem('hall_token');
   location.reload();
 }
-// 原型演示按钮: 探测 127.0.0.1:3399 是否在跑, 在跑则新标签打开, 否则提示先启动
+// 原型演示按钮: 探测 127.0.0.1:1233 是否在跑, 在跑则新标签打开, 否则提示先启动
 function openProtoDemo(btn) {
   var msg = document.getElementById('protoMsg');
   msg.style.display = 'block';
   msg.style.color = 'var(--ink2)';
   msg.textContent = '正在检测原型服务…';
-  fetch('http://127.0.0.1:3399/ui', { mode: 'no-cors' })
+  fetch('http://127.0.0.1:1233/ui', { mode: 'no-cors' })
     .then(function() {
       msg.textContent = '';
       msg.style.display = 'none';
-      window.open('http://127.0.0.1:3399/ui', '_blank');
+      window.open('http://127.0.0.1:1233/ui', '_blank');
     })
     .catch(function() {
       msg.style.color = 'var(--rose)';

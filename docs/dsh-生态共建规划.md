@@ -98,5 +98,5 @@
 | cordis 实例分裂（双运行时） | 插件装载行为不可预测 | `cordisAligned` 校验固化为测试，false 即拒绝装载 |
 | `!!js` 表达式执行 | 供应链攻击面 | 仅信任官方首包清单；自产插件不用 `!!js`；组合器白名单求值 |
 | 遥测外传（FEEDBACK_ONLY 默认开） | 企业部署合规 | 我们的分发 profile 默认注入 `DSH_TELEMETRY_DISABLED=1` |
-| 双前端心智混乱（hall vs 官方 web UI） | 用户困惑 | 定位切分：hall = 终用户产品壳（3419）；官方 web UI = 开发者工作台（3080），不进默认链路 |
+| 双前端心智混乱（hall vs 官方 web UI） | 用户困惑 | 定位切分：hall = 终用户产品壳（1231）；官方 web UI = 开发者工作台（3080），不进默认链路 |
 | Windows 行为差异 | 工具行不可用 | 官方行已按平台自适应（bash/pwsh 互斥）；关键路径 CI 覆盖 Windows |
