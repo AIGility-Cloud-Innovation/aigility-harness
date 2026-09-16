@@ -11,7 +11,7 @@
 export { DshInterop } from "./interop.js";
 export { dshSuiteVersions, mountDshRow, resolvePluginModule } from "./interop.js";
 export type { DshSuiteVersions } from "./interop.js";
-export { dshBaseRows, isJsExpr } from "./base-rows.js";
+export { dshBaseRows, isJsExpr, parsePatchEntries } from "./base-rows.js";
 export type { DshBaseRow, JsExpr } from "./base-rows.js";
 export { installedDshPackages, disabledToText } from "./installed.js";
 export type { InstalledDshPackage } from "./installed.js";

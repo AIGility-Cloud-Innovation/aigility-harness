@@ -107,6 +107,8 @@ describe("集成验证（真实驱动 Codex CLI）", () => {
           cwd: process.cwd(),
           sandboxMode: "read-only",
           timeoutMs: 100_000,
+          // glm-4-flash: 账户免费额度可用; 默认 glm-4.6 需余额, 集成环境不稳定
+          model: "glm-4-flash",
         },
         mockContext(),
       );
@@ -130,6 +132,7 @@ describe("集成验证（真实驱动 Codex CLI）", () => {
         cwd: process.cwd(),
         sandboxMode: "read-only",
         timeoutMs: 120_000,
+        model: "glm-4-flash",
       },
       mockContext(),
     );
@@ -145,6 +148,7 @@ describe("集成验证（真实驱动 Codex CLI）", () => {
         cwd: process.cwd(),
         sandboxMode: "read-only",
         timeoutMs: 120_000,
+        model: "glm-4-flash",
       },
       mockContext(),
     );

@@ -69,6 +69,9 @@ try {
 
 if (!process.env.DEEPSEEK_API_KEY) {
   console.error("[coach-smoke] 缺 DEEPSEEK_API_KEY —— 无法真跑对话; 但依赖与补丁行已就绪");
+  console.error("[coach-smoke] 用法 (PowerShell):  $env:DEEPSEEK_API_KEY='<key>'; pnpm --filter @aigility-harness/dsh-plugin-persona-coach run smoke");
+  console.error("[coach-smoke] 用法 (bash):        DEEPSEEK_API_KEY=<key> pnpm --filter @aigility-harness/dsh-plugin-persona-coach run smoke");
+  console.error("[coach-smoke] 密钥可用 start-appbase.cmd 里的 BIGMODEL_API_KEY (bigmodel 兼容网关)");
   process.exit(2);
 }
 

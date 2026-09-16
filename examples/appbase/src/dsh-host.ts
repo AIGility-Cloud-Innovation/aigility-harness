@@ -15,11 +15,11 @@
  *  - 插件包是 TS 源码入口也没关系: 服务器跑在 tsx 下, 动态 import 时即时编译
  */
 
-import { DshInterop, dshSuiteVersions, dshAgentHeadless } from "@aigility-harness/dsh-interop";
+import { DshInterop, dshSuiteVersions, dshAgentHeadless, parsePatchEntries } from "@aigility-harness/dsh-interop";
 import type { DshHeadlessResult } from "@aigility-harness/dsh-interop";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 
 type AnyCtx = {
   plugin: (p: unknown, cfg: unknown) => Promise<void> | void;
@@ -113,10 +113,11 @@ export async function dshLoadEnabled(records: DshPluginRecord[]): Promise<Record
 // LLM 上游经环境变量指向 OpenAI 兼容网关 (bigmodel)。这是应用消费 dsh
 // agent 能力 (含 Skill) 的可靠通道; 进程内服务图组装属 M2 profile 组合器。
 
-// 家目录固定在 examples/.dsh-home: 首次 headless 运行时官方已在
-// profiles/ 下装好整套依赖树 (pnpm nodeLinker=hoisted), 复用避免重新装配
+// 家目录固定在 examples/.dsh-home: 首次 headless 运行时官方已在 profiles/ 下
+// 装好整套依赖树 (pnpm nodeLinker=hoisted), 复用避免重新装配。
+// 注意层级: import.meta.url = src/dsh-host.ts, "..",".." 到 examples (不是 appbase)。
 const APP_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const DSH_AGENT_HOME = join(APP_ROOT, "..", ".dsh-home");
+const DSH_AGENT_HOME = join(APP_ROOT, ".dsh-home");
 
 export async function dshAgentRun(task: string): Promise<DshHeadlessResult> {
   const apiKey = process.env.BIGMODEL_API_KEY ?? "";
@@ -134,4 +135,33 @@ export async function dshAgentRun(task: string): Promise<DshHeadlessResult> {
     // 只读权限: 冒烟通道不给写盘/执行审批面, 后续按需放宽
     env: { DSH_PERMISSION_MODE: "read-only" },
   });
+}
+
+// ── 可体验插件盘点 (headless profile 用户补丁层) ─────────────────
+// 「DSH 插件体验官」弹窗的数据源: 只列出真正装进 headless profile 的插件,
+// 页面注册表里的插件 (进程内宿主) 不在此列 —— 体验通道跑的是官方 headless。
+
+export interface DshAgentPlugin {
+  id?: string;
+  name: string;
+}
+
+export function dshAgentPlugins(): DshAgentPlugin[] {
+  const patchPath = join(DSH_AGENT_HOME, "profiles", "headless", "cordis.patch.yml");
+  if (!existsSync(patchPath)) return [];
+  const out: DshAgentPlugin[] = [];
+  for (const op of parsePatchEntries(readFileSync(patchPath, "utf8"))) {
+    const rows = Array.isArray(op.insert) ? op.insert : [];
+    for (const row of rows) {
+      if (typeof row !== "object" || row === null) continue;
+      const r = row as Record<string, unknown>;
+      if (typeof r.name === "string" && r.name.length > 0) {
+        out.push({
+          id: typeof r.id === "string" ? r.id : undefined,
+          name: r.name,
+        });
+      }
+    }
+  }
+  return out;
 }

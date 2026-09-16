@@ -70,6 +70,19 @@ textarea.minput { min-height:96px; font-family:Consolas,monospace; }
 .srcs { font-size:12.5px; line-height:2.1; }
 .srcs a { color:var(--accent); font-weight:600; text-decoration:none; }
 .srcs .w { color:var(--ink2); }
+/* ── DSH 插件体验官: 悬浮按钮 + 弹窗 ── */
+.fab { position:fixed; right:26px; bottom:26px; z-index:50; border:none; background:linear-gradient(120deg,#312e81,#4f46e5 55%,#7c3aed); color:#fff; border-radius:999px; padding:13px 20px; font-size:13.5px; font-weight:700; cursor:pointer; font-family:inherit; box-shadow:0 8px 26px rgba(49,46,129,.4); }
+.fab:hover { transform:translateY(-1px); }
+.xp-mask { position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:60; display:none; align-items:center; justify-content:center; padding:20px; }
+.xp-mask.show { display:flex; }
+.xp-panel { background:#fff; border-radius:18px; width:min(680px,94vw); max-height:86vh; display:flex; flex-direction:column; box-shadow:0 24px 64px rgba(15,23,42,.35); overflow:hidden; }
+.xp-head { display:flex; align-items:center; gap:10px; padding:16px 20px; background:linear-gradient(120deg,#312e81,#4f46e5 55%,#7c3aed); color:#fff; }
+.xp-head b { font-size:15px; }
+.xp-head .x { margin-left:auto; border:none; background:rgba(255,255,255,.2); color:#fff; border-radius:8px; width:28px; height:28px; cursor:pointer; font-size:14px; font-family:inherit; }
+.xp-body { padding:16px 20px 20px; overflow-y:auto; display:flex; flex-direction:column; gap:10px; }
+.xp-plugs { display:flex; flex-wrap:wrap; gap:8px; }
+.xp-plug { border:1.5px solid var(--line); background:#fff; border-radius:999px; padding:7px 14px; font-size:12.5px; cursor:pointer; font-family:inherit; color:var(--ink); }
+.xp-plug.on { background:var(--soft); border-color:var(--accent); color:var(--accent); font-weight:700; }
 </style>
 </head>
 <body>
@@ -169,18 +182,6 @@ textarea.minput { min-height:96px; font-family:Consolas,monospace; }
       <div class="hint">插件包在本机需已安装（node_modules 可解析）。加载即把插件插入服务进程内的 cordis 运行时；保存配置后需重新加载生效。</div>
     </div>
     <div id="pluginList"></div>
-    <div class="card pad">
-      <div class="chead">
-        <b class="nm">🤖 Agent 通道 (官方 headless)</b>
-        <span class="hint" id="agMeta"></span>
-      </div>
-      <div class="cathead">用官方 dsh headless profile 跑一次真实 agent（完整服务图：推理 + 官方工具 + Skill）。LLM 上游为 OpenAI 兼容网关，权限 read-only。</div>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <input class="minput" id="agTask" placeholder="任务，如：读一下当前目录有哪些文件" style="flex:1;margin-top:0">
-        <button class="b-load" style="white-space:nowrap" onclick="runAgent()">▶ 运行</button>
-      </div>
-      <div class="catbox" id="agOut" style="font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap;display:none"></div>
-    </div>
     <div class="card pad">
       <div class="chead">
         <b class="nm">📦 已安装的 DSH 插件包</b>
@@ -314,6 +315,25 @@ textarea.minput { min-height:96px; font-family:Consolas,monospace; }
   </div>
 </div>
 <div id="msg"></div>
+
+<!-- DSH 插件体验官: 悬浮按钮 + 弹窗 (headless agent 真实体验本页装载的插件) -->
+<button class="fab" onclick="openXp()">🧩 DSH 插件体验官</button>
+<div class="xp-mask" id="xpMask" onclick="if(event.target===this)closeXp()">
+  <div class="xp-panel">
+    <div class="xp-head"><b>🧩 DSH 插件体验官</b>
+      <span style="font-size:11.5px;color:rgba(255,255,255,.75)" id="xpMeta"></span>
+      <button class="x" onclick="closeXp()">✕</button></div>
+    <div class="xp-body">
+      <div class="hint">选一个插件，用官方 dsh headless agent（完整服务图：推理 + 官方工具 + Skill，read-only 权限）真实跑一轮体验。插件列表来自 headless profile 实际装载清单。</div>
+      <div class="xp-plugs" id="xpPlugs"><span class="hint">装载中…</span></div>
+      <div style="display:flex;gap:8px">
+        <input class="minput" id="xpTask" placeholder="体验任务，如：我想给班里做个记账本" style="flex:1;margin:0" onkeydown="if(event.key==='Enter')runXp()">
+        <button class="b-load" id="xpRunBtn" style="white-space:nowrap" onclick="runXp()">▶ 体验</button>
+      </div>
+      <div class="catbox" id="xpOut" style="font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap;display:none"></div>
+    </div>
+  </div>
+</div>
 
 <script>
 // ── 通用 ──
@@ -731,28 +751,71 @@ function registerPlugin() {
   }).catch(function(e) { toast('✗ ' + e.message); });
 }
 
-async function runAgent() {
-  var btn = event && event.target;
-  var task = document.getElementById('agTask').value.trim();
-  if (!task) return toast('✗ 请输入任务');
-  var out = document.getElementById('agOut');
+// ── DSH 插件体验官 (悬浮按钮 → 弹窗) ────────────────────────────
+// 插件列表来自 headless profile 用户补丁层 (GET /app/dsh/agent/plugins);
+// 体验执行走原 Agent 通道 (POST /app/dsh/agent/run, 官方 headless agent)。
+var XP_PRESETS = {
+  'persona-coach': '我想给班里做个记账本',
+  'dsh-plugin-persona-coach': '我想给班里做个记账本',
+};
+var xpCurrent = '';
+function openXp() {
+  document.getElementById('xpMask').classList.add('show');
+  loadXpPlugins();
+}
+function closeXp() {
+  document.getElementById('xpMask').classList.remove('show');
+}
+function loadXpPlugins() {
+  fetchJSON('/app/dsh/agent/plugins').then(function(d) {
+    var plugs = d.plugins || [];
+    var box = document.getElementById('xpPlugs');
+    if (!plugs.length) {
+      box.innerHTML = '<span class="hint">headless profile 里还没有可体验的插件 —— 在本页注册加载插件后再来体验</span>';
+      return;
+    }
+    box.innerHTML = plugs.map(function(p) {
+      var label = p.id || (p.name || '').split('/').pop();
+      return '<button class="xp-plug" data-id="' + esc(p.id || '') + '" data-name="' + esc(p.name || '') + '" onclick="pickXpPlugin(this)">' + esc(label) + '</button>';
+    }).join('');
+    pickXpPlugin(box.querySelector('.xp-plug')); // 默认选中第一个并预填体验任务
+  }).catch(function(e) {
+    document.getElementById('xpPlugs').innerHTML = '<span class="hint">✗ ' + esc(e.message) + '</span>';
+  });
+}
+function pickXpPlugin(btn) {
+  if (!btn) return;
+  document.querySelectorAll('.xp-plug').forEach(function(b) { b.classList.remove('on'); });
+  btn.classList.add('on');
+  xpCurrent = btn.getAttribute('data-name') || '';
+  var id = btn.getAttribute('data-id') || '';
+  var label = btn.textContent.trim();
+  document.getElementById('xpTask').value = XP_PRESETS[id] || XP_PRESETS[xpCurrent] || XP_PRESETS[label] || '';
+}
+async function runXp() {
+  var task = document.getElementById('xpTask').value.trim();
+  if (!task) return toast('✗ 请输入体验任务');
+  var out = document.getElementById('xpOut');
   out.style.display = 'block';
-  out.textContent = '⏳ agent 运行中（最长 180s）…';
-  if (btn) btn.disabled = true;
+  out.textContent = '⏳ ' + (xpCurrent ? '[' + xpCurrent.split('/').pop() + '] ' : '') + 'agent 运行中（最长 180s）…';
+  var btn = document.getElementById('xpRunBtn');
+  btn.disabled = true;
   try {
     var d = await fetchJSON('/app/dsh/agent/run', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ task: task })
     }, 200000);
-    document.getElementById('agMeta').textContent = '耗时 ' + (d.durationMs / 1000).toFixed(1) + 's';
+    document.getElementById('xpMeta').textContent = '耗时 ' + (d.durationMs / 1000).toFixed(1) + 's';
     out.textContent = d.ok ? (d.output || '(空回复)') : ('✗ ' + (d.error || '失败') + '\n' + (d.output || ''));
-    if (d.ok) toast('✓ agent 完成');
+    if (d.ok) toast('✓ 体验完成');
   } catch (e) {
     out.textContent = '✗ ' + e.message;
   } finally {
-    if (btn) btn.disabled = false;
+    btn.disabled = false;
   }
 }
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeXp(); });
+
 function prefillReg(name) {  document.getElementById('rgPkg').value = name;
   var shortName = name.split('/').pop().replace(/^dsh-/, '');
   document.getElementById('rgName').value = shortName;
