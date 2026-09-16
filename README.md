@@ -611,6 +611,7 @@ await root.timem.recallRules({ scene: "简历评估" });        // 规则
 - **契约**：`@aigility-harness/core` 的 `HarnessInterop`（`family` / `versions()` / `mount()`）——家族中立，不出现任何 dsh 概念。
 - **互操作实现**：`@aigility-harness/dsh-interop`——官方套件在 workspace 的**唯一落脚点**：`@deepseek-ai/dsh@0.1.5-rc.2` + `@dsh-base@0.1.5-rc.2` 精确锁定（pre-1.0 禁止 `^` 漂移）；`DshInterop` 实现契约，并导出 dsh 专用的 `dshSuiteVersions()`（cordis 实例对齐保险丝）、`mountDshRow()`（官方 patch 行装载器）、`dshBaseRows()`（官方能力清单只读解析，84 行）、`composeProfileRows()` / `mountComposedProfile()`（profile 组合器：官方 patch 语义合并 + `!!js` 白名单求值 + 依赖感知成组装载）与 `dshAgentHeadless()`（官方 headless profile 真实 agent 通道）。
 - **纯内核**：`@aigility-harness/kernel-dsh` 只依赖 cordis，零家族套件依赖——不需要 dsh 的下游不被增重。
+- **服务型插件的接入实证（timem 案例，已装载进 dsh web profile）**：`@timem/dsh-plugin-timem` 的实测结论固化为打包规范：① git 直装的插件**必须发布编译产物**——Node 拒绝对 node_modules 内的 TS 源码做类型剥离，`main` 指向 `src/*.ts` 会让官方 loader 必然失败；② 插件须容忍无 config 装载（可选配置全部带回退，缺失时降级而非崩溃）；③ **服务装载 ≠ agent 感知**——纯服务插件（如记忆）对聊天模型不可见，要让 agent "带着记忆说话"还需集成面：召回注入 `systemPrompt.context`、写回做成命令或会话钩子；召回时机/用户身份/写回策略属部署政策，应做成配置而非硬编码。
 - **路线图**：资产 → `dsh-plugin-*` 打包映射、反向引入短名单、版本/发布策略、M1–M4 里程碑见 [`docs/dsh-生态共建规划.md`](docs/dsh-生态共建规划.md)。**M1–M2 已完成**（桥接原语 / 官方能力目录 / profile 组合器 / 首个反向插件 `@aigility-harness/dsh-plugin-persona-coach` 已在官方 dsh headless 实跑验收）；M3（角色族 · app-dev · metering）待启动。
 
 ---
