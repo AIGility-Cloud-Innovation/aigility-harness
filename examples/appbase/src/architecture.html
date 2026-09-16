@@ -67,7 +67,7 @@
 
 <div class="keys">
   <div class="key"><b>① 五域插拔架构</b><span>底座 → 认知 → 行动 → 编排 → 人格，域号＝依赖序（每域只依赖更小域号）；运行时调用经 Capability Seam 扁平化</span></div>
-  <div class="key"><b>② 一切皆插件 · DSH 生态</b><span>内核用 DeepSeek Harness 的 cordis 运行时；官方 dsh 套件按「行」借力（工具/会话/沙箱/压缩…约 60 行能力）</span></div>
+  <div class="key"><b>② 一切皆插件 · DSH 生态</b><span>内核用 DeepSeek Harness 的 cordis 运行时；官方 dsh 套件按「行」借力（工具/会话/沙箱/压缩…84 行能力），反向亦然——领域插件可装进官方 dsh</span></div>
   <div class="key"><b>③ 契约永固 · Harness 可替换</b><span>core 定义家族中立的 HarnessInterop 契约，dsh 只是当前实现；换其他 harness 家族 = 换一个 interop 包，上层无感</span></div>
 </div>
 
@@ -75,13 +75,13 @@
 <div class="band">
   <h2>从哪里进入 &nbsp;<span class="tag">你现在看到的这个系统</span></h2>
   <div class="cards">
-    <div class="card hl"><b>应用大厅 /hall</b><span>角色对话 + 应用网格（本页的上层入口，:3419）</span></div>
+    <div class="card hl"><b>应用大厅 /hall</b><span>角色对话 + 应用网格（本页的上层入口，:1231）</span></div>
     <div class="card"><b>对话流图 /hall/flows</b><span>五个对话角色的真实请求流转图</span></div>
     <div class="card"><b>架构总览 /hall/architecture</b><span>本页 · 系统可视化介绍</span></div>
     <div class="card"><b>管理壳 /admin</b><span>六标签：账号与用户 · LLM 配置 · DSH 插件 · 框架层插件 · Token 用量 · 积分账务</span></div>
-    <div class="card dsh"><b>DSH 插件 /admin?tab=dsh</b><span>插件注册/装载 + 官方能力目录（dsh-base 全部能力行可视化）</span></div>
+    <div class="card dsh"><b>DSH 插件 /admin?tab=dsh-plugins</b><span>插件注册/装载 + 官方能力目录 + 插件体验官（dsh-base 全部能力行可视化）</span></div>
     <div class="card"><b>个人中心 /me</b><span>余额 / 用量 / 流水</span></div>
-    <div class="card"><b>AI 网关 :3418</b><span>http-ingress · OpenAI 兼容 / SSE / Bearer</span></div>
+    <div class="card"><b>AI 网关 :1232</b><span>http-ingress · OpenAI 兼容 / SSE / Bearer</span></div>
   </div>
 </div>
 <div class="arrow">▼ 页面调用后端 API（JSON over HTTP · cookie/Bearer）</div>
@@ -101,14 +101,13 @@
 
 <!-- D5 -->
 <div class="band">
-  <h2>D5 角色人格域 &nbsp;<span class="tag">构建主体形象，委托 D4 编排</span></h2>
-  <div class="cards">
+  <h2>D5 角色人格域 &nbsp;<span class="tag">构建主体形象：声明模态能力与视听外观，委托 D4 编排</span></h2>  <div class="cards">
     <div class="card"><b>sales-chat</b><span>平台客服形象 · 平台能力问答</span></div>
     <div class="card"><b>coding-coach</b><span>编码教练 · 教学讲解不动手；动手的是 app-dev</span></div>
     <div class="card"><b>app-dev</b><span>网页应用开发员 · 沙箱内生成/修改单文件应用</span></div>
     <div class="card"><b>repair-chat</b><span>报修客服 · 工单受理 · 需求进 D4 缓冲</span></div>
     <div class="card"><b>plugin-helper</b><span>插件安装引导 · 扫描+契约匹配+接入指引</span></div>
-    <div class="card"><b>policy-chat 等</b><span>业务角色形象 · 语音输入经 D3 的 STT 能力（实现暂居本域，待迁移）</span></div>
+    <div class="card"><b>policy-chat 等</b><span>业务角色形象 · 语音（STT/TTS）</span></div>
   </div>
 </div>
 <div class="arrow">▼ ctx.call(ref, request)</div>
@@ -123,30 +122,28 @@
     <div class="card"><b>guided-design</b><span>多阶段引导式设计（编码教练用）· 决定委托哪个编码驱动、带什么任务</span></div>
     <div class="card"><b>policy-review</b><span>审查编排 13 模块（见下方切片章节）</span></div>
   </div>
-  <span class="note">注：编码 Agent 驱动（zcode/codex/claude）是<b>被调执行器</b>，代码实居 D3 行动执行域 —— 本域只做「何时调、调谁、带什么上下文」的委托决策。</span>
 </div>
 <div class="arrow">▼ capability 调用</div>
 
-<!-- D2 -->
-<div class="band">
-  <h2>D2 认知算力域 &nbsp;<span class="tag">电站：只供算力，不载业务</span></h2>
-  <div class="cards">
-    <div class="card hl"><b>llm-inference</b><span>LiteLLM 网关(:48724) / bigmodel 直连 / stub 三 Provider；DB 配置优先、失败自动降级</span></div>
-    <div class="card"><b>timem-memory / write（记忆引擎）</b><span>TiMEM 长期记忆：尽力而为召回与沉淀 · README 列为本域典型模块，代码实居 layer-cognitive</span></div>
-  </div>
-  <span class="note">边界说明：policy-parser（制度解析＝被调工具）与 policy-kb（台账＝业务数据资产）是制度切片的业务能力，不属本域——见下方切片章节。本域只回答「算力从哪来」：LLM 适配与路由、记忆引擎、会话/身份上下文。</span>
-</div>
-<div class="arrow">▼</div>
-
 <!-- D3 -->
 <div class="band">
-  <h2>D3 行动执行域 &nbsp;<span class="tag">工具（被调）与外设（主动触发）</span></h2>
+  <h2>D3 行动执行域 &nbsp;<span class="tag">工具（被调）与外设（主动触发）· 含模态工具族</span></h2>
   <div class="cards">
     <div class="card"><b>text-to-speech</b><span>msedge-tts · 由角色/编排经 ctx.call 调用</span></div>
-    <div class="card"><b>speech-to-text</b><span>vosk / whisper · 语音转写；与 TTS 同属模态工具（现状: 代码暂居 layer-persona，语义归属本域，待迁移）</span></div>
-    <div class="card hl"><b>编码 Agent 驱动</b><span>zcode / codex / claude 可插拔（dsh headless 预留接缝）· 沙箱快照备份回滚 · 由 D4 委托执行</span></div>
+    <div class="card"><b>speech-to-text</b><span>vosk / whisper · 语音转写 · 模态工具</span></div>
+    <div class="card"><b>视觉 / 3D 形象（规划）</b><span>图像采集与理解 · 形象渲染</span></div>
+    <div class="card hl"><b>编码 Agent 驱动</b><span>zcode / codex / claude 可插拔 · dsh headless 已接入（admin「插件体验官」实跑）· 沙箱快照备份回滚 · 由 D4 委托执行</span></div>
     <div class="card"><b>tool-execution（占位）</b><span>通用工具执行 · 二期 doc-parse / docx 批注等入驻</span></div>
     <div class="card"><b>外设触发源</b><span>定时任务 · 消息推送 · watcher（现状由 ingress 承担触发）</span></div>
+  </div>
+</div>
+<div class="arrow">▼ 算力消费</div>
+
+<!-- D2 -->
+<div class="band">
+  <h2>D2 认知算力域 &nbsp;<span class="tag">电站</span></h2>
+  <div class="cards">
+    <div class="card hl"><b>llm-inference</b><span>LiteLLM 网关(:48724) / bigmodel 直连 / stub 三 Provider；DB 配置优先、失败自动降级</span></div>
   </div>
 </div>
 <div class="arrow">▼</div>
@@ -158,21 +155,22 @@
     <div class="card"><b>kernel-dsh（cordis 4.0.2）</b><span>KernelAdapter 契约的 DSH 内核适配：SeamRegistry · 载体（线程/子进程）· 事件总线 · 可逆副作用。纯内核包，零家族套件依赖</span></div>
     <div class="card"><b>InMemoryKernelAdapter</b><span>原型内核（AppBase 装配用）· bootstrap 按层拓扑排序</span></div>
     <div class="card"><b>py-bridge</b><span>声明式 Python 插件 · JSON-RPC over stdio · 反向 call_ts_capability（LangGraph / RAG）</span></div>
-    <div class="card"><b>基建 + ingress</b><span>config / logging / audit / rate-limit 四件套；边缘入口：hall(:3419) · http-ingress(:3418) · 飞书 · 企微</span></div>
+    <div class="card"><b>基建 + ingress</b><span>config / logging / audit / rate-limit 四件套；边缘入口：hall(:1231) · http-ingress(:1232) · 飞书 · 企微</span></div>
   </div>
   <div class="cards" style="margin-top:10px">
     <div class="card dsh" style="flex-basis:100%">
-      <b>DSH 生态对齐（契约 → interop → 官方套件）</b>
+      <b>DSH 生态对齐（契约 → interop → 官方套件，双向可装载）</b>
       <span style="font-size:11.5px;color:var(--ink);line-height:1.7">
         core 的 <b>HarnessInterop</b> 契约（family / versions / mount，家族中立）→
         <b>@aigility-harness/dsh-interop</b> 当前实现（官方套件在本工程的唯一落脚点）→
         官方 <b>@deepseek-ai/dsh + dsh-base 0.1.5-rc.2</b> 精确锁定。
-        官方能力按 <b>cordis.patch.yml 行清单</b>编址（约 60 行：agent 循环 · 工具族 · 会话 · 沙箱审批 · 上下文压缩 · 子代理…），
-        <b>dshBaseRows()</b> 只读解析成「官方能力目录」（管理页可视化），<b>mountDshRow()</b> 按行装载进运行时；
+        官方能力按 <b>cordis.patch.yml 行清单</b>编址（84 行：agent 循环 · 工具族 · 会话 · 沙箱审批 · 上下文压缩 · 子代理…）：
+        <b>dshBaseRows()</b> 只读解析成「官方能力目录」，<b>profile 组合器</b>按官方语义合并各层（last-write-wins，!!js 白名单求值），<b>mountDshRow()</b> 按行装载进运行时；
+        反向：领域角色打包为 <b>dsh-plugin-*</b> 装进官方 dsh（首个：<b>dsh-plugin-persona-coach</b> 编码教练，headless 实跑验证）；
         <b>cordisAligned</b> 校验两侧 cordis 为同一物理模块（单运行时保险丝）。
         换 harness 家族 = 新增一个 <b>&lt;family&gt;-interop</b> 包实现同一契约，core / 五域 / AppBase 全部无感。
       </span>
-      <span class="note">管理入口：/admin → 「DSH 插件」标签 → 官方能力目录 · 设计与路线图见 docs/dsh-生态共建规划.md</span>
+      <span class="note">管理入口：/admin → 「DSH 插件」标签 → 官方能力目录 · 插件体验官 · 设计与路线图见 docs/dsh-生态共建规划.md</span>
     </div>
   </div>
 </div>
