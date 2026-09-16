@@ -1,0 +1,42 @@
+@echo off
+setlocal
+chcp 65001 >nul
+rem ============================================================
+rem  DSH official web UI one-click start (local real config --
+rem  git-ignored). Template: start-dsh-web.cmd.example
+rem
+rem  Reuses the shared dsh home (examples/.dsh-home) already
+rem  provisioned by the headless agent channel.
+rem
+rem  NOTE: keep this file ASCII-only with CRLF line endings
+rem  (same reason as start-appbase.cmd).
+rem ============================================================
+
+rem ---- Port guard: refuse to start twice ----
+netstat -ano | findstr ":3080" | findstr "LISTENING" >nul 2>nul
+if errorlevel 1 goto port_ok
+echo [dsh-web] DSH Web UI is ALREADY RUNNING (port 3080 in use).
+echo   Open the token URL printed by that instance, or stop it:
+echo   taskkill /PID ^<pid^> /F    (pid: netstat -ano ^| findstr :3080)
+exit /b 1
+:port_ok
+
+rem ---- Shared dsh home (same tree the headless agent channel uses) ----
+for %%i in ("%~dp0..\.dsh-home") do set "DSH_HOME=%%~fi"
+set "DSH_TELEMETRY_DISABLED=1"
+
+rem ---- LLM upstream (OpenAI-compatible gateway; same key as start-appbase) ----
+set "DEEPSEEK_API_KEY=<BIGMODEL_API_KEY>"
+set "DEEPSEEK_BASE_URL=https://open.bigmodel.cn/api/paas/v4"
+
+rem ---- Resolve official CLI bin.js (direct node: pnpm shim drops env) ----
+set "DSH_BIN="
+for /f "delims=" %%f in ('node "%~dp0..\..\packages\dsh-interop\scripts\dsh-bin.js"') do set "DSH_BIN=%%f"
+if not defined DSH_BIN (
+  echo [dsh-web] cannot resolve dsh CLI - run pnpm install at repo root first
+  exit /b 1
+)
+
+echo [dsh-web] starting DSH Web UI on :3080 - browser opens with the token URL ...
+echo [dsh-web] stop: close this window or Ctrl+C  (check: netstat -ano ^| findstr :3080)
+node "%DSH_BIN%" --profile web

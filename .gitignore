@@ -25,3 +25,6 @@ examples/timem-live-test/
 
 # dsh headless agent home (profiles/sessions/credentials cache, 可重建但体积大)
 examples/.dsh-home/
+
+# DSH web UI one-click start script (contains key, not committed); template: start-dsh-web.cmd.example
+examples/appbase/start-dsh-web.cmd
