@@ -103,6 +103,7 @@ const DEFAULT_SANDBOX_ROOT = resolve(REPO_ROOT, "examples", "apps");
  * 运行后扁平化: 把沙箱子目录里新生的 *.html (如 ZCode 新建项目的 __new__ 约定目录)
  * 移动到沙箱根目录 —— 大厅只伺服根目录的扁平 HTML, 子目录文件必然 404。
  * 重名时追加序号; 清空后删除空子目录。
+ * 跳过 . 开头的隐藏目录 (.backups 版本快照等), 避免把历史副本当成新应用搬到根目录。
  */
 export function flattenSandboxApps(): string[] {
   const root = ensureSandboxRoot();
@@ -111,7 +112,10 @@ export function flattenSandboxApps(): string[] {
   try {
     entries = readdirSync(root, { withFileTypes: true })
       .filter((e) => e.isDirectory())
-      .map((e) => e.name);
+      .map((e) => e.name)
+      // 跳过隐藏目录 (.backups 版本快照 / .git 等): 里面的 html 是历史副本, 不是新应用产物,
+      // 若被搬到大厅根目录会覆盖或污染正在使用的应用
+      .filter((name) => !name.startsWith("."));
   } catch { return moved; }
   for (const dir of entries) {
     const dirPath = join(root, dir);
@@ -157,6 +161,9 @@ export function getAllowedCwd(cwd?: string): string {
   if (target !== root && !target.startsWith(root + sep)) {
     throw new Error(`工作目录不在允许范围内: ${cwd} (仅允许 ${root} 内)`);
   }
+  // 子目录 (如「新建应用」约定的 __new__) 首轮可能还不存在 —— 编码 agent 的 spawn cwd
+  // 必须是已存在的目录 (不存在会退到父目录, 应用就绕过子目录约定直接落到沙箱根), 这里补建
+  if (!existsSync(target)) mkdirSync(target, { recursive: true });
   return target;
 }
 
@@ -180,10 +187,14 @@ const APP_DEV_SYSTEM_PROMPT = `你是「网页应用开发员」，一位专注�
 - 页面由 AppBase 同源伺服: 后端 API 一律用相对路径 (空基址), 如 fetch('/app/data/xxx')
 - 禁止硬编码 127.0.0.1 / localhost / 内网 IP / 带端口的主机地址 —— 会导致其他设备打开时请求打到设备自身
 - 需直连 AI 网关 (端口与本页不同) 时, 用 location.hostname 动态推导: location.protocol + '//' + location.hostname + ':1232'
-- 完成后告诉用户: 应用已创建, 如何访问/使用
+- 完成后告诉用户: 应用已创建, 并给出可点击的访问方式
+- 访问地址一律写成大厅同源相对路径 /apps/<文件名> (如 /apps/qa-assistant.html) —— 伺服层只在 /apps/<文件名> 挂了路由, 别的路径都打不开
+- 绝对不要给出根路径链接 (如 /qa-assistant.html 或 http://<主机名>/qa-assistant.html): 根路径没有映射, 打开只会是 404 空白页
 
 产出位置 (必须遵守):
 - 新建应用必须直接生成在工作目录根部 (如 ./log-monitor.html), 绝对不要创建子目录存放
+- 新建应用时你先为它起名, 文件名 = 应用名 + .html, 只用中文字/字母/数字/下划线/短横线
+  (不要空格、标点、多级后缀), 如 ./记账本.html 或 ./log-monitor.html; 并在回复里明确写出应用名
 - 修改已有应用直接改对应 .html 文件本身
 
 工作目录限制 (必须遵守):
@@ -258,7 +269,7 @@ const appDevProvider: Provider<AppDevRequest, AppDevResponse> = {
     const movedNote = moved.length > 0
       ? `
 
-（检测到应用生成在子目录，已自动移入大厅根目录：${moved.join("、")}）`
+（检测到应用生成在子目录，已自动移入大厅根目录：${moved.join("、")}；访问地址：${moved.map((f) => `/apps/${f}`).join("、")}）`
       : "";
     const response =
       raw?.text && raw.text.length > 0
