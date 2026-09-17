@@ -1,6 +1,6 @@
 # 应用管理与 LLM 用量监控设计
 
-> 状态：账号/API Key 管理**已实现**；用量监控**数据链路已就绪，展示 UI 待实现**。
+> 状态：账号/API Key 管理**已实现**；用量监控**数据链路与展示 UI 已实现**（明细 + 聚合 + 时间筛选 + 日耗柱状）；剩余为配额告警与部署加固。
 
 ## 1. 模型
 
@@ -34,17 +34,17 @@
 
 1. **上报点**：`http-ingress.ts` dev 链路（`/v1/chat/completions` 等）LLM 调用成功后，
    若配置 `usageReportUrl`，fire-and-forget `POST {key, model, usage}`。
-   appbase 启动时已传入 `http://127.0.0.1:3419/app/usage/collect`。
+   appbase 启动时已传入 `http://127.0.0.1:1231/app/usage/collect`。
 2. **存储**：`llm_usage` 表（key / model / prompt_tokens / completion_tokens / total_tokens / created_at）。
 3. **聚合查询**：`GET /app/hall/manage` 已返回 `usage`（最近 100 条明细）和 `agg`
    （按账号/Key 聚合的调用次数与 token 总数）。
 
 ## 4. 待实现（UI 层）
 
-- [ ] 大厅管理抽屉的"用量"标签页：明细表 + 按账号聚合视图（数据接口已返回 `usage`/`agg`）
-- [ ] 按时间范围筛选（日/周/月 token 消耗曲线）
+- [x] 大厅管理抽屉的"用量"区块：明细表 + 按账号聚合视图（数据接口已返回 `usage`/`agg`）（已实现）
+- [x] 按时间范围筛选（今日/近7天/近30天/全部 + 每日 token 柱状，客户端过滤近 100 条明细）（已实现）
 - [ ] 用量告警（单 Key 配额上限，超限返回 429）
-- [ ] 流式请求的用量统计（当前流式路径剥掉 stream 后仍可统计——已在同一切入点，仅需确认 SSE 分支也上报）
+- [x] 流式请求的用量统计（已确认：上报切入点协议无关，SSE 分支同样经 `usageReportUrl` 上报）
 - [ ] 非内网部署时 `/app/usage/collect` 的鉴权强化
 
 ## 5. 已知限制

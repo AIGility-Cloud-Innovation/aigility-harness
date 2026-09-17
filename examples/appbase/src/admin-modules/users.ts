@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   json, readBody, pool, hashPassword, verifyPassword, signToken, setAuthCookie,
-  bearerUser, isAdminUser, writeAudit, emailOf, loginLimiter, loginLockKey, adminEmails,
+  bearerUser, pageUserId, isAdminUser, writeAudit, emailOf, loginLimiter, loginLockKey, adminEmails,
 } from "./context.js";
 
 /** auth + /app/admin 路由处理; 返回 true = 已响应 (未命中前缀返回 false) */
@@ -32,7 +32,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, path: st
       const email = String(body.email ?? "").trim().toLowerCase();
       const password = String(body.password ?? "");
       if (!email || password.length < 6) {
-        return json(res, 400, { error: "email 和 password(≥6位) 必填" });
+        return json(res, 400, { error: "用户名或邮箱 和 password(≥6位) 必填" });
       }
       const id = randomUUID();
       const hash = await hashPassword(password);
@@ -46,11 +46,23 @@ export async function handle(req: IncomingMessage, res: ServerResponse, path: st
           [id, email, hash, makeAdmin],
         );
       } catch (e: any) {
-        if (String(e?.code) === "23505") return json(res, 409, { error: "邮箱已注册" });
+        if (String(e?.code) === "23505") return json(res, 409, { error: "该用户名或邮箱已注册" });
         throw e;
       }
       const token = signToken(id);
       setAuthCookie(res, token);
+      // 经应用登录门注册 (next=/apps/<appId>): 自动授予该应用成员身份, 省去管理员手工添加
+      const appMatch = /^\/apps\/([^/?]+)/.exec(String(body.next ?? ""));
+      if (appMatch) {
+        const appId = decodeURIComponent(appMatch[1]);
+        const { rows: appRow } = await pool.query("SELECT 1 FROM apps WHERE id = $1", [appId]);
+        if (appRow.length > 0) {
+          await pool.query(
+            "INSERT INTO app_members (app_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            [appId, id]);
+          void writeAudit(email, "member.auto_add", appId, "注册于应用登录门, 自动授权");
+        }
+      }
       void writeAudit(email, "register", email, makeAdmin ? "(首个用户, 自动管理员)" : "");
       return json(res, 201, { token, user: { id, email, isAdmin: makeAdmin } });
     }
@@ -75,7 +87,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, path: st
         const after = loginLimiter.fail(lockKey);
         void writeAudit(email, "login.fail", email,
           `ip=${ip}` + (after.remaining > 0 ? ` 还可尝试 ${after.remaining} 次` : " (触发锁定)"));
-        return json(res, 401, { error: after.remaining > 0 ? `邮箱或密码错误 (还可尝试 ${after.remaining} 次)` : "邮箱或密码错误" });
+        return json(res, 401, { error: after.remaining > 0 ? `用户名或密码错误 (还可尝试 ${after.remaining} 次)` : "用户名或密码错误" });
       }
       loginLimiter.reset(lockKey);
       const token = signToken(rows[0].id);
@@ -93,7 +105,8 @@ export async function handle(req: IncomingMessage, res: ServerResponse, path: st
 
     // 当前登录者信息 (前端启动时校验 token / 拿管理员身份)
     if (method === "GET" && path === "/app/auth/me") {
-      const userId = bearerUser(req);
+      // 双轨身份: Bearer 或 httpOnly cookie (应用页裸 fetch 靠 cookie 识别)
+      const userId = pageUserId(req);
       if (!userId) return json(res, 401, { error: "未登录" });
       const { rows } = await pool.query("SELECT id, email FROM users WHERE id = $1", [userId]);
       if (rows.length === 0) return json(res, 401, { error: "用户不存在" });
@@ -123,8 +136,8 @@ export async function handle(req: IncomingMessage, res: ServerResponse, path: st
         const email = String(body.email ?? "").trim().toLowerCase();
         const password = String(body.password ?? "");
         const makeAdmin = Boolean(body.is_admin);
-        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-          return json(res, 400, { error: "请输入有效的邮箱地址" });
+        if (!email) {
+          return json(res, 400, { error: "请输入用户名或邮箱" });
         }
         if (password.length < 6) {
           return json(res, 400, { error: "密码至少 6 位" });
@@ -134,10 +147,9 @@ export async function handle(req: IncomingMessage, res: ServerResponse, path: st
         try {
           await pool.query(
             "INSERT INTO users (id, email, password_hash, is_admin) VALUES ($1, $2, $3, $4)",
-            [id, email, hash, makeAdmin],
-          );
+            [id, email, hash, makeAdmin]);
         } catch (e: any) {
-          if (String(e?.code) === "23505") return json(res, 409, { error: "邮箱已存在" });
+          if (String(e?.code) === "23505") return json(res, 409, { error: "该用户名或邮箱已存在" });
           throw e;
         }
         const adminEmail = await emailOf(adminId);

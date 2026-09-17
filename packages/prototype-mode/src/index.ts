@@ -345,7 +345,7 @@ async function main(): Promise<void> {
     console.error("   resolve http-ingress 失败:", ingressRes.error);
   } else {
     const ingressReq: HttpIngressRequest = {
-      port: 3399,
+      port: 1233,
       devPaths: ["/v1/chat/completions", "/v1/messages"],
       agentPaths: ["/api/chat"],
     };
@@ -359,7 +359,7 @@ async function main(): Promise<void> {
       // 双链路真实 HTTP 请求
       try {
         // 链路 A：开发者协议 (/v1/chat/completions → protocol-adapter → LLM)
-        const devRes = await fetch("http://127.0.0.1:3399/v1/chat/completions", {
+        const devRes = await fetch("http://127.0.0.1:1233/v1/chat/completions", {
           method: "POST",
           headers: { "Content-Type": "application/json", "user-agent": "claude-cli/2.x" },
           body: JSON.stringify({
@@ -372,7 +372,7 @@ async function main(): Promise<void> {
         log("dev", `HTTP ${devRes.status}: ${JSON.stringify(devBody).slice(0, 200)}`);
 
         // 链路 B：角色形象 (/api/chat → sales-chat → workflow-engine)
-        const agentRes = await fetch("http://127.0.0.1:3399/api/chat", {
+        const agentRes = await fetch("http://127.0.0.1:1233/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ user_input: "帮我查一下今天的订单", merchant_id: "M001", customer_id: "C001" }),
@@ -419,7 +419,7 @@ async function main(): Promise<void> {
   }
   // 默认常驻: 最小 Web UI 持续可用(AppBase 登录页旁的原型演示卡片内嵌本服务)
   console.log("\n=== 原型模式演示完成 · Web UI 常驻中 ===");
-  console.log("    浏览器打开 http://127.0.0.1:3399/ (或 /ui) 与角色对话");
+  console.log("    浏览器打开 http://127.0.0.1:1233/ (或 /ui) 与角色对话");
   console.log("    AppBase 登录页右侧「原型演示」卡片即本服务 · Ctrl+C 退出");
   console.log("    (一次性自测后退出: PROTO_DEMO_EXIT=1)");
   await new Promise(() => {}); // 常驻, HTTP 服务器持续监听

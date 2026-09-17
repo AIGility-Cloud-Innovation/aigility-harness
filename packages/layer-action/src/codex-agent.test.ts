@@ -28,11 +28,24 @@ function mockContext(callImpl?: SeamContext["call"]): SeamContext {
 const codexAvailable = (): boolean => {
   const bin = process.env.CODEX_BIN ?? "codex";
   try {
-    return spawnSync(bin, ["--version"], { timeout: 5000 }).status === 0;
+    // Windows: codex 是 .cmd 包装, 必须走 shell 才能探到 (与实现侧 useShell 一致)
+    return (
+      spawnSync(bin, ["--version"], {
+        timeout: 5000,
+        shell: process.platform === "win32",
+      }).status === 0
+    );
   } catch {
     return false;
   }
 };
+
+/**
+ * 集成测试需 codex 的模型上游真实可用 (本机 ~/.codex/config.toml 指向
+ * appbase 网关, 网关密钥与运行实例必须一致)。默认跳过保持套件绿色;
+ * 显式 CODEX_IT=1 开启真跑 (慢, 单轮可达数分钟)。
+ */
+const codexItEnabled = (): boolean => process.env.CODEX_IT === "1";
 
 describe("@action/codex-agent 契约", () => {
   it("服务定义归属 Action 层且版本/描述正确", () => {
@@ -51,14 +64,6 @@ describe("execute 边界校验", () => {
   it("空 prompt 返回 err 而非抛异常", async () => {
     const r = await codexAgentProvider.execute(
       { prompt: "   " },
-      mockContext(),
-    );
-    expect(r.ok).toBe(false);
-  });
-
-  it("未实现的 thread resume 返回 err", async () => {
-    const r = await codexAgentProvider.execute(
-      { prompt: "hi", threadId: "some-thread-id" },
       mockContext(),
     );
     expect(r.ok).toBe(false);
@@ -91,7 +96,7 @@ describe("health 探针", () => {
 });
 
 describe("集成验证（真实驱动 Codex CLI）", () => {
-  it.skipIf(!codexAvailable())(
+  it.skipIf(!codexAvailable() || !codexItEnabled())(
     "trivial 任务完成 JSONL 全链路往返",
     { timeout: 120_000 },
     async () => {
@@ -102,6 +107,8 @@ describe("集成验证（真实驱动 Codex CLI）", () => {
           cwd: process.cwd(),
           sandboxMode: "read-only",
           timeoutMs: 100_000,
+          // glm-4-flash: 账户免费额度可用; 默认 glm-4.6 需余额, 集成环境不稳定
+          model: "glm-4-flash",
         },
         mockContext(),
       );
@@ -116,4 +123,39 @@ describe("集成验证（真实驱动 Codex CLI）", () => {
       }
     },
   );
+
+  it("thread resume: 两轮往返携带记忆（exec resume 子命令 + stdin `-`）", { timeout: 300_000, skip: !codexAvailable() || !codexItEnabled() }, async () => {
+    const marker1 = "CODEX_RESUME_A";
+    const first = await codexAgentProvider.execute(
+      {
+        prompt: `Remember this token for later: ${marker1}. Reply with exactly that token.`,
+        cwd: process.cwd(),
+        sandboxMode: "read-only",
+        timeoutMs: 120_000,
+        model: "glm-4-flash",
+      },
+      mockContext(),
+    );
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.value.threadId).toBeTruthy();
+
+    const marker2 = "CODEX_RESUME_B";
+    const second = await codexAgentProvider.execute(
+      {
+        prompt: `Reply with the token I gave you earlier and then this new token: ${marker2}`,
+        threadId: first.value.threadId,
+        cwd: process.cwd(),
+        sandboxMode: "read-only",
+        timeoutMs: 120_000,
+        model: "glm-4-flash",
+      },
+      mockContext(),
+    );
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value.threadId).toBeTruthy();
+    expect(second.value.text).toContain(marker1);
+    expect(second.value.text).toContain(marker2);
+  });
 });

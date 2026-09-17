@@ -48,6 +48,7 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
 .mbtn { border:none; background:var(--accent); color:#fff; border-radius:9px; padding:8px 16px; font-weight:600; cursor:pointer; font-size:12.5px; font-family:inherit; }
 .mbtn.g { background:var(--soft); color:var(--accent); }
 .mbtn.s { padding:4px 10px; font-size:11.5px; }
+.mbtn.danger { background:var(--rose-soft); color:var(--rose); }
 .okchip { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; background:var(--green-soft); color:var(--green); }
 .openchip { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; background:#fff3e6; color:#d97706; }
 .offchip { background:#f1f4f9; color:var(--ink2); }
@@ -83,13 +84,14 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
 .login-card .lsub { font-size:12.5px; color:var(--ink2); margin:6px 0 18px; }
 .login-btns { display:flex; gap:10px; margin-top:4px; }
 .login-msg { font-size:12.5px; color:var(--rose); margin-top:12px; min-height:16px; }
-/* 原型演示卡（免登录游客试玩，内嵌 prototype-mode 最小 UI） */
+/* 友情链接卡（登录页侧栏） */
 .proto-card { background:#fff; border-radius:20px; padding:18px 18px 12px; width:560px; max-width:92vw; display:flex; flex-direction:column; box-shadow:0 24px 70px rgba(0,0,0,.4); }
 .proto-card h2 { font-size:20px; }
 .proto-card .lsub { font-size:12.5px; color:var(--ink2); margin:6px 0 12px; }
-.proto-frame { flex:1; width:100%; min-height:400px; border:0; border-radius:12px; background:#0b1220; }
-.proto-note { font-size:11px; color:var(--ink2); margin-top:8px; opacity:.8; }
-.proto-note code { background:var(--soft); border-radius:5px; padding:1px 6px; }
+.link-list { display:flex; flex-direction:column; gap:8px; }
+.link-list a { display:flex; align-items:center; gap:8px; padding:9px 12px; border:1px solid var(--line,#e8ecf4); border-radius:11px; font-size:13px; color:var(--ink,#1e293b); text-decoration:none; transition:background .15s; }
+.link-list a:hover { background:var(--soft,#f3f5fa); }
+.link-list a small { margin-left:auto; color:var(--ink2,#64748b); font-size:11px; }
 @media (max-width:1060px) { .proto-card { display:none; } }
 </style>
 </head>
@@ -101,7 +103,7 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
     <div class="login-card">
       <h2>🚀 AppBase</h2>
       <div class="lsub">请先登录（或注册）账号，再进入应用大厅<br><small style="opacity:.6">powered by aigility-harness</small></div>
-      <input class="minput" id="lgEmail" placeholder="邮箱" autocomplete="username">
+      <input class="minput" id="lgEmail" placeholder="用户名或邮箱" autocomplete="username">
       <input class="minput" id="lgPassword" type="password" placeholder="密码（注册至少 6 位）" autocomplete="current-password">
       <div class="login-btns">
         <button class="mbtn" style="flex:1" onclick="doLogin(false)">登录</button>
@@ -110,10 +112,14 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
       <div class="login-msg" id="lgMsg"></div>
     </div>
     <div class="proto-card">
-      <h2>🧪 原型演示（免登录）</h2>
-      <div class="lsub">五域 Agent 最小 Web UI —— 游客即点即聊<br><small style="opacity:.6">注册登录后可进应用大厅，体验多角色与完整功能</small></div>
-      <iframe class="proto-frame" src="http://127.0.0.1:3399/ui" title="aigility-harness 原型演示"></iframe>
-      <div class="proto-note">若上方空白，请先在本机启动原型：<code>pnpm example:prototype</code></div>
+      <h2>🔗 友情链接</h2>
+      <div class="lsub">相关项目与平台<br><small style="opacity:.6">注册登录后可进应用大厅，体验多角色与完整功能</small></div>
+      <!-- 编辑友链: 直接增删下面的 <a> 行即可 -->
+      <div class="link-list">
+        <a href="https://git.aigility.cloud/AIGility-Cloud-Innovation/aigility-harness" target="_blank" rel="noopener">🐙 aigility-harness<small>开源仓库</small></a>
+        <a href="https://open.bigmodel.cn" target="_blank" rel="noopener">✨ 智谱 BigModel 开放平台<small>GLM 大模型</small></a>
+        <a href="https://www.timem.cloud" target="_blank" rel="noopener">🧠 TiMEM 太忆<small>长期记忆空间</small></a>
+      </div>
     </div>
   </div>
 </div>
@@ -121,7 +127,7 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
 <div class="shell" id="shellWrap" style="display:none">
   <div class="hero">
     <h1>🚀 AppBase · 应用大厅</h1>
-    <p>AI 生成的网页应用都住在这里 —— 打开即用，账号与 LLM 配置统一管理<br><small style="opacity:.65">powered by aigility-harness · <a href="/hall/flows" target="_blank" style="color:inherit">对话流图</a></small></p>
+    <p>AI 生成的网页应用都住在这里 —— 打开即用，账号与 LLM 配置统一管理<br><small style="opacity:.65">powered by aigility-harness · <a href="/hall/flows" target="_blank" style="color:inherit">对话流图</a> · <a href="/hall/architecture" target="_blank" style="color:inherit">架构总览</a></small></p>
     <div class="accbar">
       <span class="who" id="whoami"></span>
       <button id="tkBadge" onclick="openRoleChat('repair'); setTimeout(function(){ if (document.getElementById('ticketPanel').style.display !== 'block') toggleTicketPanel(); }, 150)" style="display:none"></button>
@@ -166,7 +172,22 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
           <button class="mbtn g" onclick="fetchModels()">⟳ 获取模型列表</button>
           <span id="modelMsg" style="font-size:12px;color:var(--ink2)"></span>
         </div>
-        <div style="font-size:11.5px;color:var(--ink2);margin-top:8px">📊 LLM 用量监控：规划中，见 docs/app-management-design.md</div>
+      </div>
+      <div class="sec">
+        <h3>📈 LLM 用量</h3>
+        <div class="sh">按应用 Key 归集的调用用量（网关上报；明细最多展示最近 100 条）</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+          <select class="minput" id="usageRange" style="margin:0;width:110px;flex:none" onchange="renderUsage()">
+            <option value="day">今日</option>
+            <option value="week">近7天</option>
+            <option value="month">近30天</option>
+            <option value="all" selected>全部</option>
+          </select>
+          <span id="usageSummary" class="sub" style="font-size:12px;color:var(--ink2)"></span>
+        </div>
+        <div id="usageChart"></div>
+        <div id="usageAgg" style="margin-top:8px"></div>
+        <div id="usageDetail" style="margin-top:8px;overflow-x:auto"></div>
       </div>
       <div class="sec">
         <h3>📦 应用 .env 配置</h3>
@@ -174,6 +195,11 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
         <textarea class="minput" id="envText" style="min-height:110px;font-family:Consolas,monospace;font-size:12px" placeholder="CLASS_NAME=三年级二班&#10;SCHOOL=实验小学&#10;MAX_STUDENTS=50"></textarea>
         <button class="mbtn" onclick="saveEnv()">保存 .env 配置</button>
         <span id="envMsg" style="font-size:12px;color:var(--ink2);margin-left:8px"></span>
+      </div>
+      <div class="sec">
+        <h3>🗑 卸载应用</h3>
+        <div class="sh">从大厅删除该应用文件，删除后无法找回（.backups 里的历史快照仍保留在磁盘上）。仅管理员可操作。</div>
+        <button class="mbtn danger" onclick="armConfirm(this, uninstallApp)">🗑 卸载此应用</button>
       </div>
     </div>
   </div>
@@ -280,15 +306,20 @@ function doLogin(register) {
   var password = document.getElementById('lgPassword').value;
   var msg = document.getElementById('lgMsg');
   msg.textContent = '';
+  // 登录门前 ?next= 回跳: 仅接受站内相对路径 (防开放重定向)
+  var m = /[?&]next=([^&]+)/.exec(location.search);
+  var next = m ? decodeURIComponent(m[1]) : '';
+  if (next && (!next.startsWith('/') || next.startsWith('//'))) next = '';
   fetchJSON('/app/auth/' + (register ? 'register' : 'login'), {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: email, password: password })
+    body: JSON.stringify({ email: email, password: password, next: next })
   }).then(function(d) {
     if (!d.token) { msg.textContent = '✗ ' + (d.error || '失败'); return; }
     mgToken = d.token;
     userEmail = d.user.email;
     isAdmin = !!d.user.isAdmin;
     sessionStorage.setItem('hall_token', d.token);
+    if (next) { location.href = next; return; }
     enterHall();
   }).catch(function(e) { msg.textContent = '✗ ' + e.message; });
 }
@@ -381,6 +412,17 @@ function openMg(enc) {
   document.getElementById('mgDrawer').classList.add('show');
 }
 function closeMg() { document.getElementById('mgDrawer').classList.remove('show'); }
+// 卸载应用: DELETE /app/hall/apps/<name> (服务端仅管理员, 删沙箱文件并写审计)
+function uninstallApp() {
+  if (!mgApp) return;
+  fetchJSON('/app/hall/apps/' + encodeURIComponent(mgApp), { method: 'DELETE', headers: jheaders() })
+    .then(function() {
+      toast('已卸载「' + mgApp.replace('.html', '') + '」');
+      closeMg();
+      loadApps(); // 大厅列表里移除该应用
+    })
+    .catch(function(e) { toast('卸载失败: ' + e.message); });
+}
 
 // ── 全局 LLM 配置 (仅管理员) ──
 
@@ -475,7 +517,94 @@ function loadManage() {
     if (typeof d.envText === 'string') {
       document.getElementById('envText').value = d.envText;
     }
+    mgUsage = { usage: d.usage || [], agg: d.agg || [] };
+    renderUsage();
   }).catch(function(e) { alert('加载管理信息失败: ' + e.message); });
+}
+
+// ── LLM 用量标签页 ──────────────────────────────────────────────
+var mgUsage = { usage: [], agg: [] };
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+function usageInRange(range) {
+  var now = new Date();
+  var from = null;
+  if (range === 'day') { from = new Date(now.getFullYear(), now.getMonth(), now.getDate()); }
+  else if (range === 'week') { from = new Date(now.getTime() - 7 * 86400000); }
+  else if (range === 'month') { from = new Date(now.getTime() - 30 * 86400000); }
+  return mgUsage.usage.filter(function(u) {
+    if (!from) return true;
+    var t = new Date(u.created_at);
+    return t >= from;
+  });
+}
+
+function renderUsage() {
+  var rangeEl = document.getElementById('usageRange');
+  if (!rangeEl) return;
+  var rows = usageInRange(rangeEl.value);
+  var totalCalls = rows.length;
+  var totalTokens = rows.reduce(function(s, u) { return s + (u.total_tokens || 0); }, 0);
+  document.getElementById('usageSummary').textContent =
+    totalCalls ? ('近段 ' + totalCalls + ' 次调用 · ' + totalTokens.toLocaleString() + ' tokens') : '所选范围内暂无调用';
+
+  // 每日 token 柱状（CSS 条，最高日为满宽）
+  var byDay = {};
+  rows.forEach(function(u) {
+    var d = new Date(u.created_at);
+    var k = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    byDay[k] = (byDay[k] || 0) + (u.total_tokens || 0);
+  });
+  var days = Object.keys(byDay).sort().slice(-14);
+  var maxDay = days.reduce(function(m, k) { return Math.max(m, byDay[k]); }, 0);
+  document.getElementById('usageChart').innerHTML = days.length
+    ? days.map(function(k) {
+        var w = maxDay ? Math.max(2, Math.round(byDay[k] * 100 / maxDay)) : 0;
+        return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;font-size:11.5px">'
+          + '<span class="sub" style="width:76px;flex:none;color:var(--ink2)">' + k.slice(5) + '</span>'
+          + '<div style="flex:1;background:var(--line);border-radius:6px;height:14px;overflow:hidden">'
+          + '<div style="width:' + w + '%;height:100%;background:var(--rose-soft)"></div></div>'
+          + '<span class="sub" style="width:86px;flex:none;text-align:right;color:var(--ink2)">' + byDay[k].toLocaleString() + '</span></div>';
+      }).join('')
+    : '';
+
+  // 按账号/Key 聚合
+  var agg = mgUsage.agg;
+  document.getElementById('usageAgg').innerHTML = agg.length
+    ? '<div class="sub" style="font-size:12px;color:var(--ink2);margin-bottom:4px">按账号 / Key 聚合（全部时间）</div>'
+      + agg.map(function(a) {
+        return '<div class="rowline"><div class="grow"><b>' + esc(a.who) + '</b></div>'
+          + '<span class="sub" style="font-size:12px;color:var(--ink2)">' + a.calls + ' 次 · ' + (a.tokens || 0).toLocaleString() + ' tokens</span></div>';
+      }).join('')
+    : '<div class="sub" style="font-size:12px;color:var(--ink2)">还没有任何 Key 产生用量</div>';
+
+  // 明细（最近在前, 最多 50 条）
+  var detail = rows.slice(0, 50);
+  document.getElementById('usageDetail').innerHTML = detail.length
+    ? '<table style="width:100%;border-collapse:collapse;font-size:11.5px">'
+      + '<tr style="color:var(--ink2);text-align:left">'
+      + '<th style="padding:4px 6px;border-bottom:1px solid var(--line)">时间</th>'
+      + '<th style="padding:4px 6px;border-bottom:1px solid var(--line)">账号/Key</th>'
+      + '<th style="padding:4px 6px;border-bottom:1px solid var(--line)">模型</th>'
+      + '<th style="padding:4px 6px;border-bottom:1px solid var(--line);text-align:right">输入</th>'
+      + '<th style="padding:4px 6px;border-bottom:1px solid var(--line);text-align:right">输出</th>'
+      + '<th style="padding:4px 6px;border-bottom:1px solid var(--line);text-align:right">合计</th></tr>'
+      + detail.map(function(u) {
+        return '<tr>'
+          + '<td style="padding:4px 6px;border-bottom:1px solid var(--line);white-space:nowrap">' + new Date(u.created_at).toLocaleString() + '</td>'
+          + '<td style="padding:4px 6px;border-bottom:1px solid var(--line);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(u.account || u.key.slice(0, 14) + '…') + '</td>'
+          + '<td style="padding:4px 6px;border-bottom:1px solid var(--line)">' + esc(u.model) + '</td>'
+          + '<td style="padding:4px 6px;border-bottom:1px solid var(--line);text-align:right">' + (u.prompt_tokens || 0).toLocaleString() + '</td>'
+          + '<td style="padding:4px 6px;border-bottom:1px solid var(--line);text-align:right">' + (u.completion_tokens || 0).toLocaleString() + '</td>'
+          + '<td style="padding:4px 6px;border-bottom:1px solid var(--line);text-align:right"><b>' + (u.total_tokens || 0).toLocaleString() + '</b></td></tr>';
+      }).join('')
+      + '</table>'
+    : '';
 }
 function fillMemberCandidates() {
   fetchJSON('/app/hall/manage/user-emails', { headers: jheaders() }).then(function(d) {

@@ -35,6 +35,12 @@ main { flex:1; display:flex; flex-direction:column; max-width:980px; width:100%;
 .final-prompt pre { white-space:pre-wrap; word-break:break-word; font-size:12.5px; font-family:Consolas,monospace; max-height:260px; overflow-y:auto; margin:0 0 8px; }
 .final-prompt button { border:none; background:var(--accent); color:#fff; border-radius:8px; padding:6px 12px; font-size:12px; font-weight:600; cursor:pointer; font-family:inherit; }
 .final-prompt .sub { font-size:11px; color:var(--ink2); margin-top:6px; }
+.new-app-card { align-self:flex-start; width:92%; background:#fff; border:1.5px solid var(--accent); border-radius:12px; padding:11px 13px; box-shadow:0 1px 2px rgba(15,23,42,.05); }
+.new-app-card .title { font-size:13px; font-weight:700; margin-bottom:5px; }
+.new-app-card .sub { font-size:11.5px; color:var(--ink2); margin-bottom:9px; }
+.new-app-card .row { display:flex; gap:8px; flex-wrap:wrap; }
+.new-app-card button { border:none; background:var(--accent); color:#fff; border-radius:8px; padding:6px 12px; font-size:12px; font-weight:600; cursor:pointer; font-family:inherit; }
+.new-app-card button.ghost { background:var(--soft); color:var(--accent); }
 </style>
 </head>
 <body>
@@ -94,8 +100,9 @@ function relaunchIfAuthErr(e) {
 }
 
 function isCoach() { return ROLE === '@persona/coding-coach'; }
+function histKeyFor(app) { return 'wb_chat_' + ROLE + '_' + (app || '-'); }
 function histKey() {
-  return 'wb_chat_' + ROLE + '_' + (appSel.value||'-');
+  return histKeyFor(appSel.value);
 }
 function stateKey() { return histKey() + '_state'; }
 // ── 聊天历史云端持久化 ──
@@ -118,22 +125,132 @@ function saveSessionState() {
   try { localStorage.setItem(stateKey(), JSON.stringify(sessionState)); } catch (e) {}
 }
 function onAppChange() {
-  if (appSel.value === NEW_APP) createApp();
-  else { localStorage.setItem('wb_app', appSel.value); loadHistory(); }
+  if (appSel.value === NEW_APP) enterNewAppMode();
+  else {
+    localStorage.removeItem('wb_pending_new'); // 切到具体应用: 清掉待确认的新应用
+    pendingNewApp = null;
+    localStorage.setItem('wb_app', appSel.value);
+    loadHistory();
+    renderMode(); // 提示文案回到「编辑模式」
+  }
 }
-function createApp() {
-  var name = prompt('新应用名称（中文或英文，不用带 .html）:');
-  if (!name) { appSel.value = appSel.options.length > 1 ? appSel.options[1].value : ''; loadHistory(); return; }
-  var file = name + '.html';
-  fetchJSON('/app/hall/apps', { method:'POST',
-    headers: Object.assign({ 'Content-Type':'application/json' }, authH()),
-    body: JSON.stringify({ name: file, content: '<!DOCTYPE html>\n<html lang="zh-CN"\n><head><meta charset="UTF-8"\n><title>' + name + '</title></head><body><h1>' + name + '</h1><p>placeholder</p></body></html>' }) })
+
+// ── 新建应用流程 ──
+// 「➕ 新建应用」不先起名字: 目标应用即沙箱的 __new__ 子目录, 用户在聊天里描述需求,
+// 开发员自己起名字并在该目录生成 (app-dev 会把子目录产物扁平化到大厅根目录);
+// 前端检测到新应用后在对话流里给一张确认卡片 —— 用户确认名字后才切换「目标应用」,
+// 并把「新建应用」这段对话的聊天记录一并迁到新应用名下。
+var pendingNewApp = null; // 待用户确认的新应用文件名
+function enterNewAppMode() {
+  localStorage.removeItem('wb_app'); // 新建态本身不持久化, 免得下次进页面停在没有应用的状态
+  loadHistory();                     // 切到「新建应用」自己的会话历史
+  var pend = localStorage.getItem('wb_pending_new');
+  if (pend && knownApps && knownApps.indexOf(pend) >= 0) { offerNewApp(pend); return; }
+  document.getElementById('tip').textContent =
+    '🆕 新建应用：直接描述你要做的应用（如「做一个记账本」）。开发员会起好名字并生成，完成后在对话里点确认即可切过去。';
+}
+// 把「新建应用」期间累积的聊天记录迁到新应用名下 (本地 + 云端)
+function migrateHistory(fromKey, toKey) {
+  if (!fromKey || fromKey === toKey) return;
+  var raw = localStorage.getItem(fromKey);
+  if (raw) { try { localStorage.setItem(toKey, raw); localStorage.removeItem(fromKey); } catch (e) {} }
+  var st = localStorage.getItem(fromKey + '_state');
+  if (st) { try { localStorage.setItem(toKey + '_state', st); localStorage.removeItem(fromKey + '_state'); } catch (e) {} }
+  var msgs = [];
+  try { msgs = JSON.parse(raw || '[]') || []; } catch (e) { msgs = []; }
+  if (msgs.length) { cloudSaveHistory(toKey, msgs); cloudSaveHistory(fromKey, []); return; }
+  // 本地没有 (换过浏览器/清过本地存储): 从云端兜底迁移一次
+  cloudLoadHistory(fromKey, function(cloud) {
+    if (!cloud.length) return;
+    cloudSaveHistory(toKey, cloud);
+    cloudSaveHistory(fromKey, []);
+  });
+}
+// 用户确认名字: 迁移聊天记录 → 刷新列表 → 选中该应用
+function confirmNewApp(file, fromKey) {
+  migrateHistory(fromKey, histKeyFor(file));
+  return loadApps(true, file).then(function() {
+    pendingNewApp = null;
+    localStorage.removeItem('wb_pending_new');
+    if (appSel.value !== file) { // 列表里没有 (如普通用户看不到未授权应用): 补一项再选中
+      var opt = document.createElement('option');
+      opt.value = file;
+      opt.textContent = file.replace(/\.html$/, '');
+      appSel.appendChild(opt);
+      appSel.value = file;
+    }
+    localStorage.setItem('wb_app', file);
+    loadHistory();
+    document.getElementById('tip').textContent =
+      '📌 已切换到「' + file + '」，点「打开应用」即可查看；后续对话都是在改这个应用。';
+  });
+}
+// 名字不合适: 走大厅的重命名接口 (PUT ?rename=), 成功后按新名字确认切换
+function renameNewApp(oldFile, newName, fromKey, card) {
+  var newFile = newName + '.html';
+  if (!/^[\w一-龥-]+\.html$/.test(newFile)) { alert('名称只能用中文、字母、数字、下划线或短横线'); return; }
+  fetchJSON('/app/hall/apps/' + encodeURIComponent(oldFile) + '?rename=' + encodeURIComponent(newFile),
+    { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, authH()), body: '{}' })
     .then(function(d) {
-      localStorage.setItem('wb_app', file);
-      loadApps(true);
-      alert('应用「' + name + '」已创建，现在可以直接向开发员描述需求。');
+      card.remove();
+      return confirmNewApp((d && d.name) || newFile, fromKey);
     })
-    .catch(function(e) { if (!relaunchIfAuthErr(e)) alert('创建失败: ' + e.message); loadApps(); });
+    .catch(function(e) {
+      if (relaunchIfAuthErr(e)) return;
+      alert('改名失败: ' + e.message);
+    });
+}
+// 开发员在「新建应用」态生成了新应用 → 在对话流里给一张确认卡片 (名字先由开发员起, 用户确认或改)
+function offerNewApp(file) {
+  if (pendingNewApp === file) return; // 同一个应用不重复提示
+  pendingNewApp = file;
+  localStorage.setItem('wb_pending_new', file);
+  var fromKey = histKey();            // 「新建应用」态的历史键
+  var label = file.replace(/\.html$/, '');
+  var box = document.getElementById('msgs');
+  var card = document.createElement('div');
+  card.className = 'new-app-card';
+  var title = document.createElement('div');
+  title.className = 'title';
+  title.textContent = '🆕 开发员已生成新应用「' + label + '」';
+  var sub = document.createElement('div');
+  sub.className = 'sub';
+  sub.textContent = '确认后把「目标应用」切到 ' + file + '，并把新建这段对话的记录一起带过去。';
+  var row = document.createElement('div');
+  row.className = 'row';
+  var okBtn = document.createElement('button');
+  okBtn.textContent = '✅ 就用「' + label + '」，切过去';
+  okBtn.onclick = function() { card.remove(); confirmNewApp(file, fromKey); };
+  var renameBtn = document.createElement('button');
+  renameBtn.className = 'ghost';
+  renameBtn.textContent = '✏️ 换个名字';
+  renameBtn.onclick = function() {
+    var nn = prompt('新应用名称（中文或英文，不用带 .html）:', label);
+    if (nn === null) return;
+    nn = nn.trim();
+    if (!nn || nn === label) return;
+    renameNewApp(file, nn, fromKey, card);
+  };
+  row.appendChild(okBtn);
+  row.appendChild(renameBtn);
+  card.appendChild(title);
+  card.appendChild(sub);
+  card.appendChild(row);
+  box.appendChild(card);
+  box.scrollTop = 1e9;
+  document.getElementById('tip').textContent =
+    '🆕 新应用「' + file + '」已生成，确认名字后即可切换「目标应用」。';
+}
+// 每轮对话后检查列表新增: 新建态下直接给确认卡片; 用户已切到具体应用则记下来, 切回时再给
+function claimFreshApps(fresh) {
+  if (isCoach() || !fresh || !fresh.length) return;
+  if (appSel.value !== NEW_APP) { // 不动用户的目标应用, 只记录待确认
+    localStorage.setItem('wb_pending_new', fresh[0].name);
+    document.getElementById('tip').textContent =
+      '🆕 检测到新应用「' + fresh[0].name.replace(/\.html$/, '') + '」已生成；切回「➕ 新建应用」即可确认切换。';
+    return;
+  }
+  offerNewApp(fresh[0].name);     // 列表按 mtime 倒序, 取最近生成的那个
 }
 
 // ── 模式 ──
@@ -148,16 +265,23 @@ function renderMode() {
 }
 
 // ── 选择器 ──
-function loadApps(keep) {
+var knownApps = null; // 上次拉到的应用名列表 (用于识别本次新生成的应用; null=尚未加载)
+function loadApps(keep, selectName) {
   // keep=true: 刷新列表时保持当前选中, 不回退到 "-- 选择应用 --"
+  // selectName: 刷新后强制选中该应用 (用于刚创建的新应用)
   var prev = keep ? appSel.value : '';
-  fetchJSON('/app/hall/apps', { headers: authH() }).then(function(d) {
-    var wanted = keep ? prev : (qs.get('app') || localStorage.getItem('wb_app'));
-    appSel.innerHTML = '<option value="">-- 选择应用 --</option><option value="__new__">➕ 新建应用</option>' + (d.apps||[]).map(function(a){
+  return fetchJSON('/app/hall/apps', { headers: authH() }).then(function(d) {
+    var apps = d.apps || [];
+    var fresh = knownApps ? apps.filter(function(a){ return knownApps.indexOf(a.name) < 0; }) : [];
+    knownApps = apps.map(function(a){ return a.name; });
+    var wanted = selectName || (keep ? prev : (qs.get('app') || localStorage.getItem('wb_app')));
+    appSel.innerHTML = '<option value="">-- 选择应用 --</option><option value="__new__">➕ 新建应用</option>' + apps.map(function(a){
       return '<option value="'+a.name+'">'+a.name.replace('.html','')+'</option>';
     }).join('');
-    if (wanted && wanted !== NEW_APP && (d.apps||[]).some(function(a){ return a.name === wanted; })) appSel.value = wanted;
-  }).catch(function(e){ relaunchIfAuthErr(e); });
+    if (wanted === NEW_APP) appSel.value = NEW_APP; // 新建态: 刷新列表后仍停在「➕ 新建应用」
+    else if (wanted && apps.some(function(a){ return a.name === wanted; })) appSel.value = wanted;
+    return fresh;
+  }).catch(function(e){ relaunchIfAuthErr(e); return []; });
 }
 function loadTools() {
   fetchJSON('/app/hall/tools', { headers: authH() }).then(function(d) {
@@ -185,6 +309,9 @@ function loadHistory() {
     box.innerHTML = '';
     chatHistory.forEach(function(m){ addMsg(m.role, m.content, true); });
     box.scrollTop = 1e9;
+    if (pendingNewApp && appSel.value === NEW_APP) { // 重渲染冲掉了确认卡片, 补回来
+      var f = pendingNewApp; pendingNewApp = null; offerNewApp(f);
+    }
   });
   if (!chatHistory.length) {
     addMsg('bot', isCoach()
@@ -223,6 +350,7 @@ function addMsg(role, text, skipSave) {
 }
 function openTarget() {
   if (!appSel.value) { alert('请先选择目标应用'); return; }
+  if (appSel.value === NEW_APP) { alert('当前选中的是「➕ 新建应用」，请先创建或选择一个具体应用'); return; }
   window.open('/apps/' + encodeURIComponent(appSel.value), '_blank');
 }
 
@@ -276,7 +404,9 @@ function sendChat() {
   var statusEl = addMsg('bot', coach
     ? '⏳ 思考中…'
     : '🛠 工作中…（' + (toolSel.options[toolSel.selectedIndex]||{text:''}).text + '，可能需要 1-3 分钟）', true); // 状态气泡不写入历史
-  var message = coach ? text : ('目标应用文件: ' + appSel.value + '\n\n' + text);
+  var message = coach ? text : (appSel.value === NEW_APP
+    ? '【新建应用】' + text + '\n\n（新应用请直接生成在当前工作目录，文件名为 <应用名>.html）'
+    : '目标应用文件: ' + appSel.value + '\n\n' + text);
   fetchJSON('/hall/chat', { method:'POST', headers: Object.assign({ 'Content-Type':'application/json' }, authH()),
     body: JSON.stringify(Object.assign({
       role: ROLE,
@@ -300,7 +430,9 @@ function sendChat() {
         appendBar('✅ 设计完成！完整提示词已生成');
         appendCopyPrompt(d.final_prompt);
       }
-      loadApps(true); // 刷新列表但保持当前选中
+      // 刷新列表但保持当前选中; 「新建应用」态下开发员刚生成/搬来了应用 → 给确认卡片
+      // (名字先由开发员起, 用户确认或改名之后才切换「目标应用」并带走这段对话)
+      loadApps(true).then(claimFreshApps);
     })
     .catch(function(e) {
       statusEl.remove();
@@ -308,6 +440,8 @@ function sendChat() {
       addMsg('bot', '请求失败: ' + (e.name === 'AbortError'
         ? '等待超时（11 分钟）。可能是编码工具卡死，请检查服务端后重试'
         : e.message), true); // 错误提示如实展示, 但不写入历史
+      // 超时/中断时编码 agent 可能已经把应用生成好了: 也刷新一次, 免得新应用没人认领
+      loadApps(true).then(claimFreshApps);
     })
     .finally(function(){ inFlight = false; btn.disabled = false; input.focus(); });
 }
@@ -318,18 +452,25 @@ document.getElementById('chatInput').addEventListener('keydown', function(e){
 });
 [appSel, toolSel].forEach(function(sel) {
   sel.addEventListener('change', function() {
-    localStorage.setItem('wb_app', appSel.value);
     localStorage.setItem('wb_tool', toolSel.value);
+    // 新建态由 enterNewAppMode 自己处理 (它会渲染确认卡片), 这里不能重渲染, 否则卡片被冲掉
+    if (appSel.value === NEW_APP) return;
+    localStorage.setItem('wb_app', appSel.value);
     loadHistory();
   });
 });
 
 document.getElementById('roleName').textContent = ROLE_NAMES[ROLE] || ROLE;
 if (isCoach()) { appSel.style.display = 'none'; document.querySelector('header label').style.display = 'none'; }
-loadApps();
+loadApps().then(function() {
+  // 列表回来才知道选中了哪个应用, 这时再按它的历史键渲染 (否则会渲染成空历史)
+  if (appSel.value === NEW_APP) { enterNewAppMode(); return; } // 带 ?app=__new__ 进入时直接进新建态
+  // 刷新后还有待确认的新应用: 自动回到「新建应用」态, 让确认卡片重新出现
+  if (!appSel.value && localStorage.getItem('wb_pending_new')) { appSel.value = NEW_APP; enterNewAppMode(); return; }
+  loadHistory();
+});
 loadTools();
 renderMode();
-loadHistory();
 </script>
 </body>
 </html>

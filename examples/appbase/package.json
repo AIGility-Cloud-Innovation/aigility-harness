@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@aigility-harness/core": "workspace:*",
+    "@aigility-harness/dsh-interop": "workspace:*",
     "@aigility-harness/layer-cognitive": "workspace:*",
     "@aigility-harness/layer-infrastructure": "workspace:*",
     "@aigility-harness/layer-orchestration": "workspace:*",

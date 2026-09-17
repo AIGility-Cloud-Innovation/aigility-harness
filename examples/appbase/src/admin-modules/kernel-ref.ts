@@ -1,6 +1,14 @@
 /** 内核引用 (由 appbase index.ts 注入; 避免模块直接依赖装配层) */
 let adminKernel: {
+  createContext(sessionId: string, callerLayer: string): unknown;
   registry: {
+    resolve<TReq = unknown, TRes = unknown>(ref: {
+      id: string;
+      versionRange: string;
+    }): Promise<
+      | { ok: true; value: { execute(req: TReq, ctx: unknown): Promise<{ ok: boolean; value?: TRes; error?: string }> } }
+      | { ok: false; error: string }
+    >;
     listAllServices(): Array<{ service: unknown; providerName: string; state: unknown }>;
   };
 } | null = null;

@@ -8,9 +8,9 @@
  *   3. AI 网关 (@infrastructure/http-ingress + protocol-adapter + llm-inference)
  *
  * 运行: cd examples/appbase && pnpm start
- * 访问: http://127.0.0.1:3419/hall  (对话厅)
- *       http://127.0.0.1:3419/app/apps  (后端 API)
- *       http://127.0.0.1:3418/v1/chat/completions  (AI 网关)
+ * 访问: http://127.0.0.1:1231/hall  (对话厅)
+ *       http://127.0.0.1:1231/app/apps  (后端 API)
+ *       http://127.0.0.1:1232/v1/chat/completions  (AI 网关)
  */
 
 import {
@@ -37,8 +37,8 @@ import { plugin as orchestrationPlugin } from "@aigility-harness/layer-orchestra
 import { plugin as actionPlugin } from "@aigility-harness/layer-action";
 import { appBackendHandler, initAppBackend, isKnownGatewayKey } from "./backend.js";
 
-const APP_PORT = 3419;
-const GATEWAY_PORT = 3418;
+const APP_PORT = 1231;
+const GATEWAY_PORT = 1232;
 
 async function main(): Promise<void> {
   console.log("=== AppBase（对话厅 + 网页应用开发员 + 后端 API + AI 网关）===\n");
@@ -89,7 +89,7 @@ async function main(): Promise<void> {
   setAdminKernel(kernel);
   setAdminManifests(plugins.map((p) => p.manifest));
 
-  // 4. 统一 HTTP server (3419): hall + 后端 API 同源
+  // 4. 统一 HTTP server (1231): hall + 后端 API 同源
   let hallHandler: ((req: any, res: any) => Promise<void>) | null = null;
   const server = createServer(async (req, res) => {
     // CORS: 允许生成的网页应用从浏览器跨域调用后端 API
@@ -173,8 +173,14 @@ async function main(): Promise<void> {
       res.end(FLOWS_HTML);
       return;
     }
+    // 系统架构总览页 (公开只读)
+    if (req.method === "GET" && (req.url === "/hall/architecture" || req.url?.startsWith("/hall/architecture?"))) {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(ARCH_HTML);
+      return;
+    }
     // 应用大厅页 (替代原对话厅首页; 对话 API /hall/chat 不受影响)
-    if (req.method === "GET" && (req.url === "/hall" || req.url === "/hall/")) {
+    if (req.method === "GET" && (req.url === "/hall" || req.url === "/hall/" || req.url?.startsWith("/hall?"))) {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(APP_HALL_HTML);
       return;
@@ -210,22 +216,11 @@ async function main(): Promise<void> {
       res.end();
       return;
     }
+    // DSH 插件管理页 (管理员专用; 非管理员跳回大厅; 浏览器导航靠 httpOnly cookie 识别)
+    // 注: /dsh 独立页已并入 /admin?tab=dsh-plugins 统一管理壳 (原 dsh-admin.html 已删除, 功能并入壳页)
     if (req.method === "GET" && (req.url === "/dsh" || req.url?.startsWith("/dsh?"))) {
       res.writeHead(302, { Location: "/admin?tab=dsh-plugins" });
       res.end();
-      return;
-    }
-    // DSH 插件管理页 (管理员专用; 非管理员跳回大厅; 浏览器导航靠 httpOnly cookie 识别)
-    if (req.method === "GET" && (req.url === "/dsh" || req.url?.startsWith("/dsh?"))) {
-      const backend = await import("./backend.js");
-      const uid = backend.pageUserId(req);
-      if (!uid || !(await backend.isAdminUser(uid))) {
-        res.writeHead(302, { Location: "/hall" });
-        res.end();
-        return;
-      }
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(DSH_ADMIN_HTML);
       return;
     }
     // hall 路由 (由 hall 返回的 handler 处理); 对话 API 同样需要先登录
@@ -275,12 +270,12 @@ async function main(): Promise<void> {
   const hallValue = hallStart.value as { handler?: (req: any, res: any) => Promise<void> };
   hallHandler = hallValue.handler ?? null;
 
-  // 6. 监听 3419
+  // 6. 监听 1231
   await new Promise<void>((resolve) => server.listen(APP_PORT, "0.0.0.0", () => resolve()));
   console.log(`AppBase 已就绪: http://127.0.0.1:${APP_PORT}/hall (对话厅)`);
   console.log(`                http://127.0.0.1:${APP_PORT}/app/apps (后端 API)`);
 
-  // 7. 启动 AI 网关 (http-ingress, 3418)
+  // 7. 启动 AI 网关 (http-ingress, 1232)
   const gwCtx = kernel.createContext("appbase-gateway", LayerId.Infrastructure);
   const gwResolved = await kernel.registry.resolve({
     id: "@infrastructure/http-ingress",
@@ -488,11 +483,12 @@ const APP_HALL_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)),
 const WORKBENCH_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "workbench.html"), "utf-8");
 // 用户管理页 (管理员专用)
 const FLOWS_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "flows.html"), "utf-8");
+// 系统架构总览页 (公开只读, 可视化介绍)
+const ARCH_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "architecture.html"), "utf-8");
 const ADMIN_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "admin.html"), "utf-8");
 // 用户个人中心 (登录用户; 余额/用量/流水, 对所有网页应用通用)
 const ME_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "me.html"), "utf-8");
 // DSH 插件管理页 (管理员专用)
-const DSH_ADMIN_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "dsh-admin.html"), "utf-8");
 
 // 首页 (跳转对话厅 + 产品简介)
 const INDEX_HTML = `<!DOCTYPE html>

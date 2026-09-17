@@ -39,9 +39,9 @@ describe("Layer ordering", () => {
     expect(LAYER_ORDER).toEqual([
       LayerId.Infrastructure,
       LayerId.Cognitive,
-      LayerId.Persona,
-      LayerId.Orchestration,
       LayerId.Action,
+      LayerId.Orchestration,
+      LayerId.Persona,
     ]);
   });
 

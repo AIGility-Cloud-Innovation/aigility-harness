@@ -137,6 +137,17 @@ export type {
 } from "./repair-chat.js";
 import { repairChatService, repairChatProvider } from "./repair-chat.js";
 
+// 班班助理角色形象 (班级数据问答, 小本本专用)
+export {
+  banbanChatService,
+  banbanChatProvider,
+} from "./banban-chat.js";
+export type {
+  BanbanChatRequest,
+  BanbanChatResponse,
+} from "./banban-chat.js";
+import { banbanChatService, banbanChatProvider } from "./banban-chat.js";
+
 // ── 服务定义 ─────────────────────────────────────────────────────
 
 export interface TextInputRequest {
@@ -195,9 +206,9 @@ const textInputProvider: Provider<TextInputRequest, TextInputResponse> = {
 export const manifest: PluginManifest = {
   name: "@persona/character",
   layer: LayerId.Persona,
-  description: "角色人格层：感知（文本/语音）+ 角色形象（sales-chat/plugin-helper/app-dev/coding-coach/advisory-chat/harness-guide/timem-support/timem-project-assistant/repair-chat）",
-  version: "0.3.0",
-  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, appDevService, codingCoachService, advisoryChatService, harnessGuideService, timemSupportService, timemProjectAssistantService, repairChatService],
+  description: "角色人格层：感知（文本/语音）+ 角色形象（sales-chat/plugin-helper/app-dev/coding-coach/advisory-chat/harness-guide/timem-support/timem-project-assistant/repair-chat/banban-chat）",
+  version: "0.4.0",
+  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, appDevService, codingCoachService, advisoryChatService, harnessGuideService, timemSupportService, timemProjectAssistantService, repairChatService, banbanChatService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
 };
@@ -228,6 +239,7 @@ export const plugin: LayerPlugin = {
       timemSupportProvider,
       timemProjectAssistantProvider,
       repairChatProvider,
+      banbanChatProvider,
     ];
   },
   getState(): PluginState {

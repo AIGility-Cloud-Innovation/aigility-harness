@@ -30,6 +30,7 @@ import {
   pageUserId, PG_CONFIG,
 } from "./admin-modules/context.js";
 import { adminDispatch, adminPanelList } from "./admin-modules/index.js";
+import { getAdminKernel } from "./admin-modules/kernel-ref.js";
 import { initLlmConfig, normalizeLlmBase } from "./admin-modules/llm-config.js";
 import { httpRelayProvider, relayTargets } from "@aigility-harness/layer-infrastructure";
 import { parseEnvText } from "./admin-modules/context.js";
@@ -255,6 +256,51 @@ export async function appBackendHandler(
       res.writeHead(200, { "Content-Type": relay.value.contentType || "text/plain; charset=utf-8" });
       res.end(relay.value.body);
       return;
+    }
+
+    // ── 班班助理 (薄路由): 业务在角色域 @persona/banban-chat (提示词/流内记忆编排), 这里只鉴权与转发 ──
+    if (path === "/app/banban/chat" && method === "POST") {
+      const bbUserId = pageUserId(req);
+      if (!bbUserId) return json(res, 401, { error: "未授权: 请先登录" });
+      const kernel = getAdminKernel();
+      if (!kernel) return json(res, 503, { error: "内核未就绪" });
+      const body = await readBody(req);
+      const question = String(body.question ?? "").trim();
+      if (!question) return json(res, 400, { error: "question 必填" });
+      const bbCtx = kernel.createContext(`banban-${bbUserId}`, "persona");
+      const chat = await kernel.registry.resolve<unknown, { response?: string; degraded?: boolean }>(
+        { id: "@persona/banban-chat", versionRange: "^1.0.0" });
+      if (!chat.ok) return json(res, 503, { error: chat.error || "班班助理能力未注册" });
+      // LLM 跟随小本本应用的应用级配置 (app_llm_config); 无配置时回退全局 env。
+      // 应用凭据不出后端; 需对该应用有 owner/成员/管理员身份才可使用。
+      const NB_APP = "teacher-notebook.html";
+      const { rows: nbApp } = await pool.query("SELECT owner_id FROM apps WHERE id = $1", [NB_APP]);
+      if (nbApp.length === 0) return json(res, 404, { error: "应用不存在: " + NB_APP });
+      const nbOwner = nbApp[0].owner_id === bbUserId;
+      const nbMember = !nbOwner
+        ? (await pool.query("SELECT 1 FROM app_members WHERE app_id = $1 AND user_id = $2", [NB_APP, bbUserId])).rowCount! > 0
+        : false;
+      if (!nbOwner && !nbMember && !(await isAdminUser(bbUserId))) {
+        return json(res, 403, { error: "你没有「班主任小本本」的访问权限" });
+      }
+      const { rows: llmRows } = await pool.query(
+        "SELECT url, key, model FROM app_llm_config WHERE app_id = $1", [NB_APP]);
+      const llmCfg = llmRows[0]?.key
+        ? { url: llmRows[0].url || "", key: llmRows[0].key, model: llmRows[0].model || "" }
+        : undefined;
+      const r = await chat.value.execute(
+        {
+          user_input: question,
+          session_id: `banban-${bbUserId}`,
+          user_key: await emailOf(bbUserId),
+          class_context: String(body.context ?? "").slice(0, 12000),
+          ...(llmCfg ? { llm: llmCfg } : {}),
+          history: Array.isArray(body.history) ? body.history.slice(-12) : [],
+        },
+        bbCtx,
+      );
+      if (!r.ok) return json(res, 502, { error: r.error ?? "班班助理执行失败" });
+      return json(res, 200, { response: r.value?.response ?? "", degraded: Boolean(r.value?.degraded) });
     }
 
     // ── 报修工单 (登录用户: 自己的工单; 管理员: 全部) ──
@@ -744,9 +790,8 @@ export async function appBackendHandler(
     }
 
     // ── auth 中间件 (以下全部需要 token; /app/data 除外 —— 数据路由内做 Bearer/cookie 双轨鉴权) ──
-    const auth = req.headers.authorization ?? "";
-    const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-    const userId = token ? verifyToken(token) : null;
+    // 双轨身份: Bearer 优先, 回落 httpOnly cookie (应用新标签页/裸 fetch 靠 cookie)
+    const userId = pageUserId(req);
     if (!userId && !path.startsWith("/app/data/")) {
       return json(res, 401, { error: "未授权: 需要 Bearer token" });
     }
@@ -1211,6 +1256,19 @@ export async function initAppBackend(): Promise<void> {
     }
   } catch (e) {
     console.error("[migrate] 数据空间迁移失败(忽略):", e);
+  }
+
+  // 角色策略补列 (2026-09-15): 既有空间的 teacher readTables 追加 exams (考试成绩对任课老师只读可见)。
+  // 幂等: 已含 exams 的不动; 新建空间由应用自带的新 ROLE_POLICY 覆盖。
+  try {
+    await pool.query(
+      `UPDATE app_spaces
+       SET role_policy = jsonb_set(role_policy, '{roles,teacher,readTables}',
+           (role_policy->'roles'->'teacher'->'readTables') || '"exams"'::jsonb)
+       WHERE role_policy->'roles'->'teacher'->'readTables' IS NOT NULL
+         AND NOT (role_policy->'roles'->'teacher'->'readTables') @> '"exams"'::jsonb`);
+  } catch (e) {
+    console.error("[migrate] teacher 角色补 exams 读权限失败(忽略):", e);
   }
 
   // 数据转发目标种子: 全局 APPBASE_RELAY_TARGETS 里的目标写入对应应用 .env (用户可在管理抽屉改)

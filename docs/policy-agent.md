@@ -25,7 +25,7 @@ LLM 复用全局配置(`LITELLM_URL/LITELLM_KEY/LLM_MODEL`, 或 `LLM_PROVIDER=bi
 | D2 认知 | `@cognitive/policy-kb` | `packages/layer-cognitive/src/policy-kb.ts` | 统一字段入库、版本归档、效力维护两规则、条款检索、主题词族扫描、台账统计、缺口三规则、高频依据小库、审查意见语料库、审查记录沉淀。内存 + JSON 快照 |
 | D2 认知 | (种子语料) | `packages/layer-cognitive/src/policy-seeds.ts` | 依据库 10 条(样例批注实际引用过的法规)、意见语料 15 条(真实原句, 四级口径反推自 64 条语料)、主题词族、部门→性质预归类映射 |
 | D4 编排 | `@orchestration/policy-review` | `packages/layer-orchestration/src/policy-review.ts` | 13 个审查模块编排: 逐模块规则打底 + LLM 增强 + 降级兜底; 每次运行自动落审查记录(模块15) |
-| D3 角色 | `@persona/policy-chat` | `packages/layer-persona/src/policy-chat.ts` | 智能体自然语言入口: 关键词意图路由 → 审查编排/知识库; 闲聊委派 workflow-engine; TiMEM 记忆尽力而为召回 |
+| D5 角色 | `@persona/policy-chat` | `packages/layer-persona/src/policy-chat.ts` | 智能体自然语言入口: 关键词意图路由 → 审查编排/知识库; 闲聊委派 workflow-engine; TiMEM 记忆尽力而为召回 |
 | 装配 | policy-agent | `examples/policy-agent/` | InMemoryKernelAdapter + 三层插件 + HTTP(:3430) + WebUI + 种子制度(含 v1/v2 版本对) |
 
 ## 三、15 个功能模块映射

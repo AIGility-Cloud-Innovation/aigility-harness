@@ -1,4 +1,4 @@
-node_modules/
+ï»¿node_modules/
 dist/
 *.tsbuildinfo
 .DS_Store
@@ -23,9 +23,13 @@ examples/appbase/start-appbase.cmd
 .zcode/
 examples/timem-live-test/
 
-# ±¾µØ¹¤×÷Çø¸¨Öú(²»Èë¿â)
+# dsh headless agent home (profiles/sessions/credentials cache, å¯é‡å»ºä½†ä½“ç§¯å¤§)
+examples/.dsh-home/
+
+# DSH web UI one-click start script (contains key, not committed); template: start-dsh-web.cmd.example
+examples/appbase/start-dsh-web.cmd
+
+# local workspace helpers (not committed)
 .workbuddy/
 *.bak
 examples/wecom-dsh/.state/
-examples/wecom-chat/node_modules/
-examples/wecom-dsh/node_modules/

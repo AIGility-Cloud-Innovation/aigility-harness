@@ -41,13 +41,13 @@
 <body>
 
 <h1>aigility-harness · 完整架构图 <small>五域插件架构 + 制度流程管理智能体垂直切片 · 2026-09</small></h1>
-<p class="sub">域号 = 自底向上的装配/依赖序（OSI 式）；运行时调用经 Capability Seam 扁平化：D3→D4、D4→D2/D5 工具、外设→主动触发 D4——域号不限制调用方向</p>
+<p class="sub">域号 = 自底向上的装配/依赖序（OSI 式）；运行时调用经 Capability Seam 扁平化：D5→D4、D4→D2/D3 工具、外设→主动触发 D4——调用流域号严格递减</p>
 
 <!-- 外部 -->
 <div class="band" style="max-width:1240px">
   <h2>外部依赖 / 用户</h2>
   <div class="cards">
-    <div class="card"><b>👤 用户</b><span>浏览器: hall(:3419) / /dsh 管理页 / workbench / policy-agent(:3430)<br>飞书 / 企业微信 Bot</span></div>
+    <div class="card"><b>👤 用户</b><span>浏览器: hall(:1231) / /dsh 管理页 / workbench / policy-agent(:3430)<br>飞书 / 企业微信 Bot</span></div>
     <div class="card"><b>🧠 LLM 上游</b><span>LiteLLM 网关(:48724)<br>或 bigmodel 直连(LLM_PROVIDER=bigmodel)</span></div>
     <div class="card"><b>☁️ TiMEM Cloud</b><span>长期记忆 / 经验规则<br>@timem/dsh-plugin-timem (Gitea 私仓)</span></div>
     <div class="card"><b>🐘 PostgreSQL (appbase)</b><span>users / apps / dsh_plugins / 审计 / 工单</span></div>
@@ -57,19 +57,19 @@
 
 <!-- D5 工具与外设 -->
 <div class="band">
-  <h2>D5 行动执行域 &nbsp;<span class="tag">工具(被调) 与 外设(主动触发)</span></h2>
+  <h2>D3 行动执行域 &nbsp;<span class="tag">工具(被调) 与 外设(主动触发)</span></h2>
   <div class="cards">
     <div class="card"><b>text-to-speech</b><span>msedge-tts · 由 D3/D4 经 ctx.call 调用</span></div>
     <div class="card"><b>tool-execution（占位）</b><span>通用工具执行 · 二期: doc-parse / docx 批注等制度智能体工具入驻此域</span></div>
     <div class="card"><b>外设（主动触发源）</b><span>定时任务 · 消息推送 · watcher · 自带事件循环主动发起 D4 编排（现状由 D1 各 ingress 承担触发）</span></div>
   </div>
-  <span style="color:#8b949e;font-size:11px;display:block;margin-top:8px">调用边: 编排工作流节点(capability_node) / LLM function calling → 工具；外设 → 主动触发编排<br>⚠ 语义张力: 被调工具按「只依赖更小编号」应 &lt; D4；现行 LAYER_DESCRIPTORS 中 Action.dependsOn=[Infra, Orchestration]（LayerId/layer-* 为代码保留命名, 对应域见 README 3.1） 为下游外化语义, 运行时无影响（Seam 扁平）, 待工具类能力增多后一次性调整</span>
+  <span style="color:#8b949e;font-size:11px;display:block;margin-top:8px">调用边: 编排工作流节点(capability_node) / LLM function calling → 工具；外设 → 主动触发编排<br>依赖边（2026-09 域号对调后）: 行动(D3)→底座(D1)；编排(D4)→行动(D3)+认知(D2)+底座(D1)；人格(D5)→编排(D4)+认知(D2)+底座(D1)——每域只依赖更小域号，原「编排调行动工具＝4 依赖 5」的语义张力已消除</span>
 </div>
 <div class="arrow">▼</div>
 
 <!-- D3 -->
 <div class="band">
-  <h2>D3 角色人格域 &nbsp;<span class="tag">构建主体形象, 委托 L4</span></h2>
+  <h2>D5 角色人格域 &nbsp;<span class="tag">构建主体形象, 委托 D4</span></h2>
   <div class="cards">
     <div class="card hl"><b>policy-chat 制度流程管理智能体</b><span>意图路由(15模块) · 制度定位 · TiMEM 召回 · 闲聊兜底 workflow-engine</span></div>
     <div class="card"><b>编码教练 / coding-coach</b><span>教学讲解（不动手）；动手者为 coder 开发员(zcode/codex/claude)</span></div>
@@ -107,7 +107,7 @@
 
 <!-- D2 -->
 <div class="band">
-  <h2>D2 认知决策域 &nbsp;<span class="tag">纯规则能力 + LLM 推理 + 记忆</span></h2>
+  <h2>D2 认知算力域 &nbsp;<span class="tag">电站：算力供应 · 记忆引擎 · 只供算力不载业务</span></h2>
   <div class="cards">
     <div class="card"><b>llm-inference</b><span>litellm 网关 / bigmodel 直连 / stub 三 Provider, resolve 先注册者优先; 失败→各模块降级</span></div>
     <div class="card hl"><b>policy-parser 条款解析器</b><span>第X章/节/条/（一）/1. 锚点切片 · 管理要素 · 引用识别 · 异常队列 · 条款树 diff</span></div>
@@ -125,7 +125,7 @@
     <div class="card"><b>InMemoryKernelAdapter</b><span>原型内核(policy-agent / appbase 装配用) · bootstrap 按层拓扑排序</span></div>
     <div class="card hl"><b>py-bridge</b><span>声明式 Python 插件 · JSON-RPC over stdio · 反向 call_ts_capability<br>→ aigility Python SDK(LangGraph/RAG, 二期: doc-parse / docx 批注)</span></div>
     <div class="card"><b>config / logging / audit / rate-limit</b><span>基建四件套 · config/default.json(LLM 网关兜底)</span></div>
-    <div class="card" style="flex-basis:100%"><b>ingress 边缘入口（代码归属本域 layer-infrastructure）</b><span>hall 多角色大厅(:3419) · http-ingress AI 网关(:3418, OpenAI 兼容/SSE/Bearer) · feishu(Lark WS 长连接) · wecom(企微 aibot) —— AppID→persona 路由；policy-agent(:3430) 为示例装配自有 server, 不属五域任一域</span></div>
+    <div class="card" style="flex-basis:100%"><b>ingress 边缘入口（代码归属本域 layer-infrastructure）</b><span>hall 多角色大厅(:1231) · http-ingress AI 网关(:1232, OpenAI 兼容/SSE/Bearer) · feishu(Lark WS 长连接) · wecom(企微 aibot) —— AppID→persona 路由；policy-agent(:3430) 为示例装配自有 server, 不属五域任一域</span></div>
   </div>
 </div>
 

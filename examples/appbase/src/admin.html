@@ -30,6 +30,13 @@ tr:last-child td { border-bottom:none; }
 .chip.admin, .chip.on, .chip.ok { background:var(--green-soft); color:var(--green); }
 .chip.user, .chip.off { background:#f1f4f9; color:var(--ink2); }
 .chip.err { background:var(--rose-soft); color:var(--rose); }
+.pkg { font-family:Consolas,monospace; font-size:11.5px; color:var(--ink2); background:#f1f4f9; padding:2px 7px; border-radius:6px; }
+.catbox { max-height:460px; overflow-y:auto; margin-top:8px; }
+.catrow { padding:9px 2px; border-bottom:1px dashed var(--line); }
+.catrow:last-child { border-bottom:none; }
+.catrow .cid { font-family:Consolas,monospace; font-weight:700; font-size:12.5px; }
+.catnotes { font-size:11.5px; color:var(--ink2); margin-top:3px; line-height:1.55; }
+.cathead { font-size:11.5px; color:var(--ink2); margin-top:6px; }
 td button, .regbar button, .cbtn { border:none; border-radius:8px; padding:5px 10px; font-size:11.5px; cursor:pointer; font-weight:600; font-family:inherit; margin-right:5px; }
 .b-admin { background:var(--green-soft); color:var(--green); }
 .b-demote { background:#fff3e6; color:#d97706; }
@@ -63,6 +70,19 @@ textarea.minput { min-height:96px; font-family:Consolas,monospace; }
 .srcs { font-size:12.5px; line-height:2.1; }
 .srcs a { color:var(--accent); font-weight:600; text-decoration:none; }
 .srcs .w { color:var(--ink2); }
+/* ── DSH 插件体验官: 悬浮按钮 + 弹窗 ── */
+.fab { position:fixed; right:26px; bottom:26px; z-index:50; border:none; background:linear-gradient(120deg,#312e81,#4f46e5 55%,#7c3aed); color:#fff; border-radius:999px; padding:13px 20px; font-size:13.5px; font-weight:700; cursor:pointer; font-family:inherit; box-shadow:0 8px 26px rgba(49,46,129,.4); }
+.fab:hover { transform:translateY(-1px); }
+.xp-mask { position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:60; display:none; align-items:center; justify-content:center; padding:20px; }
+.xp-mask.show { display:flex; }
+.xp-panel { background:#fff; border-radius:18px; width:min(680px,94vw); max-height:86vh; display:flex; flex-direction:column; box-shadow:0 24px 64px rgba(15,23,42,.35); overflow:hidden; }
+.xp-head { display:flex; align-items:center; gap:10px; padding:16px 20px; background:linear-gradient(120deg,#312e81,#4f46e5 55%,#7c3aed); color:#fff; }
+.xp-head b { font-size:15px; }
+.xp-head .x { margin-left:auto; border:none; background:rgba(255,255,255,.2); color:#fff; border-radius:8px; width:28px; height:28px; cursor:pointer; font-size:14px; font-family:inherit; }
+.xp-body { padding:16px 20px 20px; overflow-y:auto; display:flex; flex-direction:column; gap:10px; }
+.xp-plugs { display:flex; flex-wrap:wrap; gap:8px; }
+.xp-plug { border:1.5px solid var(--line); background:#fff; border-radius:999px; padding:7px 14px; font-size:12.5px; cursor:pointer; font-family:inherit; color:var(--ink); }
+.xp-plug.on { background:var(--soft); border-color:var(--accent); color:var(--accent); font-weight:700; }
 </style>
 </head>
 <body>
@@ -85,7 +105,7 @@ textarea.minput { min-height:96px; font-family:Consolas,monospace; }
       </div>
       <div class="regbar" id="addUserBar">
         <div class="row2">
-          <input class="minput" id="auEmail" placeholder="邮箱 (如 teacher@school.edu)">
+          <input class="minput" id="auEmail" placeholder="用户名或邮箱 (如 teacher 或 teacher@school.edu)">
           <input class="minput" id="auPassword" type="password" placeholder="初始密码 (至少6位)">
         </div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
@@ -162,6 +182,24 @@ textarea.minput { min-height:96px; font-family:Consolas,monospace; }
       <div class="hint">插件包在本机需已安装（node_modules 可解析）。加载即把插件插入服务进程内的 cordis 运行时；保存配置后需重新加载生效。</div>
     </div>
     <div id="pluginList"></div>
+    <div class="card pad">
+      <div class="chead">
+        <b class="nm">📦 已安装的 DSH 插件包</b>
+        <span class="hint" id="instMeta"></span>
+        <div class="ops"><button class="b-save" onclick="loadInstalled()">⟳ 刷新</button></div>
+      </div>
+      <div class="cathead">本机 node_modules 里实际安装的官方 dsh 套件包（递归依赖树盘点，版本为实装版本）。「插件」= 出现在官方能力清单中的行；「支撑库」= 套件内部非插件包。「注册到运行时」一键预填下方表单。</div>
+      <div class="catbox" id="instBox"><div class="hint">加载中…</div></div>
+    </div>
+    <div class="card pad">
+      <div class="chead">
+        <b class="nm">📚 官方能力目录</b>
+        <span class="hint" id="catMeta"></span>
+        <div class="ops"><button class="b-save" onclick="loadCatalog()">⟳ 刷新</button></div>
+      </div>
+      <div class="cathead">官方 dsh-base 清单里的全部能力行（只读展示；<code>js(...)</code> 为官方清单原文表达式，服务端不执行）。</div>
+      <div class="catbox" id="catBox"><div class="hint">加载中…</div></div>
+    </div>
     <div class="card pad">
       <div class="chead"><b class="nm">🔎 插件从哪里找</b></div>
       <div class="srcs">
@@ -277,6 +315,25 @@ textarea.minput { min-height:96px; font-family:Consolas,monospace; }
   </div>
 </div>
 <div id="msg"></div>
+
+<!-- DSH 插件体验官: 悬浮按钮 + 弹窗 (headless agent 真实体验本页装载的插件) -->
+<button class="fab" onclick="openXp()">🧩 DSH 插件体验官</button>
+<div class="xp-mask" id="xpMask" onclick="if(event.target===this)closeXp()">
+  <div class="xp-panel">
+    <div class="xp-head"><b>🧩 DSH 插件体验官</b>
+      <span style="font-size:11.5px;color:rgba(255,255,255,.75)" id="xpMeta"></span>
+      <button class="x" onclick="closeXp()">✕</button></div>
+    <div class="xp-body">
+      <div class="hint">选一个插件，用官方 dsh headless agent（完整服务图：推理 + 官方工具 + Skill，read-only 权限）真实跑一轮体验。插件列表来自 headless profile 实际装载清单。</div>
+      <div class="xp-plugs" id="xpPlugs"><span class="hint">装载中…</span></div>
+      <div style="display:flex;gap:8px">
+        <input class="minput" id="xpTask" placeholder="体验任务，如：我想给班里做个记账本" style="flex:1;margin:0" onkeydown="if(event.key==='Enter')runXp()">
+        <button class="b-load" id="xpRunBtn" style="white-space:nowrap" onclick="runXp()">▶ 体验</button>
+      </div>
+      <div class="catbox" id="xpOut" style="font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap;display:none"></div>
+    </div>
+  </div>
+</div>
 
 <script>
 // ── 通用 ──
@@ -412,6 +469,8 @@ function toggleMem(id) {
   var tr = document.getElementById('mem-' + id);
   var show = tr.style.display === 'none';
   tr.style.display = show ? '' : 'none';
+  var bar = document.getElementById('membar-' + id);
+  if (bar) bar.classList[show ? 'add' : 'remove']('show');
   if (show) loadMem(id);
 }
 function loadMem(id) {
@@ -447,8 +506,7 @@ function submitAddUser() {
   var email = document.getElementById('auEmail').value.trim();
   var password = document.getElementById('auPassword').value;
   var isAdmin = document.getElementById('auAdmin').checked;
-  if (!email) return toast('✗ 请输入邮箱');
-  if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) return toast('✗ 邮箱格式不正确');
+  if (!email) return toast('✗ 请输入用户名或邮箱');
   if (password.length < 6) return toast('✗ 密码至少 6 位');
   fetchJSON('/app/admin/users', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -694,6 +752,133 @@ function registerPlugin() {
   }).catch(function(e) { toast('✗ ' + e.message); });
 }
 
+// ── DSH 插件体验官 (悬浮按钮 → 弹窗) ────────────────────────────
+// 插件列表来自 headless profile 用户补丁层 (GET /app/dsh/agent/plugins);
+// 体验执行走原 Agent 通道 (POST /app/dsh/agent/run, 官方 headless agent)。
+var XP_PRESETS = {
+  'persona-coach': '我想给班里做个记账本',
+  'dsh-plugin-persona-coach': '我想给班里做个记账本',
+};
+var xpCurrent = '';
+function openXp() {
+  document.getElementById('xpMask').classList.add('show');
+  loadXpPlugins();
+}
+function closeXp() {
+  document.getElementById('xpMask').classList.remove('show');
+}
+function loadXpPlugins() {
+  fetchJSON('/app/dsh/agent/plugins').then(function(d) {
+    var plugs = d.plugins || [];
+    var box = document.getElementById('xpPlugs');
+    if (!plugs.length) {
+      box.innerHTML = '<span class="hint">headless profile 里还没有可体验的插件 —— 在本页注册加载插件后再来体验</span>';
+      return;
+    }
+    box.innerHTML = plugs.map(function(p) {
+      var label = p.id || (p.name || '').split('/').pop();
+      return '<button class="xp-plug" data-id="' + esc(p.id || '') + '" data-name="' + esc(p.name || '') + '" onclick="pickXpPlugin(this)">' + esc(label) + '</button>';
+    }).join('');
+    pickXpPlugin(box.querySelector('.xp-plug')); // 默认选中第一个并预填体验任务
+  }).catch(function(e) {
+    document.getElementById('xpPlugs').innerHTML = '<span class="hint">✗ ' + esc(e.message) + '</span>';
+  });
+}
+function pickXpPlugin(btn) {
+  if (!btn) return;
+  document.querySelectorAll('.xp-plug').forEach(function(b) { b.classList.remove('on'); });
+  btn.classList.add('on');
+  xpCurrent = btn.getAttribute('data-name') || '';
+  var id = btn.getAttribute('data-id') || '';
+  var label = btn.textContent.trim();
+  document.getElementById('xpTask').value = XP_PRESETS[id] || XP_PRESETS[xpCurrent] || XP_PRESETS[label] || '';
+}
+async function runXp() {
+  var task = document.getElementById('xpTask').value.trim();
+  if (!task) return toast('✗ 请输入体验任务');
+  var out = document.getElementById('xpOut');
+  out.style.display = 'block';
+  out.textContent = '⏳ ' + (xpCurrent ? '[' + xpCurrent.split('/').pop() + '] ' : '') + 'agent 运行中（最长 180s）…';
+  var btn = document.getElementById('xpRunBtn');
+  btn.disabled = true;
+  try {
+    var d = await fetchJSON('/app/dsh/agent/run', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task: task })
+    }, 200000);
+    document.getElementById('xpMeta').textContent = '耗时 ' + (d.durationMs / 1000).toFixed(1) + 's';
+    out.textContent = d.ok ? (d.output || '(空回复)') : ('✗ ' + (d.error || '失败') + '\n' + (d.output || ''));
+    if (d.ok) toast('✓ 体验完成');
+  } catch (e) {
+    out.textContent = '✗ ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeXp(); });
+
+function prefillReg(name) {  document.getElementById('rgPkg').value = name;
+  var shortName = name.split('/').pop().replace(/^dsh-/, '');
+  document.getElementById('rgName').value = shortName;
+  var bar = document.getElementById('regBar');
+  if (bar) { bar.classList.add('show'); bar.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  toast('已预填 ' + name + ' —— 可补充描述后点「注册」');
+}
+
+function loadInstalled() {
+  fetchJSON('/app/dsh/installed').then(function(d) {
+    document.getElementById('instMeta').innerHTML =
+      'dsh ' + esc(d.suite || '?') + ' · 共 ' + (d.total || 0) + ' 包 · 插件 ' + (d.pluginCount || 0);
+    var rows = d.packages || [];
+    var plugins = rows.filter(function(p){ return p.isPlugin; });
+    var libs = rows.filter(function(p){ return !p.isPlugin; });
+    function rowHtml(p) {
+      return '<div class="catrow">'
+        + '<a href="https://www.npmjs.com/package/' + encodeURIComponent(p.name) + '" target="_blank" rel="noopener" class="cid">' + esc(p.name) + '</a> '
+        + '<span class="pkg">' + esc(p.version) + '</span> '
+        + (p.isPlugin ? '<span class="chip ok">插件' + (p.officialRowIds.length > 1 ? '×' + p.officialRowIds.length : '') + '</span>' : '<span class="chip off">支撑库</span>')
+        + (p.officialRowIds.length ? '<span class="hint"> 行: ' + esc(p.officialRowIds.join(', ')) + '</span>' : '')
+        + (p.description ? '<div class="catnotes">' + esc(p.description) + '</div>' : '')
+        + '<div style="margin-top:4px"><button class="b-en" onclick="prefillReg(\'' + esc(p.name) + '\')">➕ 注册到运行时</button></div>'
+        + '</div>';
+    }
+    function group(title, list) {
+      if (!list.length) return '';
+      return '<div style="margin:6px 0 2px;font-weight:700;font-size:12px">' + title + '（' + list.length + '）</div>'
+        + list.map(rowHtml).join('');
+    }
+    document.getElementById('instBox').innerHTML =
+      group('插件', plugins) + group('支撑库', libs);
+  }).catch(function(e) {
+    document.getElementById('instBox').innerHTML = '<div class="hint">无法加载安装盘点: ' + esc(e.message) + '</div>';
+  });
+}
+
+function loadCatalog() {
+  fetchJSON('/app/dsh/catalog').then(function(d) {
+    var v = d.versions || {};
+    var aligned = v.cordisAligned !== false;
+    document.getElementById('catMeta').innerHTML =
+      'dsh ' + esc(v.dsh || '?') + ' · cordis ' + esc(v.cordis || '?') +
+      ' · <span class="chip ' + (aligned ? 'ok' : 'err') + '">' + (aligned ? '实例对齐 ✓' : '实例未对齐 ✗') + '</span>' +
+      ' · 共 ' + (d.total || 0) + ' 行';
+    var rows = d.rows || [];
+    document.getElementById('catBox').innerHTML = rows.map(function(r) {
+      var badge = '';
+      if (r.disabledText === '默认禁用') badge = '<span class="chip off">默认禁用</span>';
+      else if (r.disabledText) badge = '<span class="chip off" title="' + esc(r.disabledText) + '">条件禁用</span>';
+      return '<div class="catrow">'
+        + '<span class="cid">' + esc(r.id || '—') + '</span> '
+        + '<span class="pkg">' + esc(r.name) + '</span> '
+        + badge
+        + (r.notes ? '<div class="catnotes" title="' + esc(r.notes) + '">' + esc(r.notes) + '</div>' : '')
+        + '</div>';
+    }).join('');
+  }).catch(function(e) {
+    document.getElementById('catBox').innerHTML = '<div class="hint">无法加载官方目录: ' + esc(e.message) + '</div>';
+  });
+}
+
 // ── ⚙ 框架层插件 ──
 var LAYER_NAMES = {
   infrastructure: 'L1 基础设施', cognitive: 'L2 认知', orchestration: 'L4 编排',
@@ -844,6 +1029,8 @@ fetchJSON('/app/hall/admin-panels').then(function(d) {
   loadAudit();
   loadLlmGlobal();
   loadPlugins();
+  loadInstalled();
+  loadCatalog();
   loadHarness();
   loadUsage();
   loadCredits();

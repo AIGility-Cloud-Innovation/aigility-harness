@@ -123,6 +123,21 @@ export interface WorkflowEngineRequest {
   system_prompt?: string;
   /** 会话历史 (来自调用方/前端; 未提供时用服务端 session 记忆兜底) */
   history?: Array<{ role: "user" | "assistant"; content: string }>;
+  /** 流内记忆节点 (可选): 传入后启用 召回→LLM→沉淀 三段编排, 按用户+agent 隔离 */
+  memory?: {
+    /** 记忆隔离的 agent 标识 (如 banban-assist / repair-chat) */
+    agent_id: string;
+    /** 记忆归属用户 (通常为登录邮箱) */
+    user_id: string;
+    /** 召回条数 (默认 4) */
+    limit?: number;
+  };
+  /** 请求级 LLM 上游覆盖 (可选): 应用自带 LLM 配置时传入, 缺省走 env 全局 */
+  llm?: {
+    url?: string;
+    key?: string;
+    model?: string;
+  };
 }
 
 export interface WorkflowEngineResponse {
@@ -176,14 +191,40 @@ const workflowEngineProvider: Provider<
     // LLM 不可用时降级为确定性 stub 回复（degraded=true 显式标记），保证链路不断。
     const sessionId = request.session_id;
     const history = request.history?.length ? request.history.slice(-MAX_SESSION_MSGS) : loadHistory(sessionId);
+    // ── 记忆召回节点 (流内标准节点, 尽力而为): 命中则注入系统提示词, 失败静默降级 ──
+    let systemPrompt =
+      request.system_prompt ||
+      `你是「${request.agent_name ?? "智能助理"}」。请用简体中文简洁、专业地回复用户。`;
+    if (request.memory) {
+      try {
+        const memRes = (await ctx.call<{ query: string; user_id: string; agent_id: string; limit: number },
+          { ok?: boolean; results?: Array<{ content: string }>; error?: string }>(
+          { id: "@action/timem-memory", versionRange: "^1.0.0" },
+          {
+            query: request.user_input.slice(0, 200),
+            user_id: request.memory.user_id,
+            agent_id: request.memory.agent_id,
+            limit: request.memory.limit ?? 4,
+          },
+        )) as Result<{ ok?: boolean; results?: Array<{ content: string }>; error?: string }>;
+        const memValue = memRes.ok ? memRes.value : undefined;
+        const items = memValue?.ok ? (memValue.results ?? []).map((r) => r.content).filter(Boolean) : [];
+        if (items.length > 0) {
+          systemPrompt += `\n\n【你与这位用户的历史相关记忆】(可参考; 与当前问题相关时自然提及, 不确定时询问)\n${items
+            .map((c, i) => `${i + 1}. ${c}`)
+            .join("\n")}`;
+        }
+        console.log(`[workflow-engine] memory recall ${items.length} items for ${request.memory.user_id}@${request.memory.agent_id}${memValue?.ok ? "" : ` (timem: ${memValue?.error ?? "unavailable"})`}`);
+      } catch (e) {
+        console.log(`[workflow-engine] memory recall skipped: ${String((e as Error)?.message ?? e)}`);
+      }
+    }
+
     const messages: LlmInferenceRequest["messages"] = [
       {
         role: "system",
-        content:
-          request.system_prompt ||
-          `你是「${request.agent_name ?? "智能助理"}」。请用简体中文简洁、专业地回复用户。`,
-      },
-      // 角色归一化: 旧版前端曾存 role:"bot", 智谱等上游对非法角色报 1214 ——
+        content: systemPrompt,
+      },      // 角色归一化: 旧版前端曾存 role:"bot", 智谱等上游对非法角色报 1214 ——
       // 统一收敛为 user/assistant, 内容强转字符串, 脏历史不炸链路
       ...history
         .filter((m) => m && typeof m.content === "string" && m.content.trim())
@@ -200,10 +241,13 @@ const workflowEngineProvider: Provider<
       const llmRes = (await ctx.call<LlmInferenceRequest, LlmInferenceResponse>(
         llmInferenceRef,
         {
-          model: process.env.LLM_MODEL ?? "glm-4.6",
+          model: request.llm?.model || process.env.LLM_MODEL || "glm-4.6",
           messages,
           temperature: 0.7,
           userId: request.user_key ?? request.customer_id ?? request.merchant_id,
+          ...(request.llm?.url || request.llm?.key
+            ? { upstream: { url: request.llm?.url ?? "", key: request.llm?.key ?? "" } }
+            : {}),
         },
       )) as Result<LlmInferenceResponse>;
       if (llmRes.ok && llmRes.value?.text) {
@@ -222,6 +266,23 @@ const workflowEngineProvider: Provider<
       { role: "user", content: request.user_input },
       { role: "assistant", content: replyText || "(degraded)" },
     ]);
+
+    // ── 记忆沉淀节点 (流内标准节点, 尽力而为): 降级回复不写入, 避免污染长期记忆 ──
+    if (!degraded && request.memory) {
+      try {
+        await ctx.call<{ content: string; user_id: string; agent_id: string }, { ok?: boolean; error?: string }>(
+          { id: "@action/timem-memory-write", versionRange: "^1.0.0" },
+          {
+            content: `问答 (${new Date().toISOString().slice(0, 10)}): 用户问「${request.user_input.slice(0, 150)}」; 答复要点: ${replyText.slice(0, 200)}`,
+            user_id: request.memory.user_id,
+            agent_id: request.memory.agent_id,
+          },
+        );
+        console.log(`[workflow-engine] memory persisted for ${request.memory.user_id}@${request.memory.agent_id}`);
+      } catch (e) {
+        console.log(`[workflow-engine] memory persist skipped: ${String((e as Error)?.message ?? e)}`);
+      }
+    }
     if (!degraded) {
       return ok({
         result: replyText,
@@ -284,12 +345,12 @@ const taskPlanningProvider: Provider<
 export const manifest: PluginManifest = {
   name: "@orchestration/task-planning",
   layer: LayerId.Orchestration,
-  description: "编排规划层：任务规划占位 + 工作流引擎占位 + 插件安装工作流 + Codex 编码代理，消费认知层 LLM",
-  version: "0.2.0",
+  description: "编排规划层：任务规划占位 + 工作流引擎(流内记忆节点) + 插件安装工作流 + Codex 编码代理，消费认知层 LLM 与行动域 TiMEM 记忆",
+  version: "0.3.0",
   provides: [taskPlanningService, workflowEngineService, pluginInstallService, guidedDesignService],
-  consumes: [llmInferenceRef],
+  consumes: [llmInferenceRef, { id: "@action/timem-memory", versionRange: "^1.0.0" }, { id: "@action/timem-memory-write", versionRange: "^1.0.0" }],
   preferredCarrier: CarrierKind.Thread,
-  dependsOn: ["@cognitive/llm-inference"],
+  dependsOn: ["@cognitive/llm-inference", "@action/tool-execution"],
 };
 
 let pluginState: PluginState = PluginState.Registered;

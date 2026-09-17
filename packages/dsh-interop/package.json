@@ -1,0 +1,28 @@
+{
+  "name": "@aigility-harness/dsh-interop",
+  "version": "0.1.0",
+  "description": "DSH (@deepseek-ai/dsh) harness-family interop — implements the family-neutral HarnessInterop contract from @aigility-harness/core over the pinned official dsh suite. The only package allowed to depend on the dsh suite; kernel-* packages stay family-free.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@aigility-harness/core": "workspace:*",
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-base": "0.1.5-rc.2",
+    "js-yaml": "^4.2.0"
+  },
+  "devDependencies": {
+    "@aigility-harness/kernel-dsh": "workspace:*",
+    "@deepseek-ai/cordis-plugin-timer": "1.1.4",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

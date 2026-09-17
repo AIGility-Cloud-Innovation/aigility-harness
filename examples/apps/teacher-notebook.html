@@ -87,6 +87,11 @@ body {
 .card h2 { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
 .card .hint { font-size: 12.5px; color: var(--ink-3); margin-bottom: 16px; }
 .section-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.stu-chip { display:inline-flex; align-items:center; gap:4px; font-size:12.5px; padding:4px 10px; border-radius:999px; background:var(--soft, #eef1f6); color:var(--ink-2); cursor:default; }
+.stu-chip.has { background:var(--green-soft, #e7f8f1); color:var(--ink); }
+.stu-chip.has b { color:var(--green); }
+.stu-chip:hover { filter:brightness(.96); }
+.stu-chip input { text-align:center; }
 .section-title h2 { font-size: 16px; }
 
 .btn {
@@ -328,8 +333,8 @@ tbody tr:last-child td { border-bottom: none; }
         <button class="active" data-view="roster" onclick="switchView('roster', this)">👥 名册</button>
         <button data-view="attendance" onclick="switchView('attendance', this)">📅 考勤</button>
         <button data-view="memory" onclick="switchView('memory', this)">🧠 记忆本</button>
+        <button data-view="exams" onclick="switchView('exams', this)">📈 考试成绩</button>
         <button data-view="profile" onclick="switchView('profile', this)">📊 学生画像</button>
-        <button data-view="random" onclick="switchView('random', this)">🎲 点名</button>
         <button data-view="scores" onclick="switchView('scores', this)">⭐ 积分</button>
     </div>
 
@@ -338,7 +343,8 @@ tbody tr:last-child td { border-bottom: none; }
         <div class="card">
             <div class="toolbar">
                 <button class="btn btn-primary" data-owner-only onclick="openStudentModal()">＋ 添加学生</button>
-                <button class="btn btn-ghost" onclick="openImportModal()">📥 批量导入名册</button>
+                <button class="btn btn-ghost" onclick="openImportModal()">📥 批量编辑名册</button>
+                <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--ink-2);cursor:pointer"><input type="checkbox" id="showArchived" onchange="renderStudentList()"> 显示已归档</label>
                 <div class="grow"><input id="studentSearch" placeholder="搜索姓名 / 学号…" style="width:100%" oninput="filterStudents()"></div>
             </div>
             <div id="studentList"></div>
@@ -383,6 +389,25 @@ tbody tr:last-child td { border-bottom: none; }
                 <input id="memFilterText" placeholder="搜索内容 / 标签…" style="flex:1;min-width:150px" oninput="renderMemories()">
             </div>
             <div id="memoryList"></div>
+        </div>
+    </div>
+
+    <!-- ═══ 考试成绩 ═══ -->
+    <div id="view-exams" class="view">
+        <div class="card">
+            <div class="toolbar">
+                <button class="btn btn-primary" data-owner-only onclick="openExamModal()">＋ 添加考试</button>
+                <button class="btn btn-ghost" data-owner-only onclick="openExamImportModal()">📥 批量导入成绩</button>
+                <div class="grow"></div>
+                <label style="font-size:12.5px;color:var(--ink-2)">成绩趋势
+                    <select id="trendStudent" onchange="renderExamTrend()" style="width:auto;padding:5px 8px"><option value="">选择学生</option></select>
+                </label>
+            </div>
+            <div id="examList"></div>
+        </div>
+        <div class="card" id="trendCard" style="display:none">
+            <div class="section-title"><div><h2>📈 成绩趋势</h2><div class="hint" style="margin:4px 0 0">按考试时间排列, 折线展示变化, 右侧列出与上次的进退步</div></div></div>
+            <div id="examTrendBody"></div>
         </div>
     </div>
 
@@ -435,6 +460,11 @@ tbody tr:last-child td { border-bottom: none; }
         <label class="fl">学号</label><input id="studentNumber" style="width:100%" placeholder="如 20240101">
         <label class="fl">姓名</label><input id="studentName" style="width:100%" placeholder="学生姓名">
         <label class="fl">座位号</label><input id="studentSeat" style="width:100%" placeholder="如 3 排 5 号">
+        <label class="fl">性别</label><select id="studentGender" style="width:100%">
+            <option value="">未填写</option><option value="男">男</option><option value="女">女</option>
+        </select>
+        <label class="fl">生日</label><input id="studentBirth" type="date" style="width:100%">
+        <label class="fl">备注</label><textarea id="studentNote" style="width:100%;min-height:56px" placeholder="兴趣特长、健康状况、家校注意事项等"></textarea>
         <div style="display:flex;gap:10px;margin-top:22px">
             <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="saveStudent()">保存</button>
             <button class="btn btn-ghost" style="flex:1;justify-content:center" onclick="closeModal('studentModal')">取消</button>
@@ -445,14 +475,13 @@ tbody tr:last-child td { border-bottom: none; }
 <!-- 批量导入模态框 -->
 <div class="modal" id="importModal">
     <div class="modal-box">
-        <div class="modal-head"><h3>批量导入名册</h3><button class="modal-x" onclick="closeModal('importModal')">✕</button></div>
+        <div class="modal-head"><h3>批量编辑名册</h3><button class="modal-x" onclick="closeModal('importModal')">✕</button></div>
         <div class="hint" style="font-size:12.5px;color:var(--ink-3);margin:6px 0 10px">
-            每行一名学生，支持「学号,姓名,座位号」（逗号或 Tab 分隔，座位可省略）。也支持只有姓名、每行一个的简单格式。
+            已预填当前名册，可直接编辑。每行一名学生，支持「学号 姓名 座位号」（空格、逗号或 Tab 分隔，座位可省略），也支持只有姓名的简单格式。<b>与现有学生同名（或同学号）的行会更新其学号/座位/姓名，其余行作为新学生添加</b>；只写姓名的行不会改动该生的学号和座位。
         </div>
         <textarea id="importText" style="width:100%;min-height:180px" placeholder="20240101,张三,1排1号&#10;20240102,李四,1排2号&#10;王五"></textarea>
-        <label class="fl"><input type="checkbox" id="importDedupe" checked style="width:auto;margin-right:6px">跳过已存在的学号/姓名</label>
         <div style="display:flex;gap:10px;margin-top:18px">
-            <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="doImport()">导入</button>
+            <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="doImport()">保存</button>
             <button class="btn btn-ghost" style="flex:1;justify-content:center" onclick="closeModal('importModal')">取消</button>
         </div>
     </div>
@@ -469,7 +498,7 @@ tbody tr:last-child td { border-bottom: none; }
                 请从大厅登录后再打开本应用，数据将自动关联你的账号。
             </div>
             <div style="display:flex;gap:10px;margin-top:10px">
-                <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="location.href='/hall'">去大厅登录</button>
+                <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="location.href='/hall?next=' + encodeURIComponent('/apps/teacher-notebook.html')">去大厅登录</button>
             </div>
         </div>
         <div id="cloudActions" style="display:none">
@@ -487,6 +516,62 @@ tbody tr:last-child td { border-bottom: none; }
     </div>
 </div>
 
+<!-- 转班模态框 -->
+<div class="modal" id="transferModal">
+    <div class="modal-box" style="max-width:420px">
+        <div class="modal-head"><h3>🔄 转入其它班级</h3><button class="modal-x" onclick="closeModal('transferModal')">✕</button></div>
+        <div id="transferInfo" class="hint" style="margin-bottom:10px"></div>
+        <div id="transferTarget" style="border:1px solid var(--line);border-radius:10px;padding:6px 10px;max-height:220px;overflow:auto"></div>
+        <div style="display:flex;gap:10px;margin-top:14px">
+            <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="doTransferStudent()">确认转班</button>
+            <button class="btn btn-ghost" onclick="closeModal('transferModal')">取消</button>
+        </div>
+    </div>
+</div>
+
+<!-- 添加考试模态框 -->
+<div class="modal" id="examModal">
+    <div class="modal-box" style="max-width:420px">
+        <div class="modal-head"><h3>📝 添加考试</h3><button class="modal-x" onclick="editingExamId=null;closeModal('examModal')">✕</button></div>
+        <input id="examName" placeholder="考试名称, 如: 期中考试" style="width:100%">
+        <label style="display:block;margin-top:10px;font-size:12.5px;color:var(--ink-3)">考试日期
+            <input type="date" id="examDate" style="margin-left:6px;padding:4px 6px;font-family:inherit">
+        </label>
+        <div style="margin-top:10px;font-size:12.5px;color:var(--ink-3)">考试学科（勾选；也可输入自定义学科后添加）</div>
+        <div id="examSubjectBox" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"></div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+            <input id="newSubjectInput" placeholder="自定义学科, 如: 计算机" style="flex:1;padding:6px 8px;font-size:12.5px">
+            <button class="btn btn-ghost btn-sm" onclick="addNewSubject()">添加学科</button>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:14px">
+            <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="saveExam()">创建</button>
+            <button class="btn btn-ghost" onclick="closeModal('examModal')">取消</button>
+        </div>
+    </div>
+</div>
+
+<!-- 批量导入成绩模态框 -->
+<div class="modal" id="examImportModal">
+    <div class="modal-box" style="max-width:460px">
+        <div class="modal-head"><h3>📥 批量导入成绩</h3><button class="modal-x" onclick="closeModal('examImportModal')">✕</button></div>
+        <div id="importExamPick" style="display:none;margin-bottom:8px">
+            <span class="hint" style="font-size:12.5px;color:var(--ink-3)">选择考试：</span>
+            <select id="importExamSelect" onchange="onImportExamChange()" style="padding:4px 6px"></select>
+        </div>
+        <div class="hint" style="font-size:12.5px;color:var(--ink-3);margin:4px 0 8px">
+            <span id="importExamPrefix">导入到考试：</span><b id="importExamName" style="color:var(--ink)"></b>
+            <span id="importSubjectWrap"> · 学科：<select id="importSubject" style="padding:4px 6px"></select></span>
+            <br>每行一条：<code>姓名 分数</code>（姓名需与名册一致）。
+        </div>
+        <textarea id="examImportText" style="width:100%;min-height:140px" placeholder="张三 95&#10;李四 88&#10;王五 76"></textarea>
+        <div id="examImportMsg" class="hint" style="margin-top:6px;min-height:16px"></div>
+        <div style="display:flex;gap:10px;margin-top:10px">
+            <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="doExamImport()">导入</button>
+            <button class="btn btn-ghost" onclick="closeModal('examImportModal')">取消</button>
+        </div>
+    </div>
+</div>
+
 <!-- 班级管理模态框 (班主任: 建班/邀请任课老师; 任课: 查看班级信息) -->
 <div class="modal" id="spaceModal">
     <div class="modal-box" style="max-width:560px">
@@ -498,13 +583,44 @@ tbody tr:last-child td { border-bottom: none; }
 <!-- AI 记一笔模态框 -->
 <div class="modal" id="memoryModal">
     <div class="modal-box">
-        <div class="modal-head"><h3>✨ AI 记一笔</h3><button class="modal-x" onclick="closeModal('memoryModal')">✕</button></div>
-        <div class="hint" style="font-size:12.5px;color:var(--ink-3);margin:4px 0 10px">把观察到的情况写成一段话（可含多名学生、多件事），AI 自动识别学生并结构化为条目，确认后入库。</div>
+        <div class="modal-head"><h3>✨ 记一笔</h3><button class="modal-x" onclick="closeModal('memoryModal')">✕</button></div>
+        <div class="hint" style="font-size:12.5px;color:var(--ink-3);margin:4px 0 10px">把观察到的情况写成一段话，AI 自动识别学生并结构化；AI 不可用时点「手动输入」直接填写。</div>
         <textarea id="aiText" style="width:100%;min-height:110px" placeholder="例：今天数学课上张三和同桌讲话，提醒后改正；午休时张三主动帮王五讲错题；李四这次月考进步了10名。"></textarea>
         <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
             <button class="btn btn-primary" onclick="aiStructure()">✨ AI 结构化</button>
+            <button class="btn btn-ghost" onclick="toggleManualMemory()">✍️ 手动输入</button>
             <span id="aiStatus" style="font-size:12.5px;color:var(--ink-3)"></span>
             <span style="flex:1"></span>
+        </div>
+        <div id="manualMemoryForm" style="display:none;margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:13px">
+                <select id="mmStudent" style="flex:1;min-width:120px;padding:6px 8px"></select>
+                <select id="mmCategory" style="width:128px;padding:6px 8px">
+                    <option value="behavior">🌱 日常行为</option>
+                    <option value="discipline">📢 课堂纪律</option>
+                    <option value="exam">📝 考试成绩</option>
+                    <option value="social">🤝 交际事件</option>
+                </select>
+                <select id="mmSenti" style="width:88px;padding:6px 8px">
+                    <option value="pos">积极</option>
+                    <option value="neu" selected>中性</option>
+                    <option value="neg">消极</option>
+                </select>
+            </div>
+            <input id="mmTitle" placeholder="概括标题（不超过12字）" style="width:100%;margin-top:8px;font-size:13.5px;font-weight:600">
+            <textarea id="mmContent" placeholder="详细客观的记录…" style="width:100%;margin-top:6px;min-height:64px;font-size:13px"></textarea>
+            <div style="display:flex;gap:10px;align-items:center;margin-top:8px;font-size:12.5px;color:var(--ink-3);flex-wrap:wrap">
+                <label>日期 <input type="date" id="mmDate" style="padding:4px 6px;font-family:inherit"></label>
+                <label>关联积分 <input type="number" id="mmScore" value="0" style="width:70px;padding:4px 6px">（正加负减, 0 不加分）</label>
+                <label>考勤 <select id="mmAtt" style="padding:4px 6px">
+                    <option value="">不涉及</option>
+                    <option value="present">出勤</option>
+                    <option value="late">迟到</option>
+                    <option value="leave">请假</option>
+                    <option value="absent">缺勤</option>
+                </select></label>
+            </div>
+            <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:10px" onclick="saveManualMemory()">保存到记忆本</button>
         </div>
         <div id="aiPreview"></div>
         <div id="aiSaveBar" style="display:none;margin-top:16px">
@@ -520,12 +636,14 @@ const KEYS = {
     STUDENTS: 'teacherNotebook_students',
     ATTENDANCE: 'teacherNotebook_attendance',
     SCORES: 'teacherNotebook_scores',
-    MEMORIES: 'teacherNotebook_memories'
+    MEMORIES: 'teacherNotebook_memories',
+    EXAMS: 'teacherNotebook_exams'
 };
 let students  = [];
 let attendance = {};
 let scores    = [];
 let memories  = [];
+let exams     = [];
 
 const CATS = {
     behavior:   { label: '日常行为', icon: '🌱' },
@@ -548,7 +666,7 @@ let profileStudentId = '';
 const savedApiBase = localStorage.getItem('teacherNotebook_apiBase');
 const DATA_APP = 'teacher-notebook.html';
 const ROLE_POLICY = { roles: { teacher: {
-    readTables: ['students', 'attendance', 'scores', 'memories'],
+    readTables: ['students', 'attendance', 'scores', 'memories', 'exams'],
     writeTables: ['attendance', 'scores'],
 } } };
 const CLOUD = {
@@ -560,7 +678,7 @@ const CLOUD = {
     get rowIds() { return JSON.parse(localStorage.getItem('teacherNotebook_rowIds_' + (CLOUD.spaceId || 'x')) || '{}'); },
     set rowIds(v) { localStorage.setItem('teacherNotebook_rowIds_' + (CLOUD.spaceId || 'x'), JSON.stringify(v)); }
 };
-const COLLECTIONS = ['students', 'attendance', 'scores', 'memories'];
+const COLLECTIONS = ['students', 'attendance', 'scores', 'memories', 'exams'];
 
 // 当前用户在当前空间的角色: 'owner'(班主任) | 'teacher'(任课) | null
 let mySpaceRole = null;
@@ -715,7 +833,7 @@ async function spaceCreateFromModal() {
     try {
         await spaceCreate(name);
         closeModal('spaceModal');
-        students = []; attendance = {}; scores = []; memories = [];
+        students = []; attendance = {}; scores = []; memories = []; exams = [];
         saveLocal(); renderAll(); switchView('roster');
         renderSpaceBar();
     } catch (e) { alert('创建失败: ' + e.message); }
@@ -833,6 +951,7 @@ async function cloudPull() {
             else if (key === 'attendance') attendance = val && typeof val === 'object' ? val : {};
             else if (key === 'scores') scores = Array.isArray(val) ? val : [];
             else if (key === 'memories') memories = Array.isArray(val) ? val : [];
+            else if (key === 'exams') exams = Array.isArray(val) ? val : [];
         } catch (e) {
             console.warn('cloud pull failed:', key, e.message);
         }
@@ -847,7 +966,7 @@ async function cloudPush() {
     for (const key of COLLECTIONS) {
         // 任课老师只推自己有写权限的表 (服务端同样强制, 这里避免无谓 403)
         if (!amOwner() && !ROLE_POLICY.roles.teacher.writeTables.includes(key)) continue;
-        const payload = key === 'attendance' ? attendance : ({ students, scores, memories })[key];
+        const payload = key === 'attendance' ? attendance : ({ students, scores, memories, exams })[key];
         const body = { data: { payload } };
         try {
             if (rowIds[key]) await apiCall('PUT', '/app/data/' + key + '/' + rowIds[key] + '?space=' + encodeURIComponent(CLOUD.spaceId), body);
@@ -871,6 +990,7 @@ function saveLocal() {
     localStorage.setItem('teacherNotebook_attendance' + suffix, JSON.stringify(attendance));
     localStorage.setItem('teacherNotebook_scores' + suffix, JSON.stringify(scores));
     localStorage.setItem('teacherNotebook_memories' + suffix, JSON.stringify(memories));
+    localStorage.setItem('teacherNotebook_exams' + suffix, JSON.stringify(exams));
     renderHeroStats();
 }
 
@@ -902,6 +1022,7 @@ function switchView(id, btn) {
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.getElementById('view-' + id).classList.add('active');
     if (id === 'memory') { fillStudentFilter('memFilterStudent', true); renderMemories(); }
+    if (id === 'exams') { renderExams(); }
     if (id === 'profile') {
         fillStudentFilter('profileStudent', false);
         if (!profileStudentId) document.getElementById('profileStudent').value = ''; // 无指定学生 → 先看名卡
@@ -914,7 +1035,7 @@ function switchView(id, btn) {
 }
 
 function renderHeroStats() {
-    document.getElementById('mStudents').textContent = students.length;
+    document.getElementById('mStudents').textContent = students.filter(s => !s.archived).length;
     document.getElementById('mMemories').textContent = memories.length;
     const t = attendance[todayStr()] || {};
     document.getElementById('mToday').textContent = students.length ? Object.values(t).filter(s => s === 'present').length : '-';
@@ -926,25 +1047,38 @@ function renderHeroStats() {
 function renderStudentList() {
     const box = document.getElementById('studentList');
     if (!students.length) {
-        box.innerHTML = `<div class="empty"><div class="icon">👨‍🎓</div><h3>名册还是空的</h3><p>点击「添加学生」或「批量导入名册」开始</p></div>`;
+        box.innerHTML = `<div class="empty"><div class="icon">👨‍🎓</div><h3>名册还是空的</h3><p>点击「添加学生」或「批量编辑名册」开始</p></div>`;
+        return;
+    }
+    const showArchived = document.getElementById('showArchived') && document.getElementById('showArchived').checked;
+    const active = students.filter(s => !s.archived);
+    const archived = students.filter(s => s.archived);
+    if (!showArchived && !active.length) {
+        box.innerHTML = `<div class="empty"><div class="icon">👨‍🎓</div><h3>名册还是空的</h3><p>点击「添加学生」或「批量编辑名册」开始</p></div>`;
         return;
     }
     box.innerHTML = `<table><thead><tr>
-        <th>学号</th><th>姓名</th><th>座位</th><th>积分</th><th>记忆</th><th style="width:190px">操作</th>
+        <th>学号</th><th>姓名</th><th>座位</th><th>积分</th><th>记忆</th><th style="width:250px">操作</th>
     </tr></thead><tbody id="studentTableBody"></tbody></table>`;
     const tbody = document.getElementById('studentTableBody');
     students.forEach(st => {
+        if (st.archived && !showArchived) return;
         const memCount = memories.filter(m => m.studentId === st.id).length;
         const tr = document.createElement('tr');
+        if (st.archived) tr.style.opacity = '.55';
         tr.innerHTML = `
             <td style="color:var(--ink-3)">${esc(st.number)}</td>
-            <td><b>${esc(st.name)}</b></td>
+            <td><b>${esc(st.name)}</b>${st.archived ? ' <span class="tag" style="color:var(--ink-3)">已归档</span>' : ''}</td>
             <td>${esc(st.seat || '-')}</td>
             <td><b style="color:${(st.score||0) >= 0 ? 'var(--green)' : 'var(--rose)'}">${st.score || 0}</b></td>
             <td><span class="tag">${memCount} 条</span></td>
             <td>
                 <button class="btn btn-ghost btn-sm" onclick="viewProfile('${st.id}')">画像</button>
-                <button class="btn btn-ghost btn-sm" data-owner-only onclick="editStudent('${st.id}')">编辑</button>
+                ${st.archived
+                    ? `<button class="btn btn-ghost btn-sm" data-owner-only onclick="toggleArchiveStudent('${st.id}', false)">恢复</button>`
+                    : `<button class="btn btn-ghost btn-sm" data-owner-only onclick="editStudent('${st.id}')">编辑</button>
+                       <button class="btn btn-ghost btn-sm" data-owner-only onclick="toggleArchiveStudent('${st.id}', true)">归档</button>
+                       <button class="btn btn-ghost btn-sm" data-owner-only onclick="openTransferModal('${st.id}')">转班</button>`}
                 <button class="btn btn-danger-soft btn-sm" data-owner-only onclick="deleteStudent('${st.id}')">删除</button>
             </td>`;
         tbody.appendChild(tr);
@@ -964,6 +1098,9 @@ function openStudentModal(id = null) {
     document.getElementById('studentNumber').value = st.number || '';
     document.getElementById('studentName').value = st.name || '';
     document.getElementById('studentSeat').value = st.seat || '';
+    document.getElementById('studentGender').value = st.gender || '';
+    document.getElementById('studentBirth').value = st.birth || '';
+    document.getElementById('studentNote').value = st.note || '';
     m.classList.add('show');
 }
 function editStudent(id) { openStudentModal(id); }
@@ -972,19 +1109,121 @@ function saveStudent() {
     const number = document.getElementById('studentNumber').value.trim();
     const name = document.getElementById('studentName').value.trim();
     const seat = document.getElementById('studentSeat').value.trim();
+    const gender = document.getElementById('studentGender').value;
+    const birth = document.getElementById('studentBirth').value;
+    const note = document.getElementById('studentNote').value.trim();
     if (!number || !name) return alert('请填写学号和姓名');
+    const extra = { gender, birth, note };
     if (id) {
         const i = students.findIndex(s => s.id === id);
-        if (i !== -1) students[i] = { ...students[i], number, name, seat };
+        if (i !== -1) {
+            students[i] = { ...students[i], number, name, seat };
+            // 性别/生日/备注: 有值写入, 清空则移除 (不能靠展开覆盖, 否则清空无效)
+            for (const k of ['gender', 'birth', 'note']) {
+                if (extra[k]) students[i][k] = extra[k];
+                else delete students[i][k];
+            }
+        }
     } else {
-        students.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), number, name, seat, score: 0 });
+        students.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), number, name, seat, score: 0, ...extra });
     }
-    saveData(); renderStudentList(); closeModal('studentModal');
+    saveData(); renderAll(); closeModal('studentModal');
 }
 function deleteStudent(id) {
     if (!confirm('删除该学生？其记忆与积分记录将保留在库中。')) return;
     students = students.filter(s => s.id !== id);
     saveData(); renderStudentList();
+}
+// ── 归档 / 恢复: 仅打标记, 名册默认不显示, 数据与关联记录原样保留 ──
+function toggleArchiveStudent(id, archive) {
+    const st = students.find(s => s.id === id);
+    if (!st) return;
+    if (archive && !confirm(`归档「${st.name}」？名册默认不再显示, 可随时在「显示已归档」中恢复。`)) return;
+    st.archived = archive || undefined;
+    if (!archive) delete st.archived;
+    saveData(); renderStudentList();
+}
+// ── 转班: 学生及其积分/记忆/考勤记录整体迁入目标班级 ──
+let transferStudentId = null;
+async function openTransferModal(id) {
+    const st = students.find(s => s.id === id);
+    if (!st) return;
+    transferStudentId = id;
+    let spaces = [];
+    try { spaces = (await spaceList()).filter(s => s.id !== CLOUD.spaceId); } catch (e) {}
+    const box = document.getElementById('transferTarget');
+    if (!spaces.length) {
+        box.innerHTML = '<div class="hint" style="padding:8px 0">没有其它可转入的班级（需先在「班级管理」里新建, 或被加入其它班级）</div>';
+    } else {
+        box.innerHTML = spaces.map(s =>
+            `<label style="display:flex;align-items:center;gap:8px;padding:7px 4px;font-size:13.5px;cursor:pointer">
+                <input type="radio" name="transferTarget" value="${esc(s.id)}" ${s.id === spaces[0].id ? 'checked' : ''}>
+                ${esc(s.name)} <span class="tag">${s.my_role === 'owner' ? '我是班主任' : '任课'}</span>
+            </label>`).join('');
+    }
+    document.getElementById('transferInfo').innerHTML =
+        `将把 <b>${esc(st.name)}</b> 连同其积分、成长记忆、考勤记录一并转入所选班级, 当前班级不再保留。`;
+    document.getElementById('transferModal').classList.add('show');
+}
+async function doTransferStudent() {
+    const st = students.find(s => s.id === transferStudentId);
+    const target = document.querySelector('input[name="transferTarget"]:checked');
+    if (!st || !target) { closeModal('transferModal'); return; }
+    const targetSpace = target.value;
+    const qs = '?space=' + encodeURIComponent(targetSpace);
+    try {
+        // 1. 读目标班级各集合现状 (含服务端行 id)
+        const targetRows = {};
+        for (const key of COLLECTIONS) {
+            try {
+                const d = await apiCall('GET', '/app/data/' + key + qs);
+                targetRows[key] = (d.rows && d.rows[0]) || null;
+            } catch { targetRows[key] = null; }
+        }
+        const pick = (row, fallback) => {
+            const v = row && row.data && row.data.payload;
+            return (v === null || v === undefined) ? fallback : v;
+        };
+        const tStudents = pick(targetRows.students, []) || [];
+        const tScores = pick(targetRows.scores, []) || [];
+        const tMemories = pick(targetRows.memories, []) || [];
+        const tAtt = pick(targetRows.attendance, {}) || {};
+        // 2. 摘出该学生的关联记录
+        const relScores = scores.filter(x => x.studentId === st.id);
+        const relMemories = memories.filter(m => m.studentId === st.id);
+        const moved = { ...st }; delete moved.archived;
+        // 3. 写入目标班级
+        const tRowIds = {};
+        for (const key of COLLECTIONS) {
+            let payload, row = targetRows[key];
+            if (key === 'students') payload = [...tStudents, moved];
+            else if (key === 'scores') payload = [...tScores, ...relScores];
+            else if (key === 'memories') payload = [...tMemories, ...relMemories];
+            else {
+                payload = tAtt;
+                for (const d of Object.keys(attendance)) {
+                    if (attendance[d] && attendance[d][st.id] !== undefined) {
+                        (payload[d] = payload[d] || {})[st.id] = attendance[d][st.id];
+                    }
+                }
+            }
+            const body = { data: { payload } };
+            if (row && row.id) { await apiCall('PUT', '/app/data/' + key + '/' + row.id + qs, body); tRowIds[key] = row.id; }
+            else { const c = await apiCall('POST', '/app/data/' + key + qs, body); tRowIds[key] = c.id; }
+        }
+        // 4. 从当前班级移除
+        students = students.filter(s => s.id !== st.id);
+        scores = scores.filter(x => x.studentId !== st.id);
+        memories = memories.filter(m => m.studentId !== st.id);
+        for (const d of Object.keys(attendance)) {
+            if (attendance[d]) delete attendance[d][st.id];
+        }
+        closeModal('transferModal');
+        saveData(); renderAll();
+        alert(`已将「${st.name}」转入目标班级。`);
+    } catch (e) {
+        alert('转班失败: ' + e.message + '（若提示未授权, 需要你是目标班级的班主任或成员）');
+    }
 }
 function viewProfile(id) {
     profileStudentId = id;
@@ -993,25 +1232,34 @@ function viewProfile(id) {
 
 // ── 批量导入 ──
 function openImportModal() {
-    document.getElementById('importText').value = '';
+    document.getElementById('importText').value = students
+        .map(s => [s.number, s.name, s.seat].filter(Boolean).join(' '))
+        .filter(Boolean).join('\n');
     document.getElementById('importModal').classList.add('show');
 }
 function doImport() {
     const lines = document.getElementById('importText').value.split('\n').map(l => l.trim()).filter(Boolean);
-    const dedupe = document.getElementById('importDedupe').checked;
-    let added = 0, skipped = 0;
+    let added = 0, updated = 0;
     for (const line of lines) {
-        const parts = line.split(/[,，\t]/).map(p => p.trim());
+        const parts = line.split(/[\s,，\t]+/).map(p => p.trim());
         let number = '', name = '', seat = '';
         if (parts.length >= 2) { number = parts[0]; name = parts[1]; seat = parts[2] || ''; }
-        else { name = parts[0]; number = String(students.length + 1 + added); }
-        if (!name) { skipped++; continue; }
-        if (dedupe && students.some(s => s.number === number && number) || students.some(s => s.name === name)) { skipped++; continue; }
-        students.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), number, name, seat, score: 0 });
-        added++;
+        else { name = parts[0]; }
+        if (!name) continue;
+        // 匹配已有学生: 姓名优先, 其次学号; 命中即就地更新 (未填写的字段不改动)
+        const st = students.find(s => s.name === name) || (number && students.find(s => s.number === number));
+        if (st) {
+            if (name) st.name = name;
+            if (parts.length >= 2) st.number = number;
+            if (parts.length >= 3) st.seat = seat;
+            updated++;
+        } else {
+            students.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), number: number || String(students.length + 1 + added), name, seat, score: 0 });
+            added++;
+        }
     }
-    saveData(); renderStudentList(); closeModal('importModal');
-    alert(`导入完成：新增 ${added} 名学生${skipped ? `，跳过 ${skipped} 行` : ''}`);
+    saveData(); renderAll(); closeModal('importModal');
+    alert(`保存完成：更新 ${updated} 名现有学生${updated ? '' : '（无）'}，新增 ${added} 名${added + updated === 0 ? '——未识别到有效行' : ''}`);
 }
 
 // ═══════════════ 考勤 ═══════════════
@@ -1032,7 +1280,7 @@ function loadAttendance() {
     }
     box.innerHTML = `<table><thead><tr><th>学号</th><th>姓名</th><th>状态</th><th>操作</th></tr></thead><tbody></tbody></table>`;
     const tbody = box.querySelector('tbody');
-    students.forEach(st => {
+    students.filter(st => !st.archived).forEach(st => {
         const status = day[st.id] || 'absent';
         if (status === 'present') present++; else if (status === 'late') late++; else if (status === 'leave') leave++; else absent++;
         const styleMap = { present:['var(--green)','var(--green-soft)','出勤'], late:['#f97316','#ffedd5','迟到'], leave:['var(--amber)','var(--amber-soft)','请假'], absent:['var(--rose)','var(--rose-soft)','缺勤'] };
@@ -1064,7 +1312,7 @@ function markAll(status) {
     if (!students.length) return;
     const date = document.getElementById('attendanceDate').value;
     attendance[date] = {};
-    students.forEach(st => attendance[date][st.id] = status);
+    students.filter(st => !st.archived).forEach(st => attendance[date][st.id] = status);
     saveData(); loadAttendance();
 }
 
@@ -1072,10 +1320,10 @@ function markAll(status) {
 const AI_CFG_KEY = 'teacherNotebook_aiCfg';
 let aiDraft = [];
 
-// 网关端口 (3418) 与本页伺服端口 (3419) 不同, 用 location.hostname 动态推导, 不写死主机名;
+// 网关端口 (1232) 与本页伺服端口 (1231) 不同, 用 location.hostname 动态推导, 不写死主机名;
 // 历史 localStorage 存的 127.0.0.1/localhost 地址同样视为过期忽略。
 function gatewayEndpoint() {
-    return location.protocol + '//' + location.hostname + ':3418/v1/chat/completions';
+    return location.protocol + '//' + location.hostname + ':1232/v1/chat/completions';
 }
 function aiCfg() {
     const c = JSON.parse(localStorage.getItem(AI_CFG_KEY) || '{}');
@@ -1098,7 +1346,350 @@ function openMemoryModal() {
     document.getElementById('aiPreview').innerHTML = '';
     document.getElementById('aiSaveBar').style.display = 'none';
     document.getElementById('aiStatus').textContent = '';
+    document.getElementById('manualMemoryForm').style.display = 'none';
     document.getElementById('memoryModal').classList.add('show');
+}
+// ── 手动输入 (AI 结构化失败时的兜底): 直接填写一条结构化记忆 ──
+function toggleManualMemory() {
+    const form = document.getElementById('manualMemoryForm');
+    const show = form.style.display === 'none';
+    form.style.display = show ? 'block' : 'none';
+    if (show) {
+        const sel = document.getElementById('mmStudent');
+        const cur = sel.value;
+        sel.innerHTML = students.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+        if (cur && students.some(s => s.id === cur)) sel.value = cur;
+        document.getElementById('mmDate').value = todayStr();
+        document.getElementById('mmTitle').focus();
+    }
+}
+function saveManualMemory() {
+    const studentId = document.getElementById('mmStudent').value;
+    const st = students.find(s => s.id === studentId);
+    if (!st) return alert('请先在名册中添加学生');
+    const title = document.getElementById('mmTitle').value.trim();
+    const content = document.getElementById('mmContent').value.trim();
+    if (!title && !content) return alert('请至少填写标题或记录内容');
+    const category = document.getElementById('mmCategory').value;
+    const senti = document.getElementById('mmSenti').value;
+    const date = document.getElementById('mmDate').value || todayStr();
+    const score = parseInt(document.getElementById('mmScore').value) || 0;
+    const att = document.getElementById('mmAtt').value;
+    memories.push({
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+        studentId, studentName: st.name,
+        category, senti,
+        title: title || content.slice(0, 12),
+        content: content || title,
+        tags: [], date,
+        createdAt: new Date().toISOString()
+    });
+    if (score) applyScore(studentId, score, title || content.slice(0, 20), true, category, '手动记录', true);
+    if (att) (attendance[date] = attendance[date] || {})[studentId] = att;
+    saveData(); renderMemories(); renderScoreList(); loadAttendance();
+    closeModal('memoryModal');
+    alert(`已保存「${st.name}」的记忆到记忆本`);
+}
+
+// ═══════════════ 考试成绩 (exams: [{id,name,date,subjects:[],scores:{studentId:{subject:number}}}]) ═══════════════
+const COMMON_SUBJECTS = ['语文', '数学', '英语', '物理', '化学', '生物', '政治', '历史', '地理'];
+// 兼容旧数据: 老结构 scores[studentId] 为数字 → 视作 "总分" 学科
+const subjOf = (e, sid) => {
+    const v = e.scores[sid];
+    if (v === null || v === undefined) return {};
+    return typeof v === 'number' ? { '总分': v } : v;
+};
+// 每张考试卡片当前查看的学科
+const cardSubject = {};
+const sortedExams = () => [...exams].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+const examSubjects = e => {
+    const set = new Set(e.subjects && e.subjects.length ? e.subjects : []);
+    Object.keys(e.scores).forEach(sid => Object.keys(subjOf(e, sid)).forEach(s => set.add(s)));
+    return [...set];
+};
+const examSubjectAvg = (e, subject) => {
+    const vals = students.filter(s => !s.archived).map(s => subjOf(e, s.id)[subject]).filter(v => typeof v === 'number');
+    return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length) : null;
+};
+const examSubjectStats = (e, subject) => {
+    const vals = students.filter(s => !s.archived).map(s => subjOf(e, s.id)[subject]).filter(v => typeof v === 'number');
+    return { avg: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null,
+             max: vals.length ? Math.max(...vals) : null, count: vals.length };
+};
+
+let pendingSubjects = [];
+let editingExamId = null;
+function openExamModal(id = null) {
+    editingExamId = id;
+    const e = id ? exams.find(x => x.id === id) : null;
+    document.getElementById('examName').value = e ? e.name : '';
+    document.getElementById('examDate').value = e ? e.date : todayStr();
+    document.getElementById('newSubjectInput').value = '';
+    pendingSubjects = e ? examSubjects(e) : ['语文', '数学', '英语'];
+    renderSubjectPicker();
+    document.querySelector('#examModal .modal-head h3').textContent = e ? '📝 编辑考试' : '📝 添加考试';
+    document.querySelector('#examModal .btn-primary').textContent = e ? '保存' : '创建';
+    document.getElementById('examModal').classList.add('show');
+}
+function renderSubjectPicker() {
+    const pool = [...new Set([...COMMON_SUBJECTS, ...pendingSubjects, ...exams.flatMap(e => e.subjects || [])])];
+    document.getElementById('examSubjectBox').innerHTML = pool.map(s =>
+        `<label style="display:inline-flex;align-items:center;gap:4px;font-size:12.5px;cursor:pointer;border:1px solid var(--line);border-radius:8px;padding:4px 9px">
+            <input type="checkbox" ${pendingSubjects.includes(s) ? 'checked' : ''} onchange="togglePendingSubject('${esc(s)}', this.checked)">${esc(s)}
+        </label>`).join('');
+}
+function togglePendingSubject(s, on) {
+    if (on) { if (!pendingSubjects.includes(s)) pendingSubjects.push(s); }
+    else pendingSubjects = pendingSubjects.filter(x => x !== s);
+}
+function addNewSubject() {
+    const v = document.getElementById('newSubjectInput').value.trim();
+    if (!v) return;
+    if (!pendingSubjects.includes(v)) pendingSubjects.push(v);
+    document.getElementById('newSubjectInput').value = '';
+    renderSubjectPicker();
+}
+function saveExam() {
+    const name = document.getElementById('examName').value.trim();
+    const date = document.getElementById('examDate').value || todayStr();
+    if (!name) return alert('请填写考试名称');
+    if (!pendingSubjects.length) return alert('请至少保留一个学科');
+    if (editingExamId) {
+        const e = exams.find(x => x.id === editingExamId);
+        if (!e) return closeModal('examModal');
+        // 学科收窄时, 被移除学科的成绩一并删除 (有已录成绩时需确认)
+        const removed = examSubjects(e).filter(s => !pendingSubjects.includes(s));
+        const removedHasScores = removed.some(s =>
+            Object.keys(e.scores).some(sid => typeof subjOf(e, sid)[s] === 'number'));
+        if (removedHasScores && !confirm(`学科「${removed.join('、')}」已有录入的成绩, 移除后这些成绩将一并删除。确定？`)) return;
+        e.name = name; e.date = date; e.subjects = [...pendingSubjects];
+        if (removed.length) {
+            for (const sid of Object.keys(e.scores)) {
+                const m = subjOf(e, sid);
+                removed.forEach(s => delete m[s]);
+                if (!Object.keys(m).length) delete e.scores[sid];
+            }
+        }
+    } else {
+        exams.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), name, date, subjects: [...pendingSubjects], scores: {} });
+    }
+    editingExamId = null;
+    saveData(); renderExams(); closeModal('examModal');
+}
+function deleteExam(id) {
+    const e = exams.find(x => x.id === id);
+    if (!e || !confirm(`删除「${e.name}」？该次所有学科成绩将一并删除。`)) return;
+    exams = exams.filter(x => x.id !== id);
+    saveData(); renderExams();
+}
+let importExamId = null, importSubject = null;
+// 工具栏入口(不带 id) → 弹出考试下拉; 卡片入口(带 id) → 锁定该考试
+function openExamImportModal(id = null) {
+    if (!id && !exams.length) return alert('请先创建考试');
+    if (!id && exams.length === 1) id = exams[0].id;
+    importExamId = id;
+    const fixed = Boolean(id);
+    document.getElementById('importExamPick').style.display = fixed ? 'none' : 'block';
+    document.getElementById('importExamPrefix').style.display = fixed ? 'inline' : 'none';
+    if (!fixed) {
+        const sel = document.getElementById('importExamSelect');
+        const ordered = sortedExams().reverse();
+        sel.innerHTML = ordered.map(e => `<option value="${e.id}">${esc(e.name)} (${esc(e.date)})</option>`).join('');
+        importExamId = ordered[0].id;
+    }
+    document.getElementById('examImportModal').classList.add('show');
+    refreshImportSubjects();
+}
+function onImportExamChange() {
+    importExamId = document.getElementById('importExamSelect').value || null;
+    refreshImportSubjects();
+}
+function refreshImportSubjects() {
+    const e = exams.find(x => x.id === importExamId);
+    if (!e) return;
+    const subs = examSubjects(e);
+    importSubject = cardSubject[e.id] && subs.includes(cardSubject[e.id]) ? cardSubject[e.id] : subs[0];
+    document.getElementById('importExamName').textContent = `${e.name} (${e.date})`;
+    document.getElementById('importSubject').innerHTML = subs.map(s =>
+        `<option ${s === importSubject ? 'selected' : ''}>${esc(s)}</option>`).join('');
+    document.getElementById('importSubject').onchange = function() { importSubject = this.value; };
+    document.getElementById('examImportText').value = '';
+    document.getElementById('examImportMsg').textContent = '';
+}
+function doExamImport() {
+    const e = exams.find(x => x.id === importExamId);
+    if (!e || !importSubject) return;
+    const lines = document.getElementById('examImportText').value.split('\n').map(l => l.trim()).filter(Boolean);
+    if (!lines.length) return alert('请粘贴成绩行');
+    let okCount = 0; const missed = [];
+    for (const line of lines) {
+        const m = line.match(/^(.+?)[\s,，\t]+(-?\d+(?:\.\d+)?)$/);
+        if (!m) { missed.push(line); continue; }
+        const name = m[1].trim();
+        const st = students.find(s => !s.archived && (s.name === name || s.number === name))
+            || students.find(s => !s.archived && s.name.includes(name));
+        if (!st) { missed.push(line); continue; }
+        (e.scores[st.id] = subjOf(e, st.id))[importSubject] = parseFloat(m[2]);
+        if (!e.subjects?.includes(importSubject)) (e.subjects = e.subjects || []).push(importSubject);
+        okCount++;
+    }
+    saveData(); renderExams();
+    closeModal('examImportModal');
+    alert(`已导入 ${importSubject} ${okCount} 条` + (missed.length ? `；未识别 ${missed.length} 条（姓名不在名册或格式不对）：\n` + missed.join('\n') : ''));
+}
+function setExamScore(examId, studentId, subject, val) {
+    const e = exams.find(x => x.id === examId);
+    if (!e) return;
+    const m = subjOf(e, studentId);
+    const v = parseFloat(val);
+    if (val === '' || isNaN(v)) delete m[subject];
+    else m[subject] = v;
+    e.scores[studentId] = m;
+    saveData();
+    renderExamStats(examId);
+    renderExamTrend();
+}
+function renderExamStats(examId) {
+    const e = exams.find(x => x.id === examId);
+    const box = document.getElementById('examStats-' + examId);
+    if (!e || !box) return;
+    const subject = cardSubject[examId] || examSubjects(e)[0] || '';
+    const st = examSubjectStats(e, subject);
+    box.textContent = `${subject} · 均分 ${st.avg === null ? '-' : st.avg.toFixed(1)} · 最高 ${st.max ?? '-'} · 已录 ${st.count}/${students.filter(s => !s.archived).length} 人`;
+}
+function renderExams() {
+    const box = document.getElementById('examList');
+    const active = students.filter(s => !s.archived);
+    // 趋势学生下拉同步 (保留当前选择)
+    const sel = document.getElementById('trendStudent');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">选择学生</option>' + active.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+    if (cur && active.some(s => s.id === cur)) sel.value = cur;
+
+    if (!exams.length) {
+        box.innerHTML = `<div class="empty"><div class="icon">📝</div><h3>还没有考试</h3><p>点击「添加考试」创建(可多选学科), 再录入或批量导入成绩</p></div>`;
+        document.getElementById('trendCard').style.display = 'none';
+        renderExamTrend();
+        return;
+    }
+    const rows = sortedExams().reverse().map(e => {
+        const subs = examSubjects(e);
+        if (!cardSubject[e.id] || !subs.includes(cardSubject[e.id])) cardSubject[e.id] = subs[0];
+        const subject = cardSubject[e.id];
+        return `<div class="card" style="margin-top:12px;box-shadow:none">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:2px 0">
+                <b style="font-size:15px">${esc(e.name)}</b>
+                <span class="tag">${esc(e.date)}</span>
+                <span style="display:flex;gap:5px;flex-wrap:wrap">
+                    ${subs.map(s => `<button class="btn btn-sm ${s === subject ? 'btn-primary' : 'btn-ghost'}"
+                        onclick="cardSubject['${e.id}']='${esc(s)}';renderExams()">${esc(s)}</button>`).join('')}
+                </span>
+                <span class="sub" id="examStats-${e.id}"></span>
+                <span style="flex:1"></span>
+                <button class="btn btn-ghost btn-sm" data-owner-only onclick="openExamModal('${e.id}')">编辑</button>
+                <button class="btn btn-ghost btn-sm" data-owner-only onclick="openExamImportModal('${e.id}')">导入</button>
+                <button class="btn btn-danger-soft btn-sm" data-owner-only onclick="deleteExam('${e.id}')">删除</button>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+                ${active.map(s => {
+                    const v = subjOf(e, s.id)[subject];
+                    const has = typeof v === 'number';
+                    return `<span class="stu-chip ${has ? 'has' : ''}" title="${has ? subject + ' ' + v : '未录入, 点击录入'}"
+                        onclick="editChipScore('${e.id}','${s.id}',this)">${esc(s.name)}${has ? ` <b>${v}</b>` : ''}</span>`;
+                }).join('')}
+            </div>
+            <div class="hint" style="font-size:11.5px;margin-top:8px">点击姓名标签录入/修改当前学科（${esc(subject)}）成绩</div>
+        </div>`;
+    }).join('');
+    box.innerHTML = rows;
+    exams.forEach(e => renderExamStats(e.id));
+    renderExamTrend();
+}
+// 点击学生标签 → 原地变输入框录分 (Esc/失焦还原)
+function editChipScore(examId, studentId, chipEl) {
+    if (!amOwner()) return;
+    const e = exams.find(x => x.id === examId);
+    const st = studentById(studentId);
+    const subject = cardSubject[examId];
+    if (!e || !st || !subject) return;
+    const old = chipEl.innerHTML;
+    chipEl.innerHTML = `<input type="number" step="0.5" value="${subjOf(e, studentId)[subject] ?? ''}" placeholder="-"
+        style="width:56px;padding:1px 4px;font-size:12px;border:none;outline:none;background:transparent;font-family:inherit">`;
+    const input = chipEl.querySelector('input');
+    input.focus(); input.select();
+    const commit = () => { setExamScore(examId, studentId, subject, input.value); };
+    input.addEventListener('keydown', ev => {
+        if (ev.key === 'Enter') commit();
+        if (ev.key === 'Escape') { chipEl.innerHTML = old; }
+    });
+    input.addEventListener('blur', () => { if (chipEl.isConnected && chipEl.querySelector('input')) commit(); });
+}
+function renderExamTrend() {
+    const card = document.getElementById('trendCard');
+    const sid = document.getElementById('trendStudent').value;
+    const body = document.getElementById('examTrendBody');
+    const st = studentById(sid);
+    if (!st) { card.style.display = 'none'; body.innerHTML = ''; return; }
+    card.style.display = 'block';
+    // 收集该学生所有「有分数」的 (考试, 学科) 记录, 按学科分线
+    const bySubject = {};   // subject -> [{name,date,score}]
+    for (const e of sortedExams()) {
+        for (const [subject, v] of Object.entries(subjOf(e, sid))) {
+            if (typeof v !== 'number') continue;
+            (bySubject[subject] = bySubject[subject] || []).push({ id: e.id, name: e.name, date: e.date, score: v });
+        }
+    }
+    const subjects = Object.keys(bySubject);
+    if (!subjects.length) {
+        body.innerHTML = `<div class="hint" style="padding:10px 0">「${esc(st.name)}」还没有任何考试成绩, 在上方考试卡片的姓名标签点一下即可录入。</div>`;
+        return;
+    }
+    const COLORS = ['#4f46e5', '#10b981', '#f97316', '#0ea5e9', '#e11d48', '#8b5cf6', '#ca8a04', '#0d9488'];
+    // SVG: x 轴按考试日期统一排列, 每学科一条折线
+    const allDates = [...new Set(sortedExams().map(e => e.date))].sort();
+    const W = 640, H = 240, padL = 40, padB = 46, padT = 16, padR = 16;
+    const allVals = subjects.flatMap(s => bySubject[s].map(x => x.score));
+    let min = Math.min(...allVals), max = Math.max(...allVals);
+    if (max - min < 10) { min = Math.max(0, min - 5); max = max + 5; }
+    else { min = Math.max(0, min - 3); max = max + 3; }
+    const px = i => allDates.length === 1 ? (W - padL - padR) / 2 + padL : padL + i * (W - padL - padR) / (allDates.length - 1);
+    const py = v => padT + (H - padT - padB) * (1 - (v - min) / (max - min || 1));
+    const colorOf = s => COLORS[subjects.indexOf(s) % COLORS.length];
+    let svg = [0, 0.5, 1].map(t => {
+        const v = min + (max - min) * (1 - t); const y = padT + (H - padT - padB) * t;
+        return `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="var(--line)" />
+                <text x="${padL - 6}" y="${y + 4}" font-size="10" text-anchor="end" fill="var(--ink-3)">${v.toFixed(0)}</text>`;
+    }).join('');
+    allDates.forEach((d, i) => {
+        svg += `<text x="${px(i)}" y="${H - padB + 16}" font-size="10" text-anchor="middle" fill="var(--ink-3)">${esc(d.slice(5))}</text>`;
+    });
+    for (const subject of subjects) {
+        const pts = bySubject[subject].map(x => `${px(allDates.indexOf(x.date))},${py(x.score)}`).join(' ');
+        if (bySubject[subject].length > 1) svg += `<polyline points="${pts}" fill="none" stroke="${colorOf(subject)}" stroke-width="2" />`;
+        svg += bySubject[subject].map(x => `<circle cx="${px(allDates.indexOf(x.date))}" cy="${py(x.score)}" r="3.5" fill="${colorOf(subject)}">
+            <title>${esc(subject)} · ${esc(x.name)}: ${x.score}</title></circle>
+            <text x="${px(allDates.indexOf(x.date))}" y="${py(x.score) - 8}" font-size="10" text-anchor="middle" fill="${colorOf(subject)}">${x.score}</text>`).join('');
+    }
+    body.innerHTML = `
+        <svg viewBox="0 0 ${W} ${H}" style="width:100%;max-height:280px">${svg}</svg>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:4px">
+            ${subjects.map(s => `<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--ink-2)">
+                <span style="width:14px;height:3px;background:${colorOf(s)};border-radius:2px"></span>${esc(s)}</span>`).join('')}
+        </div>
+        <table style="margin-top:8px"><thead><tr><th>日期</th><th>考试</th><th>学科</th><th>成绩</th><th>较上次</th><th>班级均分</th></tr></thead><tbody>
+        ${subjects.flatMap(subject => bySubject[subject].map((x, i) => {
+            const prev = i > 0 ? bySubject[subject][i - 1].score : null;
+            const diff = prev === null ? null : x.score - prev;
+            const e = exams.find(e2 => e2.id === x.id);
+            const avg = e ? examSubjectAvg(e, subject) : null;
+            return `<tr><td class="sub">${esc(x.date)}</td><td>${esc(x.name)}</td>
+                <td><span class="tag" style="--c:${colorOf(subject)};--c-soft:#eef0fe">${esc(subject)}</span></td>
+                <td><b>${x.score}</b></td>
+                <td>${diff === null ? '<span class="sub">首次</span>'
+                    : `<b style="color:${diff > 0 ? 'var(--green)' : diff < 0 ? 'var(--rose)' : 'var(--ink-3)'}">${diff > 0 ? '↑ +' : diff < 0 ? '↓ ' : '± '}${diff}</b>`}</td>
+                <td class="sub">${avg === null ? '-' : avg.toFixed(1)}</td></tr>`;
+        })).join('')}
+        </tbody></table>`;
 }
 
 async function aiStructure() {
@@ -1285,6 +1876,18 @@ function backToCards() {
     document.getElementById('profileStudent').value = '';
     renderProfile();
 }
+/** 由生日算周岁; 无效/未来日期返回 null */
+function ageOf(birth) {
+    if (!birth) return null;
+    const b = new Date(birth + 'T00:00:00');
+    if (isNaN(b) || b > new Date()) return null;
+    const now = new Date();
+    let age = now.getFullYear() - b.getFullYear();
+    const m = now.getMonth() - b.getMonth();
+    if (m < 0 || (m === 0 && now.getDate() < b.getDate())) age--;
+    return age;
+}
+
 function renderProfile() {
     const box = document.getElementById('profileBody');
     const sel = document.getElementById('profileStudent');
@@ -1343,6 +1946,12 @@ function renderProfile() {
                     <span>出勤率 <b>${attRate === null ? '—' : attRate + '%'}</b></span>
                     <span>积极/消极 <b style="color:var(--green)">${posN}</b>/<b style="color:var(--rose)">${negN}</b></span>
                 </div>
+                ${(st.gender || st.birth || st.note) ? `<div style="margin-top:6px;display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--ink-3);align-items:center">
+                    ${st.gender ? `<span>性别 ${esc(st.gender)}</span>` : ''}
+                    ${st.birth ? `<span>生日 ${esc(st.birth)}${ageOf(st.birth) !== null ? '（' + ageOf(st.birth) + ' 岁）' : ''}</span>` : ''}
+                    <button class="btn btn-ghost btn-sm" data-owner-only style="margin-left:auto" onclick="openStudentModal('${st.id}')">✏ 编辑资料</button>
+                    ${st.note ? `<span style="flex-basis:100%">📝 ${esc(st.note)}</span>` : ''}
+                </div>` : ''}
             </div>
             <button class="btn btn-primary" data-owner-only onclick="openMemoryModal('${st.id}')">＋ 为 TA AI 记一笔</button>
         </div>
@@ -1393,7 +2002,7 @@ function copyProfilePrompt() {
 
     const prompt = `请基于以下结构化记录，为这名学生生成一份学生画像分析，包括：性格特质、优势与亮点、需要关注的方面、发展趋势、给班主任的具体建议（如沟通方式、激励策略、家校沟通要点）。
 
-【学生】${st.name}（学号 ${st.number}，座位 ${st.seat || '-'}，当前积分 ${st.score || 0}，出勤率 ${attRate === null ? '无记录' : attRate + '%'}）
+【学生】${st.name}（学号 ${st.number}，座位 ${st.seat || '-'}${st.gender ? '，' + st.gender : ''}${st.birth ? '，生日 ' + st.birth + (ageOf(st.birth) !== null ? '，' + ageOf(st.birth) + ' 岁' : '') : ''}，当前积分 ${st.score || 0}，出勤率 ${attRate === null ? '无记录' : attRate + '%'}）${st.note ? `\n【备注】${st.note}` : ''}
 
 【成长记忆（按时间排序）】
 ${lines.length ? lines.join('\n') : '（暂无）'}
@@ -1550,6 +2159,143 @@ document.addEventListener('DOMContentLoaded', () => {
     cloudRefreshUI();
     // 平台账号身份探测 (cookie): 已登录则后台同步云端数据 (云端优先)
     cloudIdentify();
+});
+</script>
+
+<!-- ═══ 班班助理 (角色域 @persona/banban-chat; TiMEM 记忆按老师隔离) ═══ -->
+<style>
+.banban-fab { position:fixed; right:26px; bottom:96px; z-index:900; border:none; border-radius:999px; padding:12px 20px; font-family:inherit; font-size:14px; font-weight:700; cursor:pointer; color:#fff; background:linear-gradient(120deg,#0ea5e9,#4f46e5); box-shadow:0 8px 24px rgba(14,165,233,.4); }
+.banban-fab:hover { filter:brightness(1.1); }
+.banban-drawer { position:fixed; right:16px; bottom:76px; z-index:901; width:calc(100vw - 32px); max-width:1400px; height:calc(100vh - 96px); background:#fff; border-radius:18px; box-shadow:0 24px 70px rgba(15,23,42,.35); display:none; flex-direction:column; overflow:hidden; }
+.banban-drawer.show { display:flex; }
+.banban-head { display:flex; align-items:center; gap:8px; padding:12px 14px; background:linear-gradient(120deg,#312e81,#4f46e5); color:#fff; }
+.banban-head b { font-size:14px; flex:1; }
+.banban-head button { border:none; background:rgba(255,255,255,.2); color:#fff; border-radius:8px; padding:4px 9px; font-size:12px; cursor:pointer; font-family:inherit; }
+.banban-msgs { flex:1; overflow-y:auto; padding:12px; background:#f6f7fb; display:flex; flex-direction:column; gap:8px; }
+.banban-msg { max-width:min(86%, 760px); padding:8px 12px; border-radius:12px; font-size:13px; line-height:1.65; white-space:pre-wrap; word-break:break-word; }
+.banban-msg.user { align-self:flex-end; background:var(--accent,#4f46e5); color:#fff; border-bottom-right-radius:4px; }
+.banban-msg.bot { align-self:flex-start; background:#fff; color:var(--ink,#1e293b); border:1px solid var(--line,#e8ecf4); border-bottom-left-radius:4px; }
+.banban-input { display:flex; gap:8px; padding:10px 12px; border-top:1px solid var(--line,#e8ecf4); background:#fff; }
+.banban-input textarea { flex:1; min-height:44px; max-height:110px; resize:none; border:1.5px solid var(--line,#e8ecf4); border-radius:10px; padding:8px 10px; font-family:inherit; font-size:13px; outline:none; }
+.banban-input button { border:none; border-radius:10px; padding:0 16px; font-family:inherit; font-size:13px; font-weight:600; cursor:pointer; color:#fff; background:var(--accent,#4f46e5); }
+.banban-input button:disabled { opacity:.5; cursor:default; }
+</style>
+<button class="banban-fab" id="banbanFab" onclick="toggleBanban()">🤖 班班助理</button>
+<div class="banban-drawer" id="banbanDrawer">
+    <div class="banban-head">
+        <b>🤖 班班助理</b>
+        <button onclick="clearBanban()" title="清空对话">🗑</button>
+        <button onclick="toggleBanban()">✕</button>
+    </div>
+    <div class="banban-msgs" id="banbanMsgs"></div>
+    <div class="banban-input">
+        <textarea id="banbanText" placeholder="问问学生情况, 如: 张三最近成绩怎么样?&#10;这个月哪些学生被扣过分?"></textarea>
+        <button id="banbanSendBtn" onclick="sendBanban()">发送</button>
+    </div>
+</div>
+<script>
+// ── 班班助理前端: 组装班级实时上下文 → /app/banban/chat (薄路由) ──
+let banbanHistory = [];
+let banbanOpen = false;
+const banbanStoreKey = () => 'banban_chat_' + (CLOUD.spaceId || 'local');
+
+function toggleBanban() {
+    banbanOpen = !banbanOpen;
+    document.getElementById('banbanDrawer').classList.toggle('show', banbanOpen);
+    if (banbanOpen) {
+        banbanHistory = [];
+        try { banbanHistory = JSON.parse(localStorage.getItem(banbanStoreKey()) || '[]') || []; } catch (e) {}
+        renderBanban();
+        if (!banbanHistory.length) addBanbanMsg('bot',
+            '你好，我是班班助理 🤖\n我可以基于当前班级的名册、记忆本、考试成绩和考勤回答你的问题，比如：\n· 张三最近成绩怎么样？\n· 这个月哪些学生被扣过分？\n· 对比一下李四和王五的近况。\n(对话要点会存入长期记忆, 下次可接着聊)',
+            false);
+        document.getElementById('banbanText').focus();
+    }
+}
+function addBanbanMsg(role, text, save = true) {
+    const box = document.getElementById('banbanMsgs');
+    const div = document.createElement('div');
+    div.className = 'banban-msg ' + role;
+    div.textContent = text;
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+    if (save) {
+        banbanHistory.push({ role: role === 'user' ? 'user' : 'assistant', content: text });
+        try { localStorage.setItem(banbanStoreKey(), JSON.stringify(banbanHistory.slice(-60))); } catch (e) {}
+    }
+}
+function renderBanban() {
+    const box = document.getElementById('banbanMsgs');
+    box.innerHTML = '';
+    banbanHistory.forEach(m => {
+        const div = document.createElement('div');
+        div.className = 'banban-msg ' + (m.role === 'user' ? 'user' : 'bot');
+        div.textContent = m.content;
+        box.appendChild(div);
+    });
+    box.scrollTop = box.scrollHeight;
+}
+function clearBanban() {
+    if (!banbanHistory.length || !confirm('清空班班助理对话记录？')) return;
+    banbanHistory = [];
+    localStorage.removeItem(banbanStoreKey());
+    renderBanban();
+}
+// 班级实时上下文快照 (控制在 ~10KB)
+function buildBanbanContext() {
+    const active = students.filter(s => !s.archived);
+    const L = [];
+    L.push('【名册】(' + active.length + '人)');
+    active.forEach(s => L.push(`- ${s.number} ${s.name}${s.seat ? ' 座位' + s.seat : ''}, 积分${s.score || 0}`));
+    const mems = memories.slice(-30);
+    if (mems.length) {
+        L.push('【记忆本·最近' + mems.length + '条】');
+        mems.forEach(m => L.push(`- ${m.date || ''} ${m.studentName || (studentById(m.studentId) || {}).name || '?'} [${(CATS[m.category] || {}).label || m.category}] ${m.title || ''}: ${(m.content || '').slice(0, 80)}`));
+    }
+    if (exams.length) {
+        L.push('【考试成绩】');
+        sortedExams().forEach(e => {
+            const parts = active.map(s => { const v = subjOf(e, s.id); const entries = Object.entries(v); return entries.length ? `${s.name}(${entries.map(([sub, sc]) => sub + sc).join('/')})` : null; }).filter(Boolean);
+            L.push(`- ${e.name} (${e.date}): ` + (parts.join('; ') || '未录入'));
+        });
+    }
+    const today = attendance[todayStr()] || {};
+    const todayRows = active.filter(s => today[s.id]).map(s => `${s.name}:${{ present: '出勤', late: '迟到', leave: '请假', absent: '缺勤' }[today[s.id]] || today[s.id]}`);
+    if (todayRows.length) L.push('【今日考勤】' + todayRows.join(', '));
+    return L.join('\n').slice(0, 10000);
+}
+async function sendBanban() {
+    const ta = document.getElementById('banbanText');
+    const btn = document.getElementById('banbanSendBtn');
+    const q = ta.value.trim();
+    if (!q || btn.disabled) return;
+    if (!CLOUD.user) { addBanbanMsg('bot', '请先通过大厅登录后再使用班班助理 (需要云端 AI 与长期记忆)。', false); return; }
+    ta.value = '';
+    addBanbanMsg('user', q);
+    btn.disabled = true;
+    addBanbanMsg('bot', '思考中…', false);
+    try {
+        const d = await apiCall('POST', '/app/banban/chat', {
+            question: q,
+            context: buildBanbanContext(),
+            history: banbanHistory.slice(-10),
+        });
+        removeLastBanbanDom();
+        addBanbanMsg('bot', d.response || '(空回复)');
+    } catch (e) {
+        removeLastBanbanDom();
+        addBanbanMsg('bot', '✗ 请求失败: ' + e.message + (/401/.test(e.message) ? ' (请回大厅重新登录)' : ''), false);
+    } finally {
+        btn.disabled = false;
+        ta.focus();
+    }
+}
+function removeLastBanbanDom() {
+    const box = document.getElementById('banbanMsgs');
+    if (box.lastChild) box.removeChild(box.lastChild);
+}
+document.getElementById('banbanText').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.isComposing && !e.shiftKey) { e.preventDefault(); sendBanban(); }
 });
 </script>
 </body>

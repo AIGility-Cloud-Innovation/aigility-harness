@@ -25,15 +25,6 @@ import type {
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { TimemClient } from "@timem/dsh-plugin-timem";
-import {
-  timemMemoryService,
-  timemMemoryWriteService,
-  createTimemMemoryProvider,
-  createTimemMemoryWriteProvider,
-  type TimemMemoryClientLike,
-  type TimemMemorySearchRequest,
-} from "./timem-memory-provider.js";
 
 // ── LLM Inference 契约（类型下沉 core，此包只做 re-export 保持兼容）─
 export type {
@@ -258,6 +249,12 @@ interface LlmEndpoint {
   thinking?: "enabled" | "disabled";
 }
 
+/** 剥离末尾 /chat/completions, 统一为 base url */
+function normalizeBase(u: string): string {
+  const s = u.trim().replace(/\/$/, "");
+  return s.toLowerCase().endsWith("/chat/completions") ? s.slice(0, -"/chat/completions".length) : s;
+}
+
 function resolveEndpoint(): LlmEndpoint {
   const provider = process.env.LLM_PROVIDER ?? "litellm";
   const thinking =
@@ -308,6 +305,9 @@ const litellmProvider: Provider<LlmInferenceRequest, LlmInferenceResponse> = {
       if (request[k] !== undefined) payload[k] = request[k] as unknown;
     }
     const endpoint = resolveEndpoint();
+    // 请求级上游覆盖 (可选): 应用自带 LLM 配置时由调用方传入, 优先于 env 全局
+    if (request.upstream?.url) endpoint.completionsUrl = normalizeBase(request.upstream.url) + "/chat/completions";
+    if (request.upstream?.key) endpoint.key = request.upstream.key;
     if (endpoint.thinking) payload["thinking"] = { type: endpoint.thinking };
     const body = JSON.stringify(payload);
 
@@ -413,74 +413,14 @@ const litellmProvider: Provider<LlmInferenceRequest, LlmInferenceResponse> = {
 export const manifest: PluginManifest = {
   name: "@cognitive/llm-inference",
   layer: LayerId.Cognitive,
-  description: "认知核心层：LLM 推理（stub + litellm）+ TiMEM 记忆检索/写入",
+  description: "认知核心层：LLM 推理（stub + litellm）",
   version: "0.3.0",
-  provides: [llmInferenceService, timemMemoryService, timemMemoryWriteService],
+  provides: [llmInferenceService],
   consumes: [],
   preferredCarrier: CarrierKind.Thread,
 };
 
-// 环境变量指纹客户端: /dsh 页面保存配置后 env 会被原地更新,
-// 这里检测指纹变化自动重建 TimemClient, 实现「保存配置即热生效」(无需重启)。
-// searchMemory 带云端契约兼容: Gitea 插件 0.1.0 发 query 字段, 而 api.timem.cloud
-// 要求 query_text —— 客户端调用失败时自动用 query_text 兼容重试一次。
-class EnvTimemClient implements TimemMemoryClientLike {
-  private inner: TimemClient | null = null;
-  private fp = "";
-
-  private ensure(): TimemClient {
-    const fp = `${process.env.TIMEM_API_KEY ?? ""}|${process.env.TIMEM_BASE_URL ?? ""}`;
-    if (!this.inner || this.fp !== fp) {
-      this.inner = new TimemClient({
-        apiKey: process.env.TIMEM_API_KEY ?? "",
-        baseUrl: process.env.TIMEM_BASE_URL,
-      });
-      this.fp = fp;
-    }
-    return this.inner;
-  }
-
-  async searchMemory(req: TimemMemorySearchRequest): Promise<unknown> {
-    const client = this.ensure();
-    try {
-      return await client.searchMemory({
-        query: req.query,
-        user_id: req.user_id ?? "anonymous",
-        agent_id: req.agent_id,
-        limit: req.limit ?? 5,
-      });
-    } catch (primaryErr) {
-      // 兼容重试: 直接发 query_text 字段 (云端契约)
-      const base = (process.env.TIMEM_BASE_URL ?? "http://localhost:8001").replace(/\/$/, "");
-      const resp = await fetch(`${base}/api/v1/memory/search`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-API-Key": process.env.TIMEM_API_KEY ?? "" },
-        body: JSON.stringify({
-          user_id: req.user_id,
-          agent_id: req.agent_id,
-          query_text: req.query,
-          limit: req.limit ?? 5,
-        }),
-        signal: AbortSignal.timeout(20_000),
-      });
-      const text = await resp.text();
-      if (!resp.ok) {
-        // 兼容重试也失败 → 抛出主路径错误 (更接近真实原因)
-        void text;
-        throw primaryErr;
-      }
-      try {
-        return JSON.parse(text);
-      } catch {
-        throw primaryErr;
-      }
-    }
-  }
-
-  addMemory(opts: Parameters<TimemClient["addMemory"]>[0]) {
-    return this.ensure().addMemory(opts);
-  }
-}
+// TiMEM 记忆检索/写入已迁至行动域 @action/timem-memory(-write) (记忆是对外部系统的工具调用)。
 
 let pluginState: PluginState = PluginState.Registered;
 
@@ -495,17 +435,13 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    // timem 客户端按环境变量构造 (装配方须在 bootstrap 前注入 TIMEM_API_KEY/BASE_URL,
-    // appbase 在 initAppBackend 里从 dsh_plugins 表桥接, 且保存配置时原地更新 env);
-    // 未配置 key 时构造不报错, 调用期失败由 provider 内部捕获并以 ok:false 降级
-    const timemClient = new EnvTimemClient();
     // LLM_PROVIDER=stub 时 stub 先注册(resolve 优先选它) —— 原型/离线自证零外部依赖;
     // 其余取值(缺省/litellm/bigmodel)仍 litellm 优先
     const llmProviders =
       process.env.LLM_PROVIDER === "stub"
         ? [stubProvider, litellmProvider]
         : [litellmProvider, stubProvider];
-    return [...llmProviders, createTimemMemoryProvider(timemClient), createTimemMemoryWriteProvider(timemClient)]; // 先注册 = resolve 优先选它
+    return llmProviders;
   },
   getState(): PluginState {
     return pluginState;

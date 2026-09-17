@@ -136,7 +136,7 @@ export const LAYER_DESCRIPTORS: Record<LayerId, LayerDescriptor> = {
   [L.Persona]: {
     id: L.Persona,
     name: "角色人格层",
-    dependsOn: [L.Infrastructure, L.Cognitive],
+    dependsOn: [L.Infrastructure, L.Cognitive, L.Orchestration],
     alwaysOn: false,
     prototypeCarrier: C.Subprocess,
     productionCarrier: C.Daemon,
@@ -144,7 +144,7 @@ export const LAYER_DESCRIPTORS: Record<LayerId, LayerDescriptor> = {
   [L.Orchestration]: {
     id: L.Orchestration,
     name: "编排规划层",
-    dependsOn: [L.Infrastructure, L.Cognitive],
+    dependsOn: [L.Infrastructure, L.Cognitive, L.Action],
     alwaysOn: false,
     prototypeCarrier: C.Thread,
     productionCarrier: C.NetworkService,
@@ -152,7 +152,7 @@ export const LAYER_DESCRIPTORS: Record<LayerId, LayerDescriptor> = {
   [L.Action]: {
     id: L.Action,
     name: "行动执行工具层",
-    dependsOn: [L.Infrastructure, L.Orchestration],
+    dependsOn: [L.Infrastructure],
     alwaysOn: false,
     prototypeCarrier: C.Subprocess,
     productionCarrier: C.Daemon,

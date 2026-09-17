@@ -3,12 +3,23 @@
  * 从 backend.ts 迁出 (管理界面插件化)。宿主见 ../dsh-host.ts。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { dshLoadPlugin, dshLoadEnabled, dshStatus } from "../dsh-host.js";
+import { dshLoadPlugin, dshLoadEnabled, dshStatus, dshAgentRun, dshAgentPlugins } from "../dsh-host.js";
+import { dshBaseRows, dshSuiteVersions, isJsExpr, installedDshPackages } from "@aigility-harness/dsh-interop";
 import { json, readBody, pool, bearerUser, isAdminUser, writeAudit, emailOf, parseEnvText } from "./context.js";
+
+/** 把 config 里的 JsExpr 原文渲染成 js(...) 字符串 (供展示, 不求值) */
+function renderConfig(v: unknown): unknown {
+  if (isJsExpr(v)) return `js(${v.__jsExpr})`;
+  if (Array.isArray(v)) return v.map(renderConfig);
+  if (typeof v === "object" && v !== null) {
+    return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, renderConfig(x)]));
+  }
+  return v ?? null;
+}
 
 /** dsh 路由处理; 返回 true = 已响应 */
 export async function handle(req: IncomingMessage, res: ServerResponse, path: string, method: string): Promise<boolean> {
-  if (!path.startsWith("/app/dsh/plugins")) return false;
+  if (!path.startsWith("/app/dsh/")) return false;
     // 响应追踪: 块内 return json(...) 只退出 IIFE, 由"是否已 writeHead"判定 handled
     let responded = false;
     const __wh = res.writeHead.bind(res);
@@ -18,6 +29,67 @@ export async function handle(req: IncomingMessage, res: ServerResponse, path: st
     };
   try {
     await (async () => {
+    // ── 管理员: 官方能力目录 (dsh-base patch 行清单, 只读展示, 不求值) ──
+    if (method === "GET" && path === "/app/dsh/catalog") {
+      const adminId = bearerUser(req);
+      if (!adminId) return json(res, 401, { error: "未授权: 请先登录" });
+      if (!(await isAdminUser(adminId))) return json(res, 403, { error: "需要管理员权限" });
+      const rows = dshBaseRows().map((r) => ({
+        id: r.id ?? null,
+        name: r.name,
+        disabled: r.disabled ?? false,
+        // js(...) 原文条件 / 静态禁用都算「不默认启用」展示态
+        disabledText: isJsExpr(r.disabled) ? `js(${r.disabled.__jsExpr})` : r.disabled === true ? "默认禁用" : null,
+        notes: (r.notes ?? "").length > 300 ? (r.notes ?? "").slice(0, 300) + "…" : (r.notes ?? ""),
+        config: renderConfig(r.config ?? null),
+      }));
+      return json(res, 200, { versions: dshSuiteVersions(), total: rows.length, rows });
+    }
+
+    // ── 管理员: 已安装的官方 dsh 插件包 (依赖树实装盘点, 与清单对齐) ──
+    if (method === "GET" && path === "/app/dsh/installed") {
+      const adminId = bearerUser(req);
+      if (!adminId) return json(res, 401, { error: "未授权: 请先登录" });
+      if (!(await isAdminUser(adminId))) return json(res, 403, { error: "需要管理员权限" });
+      const versions = dshSuiteVersions();
+      const pkgs = installedDshPackages().map((p) => ({
+        name: p.name,
+        version: p.version,
+        description: p.description.length > 160 ? p.description.slice(0, 160) + "…" : p.description,
+        officialRowIds: p.officialRowIds,
+        isPlugin: p.isPlugin,
+      }));
+      return json(res, 200, {
+        suite: versions.dsh,
+        cordis: versions.cordis,
+        total: pkgs.length,
+        pluginCount: pkgs.filter((p) => p.isPlugin).length,
+        packages: pkgs,
+      });
+    }
+
+    // ── 管理员: Agent 冒烟通道 (官方 headless agent, LLM 上游=兼容网关) ──
+    if (method === "POST" && path === "/app/dsh/agent/run") {
+      const adminId = bearerUser(req);
+      if (!adminId) return json(res, 401, { error: "未授权: 请先登录" });
+      if (!(await isAdminUser(adminId))) return json(res, 403, { error: "需要管理员权限" });
+      const body = await readBody(req);
+      const task = String(body.task ?? "").trim();
+      if (!task) return json(res, 400, { error: "task 必填" });
+      const adminEmail = await emailOf(adminId);
+      const result = await dshAgentRun(task);
+      void writeAudit(adminEmail, "dsh.agent_run", task.slice(0, 40), result.ok ? `ok ${result.durationMs}ms` : `失败: ${result.error?.slice(0, 80)}`);
+      return json(res, result.ok ? 200 : 502, result);
+    }
+
+    // ── 管理员: 可体验插件清单 (headless profile 用户补丁层盘点) ──
+    if (method === "GET" && path === "/app/dsh/agent/plugins") {
+      const adminId = bearerUser(req);
+      if (!adminId) return json(res, 401, { error: "未授权: 请先登录" });
+      if (!(await isAdminUser(adminId))) return json(res, 403, { error: "需要管理员权限" });
+      return json(res, 200, { plugins: dshAgentPlugins() });
+    }
+
     // ── 管理员: DSH 插件管理 (cordis 插件注册/配置/加载) ──
     if (path.startsWith("/app/dsh/plugins")) {
       const adminId = bearerUser(req);

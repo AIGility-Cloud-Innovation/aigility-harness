@@ -51,6 +51,14 @@ import {
   type ClaudeAgentRequest,
   type ClaudeAgentResponse,
 } from "./claude-agent.js";
+import {
+  timemMemoryService,
+  timemMemoryWriteService,
+  createTimemMemoryProvider,
+  createTimemMemoryWriteProvider,
+  type TimemMemoryClientLike,
+} from "./timem-memory-provider.js";
+import { TimemClient } from "@timem/dsh-plugin-timem";
 
 export { textToSpeechService, textToSpeechProvider, minimaxTtsProvider };
 export type { TextToSpeechRequest, TextToSpeechResponse };
@@ -132,12 +140,68 @@ const toolExecutionProvider: Provider<
 export const manifest: PluginManifest = {
   name: "@action/tool-execution",
   layer: LayerId.Action,
-  description: "行动执行层：工具执行占位 + 文本转语音（msedge + MiniMax 双 Provider 热替换）+ 编码代理工人(codex/zcode/claude)",
+  description: "行动执行层：工具执行占位 + 文本转语音（msedge + MiniMax 双 Provider 热替换）+ 编码代理工人(codex/zcode/claude) + TiMEM 记忆检索/写入",
   version: "0.4.0",
-  provides: [toolExecutionService, textToSpeechService, codexAgentService, zcodeAgentService, claudeAgentService],
+  provides: [toolExecutionService, textToSpeechService, codexAgentService, zcodeAgentService, claudeAgentService, timemMemoryService, timemMemoryWriteService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
 };
+
+// 环境变量指纹客户端: /dsh 页面保存配置后 env 会被原地更新,
+// 检测指纹变化自动重建 TimemClient, 实现「保存配置即热生效」(无需重启)。
+// searchMemory 带云端契约兼容: 插件发 query 字段, api.timem.cloud 要求 query_text —— 失败时自动兼容重试一次。
+class EnvTimemClient implements TimemMemoryClientLike {
+  private inner: TimemClient | null = null;
+  private fp = "";
+
+  private ensure(): TimemClient {
+    const fp = `${process.env.TIMEM_API_KEY ?? ""}|${process.env.TIMEM_BASE_URL ?? ""}`;
+    if (!this.inner || this.fp !== fp) {
+      this.inner = new TimemClient({
+        apiKey: process.env.TIMEM_API_KEY ?? "",
+        baseUrl: process.env.TIMEM_BASE_URL,
+      });
+      this.fp = fp;
+    }
+    return this.inner;
+  }
+
+  async searchMemory(req: Parameters<TimemMemoryClientLike["searchMemory"]>[0]): Promise<unknown> {
+    const client = this.ensure();
+    try {
+      return await client.searchMemory({
+        query: req.query,
+        user_id: req.user_id ?? "anonymous",
+        agent_id: req.agent_id,
+        limit: req.limit ?? 5,
+      });
+    } catch (primaryErr) {
+      const base = (process.env.TIMEM_BASE_URL ?? "http://localhost:8001").replace(/\/$/, "");
+      const resp = await fetch(`${base}/api/v1/memory/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-API-Key": process.env.TIMEM_API_KEY ?? "" },
+        body: JSON.stringify({
+          user_id: req.user_id,
+          agent_id: req.agent_id,
+          query_text: req.query,
+          limit: req.limit ?? 5,
+        }),
+        signal: AbortSignal.timeout(20_000),
+      });
+      const text = await resp.text();
+      if (!resp.ok) throw primaryErr;
+      try {
+        return JSON.parse(text);
+      } catch {
+        throw primaryErr;
+      }
+    }
+  }
+
+  addMemory(opts: Parameters<TimemClient["addMemory"]>[0]) {
+    return this.ensure().addMemory(opts);
+  }
+}
 
 let pluginState: PluginState = PluginState.Registered;
 
@@ -152,6 +216,10 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
+    // timem 客户端按环境变量构造 (装配方须在 bootstrap 前注入 TIMEM_API_KEY/BASE_URL,
+    // appbase 在 initAppBackend 里从 dsh_plugins 表桥接, 且保存配置时原地更新 env);
+    // 未配置 key 时构造不报错, 调用期失败由 provider 内部捕获并以 ok:false 降级
+    const timemClient = new EnvTimemClient();
     return [
       toolExecutionProvider,
       textToSpeechProvider,
@@ -159,6 +227,8 @@ export const plugin: LayerPlugin = {
       codexAgentProvider,
       zcodeAgentProvider,
       claudeAgentProvider,
+      createTimemMemoryProvider(timemClient),
+      createTimemMemoryWriteProvider(timemClient),
     ];
   },
   getState(): PluginState {
