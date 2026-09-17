@@ -48,6 +48,7 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
 .mbtn { border:none; background:var(--accent); color:#fff; border-radius:9px; padding:8px 16px; font-weight:600; cursor:pointer; font-size:12.5px; font-family:inherit; }
 .mbtn.g { background:var(--soft); color:var(--accent); }
 .mbtn.s { padding:4px 10px; font-size:11.5px; }
+.mbtn.danger { background:var(--rose-soft); color:var(--rose); }
 .okchip { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; background:var(--green-soft); color:var(--green); }
 .openchip { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; background:#fff3e6; color:#d97706; }
 .offchip { background:#f1f4f9; color:var(--ink2); }
@@ -83,12 +84,14 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
 .login-card .lsub { font-size:12.5px; color:var(--ink2); margin:6px 0 18px; }
 .login-btns { display:flex; gap:10px; margin-top:4px; }
 .login-msg { font-size:12.5px; color:var(--rose); margin-top:12px; min-height:16px; }
-/* 原型演示卡（免登录游客试玩，内嵌 prototype-mode 最小 UI） */
+/* 友情链接卡（登录页侧栏） */
 .proto-card { background:#fff; border-radius:20px; padding:18px 18px 12px; width:560px; max-width:92vw; display:flex; flex-direction:column; box-shadow:0 24px 70px rgba(0,0,0,.4); }
 .proto-card h2 { font-size:20px; }
 .proto-card .lsub { font-size:12.5px; color:var(--ink2); margin:6px 0 12px; }
-.proto-note { font-size:11px; color:var(--ink2); margin-top:8px; opacity:.8; }
-.proto-note code { background:var(--soft); border-radius:5px; padding:1px 6px; }
+.link-list { display:flex; flex-direction:column; gap:8px; }
+.link-list a { display:flex; align-items:center; gap:8px; padding:9px 12px; border:1px solid var(--line,#e8ecf4); border-radius:11px; font-size:13px; color:var(--ink,#1e293b); text-decoration:none; transition:background .15s; }
+.link-list a:hover { background:var(--soft,#f3f5fa); }
+.link-list a small { margin-left:auto; color:var(--ink2,#64748b); font-size:11px; }
 @media (max-width:1060px) { .proto-card { display:none; } }
 </style>
 </head>
@@ -100,7 +103,7 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
     <div class="login-card">
       <h2>🚀 AppBase</h2>
       <div class="lsub">请先登录（或注册）账号，再进入应用大厅<br><small style="opacity:.6">powered by aigility-harness</small></div>
-      <input class="minput" id="lgEmail" placeholder="邮箱" autocomplete="username">
+      <input class="minput" id="lgEmail" placeholder="用户名或邮箱" autocomplete="username">
       <input class="minput" id="lgPassword" type="password" placeholder="密码（注册至少 6 位）" autocomplete="current-password">
       <div class="login-btns">
         <button class="mbtn" style="flex:1" onclick="doLogin(false)">登录</button>
@@ -109,11 +112,14 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
       <div class="login-msg" id="lgMsg"></div>
     </div>
     <div class="proto-card">
-      <h2>🧪 原型演示（免登录）</h2>
-      <div class="lsub">五域 Agent 最小 Web UI —— 游客即点即聊<br><small style="opacity:.6">注册登录后可进应用大厅，体验多角色与完整功能</small></div>
-      <button class="mbtn g" style="width:100%; padding:12px 0; font-size:14px" onclick="openProtoDemo(this)">▶ 打开原型演示</button>
-      <div class="proto-note">需先在本机启动原型服务：<code>pnpm example:prototype</code></div>
-      <div class="proto-msg" id="protoMsg" style="display:none; margin-top:8px; font-size:12.5px; color:var(--rose); min-height:16px"></div>
+      <h2>🔗 友情链接</h2>
+      <div class="lsub">相关项目与平台<br><small style="opacity:.6">注册登录后可进应用大厅，体验多角色与完整功能</small></div>
+      <!-- 编辑友链: 直接增删下面的 <a> 行即可 -->
+      <div class="link-list">
+        <a href="https://git.aigility.cloud/AIGility-Cloud-Innovation/aigility-harness" target="_blank" rel="noopener">🐙 aigility-harness<small>开源仓库</small></a>
+        <a href="https://open.bigmodel.cn" target="_blank" rel="noopener">✨ 智谱 BigModel 开放平台<small>GLM 大模型</small></a>
+        <a href="https://www.timem.cloud" target="_blank" rel="noopener">🧠 TiMEM 太忆<small>长期记忆空间</small></a>
+      </div>
     </div>
   </div>
 </div>
@@ -189,6 +195,11 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
         <textarea class="minput" id="envText" style="min-height:110px;font-family:Consolas,monospace;font-size:12px" placeholder="CLASS_NAME=三年级二班&#10;SCHOOL=实验小学&#10;MAX_STUDENTS=50"></textarea>
         <button class="mbtn" onclick="saveEnv()">保存 .env 配置</button>
         <span id="envMsg" style="font-size:12px;color:var(--ink2);margin-left:8px"></span>
+      </div>
+      <div class="sec">
+        <h3>🗑 卸载应用</h3>
+        <div class="sh">从大厅删除该应用文件，删除后无法找回（.backups 里的历史快照仍保留在磁盘上）。仅管理员可操作。</div>
+        <button class="mbtn danger" onclick="armConfirm(this, uninstallApp)">🗑 卸载此应用</button>
       </div>
     </div>
   </div>
@@ -295,19 +306,20 @@ function doLogin(register) {
   var password = document.getElementById('lgPassword').value;
   var msg = document.getElementById('lgMsg');
   msg.textContent = '';
+  // 登录门前 ?next= 回跳: 仅接受站内相对路径 (防开放重定向)
+  var m = /[?&]next=([^&]+)/.exec(location.search);
+  var next = m ? decodeURIComponent(m[1]) : '';
+  if (next && (!next.startsWith('/') || next.startsWith('//'))) next = '';
   fetchJSON('/app/auth/' + (register ? 'register' : 'login'), {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: email, password: password })
+    body: JSON.stringify({ email: email, password: password, next: next })
   }).then(function(d) {
     if (!d.token) { msg.textContent = '✗ ' + (d.error || '失败'); return; }
     mgToken = d.token;
     userEmail = d.user.email;
     isAdmin = !!d.user.isAdmin;
     sessionStorage.setItem('hall_token', d.token);
-    // 登录门前 ?next= 回跳: 仅接受站内相对路径 (防开放重定向)
-    var m = /[?&]next=([^&]+)/.exec(location.search);
-    var next = m ? decodeURIComponent(m[1]) : '';
-    if (next && next.startsWith('/') && !next.startsWith('//')) { location.href = next; return; }
+    if (next) { location.href = next; return; }
     enterHall();
   }).catch(function(e) { msg.textContent = '✗ ' + e.message; });
 }
@@ -317,23 +329,6 @@ function logout() {
   fetch('/app/auth/logout', { method: 'POST' }).catch(function() {});
   sessionStorage.removeItem('hall_token');
   location.reload();
-}
-// 原型演示按钮: 探测 127.0.0.1:1233 是否在跑, 在跑则新标签打开, 否则提示先启动
-function openProtoDemo(btn) {
-  var msg = document.getElementById('protoMsg');
-  msg.style.display = 'block';
-  msg.style.color = 'var(--ink2)';
-  msg.textContent = '正在检测原型服务…';
-  fetch('http://127.0.0.1:1233/ui', { mode: 'no-cors' })
-    .then(function() {
-      msg.textContent = '';
-      msg.style.display = 'none';
-      window.open('http://127.0.0.1:1233/ui', '_blank');
-    })
-    .catch(function() {
-      msg.style.color = 'var(--rose)';
-      msg.textContent = '✗ 原型服务未启动：请先在本机仓库根目录运行 pnpm example:prototype，启动后重试';
-    });
 }
 document.getElementById('lgPassword').addEventListener('keydown', function(e) {
   if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) doLogin(false);
@@ -417,6 +412,17 @@ function openMg(enc) {
   document.getElementById('mgDrawer').classList.add('show');
 }
 function closeMg() { document.getElementById('mgDrawer').classList.remove('show'); }
+// 卸载应用: DELETE /app/hall/apps/<name> (服务端仅管理员, 删沙箱文件并写审计)
+function uninstallApp() {
+  if (!mgApp) return;
+  fetchJSON('/app/hall/apps/' + encodeURIComponent(mgApp), { method: 'DELETE', headers: jheaders() })
+    .then(function() {
+      toast('已卸载「' + mgApp.replace('.html', '') + '」');
+      closeMg();
+      loadApps(); // 大厅列表里移除该应用
+    })
+    .catch(function(e) { toast('卸载失败: ' + e.message); });
+}
 
 // ── 全局 LLM 配置 (仅管理员) ──
 
