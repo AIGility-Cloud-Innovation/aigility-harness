@@ -369,6 +369,33 @@ pnpm start
 
 登录页右侧内嵌「🧪 原型演示（免登录）」卡片（即 `pnpm example:prototype` 常驻的最小 Web UI）：游客先试玩，UI 顶部提示条引导注册/登录进入应用大厅。
 
+### 搭配官方 DSH Web UI（推荐双面用法）
+
+AppBase 与官方 DSH Web UI 共享一套底座（同一把 `BIGMODEL_API_KEY`、同一个 `examples/.dsh-home` 家目录、同一个 TiMEM 记忆后端），但**分工不同，不互相替代**：
+
+| | AppBase（:1231） | DSH Web UI（:3080） |
+|---|---|---|
+| 定位 | **产品面**：面向最终用户的闭环 | **生态面**：面向管理员/开发者的官方原装驾驶舱 |
+| 承载 | 应用生成/托管/分发、多角色对话、账号·授权·用量·积分 | 官方 dsh 插件体验、记忆写回、提示词/技能调优 |
+| 门禁 | 平台账号 + 应用授权 | 启动时打印的 token URL |
+
+**启动**（与 AppBase 并行运行，互不依赖）：
+
+```bash
+cd examples/appbase
+# 复制 start-dsh-web.cmd.example 为 start-dsh-web.cmd，填与 start-appbase 相同的 BIGMODEL_API_KEY
+# 双击启动 → 浏览器按提示打开 :3080 的 token URL（端口被占会拒绝二次启动，Ctrl+C 停止）
+```
+
+**推荐工作流（双窗接力）**：
+
+1. **日常生成应用 → 只用 AppBase**：`/hall` → 编码工作台选「➕ 新建应用」描述需求 → 开发员起名生成 → 对话流确认卡片 → 大厅分发。全程不需要 DSH Web UI。
+2. **带记忆的官方生态对话 → DSH Web UI**：web profile 已启用 `@timem/dsh-plugin-timem` 0.3.0 的 `agentIntegration`——对话自动注入长期记忆召回，`/remember` 命令写回；这是 AppBase 内角色尚不提供的体验（AppBase 侧记忆走认知层环境变量桥，两端同一 TiMEM 后端）。
+3. **设计 → 落地接力**：在 Web UI 里用编码教练做需求设计（web profile 用户补丁层 `cordis.patch.yml` 加一行 `dsh-plugin-persona-coach` 即可用 `/coach`，机制与 headless 相同），产出完整提示词后回到 AppBase 编码工作台交给「🪶 网页应用开发员」落地生成。
+4. **dsh-plugin-* 验收 → DSH Web UI**：自研插件要进官方生态，先在 Web UI（官方 loader 原装语义）验证「装载后行为与 AppBase 内一致」——这也是本仓库生态共建的既定验收标准。
+
+> 边界提醒：DSH Web UI 不经过 AppBase 的账号/授权/计量/审计体系（它有自己的 token 门禁），不要把最终用户引导到 Web UI；它只服务管理员与插件开发者。
+
 ### 特色案例：企业微信 → Codex
 
 企业微信「智能机器人」原生接入——在企微群里 @机器人，即可驱动 codex 真实干活：
@@ -613,5 +640,6 @@ await root.timem.recallRules({ scene: "简历评估" });        // 规则
 - **纯内核**：`@aigility-harness/kernel-dsh` 只依赖 cordis，零家族套件依赖——不需要 dsh 的下游不被增重。
 - **服务型插件的接入实证（timem 案例，已装载进 dsh web profile）**：`@timem/dsh-plugin-timem` 的实测结论固化为打包规范：① git 直装的插件**必须发布编译产物**——Node 拒绝对 node_modules 内的 TS 源码做类型剥离，`main` 指向 `src/*.ts` 会让官方 loader 必然失败；② 插件须容忍无 config 装载（可选配置全部带回退，缺失时降级而非崩溃）；③ **服务装载 ≠ agent 感知**——纯服务插件（如记忆）对聊天模型不可见，要让 agent "带着记忆说话"还需集成面：召回注入 `systemPrompt.context`、写回做成命令或会话钩子；召回时机/用户身份/写回策略属部署政策，应做成配置而非硬编码。timem 插件 0.3.0 已内置该集成面（`agentIntegration` opt-in：召回注入 + `/remember` 写回，纯 cordis 宿主不配置则保持纯服务形态），dsh web profile 补丁行已启用。
 - **路线图**：资产 → `dsh-plugin-*` 打包映射、反向引入短名单、版本/发布策略、M1–M4 里程碑见 [`docs/dsh-生态共建规划.md`](docs/dsh-生态共建规划.md)。**M1–M2 已完成**（桥接原语 / 官方能力目录 / profile 组合器 / 首个反向插件 `@aigility-harness/dsh-plugin-persona-coach` 已在官方 dsh headless 实跑验收）；M3（角色族 · app-dev · metering）待启动。
+- **怎么用官方 DSH Web UI**：AppBase 与 DSH Web UI 的双面分工与接力工作流见「七、快速开始 → 搭配官方 DSH Web UI」。
 
 ---
