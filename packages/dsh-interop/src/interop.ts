@@ -147,10 +147,11 @@ export async function mountDshRow(
         `包 ${row.name} 中没有可装载的插件导出 (找了 ${row.exportName || "default"} / apply / 函数导出)`,
       );
     }
-    await (ctx as unknown as {
-      plugin: (p: unknown, cfg: unknown) => Promise<void> | void;
+    // 保留 cordis 返回的 Fork 句柄: 调用方可据此单插件卸载 (dispose), 无需销毁整个 Context
+    const fork = await (ctx as unknown as {
+      plugin: (p: unknown, cfg: unknown) => Promise<unknown> | unknown;
     }).plugin(plugin, row.config ?? {});
-    return { status: "mounted", id: row.id };
+    return { status: "mounted", id: row.id, ref: fork };
   } catch (e) {
     return {
       status: "failed",

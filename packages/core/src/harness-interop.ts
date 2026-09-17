@@ -25,7 +25,7 @@ export interface CapabilityDescriptor {
 }
 
 export type CapabilityMountResult =
-  | { status: "mounted"; id?: string }
+  | { status: "mounted"; id?: string; /** substrate 侧句柄 (dsh 家族即 cordis Fork), 供单能力卸载用 */ ref?: unknown }
   | { status: "skipped"; id?: string; reason: string }
   | { status: "failed"; id?: string; error: string };
 

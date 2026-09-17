@@ -9,9 +9,10 @@
  * 进程内 Context 的生命周期与状态记录。
  *
  * 设计要点:
- *  - 懒创建: 第一次「加载」时才 new Context(), 不影响未使用 DSH 的启动路径
- *  - 停用单个插件 = 销毁宿主并重载其余启用的插件 (cordis 单插件卸载需要持有
- *    插件服务句柄, v1 用重建方式实现, 语义等价)
+ *  - 懒创建: 第一次「加载」时才 new Context(), 不影响未使用 DSH 的启动路径;
+ *    但启用中的插件在 initAppBackend 末尾随服务自启 (注册表 enabled 是事实源)
+ *  - 停用单个插件 = 优先用装载时保留的 cordis Fork 句柄原地 dispose (互不干扰);
+ *    句柄不可用时兜底销毁宿主并重载其余启用的插件
  *  - 插件包是 TS 源码入口也没关系: 服务器跑在 tsx 下, 动态 import 时即时编译
  */
 
@@ -22,7 +23,7 @@ import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 
 type AnyCtx = {
-  plugin: (p: unknown, cfg: unknown) => Promise<void> | void;
+  plugin: (p: unknown, cfg: unknown) => Promise<unknown> | unknown;
   destroy?: () => Promise<void> | void;
 };
 
@@ -30,7 +31,7 @@ interface HostState {
   ctx: AnyCtx;
   startedAt: string;
   versions: ReturnType<typeof dshSuiteVersions>;
-  plugins: Map<string, { at: string; error?: string }>;
+  plugins: Map<string, { at: string; error?: string; ref?: unknown }>;
 }
 
 const interop = new DshInterop();
@@ -81,12 +82,58 @@ export async function dshLoadPlugin(rec: DshPluginRecord): Promise<{ ok: boolean
     config: rec.config ?? {},
   }, { resolveFrom: import.meta.url });
   if (r.status === "mounted") {
-    host!.plugins.set(rec.name, { at: new Date().toISOString() });
+    host!.plugins.set(rec.name, { at: new Date().toISOString(), ref: r.ref });
     return { ok: true };
   }
   const error = r.status === "failed" ? r.error : "skipped (disabled)";
   host?.plugins.set(rec.name, { at: new Date().toISOString(), error });
   return { ok: false, error };
+}
+
+/**
+ * 卸载单个插件: 优先用装载时保留的 cordis Fork 句柄原地 dispose
+ * (其余已装载插件不受影响); 句柄不可用 (异常/旧装载) 时兜底为
+ * 销毁宿主并只重载 rest 里的启用插件。
+ */
+export async function dshUnloadPlugin(
+  name: string,
+  rest: DshPluginRecord[] = [],
+): Promise<Record<string, { ok: boolean; error?: string }>> {
+  if (host) {
+    const rec = host.plugins.get(name);
+    const ref = rec?.ref as { dispose?: () => unknown } | undefined;
+    if (rec && ref && typeof ref.dispose === "function") {
+      try {
+        await ref.dispose();
+        host.plugins.delete(name);
+        return {}; // 单卸成功, 无需重载其余
+      } catch { /* 落到重建兜底 */ }
+    }
+  }
+  return dshLoadEnabled(rest);
+}
+
+// ── 插件配置 → 环境变量桥 (声明式) ────────────────────────────────
+// 工程内消费者 (如认知层 @cognitive/timem-memory) 读环境变量而不是 cordis
+// 服务, 这里把注册表 config 声明式映射到环境变量; 管理页保存配置后调用
+// 即热生效, 新增桥接插件只需在此登记一行, 不再写 if 特例。
+const PLUGIN_ENV_BRIDGES: Record<string, Record<string, string>> = {
+  timem: { apiKey: "TIMEM_API_KEY", baseUrl: "TIMEM_BASE_URL", defaultDomain: "TIMEM_DEFAULT_DOMAIN" },
+};
+
+export function applyPluginEnvBridge(
+  name: string,
+  config: Record<string, unknown>,
+  opts?: { onlyIfUnset?: boolean },
+): void {
+  const bridge = PLUGIN_ENV_BRIDGES[name];
+  if (!bridge) return;
+  for (const [cfgKey, envName] of Object.entries(bridge)) {
+    const v = config[cfgKey];
+    if (v === undefined || v === null || String(v) === "") continue;
+    if (opts?.onlyIfUnset && process.env[envName]) continue;
+    process.env[envName] = String(v);
+  }
 }
 
 /** 销毁整个宿主 (停用单个插件后由调用方重载其余启用的插件) */

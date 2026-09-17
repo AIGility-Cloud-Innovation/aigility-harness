@@ -3,7 +3,7 @@
  * 从 backend.ts 迁出 (管理界面插件化)。宿主见 ../dsh-host.ts。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { dshLoadPlugin, dshLoadEnabled, dshStatus, dshAgentRun, dshAgentPlugins } from "../dsh-host.js";
+import { dshLoadPlugin, dshUnloadPlugin, applyPluginEnvBridge, dshStatus, dshAgentRun, dshAgentPlugins } from "../dsh-host.js";
 import { dshBaseRows, dshSuiteVersions, isJsExpr, installedDshPackages } from "@aigility-harness/dsh-interop";
 import { json, readBody, pool, bearerUser, isAdminUser, writeAudit, emailOf, parseEnvText } from "./context.js";
 
@@ -168,12 +168,8 @@ export async function handle(req: IncomingMessage, res: ServerResponse, path: st
           await pool.query(
             "UPDATE dsh_plugins SET enabled = $2, config = $3::jsonb, updated_at = now() WHERE name = $1",
             [name, enabled, JSON.stringify(config)]);
-          // timem 配置热生效: 原地更新认知层读取的环境变量 (无需重启)
-          if (name === "timem") {
-            if (config.apiKey) process.env.TIMEM_API_KEY = String(config.apiKey);
-            if (config.baseUrl) process.env.TIMEM_BASE_URL = String(config.baseUrl);
-            if (config.defaultDomain) process.env.TIMEM_DEFAULT_DOMAIN = String(config.defaultDomain);
-          }
+          // 配置热生效: 原地更新认知层读取的环境变量 (声明式映射, 无需重启)
+          applyPluginEnvBridge(name, config);
           void writeAudit(adminEmail, "dsh.plugin_config", name,
             [body.enabled !== undefined ? `enabled=${enabled}` : null, body.configText !== undefined ? "配置已保存" : null]
               .filter(Boolean).join(", "));
@@ -191,16 +187,17 @@ export async function handle(req: IncomingMessage, res: ServerResponse, path: st
           return json(res, result.ok ? 200 : 500, result);
         }
 
-        // 停用 = 重建宿主, 只加载其余启用的插件
+        // 停用: 优先单插件 dispose (其余插件不受影响); 句柄不可用时兜底重建宿主
         if (method === "POST" && dshAction && dshAction[2] === "unload") {
           const { rows } = await pool.query(
             "SELECT name, package, export_name, config FROM dsh_plugins WHERE enabled = true AND name <> $1",
             [name]);
-          const results = await dshLoadEnabled(rows.map((r) => ({
+          const reloaded = await dshUnloadPlugin(name, rows.map((r) => ({
             name: r.name, package: r.package, export_name: r.export_name, config: r.config ?? {},
           })));
-          void writeAudit(adminEmail, "dsh.plugin_unload", name);
-          return json(res, 200, { ok: true, reloaded: results });
+          void writeAudit(adminEmail, "dsh.plugin_unload", name,
+            Object.keys(reloaded).length > 0 ? "宿主重建重载" : "单插件卸载");
+          return json(res, 200, { ok: true, reloaded });
         }
       }
 
@@ -210,17 +207,15 @@ export async function handle(req: IncomingMessage, res: ServerResponse, path: st
         await pool.query("DELETE FROM dsh_plugins WHERE name = $1", [name]);
         const { rows } = await pool.query(
           "SELECT name, package, export_name, config FROM dsh_plugins WHERE enabled = true");
-        await dshLoadEnabled(rows.map((r) => ({
+        await dshUnloadPlugin(name, rows.map((r) => ({
           name: r.name, package: r.package, export_name: r.export_name, config: r.config ?? {},
         })));
         void writeAudit(adminEmail, "dsh.plugin_delete", name);
         return json(res, 200, { ok: true });
       }
 
-          if (responded) return true;
-    return json(res, 404, { error: "dsh: not found" });
     }
-        if (responded) return true;
+    if (responded) return true;
     return json(res, 404, { error: "dsh: not found" });
     })();
 

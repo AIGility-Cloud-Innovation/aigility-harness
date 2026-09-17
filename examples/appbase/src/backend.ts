@@ -22,7 +22,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { updateModelsUpstream } from "@aigility-harness/layer-infrastructure";
-import { dshLoadPlugin, dshLoadEnabled, dshStatus } from "./dsh-host.js";
+import { dshLoadEnabled, applyPluginEnvBridge } from "./dsh-host.js";
 // ── Admin modules (管理界面插件化): 原语迁至 admin-modules/context, 路由迁至各模块 ──
 import {
   json, readBody, pool, hashPassword, verifyPassword, signToken, setAuthCookie,
@@ -1182,16 +1182,12 @@ export async function initAppBackend(): Promise<void> {
      ON CONFLICT (name) DO NOTHING`,
     [JSON.stringify({ apiKey: "", baseUrl: "http://127.0.0.1:8001", defaultDomain: "appbase" })],
   );
-  // DSH 插件配置 → 认知能力环境变量桥: timem 的 apiKey/baseUrl 存在 dsh_plugins 表,
-  // 未显式设置环境变量时灌入, 让 @cognitive/timem-memory 直接可用
-  // (必须在内核 bootstrap 前执行 —— 本函数的调用时机即满足)。
-  // 注意: 管理页改配置后需重启服务才能刷新到这里。
+  // DSH 插件配置 → 认知能力环境变量桥 (声明式映射见 dsh-host.applyPluginEnvBridge):
+  // timem 的 apiKey/baseUrl 存在 dsh_plugins 表, 未显式设置环境变量时灌入,
+  // 让 @cognitive/timem-memory 直接可用 (必须在内核 bootstrap 前执行 —— 本函数的调用时机即满足)。
   try {
     const { rows } = await pool.query("SELECT config FROM dsh_plugins WHERE name = 'timem'");
-    const cfg = (rows[0]?.config ?? {}) as Record<string, unknown>;
-    if (!process.env.TIMEM_API_KEY && cfg.apiKey) process.env.TIMEM_API_KEY = String(cfg.apiKey);
-    if (!process.env.TIMEM_BASE_URL && cfg.baseUrl) process.env.TIMEM_BASE_URL = String(cfg.baseUrl);
-    if (!process.env.TIMEM_DEFAULT_DOMAIN && cfg.defaultDomain) process.env.TIMEM_DEFAULT_DOMAIN = String(cfg.defaultDomain);
+    applyPluginEnvBridge("timem", (rows[0]?.config ?? {}) as Record<string, unknown>, { onlyIfUnset: true });
   } catch { /* 无 timem 行不影响启动 */ }
 
   // 全局 LLM 平台配置: 种子/应用逻辑在 admin-modules/llm-config.ts (管理界面插件化)
@@ -1282,6 +1278,25 @@ export async function initAppBackend(): Promise<void> {
     }
   } catch (e) {
     console.error("[relay] target env seed failed(忽略):", e);
+  }
+
+  // 启用中的 DSH 插件随服务自启 (注册表 enabled 是唯一事实源, 不能只在管理员
+  // 手动加载时拉起): 逐个装载, 单个失败记录告警但不阻塞主启动。
+  try {
+    const { rows } = await pool.query(
+      "SELECT name, package, export_name, config FROM dsh_plugins WHERE enabled = true");
+    const results = await dshLoadEnabled(rows.map((r) => ({
+      name: r.name, package: r.package, export_name: r.export_name, config: r.config ?? {},
+    })));
+    const failed = Object.entries(results).filter(([, r]) => !r.ok);
+    if (failed.length > 0) {
+      console.warn(`[dsh] ${failed.length}/${rows.length} 个启用插件装载失败: ` +
+        failed.map(([n, r]) => `${n}(${r.error})`).join(", "));
+    } else if (rows.length > 0) {
+      console.log(`[dsh] 已随服务装载 ${rows.length} 个启用插件`);
+    }
+  } catch (e) {
+    console.warn("[dsh] 启用插件自启失败(忽略):", e);
   }
   console.log(`AppBase 后端已就绪 (PG ${PG_CONFIG.host}:${PG_CONFIG.port}/${PG_CONFIG.database})`);
 }
