@@ -343,7 +343,7 @@ tbody tr:last-child td { border-bottom: none; }
         <div class="card">
             <div class="toolbar">
                 <button class="btn btn-primary" data-owner-only onclick="openStudentModal()">＋ 添加学生</button>
-                <button class="btn btn-ghost" onclick="openImportModal()">📥 批量导入名册</button>
+                <button class="btn btn-ghost" onclick="openImportModal()">📥 批量编辑名册</button>
                 <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--ink-2);cursor:pointer"><input type="checkbox" id="showArchived" onchange="renderStudentList()"> 显示已归档</label>
                 <div class="grow"><input id="studentSearch" placeholder="搜索姓名 / 学号…" style="width:100%" oninput="filterStudents()"></div>
             </div>
@@ -460,6 +460,11 @@ tbody tr:last-child td { border-bottom: none; }
         <label class="fl">学号</label><input id="studentNumber" style="width:100%" placeholder="如 20240101">
         <label class="fl">姓名</label><input id="studentName" style="width:100%" placeholder="学生姓名">
         <label class="fl">座位号</label><input id="studentSeat" style="width:100%" placeholder="如 3 排 5 号">
+        <label class="fl">性别</label><select id="studentGender" style="width:100%">
+            <option value="">未填写</option><option value="男">男</option><option value="女">女</option>
+        </select>
+        <label class="fl">生日</label><input id="studentBirth" type="date" style="width:100%">
+        <label class="fl">备注</label><textarea id="studentNote" style="width:100%;min-height:56px" placeholder="兴趣特长、健康状况、家校注意事项等"></textarea>
         <div style="display:flex;gap:10px;margin-top:22px">
             <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="saveStudent()">保存</button>
             <button class="btn btn-ghost" style="flex:1;justify-content:center" onclick="closeModal('studentModal')">取消</button>
@@ -470,14 +475,13 @@ tbody tr:last-child td { border-bottom: none; }
 <!-- 批量导入模态框 -->
 <div class="modal" id="importModal">
     <div class="modal-box">
-        <div class="modal-head"><h3>批量导入名册</h3><button class="modal-x" onclick="closeModal('importModal')">✕</button></div>
+        <div class="modal-head"><h3>批量编辑名册</h3><button class="modal-x" onclick="closeModal('importModal')">✕</button></div>
         <div class="hint" style="font-size:12.5px;color:var(--ink-3);margin:6px 0 10px">
-            每行一名学生，支持「学号,姓名,座位号」（逗号或 Tab 分隔，座位可省略）。也支持只有姓名、每行一个的简单格式。
+            已预填当前名册，可直接编辑。每行一名学生，支持「学号 姓名 座位号」（空格、逗号或 Tab 分隔，座位可省略），也支持只有姓名的简单格式。<b>与现有学生同名（或同学号）的行会更新其学号/座位/姓名，其余行作为新学生添加</b>；只写姓名的行不会改动该生的学号和座位。
         </div>
         <textarea id="importText" style="width:100%;min-height:180px" placeholder="20240101,张三,1排1号&#10;20240102,李四,1排2号&#10;王五"></textarea>
-        <label class="fl"><input type="checkbox" id="importDedupe" checked style="width:auto;margin-right:6px">跳过已存在的学号/姓名</label>
         <div style="display:flex;gap:10px;margin-top:18px">
-            <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="doImport()">导入</button>
+            <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="doImport()">保存</button>
             <button class="btn btn-ghost" style="flex:1;justify-content:center" onclick="closeModal('importModal')">取消</button>
         </div>
     </div>
@@ -1043,14 +1047,14 @@ function renderHeroStats() {
 function renderStudentList() {
     const box = document.getElementById('studentList');
     if (!students.length) {
-        box.innerHTML = `<div class="empty"><div class="icon">👨‍🎓</div><h3>名册还是空的</h3><p>点击「添加学生」或「批量导入名册」开始</p></div>`;
+        box.innerHTML = `<div class="empty"><div class="icon">👨‍🎓</div><h3>名册还是空的</h3><p>点击「添加学生」或「批量编辑名册」开始</p></div>`;
         return;
     }
     const showArchived = document.getElementById('showArchived') && document.getElementById('showArchived').checked;
     const active = students.filter(s => !s.archived);
     const archived = students.filter(s => s.archived);
     if (!showArchived && !active.length) {
-        box.innerHTML = `<div class="empty"><div class="icon">👨‍🎓</div><h3>名册还是空的</h3><p>点击「添加学生」或「批量导入名册」开始</p></div>`;
+        box.innerHTML = `<div class="empty"><div class="icon">👨‍🎓</div><h3>名册还是空的</h3><p>点击「添加学生」或「批量编辑名册」开始</p></div>`;
         return;
     }
     box.innerHTML = `<table><thead><tr>
@@ -1094,6 +1098,9 @@ function openStudentModal(id = null) {
     document.getElementById('studentNumber').value = st.number || '';
     document.getElementById('studentName').value = st.name || '';
     document.getElementById('studentSeat').value = st.seat || '';
+    document.getElementById('studentGender').value = st.gender || '';
+    document.getElementById('studentBirth').value = st.birth || '';
+    document.getElementById('studentNote').value = st.note || '';
     m.classList.add('show');
 }
 function editStudent(id) { openStudentModal(id); }
@@ -1102,14 +1109,25 @@ function saveStudent() {
     const number = document.getElementById('studentNumber').value.trim();
     const name = document.getElementById('studentName').value.trim();
     const seat = document.getElementById('studentSeat').value.trim();
+    const gender = document.getElementById('studentGender').value;
+    const birth = document.getElementById('studentBirth').value;
+    const note = document.getElementById('studentNote').value.trim();
     if (!number || !name) return alert('请填写学号和姓名');
+    const extra = { gender, birth, note };
     if (id) {
         const i = students.findIndex(s => s.id === id);
-        if (i !== -1) students[i] = { ...students[i], number, name, seat };
+        if (i !== -1) {
+            students[i] = { ...students[i], number, name, seat };
+            // 性别/生日/备注: 有值写入, 清空则移除 (不能靠展开覆盖, 否则清空无效)
+            for (const k of ['gender', 'birth', 'note']) {
+                if (extra[k]) students[i][k] = extra[k];
+                else delete students[i][k];
+            }
+        }
     } else {
-        students.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), number, name, seat, score: 0 });
+        students.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), number, name, seat, score: 0, ...extra });
     }
-    saveData(); renderStudentList(); closeModal('studentModal');
+    saveData(); renderAll(); closeModal('studentModal');
 }
 function deleteStudent(id) {
     if (!confirm('删除该学生？其记忆与积分记录将保留在库中。')) return;
@@ -1214,25 +1232,34 @@ function viewProfile(id) {
 
 // ── 批量导入 ──
 function openImportModal() {
-    document.getElementById('importText').value = '';
+    document.getElementById('importText').value = students
+        .map(s => [s.number, s.name, s.seat].filter(Boolean).join(' '))
+        .filter(Boolean).join('\n');
     document.getElementById('importModal').classList.add('show');
 }
 function doImport() {
     const lines = document.getElementById('importText').value.split('\n').map(l => l.trim()).filter(Boolean);
-    const dedupe = document.getElementById('importDedupe').checked;
-    let added = 0, skipped = 0;
+    let added = 0, updated = 0;
     for (const line of lines) {
-        const parts = line.split(/[,，\t]/).map(p => p.trim());
+        const parts = line.split(/[\s,，\t]+/).map(p => p.trim());
         let number = '', name = '', seat = '';
         if (parts.length >= 2) { number = parts[0]; name = parts[1]; seat = parts[2] || ''; }
-        else { name = parts[0]; number = String(students.length + 1 + added); }
-        if (!name) { skipped++; continue; }
-        if (dedupe && students.some(s => s.number === number && number) || students.some(s => s.name === name)) { skipped++; continue; }
-        students.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), number, name, seat, score: 0 });
-        added++;
+        else { name = parts[0]; }
+        if (!name) continue;
+        // 匹配已有学生: 姓名优先, 其次学号; 命中即就地更新 (未填写的字段不改动)
+        const st = students.find(s => s.name === name) || (number && students.find(s => s.number === number));
+        if (st) {
+            if (name) st.name = name;
+            if (parts.length >= 2) st.number = number;
+            if (parts.length >= 3) st.seat = seat;
+            updated++;
+        } else {
+            students.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), number: number || String(students.length + 1 + added), name, seat, score: 0 });
+            added++;
+        }
     }
-    saveData(); renderStudentList(); closeModal('importModal');
-    alert(`导入完成：新增 ${added} 名学生${skipped ? `，跳过 ${skipped} 行` : ''}`);
+    saveData(); renderAll(); closeModal('importModal');
+    alert(`保存完成：更新 ${updated} 名现有学生${updated ? '' : '（无）'}，新增 ${added} 名${added + updated === 0 ? '——未识别到有效行' : ''}`);
 }
 
 // ═══════════════ 考勤 ═══════════════
@@ -1849,6 +1876,18 @@ function backToCards() {
     document.getElementById('profileStudent').value = '';
     renderProfile();
 }
+/** 由生日算周岁; 无效/未来日期返回 null */
+function ageOf(birth) {
+    if (!birth) return null;
+    const b = new Date(birth + 'T00:00:00');
+    if (isNaN(b) || b > new Date()) return null;
+    const now = new Date();
+    let age = now.getFullYear() - b.getFullYear();
+    const m = now.getMonth() - b.getMonth();
+    if (m < 0 || (m === 0 && now.getDate() < b.getDate())) age--;
+    return age;
+}
+
 function renderProfile() {
     const box = document.getElementById('profileBody');
     const sel = document.getElementById('profileStudent');
@@ -1907,6 +1946,12 @@ function renderProfile() {
                     <span>出勤率 <b>${attRate === null ? '—' : attRate + '%'}</b></span>
                     <span>积极/消极 <b style="color:var(--green)">${posN}</b>/<b style="color:var(--rose)">${negN}</b></span>
                 </div>
+                ${(st.gender || st.birth || st.note) ? `<div style="margin-top:6px;display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--ink-3);align-items:center">
+                    ${st.gender ? `<span>性别 ${esc(st.gender)}</span>` : ''}
+                    ${st.birth ? `<span>生日 ${esc(st.birth)}${ageOf(st.birth) !== null ? '（' + ageOf(st.birth) + ' 岁）' : ''}</span>` : ''}
+                    <button class="btn btn-ghost btn-sm" data-owner-only style="margin-left:auto" onclick="openStudentModal('${st.id}')">✏ 编辑资料</button>
+                    ${st.note ? `<span style="flex-basis:100%">📝 ${esc(st.note)}</span>` : ''}
+                </div>` : ''}
             </div>
             <button class="btn btn-primary" data-owner-only onclick="openMemoryModal('${st.id}')">＋ 为 TA AI 记一笔</button>
         </div>
@@ -1957,7 +2002,7 @@ function copyProfilePrompt() {
 
     const prompt = `请基于以下结构化记录，为这名学生生成一份学生画像分析，包括：性格特质、优势与亮点、需要关注的方面、发展趋势、给班主任的具体建议（如沟通方式、激励策略、家校沟通要点）。
 
-【学生】${st.name}（学号 ${st.number}，座位 ${st.seat || '-'}，当前积分 ${st.score || 0}，出勤率 ${attRate === null ? '无记录' : attRate + '%'}）
+【学生】${st.name}（学号 ${st.number}，座位 ${st.seat || '-'}${st.gender ? '，' + st.gender : ''}${st.birth ? '，生日 ' + st.birth + (ageOf(st.birth) !== null ? '，' + ageOf(st.birth) + ' 岁' : '') : ''}，当前积分 ${st.score || 0}，出勤率 ${attRate === null ? '无记录' : attRate + '%'}）${st.note ? `\n【备注】${st.note}` : ''}
 
 【成长记忆（按时间排序）】
 ${lines.length ? lines.join('\n') : '（暂无）'}
@@ -2121,13 +2166,13 @@ document.addEventListener('DOMContentLoaded', () => {
 <style>
 .banban-fab { position:fixed; right:26px; bottom:96px; z-index:900; border:none; border-radius:999px; padding:12px 20px; font-family:inherit; font-size:14px; font-weight:700; cursor:pointer; color:#fff; background:linear-gradient(120deg,#0ea5e9,#4f46e5); box-shadow:0 8px 24px rgba(14,165,233,.4); }
 .banban-fab:hover { filter:brightness(1.1); }
-.banban-drawer { position:fixed; right:20px; bottom:76px; z-index:901; width:400px; max-width:calc(100vw - 32px); height:540px; max-height:calc(100vh - 120px); background:#fff; border-radius:18px; box-shadow:0 24px 70px rgba(15,23,42,.35); display:none; flex-direction:column; overflow:hidden; }
+.banban-drawer { position:fixed; right:16px; bottom:76px; z-index:901; width:calc(100vw - 32px); max-width:1400px; height:calc(100vh - 96px); background:#fff; border-radius:18px; box-shadow:0 24px 70px rgba(15,23,42,.35); display:none; flex-direction:column; overflow:hidden; }
 .banban-drawer.show { display:flex; }
 .banban-head { display:flex; align-items:center; gap:8px; padding:12px 14px; background:linear-gradient(120deg,#312e81,#4f46e5); color:#fff; }
 .banban-head b { font-size:14px; flex:1; }
 .banban-head button { border:none; background:rgba(255,255,255,.2); color:#fff; border-radius:8px; padding:4px 9px; font-size:12px; cursor:pointer; font-family:inherit; }
 .banban-msgs { flex:1; overflow-y:auto; padding:12px; background:#f6f7fb; display:flex; flex-direction:column; gap:8px; }
-.banban-msg { max-width:86%; padding:8px 12px; border-radius:12px; font-size:13px; line-height:1.65; white-space:pre-wrap; word-break:break-word; }
+.banban-msg { max-width:min(86%, 760px); padding:8px 12px; border-radius:12px; font-size:13px; line-height:1.65; white-space:pre-wrap; word-break:break-word; }
 .banban-msg.user { align-self:flex-end; background:var(--accent,#4f46e5); color:#fff; border-bottom-right-radius:4px; }
 .banban-msg.bot { align-self:flex-start; background:#fff; color:var(--ink,#1e293b); border:1px solid var(--line,#e8ecf4); border-bottom-left-radius:4px; }
 .banban-input { display:flex; gap:8px; padding:10px 12px; border-top:1px solid var(--line,#e8ecf4); background:#fff; }
