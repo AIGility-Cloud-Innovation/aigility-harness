@@ -271,12 +271,30 @@ export async function appBackendHandler(
       const chat = await kernel.registry.resolve<unknown, { response?: string; degraded?: boolean }>(
         { id: "@persona/banban-chat", versionRange: "^1.0.0" });
       if (!chat.ok) return json(res, 503, { error: chat.error || "班班助理能力未注册" });
+      // LLM 跟随小本本应用的应用级配置 (app_llm_config); 无配置时回退全局 env。
+      // 应用凭据不出后端; 需对该应用有 owner/成员/管理员身份才可使用。
+      const NB_APP = "teacher-notebook.html";
+      const { rows: nbApp } = await pool.query("SELECT owner_id FROM apps WHERE id = $1", [NB_APP]);
+      if (nbApp.length === 0) return json(res, 404, { error: "应用不存在: " + NB_APP });
+      const nbOwner = nbApp[0].owner_id === bbUserId;
+      const nbMember = !nbOwner
+        ? (await pool.query("SELECT 1 FROM app_members WHERE app_id = $1 AND user_id = $2", [NB_APP, bbUserId])).rowCount! > 0
+        : false;
+      if (!nbOwner && !nbMember && !(await isAdminUser(bbUserId))) {
+        return json(res, 403, { error: "你没有「班主任小本本」的访问权限" });
+      }
+      const { rows: llmRows } = await pool.query(
+        "SELECT url, key, model FROM app_llm_config WHERE app_id = $1", [NB_APP]);
+      const llmCfg = llmRows[0]?.key
+        ? { url: llmRows[0].url || "", key: llmRows[0].key, model: llmRows[0].model || "" }
+        : undefined;
       const r = await chat.value.execute(
         {
           user_input: question,
           session_id: `banban-${bbUserId}`,
           user_key: await emailOf(bbUserId),
           class_context: String(body.context ?? "").slice(0, 12000),
+          ...(llmCfg ? { llm: llmCfg } : {}),
           history: Array.isArray(body.history) ? body.history.slice(-12) : [],
         },
         bbCtx,

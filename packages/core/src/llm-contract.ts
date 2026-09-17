@@ -37,6 +37,16 @@ export interface LlmInferenceRequest {
    * 缺失时计量退回按 sessionId 归因。调用方知道用户身份时应始终携带。
    */
   userId?: string;
+  /**
+   * 请求级上游覆盖 (可选): 应用自带 LLM 配置 (url/key) 时由调用方传入,
+   * 优先于 LLM_PROVIDER/env 全局; 不传则走 env 解析。OpenAI 兼容 chat/completions。
+   */
+  upstream?: {
+    /** base url (允许带 /chat/completions, 内部归一化) */
+    url: string;
+    /** API key */
+    key: string;
+  };
 }
 
 export interface LlmInferenceResponse {

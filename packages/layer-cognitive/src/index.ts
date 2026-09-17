@@ -249,6 +249,12 @@ interface LlmEndpoint {
   thinking?: "enabled" | "disabled";
 }
 
+/** 剥离末尾 /chat/completions, 统一为 base url */
+function normalizeBase(u: string): string {
+  const s = u.trim().replace(/\/$/, "");
+  return s.toLowerCase().endsWith("/chat/completions") ? s.slice(0, -"/chat/completions".length) : s;
+}
+
 function resolveEndpoint(): LlmEndpoint {
   const provider = process.env.LLM_PROVIDER ?? "litellm";
   const thinking =
@@ -299,6 +305,9 @@ const litellmProvider: Provider<LlmInferenceRequest, LlmInferenceResponse> = {
       if (request[k] !== undefined) payload[k] = request[k] as unknown;
     }
     const endpoint = resolveEndpoint();
+    // 请求级上游覆盖 (可选): 应用自带 LLM 配置时由调用方传入, 优先于 env 全局
+    if (request.upstream?.url) endpoint.completionsUrl = normalizeBase(request.upstream.url) + "/chat/completions";
+    if (request.upstream?.key) endpoint.key = request.upstream.key;
     if (endpoint.thinking) payload["thinking"] = { type: endpoint.thinking };
     const body = JSON.stringify(payload);
 

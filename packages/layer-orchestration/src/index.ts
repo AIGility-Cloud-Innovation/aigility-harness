@@ -132,6 +132,12 @@ export interface WorkflowEngineRequest {
     /** 召回条数 (默认 4) */
     limit?: number;
   };
+  /** 请求级 LLM 上游覆盖 (可选): 应用自带 LLM 配置时传入, 缺省走 env 全局 */
+  llm?: {
+    url?: string;
+    key?: string;
+    model?: string;
+  };
 }
 
 export interface WorkflowEngineResponse {
@@ -235,10 +241,13 @@ const workflowEngineProvider: Provider<
       const llmRes = (await ctx.call<LlmInferenceRequest, LlmInferenceResponse>(
         llmInferenceRef,
         {
-          model: process.env.LLM_MODEL ?? "glm-4.6",
+          model: request.llm?.model || process.env.LLM_MODEL || "glm-4.6",
           messages,
           temperature: 0.7,
           userId: request.user_key ?? request.customer_id ?? request.merchant_id,
+          ...(request.llm?.url || request.llm?.key
+            ? { upstream: { url: request.llm?.url ?? "", key: request.llm?.key ?? "" } }
+            : {}),
         },
       )) as Result<LlmInferenceResponse>;
       if (llmRes.ok && llmRes.value?.text) {
