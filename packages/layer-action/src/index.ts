@@ -58,6 +58,13 @@ import {
   createTimemMemoryWriteProvider,
   type TimemMemoryClientLike,
 } from "./timem-memory-provider.js";
+export {
+  timemMemoryService,
+  timemMemoryWriteService,
+  createTimemMemoryProvider,
+  createTimemMemoryWriteProvider,
+  type TimemMemoryClientLike,
+};
 import { TimemClient } from "@timem/dsh-plugin-timem";
 
 export { textToSpeechService, textToSpeechProvider, minimaxTtsProvider };
