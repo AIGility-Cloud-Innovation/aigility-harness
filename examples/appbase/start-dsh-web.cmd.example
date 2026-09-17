@@ -1,6 +1,17 @@
 @echo off
 setlocal
 chcp 65001 >nul
+
+rem ---- Resolve node (PATH first, then repo tools\ portable node) ----
+where node >nul 2>nul
+if not errorlevel 1 goto node_ok
+for /d %%d in ("%~dp0..\..\tools\node-v*-win-x64") do set "PATH=%%d;%PATH%"
+where node >nul 2>nul
+if not errorlevel 1 goto node_ok
+echo [dsh-web] node not found - add node to PATH or unpack portable node under repo tools\
+exit /b 1
+:node_ok
+
 rem ============================================================
 rem  DSH official web UI one-click start (local real config --
 rem  git-ignored). Template: start-dsh-web.cmd.example

@@ -13,6 +13,7 @@
     "@aigility-harness/core": "workspace:*",
     "@aigility-harness/layer-infrastructure": "workspace:*",
     "@aigility-harness/layer-cognitive": "workspace:*",
+    "@aigility-harness/layer-action": "workspace:*",
     "@aigility-harness/layer-persona": "workspace:*",
     "@aigility-harness/layer-orchestration": "workspace:*",
     "@wecom/aibot-node-sdk": "^1.0.7",

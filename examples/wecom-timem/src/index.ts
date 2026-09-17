@@ -36,7 +36,7 @@ import {
   createTimemMemoryWriteProvider,
   timemMemoryService,
   timemMemoryWriteService,
-} from "@aigility-harness/layer-cognitive/timem-memory-provider";
+} from "@aigility-harness/layer-action";
 import { TimemClient } from "@timem/dsh-plugin-timem";
 import { loadEnv } from "./env.js";
 import { resolve, dirname } from "node:path";
