@@ -2,14 +2,14 @@
  * 企微机器人 → DSH 会话中继 (wecom-dsh)
  *
  * 在企微上与 harness agent 对话: 每条企微消息转发给官方 dsh headless agent
- * （同一套 llm/tools/session/沙箱/skill 服务图），并用 --resume 在同一会话上
- * 多轮续聊。与 Web GUI 共用 DSH_HOME + 工作区时，企微会话出现在 GUI 的
- * 会话历史里 —— 相当于「在企微上开了一个同一环境、记忆独立存续的 agent 窗口」。
+ * （同一套 llm/tools/session/沙箱/skill 服务图）。headless runner 每次调用都
+ * 新建会话、无 --resume 续聊能力（dsh-headless 源码即如此），多轮记忆由本
+ * 中继自行维护：按聊天保留滚动对话历史，随下一条消息作为上下文注入任务文本。
  *
- * 运行前准备 (.env 或环境变量):
+ * 运行前准备 (examples/wecom-dsh/.env，模板 .env.example):
  *   WECOM_DSH_BOT_ID=xxx          # 企微后台「智能机器人」
  *   WECOM_DSH_BOT_SECRET=xxx
- *   DSH_BIN=D:\\SiteWorkspace\\aigility-harness\\node_modules\\.pnpm\\@deepseek-ai+dsh@0.1.5-rc.2_...\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js
+ *   DSH_BIN=D:\\...\\@deepseek-ai\\dsh\\lib\\bin.js
  *   DSH_HOME=D:\\SiteWorkspace\\aigility-harness\\examples\\.dsh-home
  *   DEEPSEEK_API_KEY=xxx          # headless 上游 (OpenAI 兼容, 可指向 bigmodel 网关)
  *   DEEPSEEK_BASE_URL=https://... # 可选
@@ -17,9 +17,9 @@
  * 启动: pnpm --filter wecom-dsh start
  *
  * 企微指令:
- *   普通消息            → 转发给 agent（同会话多轮）
- *   /new                → 放弃当前会话，下条消息开新会话
- *   /session            → 查看当前会话 id
+ *   普通消息            → 转发给 agent（滚动上下文多轮）
+ *   /new                → 清空当前聊天的对话历史
+ *   /session            → 查看当前聊天保留的轮数
  */
 import {
   bootstrap,
@@ -45,13 +45,14 @@ import { InMemoryKernelAdapter } from "prototype-mode/in-memory-kernel";
 import { plugin as infrastructurePlugin } from "@aigility-harness/layer-infrastructure";
 import { wecomIngressProvider } from "@aigility-harness/layer-infrastructure";
 import { loadEnv } from "./env.js";
-import { dshRun, listSessions, SessionStore } from "./dsh-cli.js";
-import { resolve, dirname } from "node:path";
+import { dshRun } from "./dsh-cli.js";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path, { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "../../../");
-const STATE_FILE = resolve(__dirname, "../.state/sessions.json");
+const STATE_FILE = resolve(__dirname, "../.state/transcripts.json");
 
 // ── 会话中继能力（与角色相同的调用契约: {user_input,...} → {response}）──
 
@@ -70,11 +71,54 @@ export const dshRelayService: ServiceDefinition<{ user_input: string; user_id?: 
 /** 企微 Markdown 长度上限（保守截断，保留尾部结论） */
 const MAX_REPLY = 3500;
 
+/** 滚动上下文上限：最多保留的对话轮数 / 总字符数（超出丢最旧） */
+const MAX_TURNS = 12;
+const MAX_CONTEXT_CHARS = 6000;
+
+/**
+ * 按 chatId 滚动对话历史（JSON 持久化，重启不丢）。
+ * headless runner 无 --resume，多轮记忆靠把此历史拼进下一条任务文本。
+ */
+class TranscriptStore {
+  private map = new Map<string, Array<{ role: "user" | "assistant"; text: string }>>();
+  constructor(private readonly filePath: string) {
+    try {
+      if (existsSync(filePath)) {
+        const raw = JSON.parse(readFileSync(filePath, "utf8")) as Record<string, Array<{ role: "user" | "assistant"; text: string }>>;
+        for (const [k, v] of Object.entries(raw)) if (Array.isArray(v)) this.map.set(k, v);
+      }
+    } catch (e) {
+      console.warn("[transcript] 读取失败, 从空历史开始:", e);
+    }
+  }
+  get(chatId: string): Array<{ role: "user" | "assistant"; text: string }> {
+    return this.map.get(chatId) ?? [];
+  }
+  push(chatId: string, role: "user" | "assistant", text: string): void {
+    const turns = this.get(chatId);
+    turns.push({ role, text });
+    while (turns.length > MAX_TURNS || turns.reduce((n, t) => n + t.text.length, 0) > MAX_CONTEXT_CHARS) {
+      if (turns.length <= 1) break;
+      turns.shift();
+    }
+    this.map.set(chatId, turns);
+    this.flush();
+  }
+  clear(chatId: string): void {
+    this.map.delete(chatId);
+    this.flush();
+  }
+  private flush(): void {
+    mkdirSync(path.dirname(this.filePath), { recursive: true });
+    writeFileSync(this.filePath, JSON.stringify(Object.fromEntries(this.map), null, 2), "utf8");
+  }
+}
+
 function createRelayProvider(): Provider<{ user_input: string; user_id?: string }, { response: string }> {
   const dshBinJs = process.env["DSH_BIN"] ?? "";
   const dshHome = process.env["DSH_HOME"] ?? "";
   const cwd = process.env["DSH_CWD"] ?? REPO_ROOT;
-  const store = new SessionStore(STATE_FILE);
+  const transcript = new TranscriptStore(STATE_FILE);
 
   const extraEnv: Record<string, string> = {};
   for (const key of ["DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DSH_PERMISSION_MODE"]) {
@@ -82,8 +126,7 @@ function createRelayProvider(): Provider<{ user_input: string; user_id?: string 
     if (v) extraEnv[key] = v;
   }
 
-  const run = (task: string, sessionId?: string) =>
-    dshRun({ dshBinJs, dshHome, cwd, task, resumeSessionId: sessionId, extraEnv });
+  const run = (task: string) => dshRun({ dshBinJs, dshHome, cwd, task, extraEnv });
 
   return {
     service: dshRelayService,
@@ -105,34 +148,30 @@ function createRelayProvider(): Provider<{ user_input: string; user_id?: string 
 
       // 企微侧指令
       if (text === "/new") {
-        store.delete(chatId);
-        return ok({ response: "✅ 已开启新会话，下条消息将创建全新 agent 会话。" });
+        transcript.clear(chatId);
+        return ok({ response: "✅ 已清空当前聊天的对话历史，下条消息从零开始。" });
       }
       if (text === "/session") {
-        const sid = store.get(chatId);
-        return ok({ response: sid ? `当前会话: ${sid}` : "尚无会话，下条消息将创建新会话。" });
+        const turns = transcript.get(chatId).length;
+        return ok({ response: turns > 0 ? `当前保留 ${turns} 轮对话上下文。` : "尚无对话历史。" });
       }
 
-      const before = new Set(listSessions(dshHome).map((s) => s.id));
-      const resumeId = store.get(chatId);
-      console.log(`[relay] chat=${chatId} resume=${resumeId ?? "(新会话)"} task=${text.slice(0, 60)}…`);
-      const result = await run(text, resumeId);
+      // 组装任务文本: 滚动历史 + 本次消息（headless 无 --resume, 多轮靠上下文注入）
+      const history = transcript.get(chatId);
+      const contextBlock = history.length
+        ? history.map((t) => `${t.role === "user" ? "用户" : "助手"}: ${t.text}`).join("\n") + "\n\n"
+        : "";
+      console.log(`[relay] chat=${chatId} history=${history.length}轮 task=${text.slice(0, 60)}…`);
+      const result = await run(contextBlock ? `以下是此前的对话记录（供参考上下文）:\n${contextBlock}请回答本次消息: ${text}` : text);
 
       if (!result.ok) {
         return ok({ response: `⚠️ agent 执行失败 (${(result.durationMs / 1000).toFixed(0)}s):\n${result.error ?? "未知错误"}` });
       }
 
-      // 首条消息: 从新出现的 session 目录里发现会话 id
-      if (!resumeId) {
-        const fresh = listSessions(dshHome).filter((s) => !before.has(s.id));
-        if (fresh.length > 0) {
-          fresh.sort((a, b) => b.mtimeMs - a.mtimeMs);
-          store.set(chatId, fresh[0].id);
-          console.log(`[relay] 新会话已绑定: chat=${chatId} session=${fresh[0].id}`);
-        }
-      }
+      transcript.push(chatId, "user", text);
 
       let response = result.output || "(agent 无文本输出)";
+      transcript.push(chatId, "assistant", response);
       if (response.length > MAX_REPLY) {
         response = response.slice(0, 800) + "\n\n…(中间略)…\n\n" + response.slice(-MAX_REPLY + 800);
       }

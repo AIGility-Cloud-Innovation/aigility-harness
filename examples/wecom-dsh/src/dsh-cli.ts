@@ -4,17 +4,14 @@
  * 原理:
  *   - `dsh --profile headless "任务"` = 官方组合器装配的完整 agent（llm/tools/
  *     session/沙箱/skill 一行不缺），跑一次任务、打印结果、退出
- *   - `dsh --profile headless --resume <sessionId> "任务"` = 在既有会话上续聊
- *     （多轮记忆由官方 session 存储承载）
  *   - 会话落盘于 $DSH_HOME/sessions/<工作区munge>/session-<uuid>，与 Web GUI
  *     共用同一 DSH_HOME 时，GUI 会话历史里能看到企微产生的会话
  *
- * 首条消息后用「sessions 目录里新出现的 session-* 目录」发现会话 id
- * （不依赖工作区路径 munge 规则），后续消息一律 --resume。
+ * 多轮对话: dsh-headless 每次调用都新建会话（session-<uuid>），官方 CLI 无
+ * --resume（那是 tui/web 应用的旗标）；多轮记忆由 index.ts 的 TranscriptStore
+ * 以滚动上下文注入实现。
  */
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import path from "node:path";
 
 export interface DshRunOptions {
   /** dsh CLI 的 bin.js 绝对路径（node 直接跑，避免 .cmd shim 问题） */
@@ -23,10 +20,8 @@ export interface DshRunOptions {
   dshHome: string;
   /** agent 工作目录（决定会话归属的工作区 key） */
   cwd: string;
-  /** 用户消息文本 */
+  /** 用户消息文本（多轮上下文由调用方拼进此文本，见 index.ts TranscriptStore） */
   task: string;
-  /** 续聊的会话 id（缺省 = 新会话） */
-  resumeSessionId?: string;
   /** 注入子进程的环境变量（DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL / DSH_PERMISSION_MODE 等） */
   extraEnv?: Record<string, string>;
   /** 整体超时（默认 300s：agent 干活可能较久） */
@@ -40,12 +35,15 @@ export interface DshRunResult {
   durationMs: number;
 }
 
-/** 运行一次 dsh headless（新会话或 --resume 续聊） */
+/**
+ * 运行一次 dsh headless。
+ * 注意: dsh-headless 每次调用都新建会话（session-<uuid>），官方 CLI 无 --resume
+ * （--resume 是 tui/web 应用的旗标）；多轮对话由 index.ts 的 TranscriptStore 以
+ * 上下文注入实现。
+ */
 export function dshRun(opts: DshRunOptions): Promise<DshRunResult> {
   const started = Date.now();
-  const args = ["--profile", "headless"];
-  if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
-  args.push(opts.task);
+  const args = ["--profile", "headless", opts.task];
 
   return new Promise((resolve) => {
     const child = spawn(
@@ -81,54 +79,4 @@ export function dshRun(opts: DshRunOptions): Promise<DshRunResult> {
       resolve({ ok: false, output: "", error: String(e), durationMs: Date.now() - started });
     });
   });
-}
-
-/** 列出 $DSH_HOME/sessions 下全部 session-* 目录（带创建时间） */
-export function listSessions(dshHome: string): Array<{ dir: string; id: string; mtimeMs: number }> {
-  const root = path.join(dshHome, "sessions");
-  if (!existsSync(root)) return [];
-  const result: Array<{ dir: string; id: string; mtimeMs: number }> = [];
-  for (const wsKey of readdirSync(root)) {
-    const wsDir = path.join(root, wsKey);
-    for (const name of readdirSync(wsDir)) {
-      if (!name.startsWith("session-")) continue;
-      const dir = path.join(wsDir, name);
-      try {
-        result.push({ dir, id: name.slice("session-".length), mtimeMs: statMtimeMs(dir) });
-      } catch { /* 目录刚被清理等竞态，跳过 */ }
-    }
-  }
-  return result;
-}
-
-function statMtimeMs(p: string): number {
-  return statSync(p).mtimeMs;
-}
-
-/** 持久化 chatid → sessionId 映射（JSON 文件） */
-export class SessionStore {
-  private map = new Map<string, string>();
-  constructor(private readonly filePath: string) {
-    try {
-      if (existsSync(filePath)) {
-        const raw = JSON.parse(readFileSync(filePath, "utf8")) as Record<string, string>;
-        for (const [k, v] of Object.entries(raw)) this.map.set(k, v);
-      }
-    } catch (e) {
-      console.warn("[session-store] 读取失败, 从空映射开始:", e);
-    }
-  }
-  get(chatId: string): string | undefined { return this.map.get(chatId); }
-  set(chatId: string, sessionId: string): void {
-    this.map.set(chatId, sessionId);
-    this.flush();
-  }
-  delete(chatId: string): void {
-    this.map.delete(chatId);
-    this.flush();
-  }
-  private flush(): void {
-    mkdirSync(path.dirname(this.filePath), { recursive: true });
-    writeFileSync(this.filePath, JSON.stringify(Object.fromEntries(this.map), null, 2), "utf8");
-  }
 }

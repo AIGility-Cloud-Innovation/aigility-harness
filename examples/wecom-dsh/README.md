@@ -1,10 +1,12 @@
 # wecom-dsh — 在企业微信上与 harness agent 对话
 
 企微消息 → `wecom-ingress` → `@infrastructure/dsh-session-relay` → 官方
-`dsh --profile headless [--resume <sessionId>]` CLI。
+`dsh --profile headless` CLI。
 
 - agent 能力 = 官方组合器装配的完整服务图（llm / tools / session / 沙箱 / skill）
-- 多轮记忆 = 官方 session 存储（`--resume` 续聊同一会话）
+- 多轮对话 = 中继自维护的滚动上下文（headless runner 每次调用都新建会话，
+  官方 CLI **无 `--resume`**——那是 tui/web 应用的旗标；近几轮对话随下一条
+  消息作为上下文注入，历史上限见 `src/index.ts` 的 `MAX_TURNS`/`MAX_CONTEXT_CHARS`）
 - 与 Web GUI 共用 `DSH_HOME` + 工作区时，企微产生的会话会出现在 GUI 的会话历史里
 
 ## 配置（本目录 `.env`，模板 `.env.example`）
@@ -51,16 +53,14 @@ pnpm --filter wecom-dsh start
 
 | 指令 | 行为 |
 |------|------|
-| 普通消息 | 转发给 agent（同一会话多轮续聊） |
-| `/new` | 放弃当前会话，下条消息开新会话 |
-| `/session` | 查看当前绑定的会话 id |
+| 普通消息 | 转发给 agent（滚动上下文多轮对话） |
+| `/new` | 清空当前聊天的对话历史 |
+| `/session` | 查看当前保留的对话轮数 |
 
 ## 说明与边界
 
-- 会话 id 自动发现：首条消息后扫描 `$DSH_HOME/sessions/**/session-*` 的新增目录；
-  chatid → sessionId 映射持久化在 `.state/sessions.json`。
+- 多轮记忆由中继维护：按 chatid 保留滚动对话历史（JSON 持久化在 `.state/transcripts.json`，
+  重启不丢），随每条消息作为上下文注入任务文本——headless runner 本身无会话续聊能力。
 - 每条消息是一次独立 headless 进程：**重型工具调用可用，但进程内状态不跨消息保留**
-  （跨消息记忆靠 session 存储与工作区文件）。
+  （跨消息记忆靠滚动上下文与工作区文件）。
 - agent 跑任务可能较久（默认超时 300s）；企微侧会先收到「🤖 agent 正在处理…」占位。
-- 与 GUI 正打开的同一个会话**不建议**用 `--resume` 并发写（会话文件并发写入有风险）；
-  本示例默认为企微新建独立会话线程。
