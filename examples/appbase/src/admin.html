@@ -105,7 +105,7 @@ textarea.minput { min-height:96px; font-family:Consolas,monospace; }
       </div>
       <div class="regbar" id="addUserBar">
         <div class="row2">
-          <input class="minput" id="auEmail" placeholder="邮箱 (如 teacher@school.edu)">
+          <input class="minput" id="auEmail" placeholder="用户名或邮箱 (如 teacher 或 teacher@school.edu)">
           <input class="minput" id="auPassword" type="password" placeholder="初始密码 (至少6位)">
         </div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
@@ -469,6 +469,8 @@ function toggleMem(id) {
   var tr = document.getElementById('mem-' + id);
   var show = tr.style.display === 'none';
   tr.style.display = show ? '' : 'none';
+  var bar = document.getElementById('membar-' + id);
+  if (bar) bar.classList[show ? 'add' : 'remove']('show');
   if (show) loadMem(id);
 }
 function loadMem(id) {
@@ -504,8 +506,7 @@ function submitAddUser() {
   var email = document.getElementById('auEmail').value.trim();
   var password = document.getElementById('auPassword').value;
   var isAdmin = document.getElementById('auAdmin').checked;
-  if (!email) return toast('✗ 请输入邮箱');
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return toast('✗ 邮箱格式不正确');
+  if (!email) return toast('✗ 请输入用户名或邮箱');
   if (password.length < 6) return toast('✗ 密码至少 6 位');
   fetchJSON('/app/admin/users', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
