@@ -22,3 +22,10 @@ examples/appbase/start-appbase.cmd
 # ZCode CLI 鍦ㄤ粨搴撳唴杩愯鏃剁殑浜х墿
 .zcode/
 examples/timem-live-test/
+
+# 本地工作区辅助(不入库)
+.workbuddy/
+*.bak
+examples/wecom-dsh/.state/
+examples/wecom-chat/node_modules/
+examples/wecom-dsh/node_modules/

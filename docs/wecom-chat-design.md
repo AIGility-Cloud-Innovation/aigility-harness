@@ -1,0 +1,92 @@
+# 设计：在企业微信上与 AI 助手交流（wecom-chat）
+
+> 结论先行：**零新框架代码**。项目已具备企微全链路能力
+> （`@infrastructure/wecom-ingress` WebSocket 长连接入口 + 角色路由 + 流式回复），
+> 只需一个新的「装配示例」`examples/wecom-chat`，把入口路由指向通用对话角色即可。
+
+## 1. 现有资源盘点（全部复用，不新造）
+
+| 环节 | 现成实现 | 位置 |
+|------|---------|------|
+| 企微长连接/认证/重连/心跳 | `@wecom/aibot-node-sdk` WSClient | `packages/layer-infrastructure/src/wecom-ingress.ts` |
+| 消息 → 角色路由（按群 chatid） | `agentRoutes` / `perceptionId` | 同上 |
+| 流式「正在处理…」占位 + Markdown 终稿 | `replyStream` | 同上 |
+| 通用对话角色（平台客服） | `@persona/sales-chat` | `packages/layer-persona/src/sales-chat.ts` |
+| 其它可路由角色 | `harness-guide` / `coding-coach` / `timem-support` / `app-dev`(→codex) | `packages/layer-persona/src/` |
+| LLM 供能 | `layer-cognitive`（litellmProvider） | `packages/layer-cognitive` |
+| 凭证加载 | `.env` 极简加载器 | `examples/wecom-guide/src/env.ts`（复制即用） |
+
+参照范例：`wecom-guide`（企微 → harness-guide）与本设计唯一差别是路由目标角色。
+
+## 2. 架构链路
+
+```
+企微群 @机器人
+   │  WebSocket 长连接 (wss://openws.work.weixin.qq.com, SDK 自动认证/重连)
+   ▼
+@infrastructure/wecom-ingress        ← 现成，不改
+   │  agentRoutes: { "*": "@persona/sales-chat" }
+   ▼
+@persona/sales-chat（通用对话角色，LLM 供能由 layer-cognitive 提供）
+   │  { user_input, user_id }
+   ▼
+replyStream 回企微（先「正在处理…」占位，后 Markdown 终稿）
+```
+
+## 3. 实现内容（仅一个新装配示例）
+
+```
+examples/wecom-chat/
+├── package.json        # 依赖与 wecom-guide 相同（不含 py-bridge）
+└── src/
+    ├── env.ts          # 复制自 wecom-guide 的 .env 加载器
+    └── index.ts        # bootstrap → wecomIngressProvider.execute({ agentRoutes })
+```
+
+关键配置点：
+
+- 凭证：仓库根 `.env` 写 `WECOM_CHAT_BOT_ID` / `WECOM_CHAT_BOT_SECRET`
+  （企微管理后台 →「智能机器人」创建后获取）。
+- 角色路由：默认全部消息 → `@persona/sales-chat`；
+  可用环境变量 `WECOM_CHAT_PERSONA` 一键换成任意现有角色
+  （如 `@persona/coding-coach`、`@persona/harness-guide`；
+  换成 `@persona/app-dev` 即得到编码助手 = `wecom-coder` 的效果）。
+- 可选按群路由：`WECOM_CHAT_ROUTES`（JSON，如
+  `{"wrkJcAaAA":"@persona/coding-coach"}`），未命中走默认角色。
+
+## 4. 运行方式
+
+```bash
+# 1) 企微后台创建「智能机器人」，凭证写入 .env：
+#      WECOM_CHAT_BOT_ID=xxx
+#      WECOM_CHAT_BOT_SECRET=xxx
+pnpm install                     # 链接新示例的 workspace 依赖
+pnpm --filter wecom-chat start   # 启动，控制台出现「已连接」即可
+# 2) 企微群里 @机器人 说话 → AI 回复（Markdown 支持代码块）
+```
+
+## 5. 与「和我（本 harness 会话）交流」的关系 — 已落地：wecom-dsh
+
+`examples/wecom-dsh` 实现了企微 ↔ harness agent 的会话中继：
+
+```
+企微 @机器人 → wecom-ingress → @infrastructure/dsh-session-relay
+                                   │  首条: dsh --profile headless "消息"
+                                   │  续聊: dsh --profile headless --resume <sid> "消息"
+                                   ▼
+                             官方 dsh headless agent（完整服务图: llm/tools/session/沙箱/skill）
+```
+
+- 共用 `DSH_HOME` + 工作区 → 企微产生的会话出现在 GUI 会话历史里；同一套工具与技能。
+- 多轮记忆：官方 session 存储 + `--resume`；chatid→sessionId 映射持久化于
+  `examples/wecom-dsh/.state/sessions.json`；`/new` 开新会话，`/session` 查看绑定。
+- 边界：每条消息 = 一次独立 headless 进程（无进程内跨消息状态）；不建议对 GUI
+  正打开的会话并发 `--resume`，默认为企微建独立会话线程。
+- 注入「GUI 正在对话的这个会话线程」无公开 API（内部 Host API 为 token 门禁的
+  WebSocket 私有协议），故采用同环境独立会话线程方案。
+
+## 6. 后续可选增强（均不影响本次落地）
+
+1. 多角色并存：`agentRoutes` 按群 chatid 映射不同人格（已原生支持）。
+2. 记忆/长期上下文：换路由到 `@persona/timem-support`（TiMEM 记忆客服）。
+3. 同构扩展：钉钉/飞书按 `docs/feishu-ingress-design.md` 的同构范式接入。

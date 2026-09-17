@@ -1,47 +1,200 @@
 @echo off
-chcp 65001 >nul
+rem NOTE: keep this file ASCII-only. Do NOT re-add "chcp 65001" here: switching
+rem the console codepage mid-run can make the host drop or misplace script output.
+setlocal enabledelayedexpansion
 rem ============================================================
-rem  AppBase 一键启动 (模板)
-rem  复制为 start-appbase.cmd (该文件已被 .gitignore 忽略, 可放心填密钥)
-rem  并把下面所有【填】项填好
+rem  AppBase one-click start (Docker / native PostgreSQL compatible)
+rem  Copy to start-appbase.cmd (gitignored, safe to fill secrets)
+rem  Fill all [FILL] placeholders below
+rem
+rem  PG mode auto-detect:
+rem    - docker available -> Docker container appbase-pg (host 5433 -> container 5432, auto create db)
+rem    - docker missing   -> native PG (default 127.0.0.1:5432, psql located automatically)
+rem                         if appbase db missing, auto create via psql to postgres maintenance db
+rem  psql lookup order: PSQL_BIN -> PATH -> <ProgramFiles>\PostgreSQL\<any ver>\bin
+rem  Override if psql lives somewhere unusual: set PSQL_BIN=D:\PostgreSQL\bin
+rem  Force mode: set APPBASE_PG_MODE=docker|native|auto (default auto)
 rem ============================================================
 
-rem ---- PostgreSQL (Docker: 容器 appbase-pg, 宿主 5433, 与代码默认端口对齐) ----
-set APPBASE_PG_PASSWORD=【填:容器 POSTGRES_PASSWORD】
-rem 首次在新机器: 容器不存在时自动创建 (named volume appbase_pg_data 持久化数据)
-docker start appbase-pg 2>nul
+rem ============================================================
+rem  Node/pnpm PATH detect (must run pnpm start at the end)
+rem  If pnpm not in PATH, probe common install dirs and prepend (process-local only)
+rem ============================================================
+where pnpm >nul 2>&1
+if not errorlevel 1 goto pnpm_ok
+set PNPM_FOUND=
+set PNPM_DIR=
+for %%D in (
+  "D:\SiteWorkspace\tools\node-v24.19.0-win-x64"
+  "D:\SiteWorkspace\tools\node-v22.11.0-win-x64"
+  "D:\SiteWorkspace\tools\node-v20.18.0-win-x64"
+  "D:\Program Files\nodejs"
+  "C:\Program Files\nodejs"
+  "C:\Program Files (x86)\nodejs"
+  "%APPDATA%\npm"
+  "%APPDATA%\roaming\npm"
+) do (
+  if not defined PNPM_FOUND if exist "%%~D\pnpm.cmd" set PNPM_DIR=%%~D
+  if not defined PNPM_FOUND if exist "%%~D\pnpm.cmd" set PNPM_FOUND=1
+)
+if not defined PNPM_FOUND (
+  echo [appbase] pnpm not found, please install Node.js + pnpm or add pnpm to PATH
+  pause
+  exit /b 1
+)
+rem NOTE: prepend PATH OUTSIDE the for-block. Inside a block %PATH% is expanded
+rem at parse time, so several matches would overwrite each other instead of accumulating.
+set "PATH=%PNPM_DIR%;%PATH%"
+echo [appbase] pnpm not in PATH, auto-prepended: %PNPM_DIR%
+:pnpm_ok
+
+rem ---- PostgreSQL common config (shared by both modes; password required) ----
+set APPBASE_PG_PASSWORD=[FILL:PostgreSQL password]
+set APPBASE_PG_USER=postgres
+set APPBASE_PG_DATABASE=appbase
+rem Port: Docker mode default 5433, native mode default 5432; leave unset to auto-decide
+rem set APPBASE_PG_PORT=
+rem set APPBASE_PG_HOST=127.0.0.1
+
+rem ---- PG mode (auto/docker/native; auto=detect) ----
+set APPBASE_PG_MODE=auto
+
+rem ============================================================
+rem  PG startup logic (two-mode branch)
+rem ============================================================
+if /i "%APPBASE_PG_MODE%"=="docker" goto pg_docker
+if /i "%APPBASE_PG_MODE%"=="native" goto pg_native
+
+rem ---- auto mode: probe docker availability ----
+docker version >nul 2>&1
+if not errorlevel 1 (
+  echo [appbase] Docker detected, using Docker mode
+  goto pg_docker
+)
+echo [appbase] Docker not detected, falling back to native PG mode
+goto pg_native
+
+:pg_docker
+rem ---- Docker mode: container appbase-pg (host 5433 -> container 5432, auto create db) ----
+if not defined APPBASE_PG_PORT set APPBASE_PG_PORT=5433
+docker start appbase-pg >nul 2>&1
 if errorlevel 1 (
+  echo [appbase] First-time creating Docker container appbase-pg ...
   docker run -d --name appbase-pg --restart unless-stopped ^
-    -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=%APPBASE_PG_PASSWORD% ^
-    -e POSTGRES_DB=appbase -p 127.0.0.1:5433:5432 ^
+    -e POSTGRES_USER=%APPBASE_PG_USER% -e POSTGRES_PASSWORD=%APPBASE_PG_PASSWORD% ^
+    -e POSTGRES_DB=%APPBASE_PG_DATABASE% -p 127.0.0.1:%APPBASE_PG_PORT%:5432 ^
     -v appbase_pg_data:/var/lib/postgresql/data postgres:16-alpine
+  if errorlevel 1 (
+    echo [appbase] Docker container start failed, check Docker Desktop is running
+    pause
+    exit /b 1
+  )
+)
+goto pg_done
+
+:pg_native
+rem ---- Native PG mode: default 5432 ----
+if not defined APPBASE_PG_PORT set APPBASE_PG_PORT=5432
+
+rem Resolve psql.exe WITHOUT hardcoding PostgreSQL version numbers:
+rem   1. PSQL_BIN exported by the caller  2. PATH  3. <ProgramFiles>\PostgreSQL\<any ver>\bin
+set APPBASE_PSQL_BIN=
+if defined PSQL_BIN if exist "%PSQL_BIN%\psql.exe" set APPBASE_PSQL_BIN=%PSQL_BIN%\
+if defined APPBASE_PSQL_BIN goto psql_resolved
+for /f "delims=" %%P in ('where psql 2^>nul') do if not defined APPBASE_PSQL_BIN set APPBASE_PSQL_BIN=%%~dpP
+if defined APPBASE_PSQL_BIN goto psql_resolved
+for %%R in ("%ProgramFiles%\PostgreSQL" "%ProgramFiles(x86)%\PostgreSQL") do (
+  if exist "%%~R\" (
+    for /d %%V in ("%%~R\*") do (
+      if not defined APPBASE_PSQL_BIN if exist "%%~V\bin\psql.exe" set APPBASE_PSQL_BIN=%%~V\bin\
+    )
+  )
+)
+if not defined APPBASE_PSQL_BIN goto psql_missing
+
+:psql_resolved
+echo [appbase] using psql: !APPBASE_PSQL_BIN!psql.exe
+set "PATH=!APPBASE_PSQL_BIN!;%PATH%"
+
+rem ---- fail LOUDLY on password/connectivity problems (never a silent pause) ----
+if "%APPBASE_PG_PASSWORD%"=="" (
+  echo [appbase] APPBASE_PG_PASSWORD is empty - fill it in at the top of this file
+  pause
+  exit /b 1
+)
+set "PGPASSWORD=%APPBASE_PG_PASSWORD%"
+echo [appbase] Connecting to PostgreSQL at 127.0.0.1:%APPBASE_PG_PORT% as %APPBASE_PG_USER% ...
+psql -h 127.0.0.1 -p %APPBASE_PG_PORT% -U %APPBASE_PG_USER% -d postgres -tAc "SELECT 1" >nul 2>&1
+if errorlevel 1 (
+  echo [appbase] Cannot connect to PostgreSQL at 127.0.0.1:%APPBASE_PG_PORT%
+  echo           - service stopped? run: net start postgresql-15   [or use services.msc]
+  echo           - wrong port / user / password? edit APPBASE_PG_PORT, APPBASE_PG_USER, APPBASE_PG_PASSWORD
+  pause
+  exit /b 1
 )
 
-rem ---- LLM 上游 (必填; 不填则页面能开, 对话/AI 报"该应用尚未配置 LLM") ----
-set BIGMODEL_API_KEY=【填:智谱开放平台 API Key】
+rem ---- create the appbase db if it does not exist ----
+psql -h 127.0.0.1 -p %APPBASE_PG_PORT% -U %APPBASE_PG_USER% -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='%APPBASE_PG_DATABASE%'" 2>nul | findstr 1 >nul
+if errorlevel 1 (
+  echo [appbase] Database %APPBASE_PG_DATABASE% missing, auto-creating ...
+  psql -h 127.0.0.1 -p %APPBASE_PG_PORT% -U %APPBASE_PG_USER% -d postgres -c "CREATE DATABASE %APPBASE_PG_DATABASE%" >nul 2>&1
+  if errorlevel 1 (
+    echo [appbase] Auto-create db failed, run manually: createdb -p %APPBASE_PG_PORT% -U %APPBASE_PG_USER% %APPBASE_PG_DATABASE%
+    pause
+    exit /b 1
+  )
+)
+goto pg_done
 
-rem ---- 编码代理驱动: zcode / codex (默认 codex) ----
-set APPBASE_RELAY_TARGETS=look_log=http://【填:日志服务地址:端口】/look_log
+:psql_missing
+echo [appbase] Native PG mode needs psql.exe, but none was found
+echo           searched: PSQL_BIN, PATH, ProgramFiles\PostgreSQL\*\bin
+echo           fix: install PostgreSQL, or set PSQL_BIN=C:\path\to\PostgreSQL\bin before running
+pause
+exit /b 1
+
+:pg_done
+echo [appbase] PG ready: 127.0.0.1:%APPBASE_PG_PORT%/%APPBASE_PG_DATABASE% (mode=%APPBASE_PG_MODE%)
+
+rem ============================================================
+rem  Business config
+rem ============================================================
+
+rem ---- LLM upstream (required; without it UI loads but chat/AI says "LLM not configured") ----
+set BIGMODEL_API_KEY=[FILL:Zhipu BigModel API key]
+
+rem ---- Second TTS provider (optional): MiniMax speech-2.8-hd; the msedge provider stays
+rem      as the other candidate. Unset key => this provider reports unhealthy, TTS still works.
+rem set MINIMAX_API_KEY=
+rem set MINIMAX_BASE_URL=https://api.minimax.cn
+rem set MINIMAX_MODEL=speech-2.8-hd
+rem set MINIMAX_VOICE_ID=Chinese_warm_narrator
+
+rem ---- HTTP relay targets (optional): name=url pairs separated by ";", url includes path
+rem      pages then call relay with only business params; per-app override: RELAY_<NAME> in the app .env
+set APPBASE_RELAY_TARGETS=look_log=[FILL:log service url, e.g. http://192.168.1.10:8080/look_log]
+
+rem ---- Coding agent driver: zcode / codex (default codex) ----
 set AGENT_DRIVER=zcode
-rem 可选, 一般无需设置 (默认 node + C:/Program Files/ZCode/resources/glm/zcode.cjs):
+rem Optional, usually not needed (default node + C:/Program Files/ZCode/resources/glm/zcode.cjs):
 rem set ZCODE_NODE_BIN=D:\Program Files\nodejs\node.exe
 rem set ZCODE_CLI_PATH=C:\Program Files\ZCode\resources\glm\zcode.cjs
 
-rem ---- 固定网关密钥 (不设则每次启动随机生成并打印在控制台, 外部调用方要跟着换) ----
-set APPBASE_GATEWAY_KEY=【填:随机长串, 如 openssl rand -hex 24 的输出】
+rem ---- Fixed gateway key (if unset, random per start and printed to console; external callers must follow) ----
+set APPBASE_GATEWAY_KEY=[FILL:random long string, e.g. openssl rand -hex 24 output]
 
-rem ---- 登录 token 签名: 默认用 src\.token-secret 文件持久化, 重启不失效, 无需设置 ----
+rem ---- Login token signing: default uses src\.token-secret file, persists across restarts, no need to set ----
 rem set APPBASE_TOKEN_SECRET=
 
-rem ---- 管理员账号 (可选): 逗号分隔的邮箱白名单, 与库内 is_admin 列取并集;
-rem      都不设时, 首个注册的用户自动成为管理员; 也可 SQL 提拔:
+rem ---- Admin accounts (optional): comma-separated email whitelist, union with is_admin column;
+rem      if both unset, first registered user becomes admin; or promote via SQL:
 rem      UPDATE users SET is_admin=true WHERE email='...'
 rem set APPBASE_ADMIN_EMAILS=admin@example.com
 
-rem ---- 注册开关 (可选): 设为 false 后仅已有账号可登录 (默认允许注册) ----
+rem ---- Registration toggle (optional): set false to allow only existing accounts to login (default allow) ----
 rem set APPBASE_ALLOW_REGISTER=false
 
-rem ---- 登录限流: 内建, 同 IP+邮箱 5 次失败锁 15 分钟, 无需配置 ----
+rem ---- Login rate-limit: built-in, same IP+email 5 fails locks 15min, no config needed ----
 
 cd /d %~dp0
 pnpm start

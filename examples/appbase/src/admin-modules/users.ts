@@ -117,6 +117,34 @@ export async function handle(req: IncomingMessage, res: ServerResponse, path: st
         return json(res, 200, { users: rows });
       }
 
+      // 管理员直接创建用户（不受注册开关限制，可指定身份）
+      if (method === "POST" && path === "/app/admin/users") {
+        const body = await readBody(req);
+        const email = String(body.email ?? "").trim().toLowerCase();
+        const password = String(body.password ?? "");
+        const makeAdmin = Boolean(body.is_admin);
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          return json(res, 400, { error: "请输入有效的邮箱地址" });
+        }
+        if (password.length < 6) {
+          return json(res, 400, { error: "密码至少 6 位" });
+        }
+        const id = randomUUID();
+        const hash = await hashPassword(password);
+        try {
+          await pool.query(
+            "INSERT INTO users (id, email, password_hash, is_admin) VALUES ($1, $2, $3, $4)",
+            [id, email, hash, makeAdmin],
+          );
+        } catch (e: any) {
+          if (String(e?.code) === "23505") return json(res, 409, { error: "邮箱已存在" });
+          throw e;
+        }
+        const adminEmail = await emailOf(adminId);
+        void writeAudit(adminEmail, "user.create", email, makeAdmin ? "(管理员)" : "");
+        return json(res, 201, { user: { id, email, is_admin: makeAdmin } });
+      }
+
       if (method === "GET" && path === "/app/admin/audit") {
         const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit") ?? 100)));
         const { rows } = await pool.query(

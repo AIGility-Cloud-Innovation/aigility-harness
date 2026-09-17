@@ -36,8 +36,9 @@ import type {
   CapabilityRef,
   HealthStatus,
 } from "@aigility-harness/core";
-import AiBot from "@wecom/aibot-node-sdk";
-import type { WsFrame, TextMessage } from "@wecom/aibot-node-sdk";
+// SDK 的 default 导出是 { WSClient } 对象，WSClient / generateReqId 都是具名导出
+import AiBot, { generateReqId } from "@wecom/aibot-node-sdk";
+import type { WsFrame, TextMessage, WSClient } from "@wecom/aibot-node-sdk";
 
 // ── 消费引用 ─────────────────────────────────────────────────────
 
@@ -93,7 +94,7 @@ export const manifest: PluginManifest = {
 
 // ── Provider 实现 ────────────────────────────────────────────────
 
-let activeClient: AiBot.WSClient | null = null;
+let activeClient: WSClient | null = null;
 let activeStop: (() => Promise<void>) | null = null;
 
 export const wecomIngressProvider: Provider<WeComIngressRequest, WeComIngressResponse> = {
@@ -152,7 +153,7 @@ export const wecomIngressProvider: Provider<WeComIngressRequest, WeComIngressRes
       let streamId = "";
       try {
         // 1. 流式占位（立即回执，让用户知道在处理）
-        streamId = AiBot.generateReqId ? AiBot.generateReqId("stream") : `stream_${Date.now()}`;
+        streamId = generateReqId("stream");
         await client.replyStream(frame, streamId, thinkingText, false);
 
         // 2. 调角色（与 http-ingress agent 链路同一载荷形状, 附带企微用户 ID 用于记忆隔离）

@@ -26,6 +26,7 @@ import {
   type TextToSpeechRequest,
   type TextToSpeechResponse,
 } from "./text-to-speech.js";
+import { minimaxTtsProvider } from "./text-to-speech-minimax.js";
 import {
   codexAgentService,
   codexAgentProvider,
@@ -51,7 +52,7 @@ import {
   type ClaudeAgentResponse,
 } from "./claude-agent.js";
 
-export { textToSpeechService, textToSpeechProvider };
+export { textToSpeechService, textToSpeechProvider, minimaxTtsProvider };
 export type { TextToSpeechRequest, TextToSpeechResponse };
 
 // 编码代理工人（D5：领活 → 执行 → 交产出，spawn CLI 子进程产生真实副作用）
@@ -131,8 +132,8 @@ const toolExecutionProvider: Provider<
 export const manifest: PluginManifest = {
   name: "@action/tool-execution",
   layer: LayerId.Action,
-  description: "行动执行层：工具执行占位 + 文本转语音 + 编码代理工人(codex/zcode/claude)",
-  version: "0.3.0",
+  description: "行动执行层：工具执行占位 + 文本转语音（msedge + MiniMax 双 Provider 热替换）+ 编码代理工人(codex/zcode/claude)",
+  version: "0.4.0",
   provides: [toolExecutionService, textToSpeechService, codexAgentService, zcodeAgentService, claudeAgentService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
@@ -151,7 +152,14 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [toolExecutionProvider, textToSpeechProvider, codexAgentProvider, zcodeAgentProvider, claudeAgentProvider];
+    return [
+      toolExecutionProvider,
+      textToSpeechProvider,
+      minimaxTtsProvider,
+      codexAgentProvider,
+      zcodeAgentProvider,
+      claudeAgentProvider,
+    ];
   },
   getState(): PluginState {
     return pluginState;
