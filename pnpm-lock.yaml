@@ -166,6 +166,34 @@ importers:
         specifier: ^2.0.0
         version: 2.0.0(@types/node@20.19.43)
 
+  examples/wecom-chat:
+    dependencies:
+      '@aigility-harness/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aigility-harness/layer-cognitive':
+        specifier: workspace:*
+        version: link:../../packages/layer-cognitive
+      '@aigility-harness/layer-infrastructure':
+        specifier: workspace:*
+        version: link:../../packages/layer-infrastructure
+      '@aigility-harness/layer-orchestration':
+        specifier: workspace:*
+        version: link:../../packages/layer-orchestration
+      '@aigility-harness/layer-persona':
+        specifier: workspace:*
+        version: link:../../packages/layer-persona
+      prototype-mode:
+        specifier: workspace:*
+        version: link:../../packages/prototype-mode
+    devDependencies:
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.12
+      typescript:
+        specifier: ^5.5.0
+        version: 5.5.2
+
   examples/wecom-coder:
     dependencies:
       '@aigility-harness/core':
@@ -186,6 +214,25 @@ importers:
       '@aigility-harness/layer-persona':
         specifier: workspace:*
         version: link:../../packages/layer-persona
+      prototype-mode:
+        specifier: workspace:*
+        version: link:../../packages/prototype-mode
+    devDependencies:
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.12
+      typescript:
+        specifier: ^5.5.0
+        version: 5.5.2
+
+  examples/wecom-dsh:
+    dependencies:
+      '@aigility-harness/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aigility-harness/layer-infrastructure':
+        specifier: workspace:*
+        version: link:../../packages/layer-infrastructure
       prototype-mode:
         specifier: workspace:*
         version: link:../../packages/prototype-mode

@@ -146,7 +146,7 @@ function createRelayProvider(): Provider<{ user_input: string; user_id?: string 
 async function main(): Promise<void> {
   console.log("=== 企微机器人 → DSH 会话中继 (wecom-dsh) ===\n");
 
-  loadEnv();
+  loadEnv(resolve(__dirname, "../.env"));
   const botId = process.env["WECOM_DSH_BOT_ID"] ?? "";
   const secret = process.env["WECOM_DSH_BOT_SECRET"] ?? "";
   if (!botId || !secret) {
@@ -155,8 +155,8 @@ async function main(): Promise<void> {
   }
   if (!process.env["DSH_BIN"] || !process.env["DSH_HOME"]) {
     console.error(
-      "缺少配置: 请在 .env 设置 DSH_BIN（官方 dsh 的 lib/bin.js 绝对路径）与 DSH_HOME\n" +
-        "示例见 examples/wecom-dsh/README.md",
+      "缺少配置: 请在 examples/wecom-dsh/.env 设置 DSH_BIN（官方 dsh 的 lib/bin.js 绝对路径）与 DSH_HOME\n" +
+        "模板见 examples/wecom-dsh/.env.example",
     );
     process.exit(1);
   }
