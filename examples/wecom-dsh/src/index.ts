@@ -65,7 +65,7 @@ export const dshRelayService: ServiceDefinition<{ user_input: string; user_id?: 
   id: "@infrastructure/dsh-session-relay",
   version: "1.0.0",
   layer: LayerId.Infrastructure,
-  description: "企微消息 → 官方 dsh headless agent 会话中继（--resume 多轮）",
+  description: "企微消息 → 官方 dsh headless agent 会话中继（滚动上下文多轮）",
 };
 
 /** 企微 Markdown 长度上限（保守截断，保留尾部结论） */

@@ -317,7 +317,7 @@ pnpm install
 ```bash
 pnpm run build        # 全部包构建
 pnpm run typecheck    # tsc --noEmit 全量类型检查
-pnpm run test         # vitest 全量测试（9 包 120+ 例，含 kernel-dsh 42 例）
+pnpm run test         # vitest 全量测试（11 包 250+ 例）
 ```
 
 ### 运行原型演示
@@ -415,7 +415,7 @@ pnpm --filter wecom-coder start
 | 能力 | 当前实现 | 可替换为 |
 |------|---------|---------|
 | LLM 推理 | `litellmProvider`（真实调用 LiteLLM，deepseek-v4-pro） | 任意 OpenAI 兼容网关（vLLM/Ollama/本地 stub） |
-| 编码 Agent | `codex-agent`（codex CLI → localhost:4000） | 任意符合契约的 Agent Provider |
+| 编码 Agent | `codex-agent`（codex CLI，JSONL 事件流） | 任意符合契约的 Agent Provider |
 | 协议适配 | `protocol-adapter`（api-router 协议翻译） | 任意协议桥接实现 |
 | HTTP 入口 + 流式 | `http-ingress` + `sse.ts`（`/v1/chat/completions` 支持 `stream:true` → SSE 帧流） | 任意传输实现（Hono 备件换装时 import 同款 sse helper） |
 | **角色对话** | `sales-chat`（平台客服）/ `repair-chat`（报修延时汇总）/ `coding-coach`（引导教练） | 任意 D5 角色（特性打包为 persona 插件） |
@@ -482,11 +482,11 @@ harness (TS)                          Python (子进程)
 
 | Seam 能力 ID | 域 | aigility 模块 | 方法 | 端到端测试 |
 |-------------|-----|-------------|------|-----------|
-| `@orchestration/workflow-engine` | D4 | `aigility.workflow.WorkflowEngine` | `invoke` | ✅ YAML → LangGraph → 条件分支 |
-| `@cognitive/memory` | D2 | `aigility.memory.Memory` | `search` | ✅ 异步方法正确处理 |
-| `@cognitive/rag-retrieval` | D2 | `aigility.rag.RAGService` | `search` | ⚠️ 需 dashscope 包 |
-| `@orchestration/chat-flow` | D4 | `aigility.chatflow.ChatFlow` | `invoke` | ✅ 初始化成功 |
-| `@orchestration/workflow-engine-timem` | D4 | `aigility.workflow.WorkflowEngine` | `ainvoke` | ✅ 企微客服工作流（timem_support） |
+| `@orchestration/workflow-engine` | D4 | `aigility.workflow.WorkflowEngine` | `invoke` | ✅ YAML → LangGraph → 条件分支（当前 py-plugins.json 实际声明） |
+| `@orchestration/workflow-engine-timem` | D4 | `aigility.workflow.WorkflowEngine` | `ainvoke` | ✅ 企微客服工作流（timem_support）（当前 py-plugins.json 实际声明） |
+| `@cognitive/memory` | D2 | `aigility.memory.Memory` | `search` | ⚠️ 已验证 aigility 侧可用，尚未声明进 py-plugins.json |
+| `@cognitive/rag-retrieval` | D2 | `aigility.rag.RAGService` | `search` | ⚠️ 需 dashscope 包，尚未声明进 py-plugins.json |
+| `@orchestration/chat-flow` | D4 | `aigility.chatflow.ChatFlow` | `invoke` | ⚠️ 初始化验证通过，尚未声明进 py-plugins.json |
 
 ### 8.4 编排工具 + 编排实例分离
 
@@ -520,7 +520,7 @@ harness (TS)                          Python (子进程)
 
 | 阶段 | 目标 | 内容 |
 |------|------|------|
-| **阶段 1**（✅ 已完成） | 原型闭环 | 五域能力 DSH 插件化，验证完整业务逻辑；kernel-dsh 35 测例 + codex-agent 规划闭环通过 |
+| **阶段 1**（✅ 已完成） | 原型闭环 | 五域能力 DSH 插件化，验证完整业务逻辑；kernel-dsh 测例全绿 + codex-agent 规划闭环通过 |
 | **阶段 1.5**（✅ 已完成） | 跨语言桥接 | py-bridge 通用 Python 对接器，aigility ADK 端到端验证通过 |
 | **阶段 1.75**（✅ 已完成） | 开箱可用 | sales-chat/plugin-helper 角色 + plugin-install 引导工作流 + 最小 Web UI（`GET /` `/ui`）+ agent 路径→角色路由 |
 | **阶段 2**（✅ 已完成） | 桥接层开发 | BusBridge 契约 + BusEnvelope 信封 + RemoteEventBus 跨进程事件桥 + `PgBusBridge` 实现（LISTEN/NOTIFY + event_log）；`PgTaskQueue`（FOR UPDATE SKIP LOCKED）+ `PgVectorStore`（pgvector HNSW）；真实总线可更换（pgmq/pgvector/NATS/Milvus 按部署选定） |
@@ -570,10 +570,11 @@ aigility-harness/
 │   ├── feishu-timem/              # 飞书 @机器人 → timem-project-assistant → timem-project-task 三段式工作流
 │   ├── dsh-timem-demo/            # DSH 内核 TiMEM 插件演示
 │   ├── openai-gateway-composition/ # OpenAI 兼容网关组合示例
-│   ├── http-gateway-alternative/  # 备件式 HTTP 网关（换装演示）
-│   ├── wecom-coder/               # 企微 @机器人 → app-dev → codex
-│   ├── wecom-guide/               # 企微 → harness-guide 框架介绍员
-│   └── wecom-timem/               # 企微 → timem-support TiMEM 客服
+│   ├── wecom-chat/                 # 企微 @机器人 → sales-chat 通用对话（装配示例）
+│   ├── wecom-coder/                # 企微 @机器人 → app-dev → codex
+│   ├── wecom-dsh/                  # 企微 @机器人 → 官方 dsh headless agent 会话中继
+│   ├── wecom-guide/                # 企微 → harness-guide 框架介绍员
+│   └── wecom-timem/                # 企微 → timem-support TiMEM 客服
 ├── config/
 │   └── py-plugins.json            # Python 插件声明式配置（aigility 能力映射）
 ├── tests/
