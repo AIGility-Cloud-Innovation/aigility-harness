@@ -1,0 +1,70 @@
+@echo off
+rem NOTE: keep this file ASCII-only. Do NOT re-add "chcp 65001" here: switching
+rem the console codepage mid-run can make the host drop or misplace script output.
+setlocal enabledelayedexpansion
+rem ============================================================
+rem  FDE workbench one-click start
+rem  Copy to start-fde-workbench.cmd (gitignored, safe to fill secrets)
+rem  Fill [FILL] placeholders below, then double-click.
+rem ============================================================
+
+rem ============================================================
+rem  Node/pnpm PATH detect (must run pnpm start at the end)
+rem ============================================================
+where pnpm >nul 2>&1
+if not errorlevel 1 goto pnpm_ok
+set PNPM_FOUND=
+set PNPM_DIR=
+for %%D in (
+  "D:\SiteWorkspace\tools\node-v24.19.0-win-x64"
+  "D:\SiteWorkspace\tools\node-v22.11.0-win-x64"
+  "D:\SiteWorkspace\tools\node-v20.18.0-win-x64"
+  "D:\Program Files\nodejs"
+  "C:\Program Files\nodejs"
+  "C:\Program Files (x86)\nodejs"
+  "%APPDATA%\npm"
+  "%APPDATA%\roaming\npm"
+) do (
+  if not defined PNPM_FOUND if exist "%%~D\pnpm.cmd" set PNPM_DIR=%%~D
+  if not defined PNPM_FOUND if exist "%%~D\pnpm.cmd" set PNPM_FOUND=1
+)
+if not defined PNPM_FOUND (
+  echo [ERROR] pnpm not found. Install Node 20+ and pnpm 9+ first.
+  pause
+  exit /b 1
+)
+echo [INFO] using pnpm at !PNPM_DIR!
+set "PATH=!PNPM_DIR!;%PATH%"
+:pnpm_ok
+
+rem ============================================================
+rem  LLM upstream: fill your key (real inference).
+rem  Leave empty -> stub degraded mode (chain still works).
+rem ============================================================
+set "BIGMODEL_API_KEY=[FILL_BIGMODEL_API_KEY]"
+rem set "LITELLM_URL=http://127.0.0.1:4000"
+rem set "LITELLM_KEY=[FILL_LITELLM_KEY]"
+
+rem Optional overrides (defaults shown)
+rem set "FDE_WEB_PORT=1234"
+rem set "FDE_GATEWAY_PORT=1235"
+rem set "FDE_PUBLIC_HOST=127.0.0.1"
+rem set "FDE_GATEWAY_KEY=your-fixed-gateway-key"
+
+cd /d "%~dp0"
+
+if not exist "node_modules" (
+  echo [INFO] installing workspace deps...
+  call pnpm install
+  if errorlevel 1 ( echo [ERROR] pnpm install failed & pause & exit /b 1 )
+)
+
+if not exist "app\dist\index.html" (
+  echo [INFO] building web frontend (first run)...
+  call pnpm --filter @aigility-harness/fde-workbench build
+  if errorlevel 1 ( echo [ERROR] vite build failed & pause & exit /b 1 )
+)
+
+echo [INFO] starting FDE workbench (web :1234, gateway :1235)...
+call pnpm start
+pause

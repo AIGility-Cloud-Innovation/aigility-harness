@@ -33,3 +33,7 @@ examples/appbase/start-dsh-web.cmd
 .workbuddy/
 *.bak
 examples/wecom-dsh/.state/
+# FDE workbench one-click start script (contains key, not committed); template: start-fde-workbench.cmd.example
+examples/fde-workbench/start-fde-workbench.cmd
+# fde-workbench local test artifacts
+examples/fde-workbench/.tmp/

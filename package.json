@@ -8,7 +8,8 @@
     "build": "pnpm -r run build",
     "test": "pnpm -r run test",
     "typecheck": "pnpm -r run typecheck",
-    "example:prototype": "pnpm --filter prototype-mode start"
+    "example:prototype": "pnpm --filter prototype-mode start",
+    "example:fde": "pnpm --filter @aigility-harness/fde-workbench start"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
