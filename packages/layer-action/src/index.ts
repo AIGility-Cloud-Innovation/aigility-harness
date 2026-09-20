@@ -85,6 +85,11 @@ export { claudeAgentService, claudeAgentProvider, claudeAgentRef };
 export type { ZcodeAgentRequest, ZcodeAgentResponse };
 export type { ClaudeAgentRequest, ClaudeAgentResponse };
 
+// 文档工人（D5：结构化块 JSON → 服务端 docx 渲染, base64 + 落盘）
+export { docWorkerService, docWorkerProvider };
+export type { DocWorkerRequest, DocWorkerResponse, DocBlock } from "./doc-worker.js";
+import { docWorkerService, docWorkerProvider } from "./doc-worker.js";
+
 // 沙箱快照备份工具（编码代理改文件前自动快照；版本回滚 UI 复用）
 export { backupHtmlFiles } from "./sandbox-backup.js";
 
@@ -147,9 +152,9 @@ const toolExecutionProvider: Provider<
 export const manifest: PluginManifest = {
   name: "@action/tool-execution",
   layer: LayerId.Action,
-  description: "行动执行层：工具执行占位 + 文本转语音（msedge + MiniMax 双 Provider 热替换）+ 编码代理工人(codex/zcode/claude) + TiMEM 记忆检索/写入",
+  description: "行动执行层：工具执行占位 + 文本转语音（msedge + MiniMax 双 Provider 热替换）+ 编码代理工人(codex/zcode/claude) + 文档工人(docx) + TiMEM 记忆检索/写入",
   version: "0.4.0",
-  provides: [toolExecutionService, textToSpeechService, codexAgentService, zcodeAgentService, claudeAgentService, timemMemoryService, timemMemoryWriteService],
+  provides: [toolExecutionService, textToSpeechService, codexAgentService, zcodeAgentService, claudeAgentService, docWorkerService, timemMemoryService, timemMemoryWriteService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
 };
@@ -234,6 +239,7 @@ export const plugin: LayerPlugin = {
       codexAgentProvider,
       zcodeAgentProvider,
       claudeAgentProvider,
+      docWorkerProvider,
       createTimemMemoryProvider(timemClient),
       createTimemMemoryWriteProvider(timemClient),
     ];

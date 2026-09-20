@@ -148,6 +148,17 @@ export type {
 } from "./banban-chat.js";
 import { banbanChatService, banbanChatProvider } from "./banban-chat.js";
 
+// FDE 数字员工角色形象 (工作台数据问答, fde-workbench 专用)
+export {
+  fdeAssistantService,
+  fdeAssistantProvider,
+} from "./fde-assistant.js";
+export type {
+  FdeAssistantRequest,
+  FdeAssistantResponse,
+} from "./fde-assistant.js";
+import { fdeAssistantService, fdeAssistantProvider } from "./fde-assistant.js";
+
 // ── 服务定义 ─────────────────────────────────────────────────────
 
 export interface TextInputRequest {
@@ -206,9 +217,9 @@ const textInputProvider: Provider<TextInputRequest, TextInputResponse> = {
 export const manifest: PluginManifest = {
   name: "@persona/character",
   layer: LayerId.Persona,
-  description: "角色人格层：感知（文本/语音）+ 角色形象（sales-chat/plugin-helper/app-dev/coding-coach/advisory-chat/harness-guide/timem-support/timem-project-assistant/repair-chat/banban-chat）",
+  description: "角色人格层：感知（文本/语音）+ 角色形象（sales-chat/plugin-helper/app-dev/coding-coach/advisory-chat/harness-guide/timem-support/timem-project-assistant/repair-chat/banban-chat/fde-assistant）",
   version: "0.4.0",
-  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, appDevService, codingCoachService, advisoryChatService, harnessGuideService, timemSupportService, timemProjectAssistantService, repairChatService, banbanChatService],
+  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, appDevService, codingCoachService, advisoryChatService, harnessGuideService, timemSupportService, timemProjectAssistantService, repairChatService, banbanChatService, fdeAssistantService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
 };
@@ -240,6 +251,7 @@ export const plugin: LayerPlugin = {
       timemProjectAssistantProvider,
       repairChatProvider,
       banbanChatProvider,
+      fdeAssistantProvider,
     ];
   },
   getState(): PluginState {

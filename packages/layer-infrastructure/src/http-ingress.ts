@@ -405,6 +405,32 @@ const httpIngressProvider: Provider<HttpIngressRequest, HttpIngressResponse> = {
           payload,
         );
 
+        // 流式: payload.stream === true 时把角色回复编码为 OpenAI 兼容 SSE。
+        // 与 dev 链路同策略 —— 上游（persona → workflow-engine → LLM）为整块非流式,
+        // 网关侧统一编码为 SSE 帧, 前端按 OpenAI delta 格式逐帧消费。
+        if (payload && typeof payload === "object" && payload["stream"] === true) {
+          writeSseHeaders(res);
+          if (!result.ok) {
+            res.write(encodeSseFrame({ error: result.error }));
+            res.write(SSE_DONE);
+            res.end();
+            return;
+          }
+          const value = result.value as
+            | { response?: string; result?: string; text?: string }
+            | undefined;
+          const text = String(value?.response ?? value?.result ?? value?.text ?? "");
+          const frames = encodeChatCompletionStream({
+            id: `chatcmpl-${randomUUID().replace(/-/g, "").slice(0, 24)}`,
+            model: String((payload as Record<string, unknown>)["model"] ?? agentRoleId),
+            content: text,
+            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+          });
+          for (const f of frames) res.write(f);
+          res.end();
+          return;
+        }
+
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(result.ok ? result.value : { error: result.error }));
       } catch (err) {
