@@ -129,7 +129,7 @@ async function spaceAccess(uid: string, spaceId: string): Promise<SpaceRole | nu
   return (await isAdminUser(uid)) ? "owner" : null;
 }
 
-/** 应用级 LLM 配置 (app_llm_config), 未配置回落全局 env; 均无 → null (调用方走降级) */
+/** LLM 配置回退链: 应用级行(app_id=lesson-prep.html) → 全局平台行(platform:*, 管理中心「全局 LLM 配置」) → env; 均无 → null (调用方走降级) */
 async function appLlmCfg(): Promise<{ url: string; key: string; model: string } | null> {
   const { rows } = await pool.query(
     "SELECT url, key, model FROM app_llm_config WHERE app_id = $1", [APP_ID]);
@@ -138,6 +138,16 @@ async function appLlmCfg(): Promise<{ url: string; key: string; model: string } 
       url: rows[0].url || process.env.BIGMODEL_BASE_URL || "https://open.bigmodel.cn/api/paas/v4",
       key: rows[0].key,
       model: rows[0].model || "",
+    };
+  }
+  // 与 AppBase「全局 LLM 配置(热生效)」同一数据源: platform: 前缀的激活行
+  const { rows: plat } = await pool.query(
+    "SELECT url, key, model FROM app_llm_config WHERE app_id LIKE 'platform:%' AND is_active = true ORDER BY updated_at DESC LIMIT 1");
+  if (plat[0]?.key) {
+    return {
+      url: plat[0].url || process.env.BIGMODEL_BASE_URL || "https://open.bigmodel.cn/api/paas/v4",
+      key: plat[0].key,
+      model: plat[0].model || "",
     };
   }
   if (process.env.BIGMODEL_API_KEY) {
@@ -150,8 +160,13 @@ async function appLlmCfg(): Promise<{ url: string; key: string; model: string } 
   return null;
 }
 
-/** 单次 LLM 调用 (OpenAI Chat 内部标准); 失败返回 null, 调用方负责降级 */
+/** 单次 LLM 调用 (OpenAI Chat 内部标准); 失败返回 null, 调用方负责降级。
+ *  LLM_PROVIDER=stub 时显式拒绝: stub 是回显占位, 生成任务宁可诚实降级也不存回显假货。 */
 async function llmText(uid: string, system: string, user: string): Promise<string | null> {
+  if ((process.env.LLM_PROVIDER ?? "") === "stub") {
+    console.error("[lesson-prep] LLM_PROVIDER=stub (原型占位/未配 LLM), 生成任务走模板降级");
+    return null;
+  }
   const kernel = getAdminKernel();
   if (!kernel) return null;
   const resolved = await kernel.registry.resolve({
@@ -172,9 +187,13 @@ async function llmText(uid: string, system: string, user: string): Promise<strin
     const r = (await resolved.value.execute(req, kernel.createContext(
       `lesson-prep-${uid}`, "cognitive",
     ))) as Result<LlmInferenceResponse>;
-    if (!r.ok || !r.value?.text) return null;
+    if (!r.ok || !r.value?.text) {
+      console.error(`[lesson-prep] LLM 调用失败(将走模板降级): ${r.ok ? "空回复" : r.error}`);
+      return null;
+    }
     return stripCodeFence(r.value.text);
-  } catch {
+  } catch (e) {
+    console.error(`[lesson-prep] LLM 调用异常(将走模板降级): ${String(e)}`);
     return null;
   }
 }
