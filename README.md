@@ -330,6 +330,14 @@ pnpm example:prototype
 
 演示跑完后 **Web UI 默认常驻**（`http://127.0.0.1:1233/`，Ctrl+C 退出；`PROTO_DEMO_EXIT=1` 恢复"自测后退出"旧行为）。
 
+### 运行 TiMEM FDE 工作台
+
+```bash
+pnpm example:fde        # = pnpm --filter @aigility-harness/fde-workbench start
+```
+
+交付一体化工作台（线索/方案/合同/交付/台账 + 数字员工）：Web `http://127.0.0.1:1234/`（打开即用，网关配置自动注入）+ AI 网关 `:1235`（`/api/fde-chat` → `@persona/fde-assistant` 业务快照问答，`/api/fde-doc` → `@action/doc-worker` 方案 Word 服务端产出）。LLM 上游自动选择：`BIGMODEL_API_KEY` → bigmodel，缺省 stub 降级。详见 [examples/fde-workbench/README.md](examples/fde-workbench/README.md)。
+
 ### 开箱即用（最小 Web UI）
 
 ```bash
@@ -543,9 +551,9 @@ aigility-harness/
 │   │                              #   PluginManifest.adminPanels 管理面板贡献点 / SeamRegistry.listAllServices
 │   ├── kernel-dsh/                # DSH-Cordis 内核适配器（Seam Registry / Effect Manager / Carrier Manager）
 │   ├── layer-cognitive/           # D2 认知算力层（LLM 推理：stub + litellm + timem-memory-provider）
-│   ├── layer-persona/            # D5 角色人格层（sales-chat / repair-chat / app-dev / coding-coach / plugin-helper / advisory-chat / harness-guide / timem-support / speech-to-text）
+│   ├── layer-persona/            # D5 角色人格层（sales-chat / repair-chat / app-dev / coding-coach / plugin-helper / advisory-chat / harness-guide / timem-support / banban-chat / fde-assistant / speech-to-text）
 │   ├── layer-orchestration/       # D4 编排规划层（任务规划 + plugin-install + timem-project-task 需求缓冲工作流 + guided-design）
-│   ├── layer-action/              # D3 行动执行层（编码代理工人 codex/zcode/claude + TTS + 沙箱快照）
+│   ├── layer-action/              # D3 行动执行层（编码代理工人 codex/zcode/claude + 文档工人 doc-worker(docx) + TTS + 沙箱快照 + TiMEM 记忆检索/写入）
 │   ├── layer-infrastructure/      # D1 底座基础层（config/logging/protocol-adapter/http-ingress/wecom-ingress/http-relay/PgBusBridge）
 │   │   └── src/
 │   │       ├── protocol-adapter.ts    # 协议翻译（Anthropic/OpenAI/Responses → 内部标准，类型取自 core 契约）
@@ -567,6 +575,7 @@ aigility-harness/
 │   └── prototype-mode/            # 原型演示入口（InMemoryKernel → 五域插件装配）
 ├── examples/                      # 可替换示例装配（各自独立 pnpm 包）
 │   ├── appbase/                   # 产品装配：应用大厅 + 网页应用开发员 + 管理中心(/admin) + AI 网关 + 对话流图
+│   ├── fde-workbench/             # TiMEM FDE 工作台：数字员工(@persona/fde-assistant) + 文档工人(@action/doc-worker) + AI 网关（Kimi FDE 前端收编深度整合）
 │   ├── feishu-timem/              # 飞书 @机器人 → timem-project-assistant → timem-project-task 三段式工作流
 │   ├── dsh-timem-demo/            # DSH 内核 TiMEM 插件演示
 │   ├── openai-gateway-composition/ # OpenAI 兼容网关组合示例
