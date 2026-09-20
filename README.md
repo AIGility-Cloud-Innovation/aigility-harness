@@ -373,6 +373,8 @@ pnpm start
 
 **数据空间（多协作单元的通用底座）**：`/app/data?space=<id>`——一个班/一个项目组 = 一个空间；负责人（班主任/项目负责人）全权，成员按建空间时声明的 `rolePolicy`（角色 → 可读/可写表清单）在**服务端**强制。空间管理 API：`POST/GET /app/spaces`（建空间/我的空间）、`GET/PATCH/DELETE /app/spaces/:id`（详情含成员表/改名归档/级联删除）、`POST/PATCH/DELETE /app/spaces/:id/members`（邀请/改角色/移除，按平台邮箱）。成员可跨空间（一人多班/多项目），负责人亦可为他空间成员。首个落地：班主任小本本（班主任建班邀请任课老师带科目；任课老师可记考勤/积分，名册与成长记忆只读；hero 班级切换器 + 班级管理弹窗）。
 
+**教师备课夹（同一体系第二个落地）**：`/apps/lesson-prep.html`——教材溯源式 AI 备课，与班主任小本本同构（平台账号 + 数据空间「备课组」+ 应用级 LLM 配置 + 流内 TiMEM 记忆的助理角色），功能线复刻自 police_academy 教师端。主线：课程 → 章节 → 教材切片（粘贴/选 .txt/.md 自动分片）→ 四课型 AI 教案（标准/实训/思政示范/复习；整册走异步队列按章节并行 + 逐章增量落库 + 前端轮询 + 20 分钟僵尸自愈）→ 四件套辅导材料（讲义/练习/要点卡/课件）→ 一键备课编排（多队列进度）→ 导出 MD/Word（Word 由 D3 行动域 `@action/doc-worker` 确定性渲染，溯源清单随文档落盘）。承袭源项目铁律：AI 只依据教材切片、零切片显式失败（防空壳教案假成功）、降级产物必须带「模板降级」标记。「备课助理」= D5 角色域 `@persona/lesson-prep-chat`（`/app/lesson-prep/chat` 薄路由，与班班助理同构）。服务端在 `examples/appbase/src/lesson-prep.ts`（空间鉴权/存储/异步队列/导出编排）+ `lesson-prep-core.ts`（模板/分片/降级/md→块 纯逻辑，vitest 覆盖）。
+
 内置角色：🎧 平台客服、🔧 应用报修客服（延时汇总建单）、🪶 网页应用开发员（zcode/codex/claude 驱动，生成单文件 HTML 应用）、🧩 插件助手、👨‍💻 编码教练。聊天历史云端持久化；LLM 配置多平台热切换。
 
 登录页右侧内嵌「🧪 原型演示（免登录）」卡片（即 `pnpm example:prototype` 常驻的最小 Web UI）：游客先试玩，UI 顶部提示条引导注册/登录进入应用大厅。
@@ -551,7 +553,7 @@ aigility-harness/
 │   │                              #   PluginManifest.adminPanels 管理面板贡献点 / SeamRegistry.listAllServices
 │   ├── kernel-dsh/                # DSH-Cordis 内核适配器（Seam Registry / Effect Manager / Carrier Manager）
 │   ├── layer-cognitive/           # D2 认知算力层（LLM 推理：stub + litellm + timem-memory-provider）
-│   ├── layer-persona/            # D5 角色人格层（sales-chat / repair-chat / app-dev / coding-coach / plugin-helper / advisory-chat / harness-guide / timem-support / banban-chat / fde-assistant / speech-to-text）
+│   ├── layer-persona/            # D5 角色人格层（sales-chat / repair-chat / app-dev / coding-coach / plugin-helper / advisory-chat / harness-guide / timem-support / banban-chat / fde-assistant / lesson-prep-chat / speech-to-text）
 │   ├── layer-orchestration/       # D4 编排规划层（任务规划 + plugin-install + timem-project-task 需求缓冲工作流 + guided-design）
 │   ├── layer-action/              # D3 行动执行层（编码代理工人 codex/zcode/claude + 文档工人 doc-worker(docx) + TTS + 沙箱快照 + TiMEM 记忆检索/写入）
 │   ├── layer-infrastructure/      # D1 底座基础层（config/logging/protocol-adapter/http-ingress/wecom-ingress/http-relay/PgBusBridge）
@@ -574,7 +576,7 @@ aigility-harness/
 │   │       └── py_bridge_worker.py  # 通用 Python worker（纯 Python 运行，不依赖 TS）
 │   └── prototype-mode/            # 原型演示入口（InMemoryKernel → 五域插件装配）
 ├── examples/                      # 可替换示例装配（各自独立 pnpm 包）
-│   ├── appbase/                   # 产品装配：应用大厅 + 网页应用开发员 + 管理中心(/admin) + AI 网关 + 对话流图
+│   ├── appbase/                   # 产品装配：应用大厅 + 网页应用开发员 + 管理中心(/admin) + AI 网关 + 对话流图 + 内置应用(班主任小本本/教师备课夹)
 │   ├── fde-workbench/             # TiMEM FDE 工作台：数字员工(@persona/fde-assistant) + 文档工人(@action/doc-worker) + AI 网关（Kimi FDE 前端收编深度整合）
 │   ├── feishu-timem/              # 飞书 @机器人 → timem-project-assistant → timem-project-task 三段式工作流
 │   ├── dsh-timem-demo/            # DSH 内核 TiMEM 插件演示

@@ -1,0 +1,1300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>教师备课夹 · 教材溯源式 AI 备课</title>
+<style>
+:root {
+    --bg: #f3f7f6;
+    --card: #ffffff;
+    --ink: #1e293b;
+    --ink-2: #475569;
+    --ink-3: #94a3b8;
+    --line: #e2ece9;
+    --accent: #0d9488;
+    --accent-deep: #0f766e;
+    --accent-soft: #e6f4f2;
+    --green: #10b981;  --green-soft: #e7f8f1;
+    --amber: #f59e0b;  --amber-soft: #fdf3e0;
+    --sky: #0ea5e9;    --sky-soft: #e6f5fd;
+    --violet: #8b5cf6; --violet-soft: #f1ebfe;
+    --rose: #f43f5e;   --rose-soft: #fde9ed;
+    --radius: 16px;
+    --shadow-sm: 0 1px 2px rgba(15,23,42,.05);
+    --shadow-md: 0 2px 4px rgba(15,23,42,.04), 0 12px 32px rgba(15,23,42,.07);
+    --shadow-lg: 0 8px 40px rgba(30,41,59,.18);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--ink);
+    min-height: 100vh; padding: 24px 20px 60px;
+    -webkit-font-smoothing: antialiased;
+}
+.shell { max-width: 1180px; margin: 0 auto; }
+
+/* ── 顶栏 ─────────────────────────────── */
+.hero {
+    background: linear-gradient(120deg, #134e4a 0%, #0f766e 55%, #0d9488 100%);
+    border-radius: 24px; padding: 34px 38px 30px; color: #fff;
+    position: relative; overflow: hidden; box-shadow: var(--shadow-lg);
+}
+.hero::after {
+    content: ''; pointer-events: none; position: absolute; right: -80px; top: -120px;
+    width: 380px; height: 380px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,255,255,.14), transparent 65%);
+}
+.hero h1 { font-size: 26px; font-weight: 700; letter-spacing: .5px; }
+.hero .sub { margin-top: 6px; font-size: 13.5px; color: rgba(255,255,255,.78); }
+.hero .meta { margin-top: 18px; display: flex; gap: 24px; flex-wrap: wrap; }
+.hero .meta div { font-size: 13px; color: rgba(255,255,255,.85); }
+.hero .meta b { display: block; font-size: 22px; font-weight: 700; color: #fff; }
+
+.cloud-chip {
+    position: absolute; right: 30px; top: 30px;
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 8px 16px; border-radius: 20px; border: 1px solid rgba(255,255,255,.35);
+    background: rgba(255,255,255,.14); color: #fff;
+    font-size: 12.5px; font-weight: 600; cursor: pointer; font-family: inherit;
+    backdrop-filter: blur(4px); transition: background .18s; z-index: 2;
+}
+.cloud-chip:hover { background: rgba(255,255,255,.25); }
+.cloud-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: #fca5a5; }
+.cloud-chip.ok .dot { background: #6ee7b7; }
+
+/* ── 导航 ─────────────────────────────── */
+.nav {
+    display: flex; gap: 6px; margin: 18px 0 22px;
+    background: var(--card); padding: 6px; border-radius: 14px;
+    box-shadow: var(--shadow-sm); border: 1px solid var(--line); overflow-x: auto;
+}
+.nav button {
+    flex: 1; min-width: 100px; padding: 11px 14px; border: none; border-radius: 10px;
+    background: transparent; font-size: 14px; font-weight: 600; color: var(--ink-2);
+    cursor: pointer; transition: all .2s; white-space: nowrap; font-family: inherit;
+}
+.nav button:hover { background: var(--accent-soft); color: var(--accent-deep); }
+.nav button.active { background: var(--accent-deep); color: #fff; box-shadow: 0 4px 12px rgba(15,118,110,.35); }
+
+.view { display: none; animation: fadein .25s ease; }
+.view.active { display: block; }
+@keyframes fadein { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* ── 卡片与通用 ───────────────────────── */
+.card {
+    background: var(--card); border-radius: var(--radius);
+    box-shadow: var(--shadow-md); border: 1px solid var(--line);
+    padding: 24px; margin-bottom: 20px;
+}
+.card h2 { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+.card .hint { font-size: 12.5px; color: var(--ink-3); margin-bottom: 16px; }
+.section-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 10px; flex-wrap: wrap; }
+
+.btn {
+    padding: 9px 18px; border: none; border-radius: 10px; font-size: 13.5px; font-weight: 600;
+    cursor: pointer; transition: all .18s; display: inline-flex; align-items: center; gap: 6px;
+    font-family: inherit; line-height: 1.2;
+}
+.btn:active { transform: scale(.97); }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn-primary { background: var(--accent-deep); color: #fff; }
+.btn-primary:hover { background: #115e59; box-shadow: 0 4px 14px rgba(15,118,110,.35); }
+.btn-ghost { background: var(--accent-soft); color: var(--accent-deep); }
+.btn-ghost:hover { background: #d7ece9; }
+.btn-danger-soft { background: var(--rose-soft); color: var(--rose); }
+.btn-sm { padding: 5px 11px; font-size: 12px; border-radius: 8px; }
+
+input, select, textarea {
+    font-family: inherit; font-size: 14px; color: var(--ink);
+    border: 1.5px solid var(--line); border-radius: 10px;
+    padding: 10px 13px; background: #fbfdfc; transition: all .2s; outline: none;
+}
+input:focus, select:focus, textarea:focus {
+    border-color: var(--accent); background: #fff;
+    box-shadow: 0 0 0 3.5px rgba(13,148,136,.12);
+}
+textarea { resize: vertical; min-height: 84px; }
+label.fl { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-2); margin: 14px 0 7px; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; }
+.row > * { flex: 1; min-width: 140px; }
+.toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 18px; }
+.toolbar .grow { flex: 1; min-width: 120px; }
+
+/* 表格 */
+table { width: 100%; border-collapse: collapse; }
+th {
+    text-align: left; font-size: 11.5px; font-weight: 700; color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: .8px; padding: 10px 14px;
+    border-bottom: 1.5px solid var(--line);
+}
+td { padding: 12px 14px; border-bottom: 1px solid #f0f5f3; font-size: 14px; }
+tbody tr:hover { background: #f7fbfa; }
+tbody tr:last-child td { border-bottom: none; }
+
+/* 课程卡 */
+.course-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; }
+.course-card {
+    background: #fbfdfc; border: 1.5px solid var(--line); border-radius: 16px; padding: 20px;
+    transition: transform .18s, box-shadow .18s, border-color .18s; cursor: pointer; position: relative;
+}
+.course-card:hover { transform: translateY(-4px); border-color: var(--accent); box-shadow: 0 10px 26px rgba(13,148,136,.14); background: #fff; }
+.course-card h3 { font-size: 15.5px; margin-bottom: 4px; }
+.course-card .desc { font-size: 12.5px; color: var(--ink-3); min-height: 18px; margin-bottom: 10px; }
+.course-card .nums { display: flex; gap: 12px; font-size: 12px; color: var(--ink-2); margin-bottom: 10px; }
+.course-card .nums b { color: var(--accent-deep); }
+.prep-bar { height: 7px; border-radius: 6px; background: #e5efec; overflow: hidden; margin-bottom: 12px; }
+.prep-bar i { display: block; height: 100%; border-radius: 6px; background: linear-gradient(90deg, var(--accent), #34d399); transition: width .5s ease; }
+.course-card .ops { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* 标签/徽章 */
+.tag {
+    display: inline-block; padding: 2.5px 9px; border-radius: 6px;
+    font-size: 11.5px; background: #eef4f2; color: var(--ink-2); margin-right: 5px;
+}
+.tag.teal { background: var(--accent-soft); color: var(--accent-deep); }
+.tag.amber { background: var(--amber-soft); color: #b45309; }
+.tag.rose { background: var(--rose-soft); color: var(--rose); }
+.tag.green { background: var(--green-soft); color: #047857; }
+.tag.sky { background: var(--sky-soft); color: #0369a1; }
+.tag.violet { background: var(--violet-soft); color: #6d28d9; }
+.st-doing { color: var(--amber); font-weight: 700; }
+.st-ok { color: var(--green); font-weight: 700; }
+.st-fail { color: var(--rose); font-weight: 700; }
+
+/* 模态框 */
+.modal {
+    display: none; position: fixed; inset: 0;
+    background: rgba(15,23,42,.45); backdrop-filter: blur(3px);
+    z-index: 100; justify-content: center; align-items: center; padding: 20px;
+}
+.modal.show { display: flex; }
+.modal-box {
+    background: #fff; border-radius: 20px; width: 100%; max-width: 560px;
+    max-height: 90vh; overflow-y: auto; padding: 28px;
+    box-shadow: var(--shadow-lg); animation: pop .22s ease;
+}
+@keyframes pop { from { opacity: 0; transform: scale(.96) translateY(10px); } to { opacity: 1; transform: none; } }
+.modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.modal-head h3 { font-size: 17px; }
+.modal-x { background: #f1f5f4; border: none; width: 32px; height: 32px; border-radius: 10px; font-size: 17px; cursor: pointer; color: var(--ink-2); }
+
+/* 产物预览 */
+.doc-view {
+    background: #fbfdfc; border: 1.5px solid var(--line); border-radius: 12px;
+    padding: 18px; font-size: 13.5px; line-height: 1.8; white-space: pre-wrap; word-break: break-word;
+    max-height: 46vh; overflow-y: auto; margin-top: 10px;
+}
+.src-list { margin-top: 10px; font-size: 12.5px; color: var(--ink-2); line-height: 1.8; }
+
+/* 批量进度 */
+.batch-log {
+    background: #10221f; color: #a7f3d0; border-radius: 12px; padding: 14px;
+    font-family: Consolas, monospace; font-size: 12px; line-height: 1.7;
+    max-height: 180px; overflow-y: auto; margin-top: 12px; white-space: pre-wrap;
+}
+.prog { height: 10px; border-radius: 6px; background: #e5efec; overflow: hidden; margin-top: 12px; }
+.prog i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), #34d399); transition: width .4s ease; }
+.check-line { display: flex; align-items: center; gap: 8px; font-size: 13.5px; padding: 7px 0; cursor: pointer; }
+.check-line input { width: auto; }
+
+/* 空状态 */
+.empty { text-align: center; padding: 48px 20px; color: var(--ink-3); }
+.empty .icon { font-size: 42px; margin-bottom: 14px; opacity: .55; }
+.empty h3 { font-size: 15px; color: var(--ink-2); margin-bottom: 6px; }
+.empty p { font-size: 13px; }
+
+.fab {
+    position: fixed; right: 26px; bottom: 30px; z-index: 90;
+    display: flex; align-items: center; gap: 8px;
+    padding: 14px 22px; border: none; border-radius: 30px;
+    background: linear-gradient(135deg, #0f766e, #0d9488);
+    color: #fff; font-size: 14.5px; font-weight: 700; font-family: inherit;
+    cursor: pointer; box-shadow: 0 8px 28px rgba(13,148,136,.45);
+    transition: transform .18s, box-shadow .18s;
+}
+.fab:hover { transform: translateY(-3px) scale(1.03); }
+
+/* 助理抽屉 */
+.prep-fab { position:fixed; right:26px; bottom:96px; z-index:900; border:none; border-radius:999px; padding:12px 20px; font-family:inherit; font-size:14px; font-weight:700; cursor:pointer; color:#fff; background:linear-gradient(120deg,#0ea5e9,#0d9488); box-shadow:0 8px 24px rgba(14,165,233,.4); }
+.prep-fab:hover { filter:brightness(1.1); }
+.prep-drawer { position:fixed; right:16px; bottom:76px; z-index:901; width:calc(100vw - 32px); max-width:760px; height:calc(100vh - 96px); background:#fff; border-radius:18px; box-shadow:0 24px 70px rgba(15,23,42,.35); display:none; flex-direction:column; overflow:hidden; }
+.prep-drawer.show { display:flex; }
+.prep-head { display:flex; align-items:center; gap:8px; padding:12px 14px; background:linear-gradient(120deg,#134e4a,#0d9488); color:#fff; }
+.prep-head b { font-size:14px; flex:1; }
+.prep-head button { border:none; background:rgba(255,255,255,.2); color:#fff; border-radius:8px; padding:4px 9px; font-size:12px; cursor:pointer; font-family:inherit; }
+.prep-msgs { flex:1; overflow-y:auto; padding:12px; background:#f4f9f8; display:flex; flex-direction:column; gap:8px; }
+.prep-msg { max-width:min(88%, 640px); padding:8px 12px; border-radius:12px; font-size:13px; line-height:1.65; white-space:pre-wrap; word-break:break-word; }
+.prep-msg.user { align-self:flex-end; background:var(--accent-deep); color:#fff; border-bottom-right-radius:4px; }
+.prep-msg.bot { align-self:flex-start; background:#fff; color:var(--ink); border:1px solid var(--line); border-bottom-left-radius:4px; }
+.prep-input { display:flex; gap:8px; padding:10px 12px; border-top:1px solid var(--line); background:#fff; }
+.prep-input textarea { flex:1; min-height:44px; max-height:110px; resize:none; border:1.5px solid var(--line); border-radius:10px; padding:8px 10px; font-family:inherit; font-size:13px; outline:none; }
+.prep-input button { border:none; border-radius:10px; padding:0 16px; font-family:inherit; font-size:13px; font-weight:600; cursor:pointer; color:#fff; background:var(--accent-deep); }
+.prep-input button:disabled { opacity:.5; cursor:default; }
+
+@media (max-width: 720px) {
+    body { padding: 12px 10px 40px; }
+    .hero { padding: 24px; }
+    .card { padding: 18px; }
+    .nav button { min-width: 84px; font-size: 13px; }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+
+    <div class="hero">
+        <button class="cloud-chip" id="cloudChip" onclick="openCloudModal()"><span class="dot"></span><span id="cloudText">未登录 · 点击登录</span></button>
+        <h1>📒 教师备课夹</h1>
+        <div class="sub">教材溯源式 AI 备课 —— 四课型教案 · 讲义/练习/要点卡/课件 · 只依据教材, 条条有出处</div>
+        <div id="spaceBar" style="display:none;margin-top:14px;align-items:center;gap:10px;flex-wrap:wrap">
+            <span style="font-size:12.5px;color:rgba(255,255,255,.75)">备课组</span>
+            <select id="spaceSelect" onchange="spaceSwitch(this.value)" style="border:none;border-radius:9px;padding:6px 10px;font-family:inherit;font-size:13px;background:rgba(255,255,255,.92);color:#1e293b;cursor:pointer"></select>
+            <button id="spaceRoleChip" style="display:none;border:none;border-radius:9px;padding:5px 11px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;background:rgba(255,255,255,.2);color:#fff"></button>
+            <button onclick="openSpaceManage()" style="border:none;border-radius:9px;padding:5px 11px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;background:rgba(255,255,255,.2);color:#fff">⚙ 备课组管理</button>
+        </div>
+        <div class="meta">
+            <div><b id="mCourses">0</b>课程</div>
+            <div><b id="mChunks">0</b>教材切片</div>
+            <div><b id="mPlans">0</b>教案</div>
+            <div><b id="mMaterials">0</b>辅导材料</div>
+        </div>
+    </div>
+
+    <div class="nav">
+        <button class="active" data-view="courses" onclick="switchView('courses', this)">📚 课程</button>
+        <button data-view="textbook" onclick="switchView('textbook', this)">📖 教材</button>
+        <button data-view="plans" onclick="switchView('plans', this)">📝 教案</button>
+        <button data-view="materials" onclick="switchView('materials', this)">🧰 材料</button>
+    </div>
+
+    <!-- ═══ 课程 ═══ -->
+    <div id="view-courses" class="view active">
+        <div class="card">
+            <div class="toolbar">
+                <button class="btn btn-primary" onclick="openCourseModal()">＋ 新建课程</button>
+                <div class="grow"></div>
+                <span class="hint" style="margin:0">备课本体系: 课程 → 章节 → 教材切片 → 教案/材料; 教案覆盖度 = 已出教案章节 ÷ 总章节</span>
+            </div>
+            <div id="courseList" class="course-grid"></div>
+        </div>
+    </div>
+
+    <!-- ═══ 教材 ═══ -->
+    <div id="view-textbook" class="view">
+        <div class="card">
+            <div class="section-title">
+                <div><h2>📖 章节与教材</h2><div class="hint" style="margin:4px 0 0">章节是教案的骨架; 上传的教材文本会按段落切成切片, AI 只依据切片生成并逐条溯源</div></div>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <select id="tbCourse" onchange="setCurCourse(this.value, renderTextbook)"></select>
+                    <button class="btn btn-primary btn-sm" onclick="openChapterModal()">＋ 添加章节</button>
+                </div>
+            </div>
+            <div id="chapterList"></div>
+        </div>
+    </div>
+
+    <!-- ═══ 教案 ═══ -->
+    <div id="view-plans" class="view">
+        <div class="card">
+            <div class="section-title">
+                <div><h2>📝 AI 教案</h2><div class="hint" style="margin:4px 0 0">整册按章节并行生成 (可中途查看进度); 单章需该章已有教材; 全程只依据教材切片并附溯源</div></div>
+            </div>
+            <div class="row" style="align-items:flex-end">
+                <div><label class="fl" style="margin-top:0">课程</label><select id="planCourse" onchange="setCurCourse(this.value, onPlanCourseChange)" style="width:100%"></select></div>
+                <div><label class="fl" style="margin-top:0">范围</label><select id="planScope" onchange="onPlanScopeChange()">
+                    <option value="course">整册 (按全部章节)</option>
+                    <option value="chapter">单章</option>
+                </select></div>
+                <div id="planChapterWrap" style="display:none"><label class="fl" style="margin-top:0">章节</label><select id="planChapter" style="width:100%"></select></div>
+                <div><label class="fl" style="margin-top:0">课型</label><select id="planTemplate" style="width:100%"></select></div>
+                <div style="flex:0 0 auto"><button class="btn btn-primary" id="planGenBtn" onclick="genPlan()">✨ 生成教案</button></div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="section-title"><div><h2>我的教案</h2><div class="hint" style="margin:4px 0 0">生成为异步任务, 列表自动刷新; 「模板降级」表示 AI 暂不可用时按骨架+教材摘录生成</div></div></div>
+            <div id="planList"></div>
+        </div>
+    </div>
+
+    <!-- ═══ 材料 ═══ -->
+    <div id="view-materials" class="view">
+        <div class="card">
+            <div class="section-title">
+                <div><h2>🧰 辅导材料四件套</h2><div class="hint" style="margin:4px 0 0">按章节生成, 只依据该章教材切片; 课件大纲每页一个 ## 小节, 可直接贴进 PPT</div></div>
+            </div>
+            <div class="row" style="align-items:flex-end">
+                <div><label class="fl" style="margin-top:0">课程</label><select id="matCourse" onchange="setCurCourse(this.value, onMatCourseChange)" style="width:100%"></select></div>
+                <div><label class="fl" style="margin-top:0">章节</label><select id="matChapter" style="width:100%"></select></div>
+                <div style="flex:0 0 auto"><button class="btn btn-primary" id="matGenBtn" onclick="genMaterial()">✨ 生成</button></div>
+            </div>
+            <div class="row" style="margin-top:10px" id="mtypePick"></div>
+        </div>
+        <div class="card">
+            <div class="toolbar">
+                <select id="matFilterType" onchange="renderMaterials()" style="width:auto">
+                    <option value="">全部类型</option>
+                    <option>讲义</option><option>练习</option><option>要点卡</option><option>课件</option>
+                </select>
+                <div class="grow"></div>
+                <span class="hint" style="margin:0">材料生成是同步任务 (约 10-30 秒)</span>
+            </div>
+            <div id="materialList"></div>
+        </div>
+    </div>
+</div>
+
+<!-- 全局悬浮: 一键备课 -->
+<button class="fab" onclick="openBatchModal()" title="一键备课">⚡<span>一键备课</span></button>
+
+<!-- 课程模态框 -->
+<div class="modal" id="courseModal">
+    <div class="modal-box" style="max-width:440px">
+        <div class="modal-head"><h3>新建课程</h3><button class="modal-x" onclick="closeModal('courseModal')">✕</button></div>
+        <label class="fl">课程名</label><input id="courseName" style="width:100%" placeholder="如: 治安管理">
+        <label class="fl">课程简介 (可选)</label><textarea id="courseDesc" style="width:100%;min-height:60px" placeholder="授课对象 / 学期 / 教材版本等"></textarea>
+        <div style="display:flex;gap:10px;margin-top:18px">
+            <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="saveCourse()">创建</button>
+            <button class="btn btn-ghost" style="flex:1;justify-content:center" onclick="closeModal('courseModal')">取消</button>
+        </div>
+    </div>
+</div>
+
+<!-- 章节模态框 -->
+<div class="modal" id="chapterModal">
+    <div class="modal-box" style="max-width:420px">
+        <div class="modal-head"><h3>添加章节</h3><button class="modal-x" onclick="closeModal('chapterModal')">✕</button></div>
+        <label class="fl">章节名</label><input id="chapterName" style="width:100%" placeholder="如: 第一章 治安管理处罚概述">
+        <div style="display:flex;gap:10px;margin-top:18px">
+            <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="saveChapter()">创建</button>
+            <button class="btn btn-ghost" style="flex:1;justify-content:center" onclick="closeModal('chapterModal')">取消</button>
+        </div>
+    </div>
+</div>
+
+<!-- 上传教材模态框 (含该章切片清单) -->
+<div class="modal" id="uploadModal">
+    <div class="modal-box">
+        <div class="modal-head"><h3 id="uploadTitle">上传教材</h3><button class="modal-x" onclick="closeModal('uploadModal')">✕</button></div>
+        <div class="hint" style="font-size:12.5px;margin:6px 0 10px">粘贴该章教材文本 (支持 .txt/.md 直接选文件读取); 系统按段落自动切片, 追加到本章切片序列末尾。</div>
+        <div style="display:flex;gap:8px;align-items:center">
+            <input id="docName" placeholder="材料名, 如: 教材v2" style="flex:1">
+            <label class="btn btn-ghost btn-sm" style="cursor:pointer">选文件<input type="file" accept=".txt,.md,.markdown" style="display:none" onchange="readFileToText(this)"></label>
+        </div>
+        <textarea id="docText" style="width:100%;min-height:140px;margin-top:8px" placeholder="粘贴教材原文…"></textarea>
+        <div style="display:flex;gap:10px;margin-top:12px">
+            <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="uploadChunks()">切并上传</button>
+        </div>
+        <div style="margin-top:16px">
+            <div style="font-size:13px;font-weight:600;margin-bottom:6px">本章切片 <span id="chunkCount" class="tag teal"></span></div>
+            <div id="chunkList" style="max-height:200px;overflow-y:auto"></div>
+        </div>
+    </div>
+</div>
+
+<!-- 教案预览模态框 -->
+<div class="modal" id="planViewModal">
+    <div class="modal-box" style="max-width:760px">
+        <div class="modal-head"><h3 id="planViewTitle">教案</h3><button class="modal-x" onclick="closeModal('planViewModal')">✕</button></div>
+        <div id="planViewMeta" style="font-size:12.5px;color:var(--ink-3)"></div>
+        <div id="planViewBody" class="doc-view"></div>
+        <div id="planViewSources" class="src-list"></div>
+    </div>
+</div>
+
+<!-- 材料预览模态框 -->
+<div class="modal" id="matViewModal">
+    <div class="modal-box" style="max-width:760px">
+        <div class="modal-head"><h3 id="matViewTitle">材料</h3><button class="modal-x" onclick="closeModal('matViewModal')">✕</button></div>
+        <div id="matViewMeta" style="font-size:12.5px;color:var(--ink-3)"></div>
+        <div id="matViewBody" class="doc-view"></div>
+        <div id="matViewSources" class="src-list"></div>
+    </div>
+</div>
+
+<!-- 一键备课模态框 -->
+<div class="modal" id="batchModal">
+    <div class="modal-box" style="max-width:520px">
+        <div class="modal-head"><h3>⚡ 一键备课</h3><button class="modal-x" onclick="closeModal('batchModal')">✕</button></div>
+        <label class="fl">课程</label>
+        <select id="batchCourse" style="width:100%"></select>
+        <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:8px">
+            <label class="check-line"><input type="checkbox" id="bPlan" checked> 📝 整册教案 (异步队列, 按章节并行)</label>
+            <label class="check-line"><input type="checkbox" id="bJiangyi" checked> 📄 讲义 (逐章)</label>
+            <label class="check-line"><input type="checkbox" id="bLianxi" checked> ✏️ 练习 (逐章)</label>
+            <label class="check-line"><input type="checkbox" id="bYaodian"> 🗂 要点卡 (逐章)</label>
+            <label class="check-line"><input type="checkbox" id="bKejian"> 🖥 课件大纲 (逐章)</label>
+        </div>
+        <div class="hint" style="margin-top:8px">教案先进异步队列; 其余逐章串行生成 (每项失败自动跳过不中断), 完成后可在对应页查看导出。</div>
+        <div class="prog" id="batchProgWrap" style="display:none"><i id="batchProg" style="width:0%"></i></div>
+        <div id="batchStat" style="font-size:12.5px;color:var(--ink-2);margin-top:8px"></div>
+        <div class="batch-log" id="batchLog" style="display:none"></div>
+        <div style="display:flex;gap:10px;margin-top:14px">
+            <button class="btn btn-primary" id="batchRunBtn" style="flex:1;justify-content:center" onclick="runBatch()">开始</button>
+            <button class="btn btn-ghost" onclick="closeModal('batchModal')">关闭</button>
+        </div>
+    </div>
+</div>
+
+<!-- 备课组管理模态框 -->
+<div class="modal" id="spaceModal">
+    <div class="modal-box" style="max-width:560px">
+        <div class="modal-head"><h3>🏫 备课组管理</h3><button class="modal-x" onclick="closeModal('spaceModal')">✕</button></div>
+        <div id="spaceManageBody">加载中…</div>
+    </div>
+</div>
+
+<!-- 云账号模态框 -->
+<div class="modal" id="cloudModal">
+    <div class="modal-box" style="max-width:460px">
+        <div class="modal-head"><h3>☁ 云端同步</h3><button class="modal-x" onclick="closeModal('cloudModal')">✕</button></div>
+        <div id="cloudInfo" style="font-size:13px;color:var(--ink-2);line-height:1.7"></div>
+        <div id="cloudForm">
+            <div style="padding:10px 0;font-size:13px;color:var(--ink-2);line-height:1.8">
+                使用<b>平台账号</b> (AppBase 大厅登录账号)。请从大厅登录后再打开本应用。
+            </div>
+            <div style="display:flex;gap:10px;margin-top:10px">
+                <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="location.href='/hall?next=' + encodeURIComponent('/apps/lesson-prep.html')">去大厅登录</button>
+            </div>
+        </div>
+        <div id="cloudActions" style="display:none">
+            <div style="margin-top:16px;padding:12px 14px;border-radius:12px;background:var(--green-soft);font-size:12.5px;color:#065f46">
+                🟢 已登录 —— 课程与教材按备课组共享, 教案与材料记录创建者; 换设备登录即可恢复。
+            </div>
+            <div style="display:flex;gap:10px;margin-top:16px">
+                <button class="btn btn-danger-soft" style="flex:1;justify-content:center" onclick="cloudLogout()">退出登录</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ 备课助理 (角色域 @persona/lesson-prep-chat; TiMEM 记忆按老师隔离) ═══ -->
+<button class="prep-fab" id="prepFab" onclick="togglePrep()">🤖 备课助理</button>
+<div class="prep-drawer" id="prepDrawer">
+    <div class="prep-head">
+        <b>🤖 备课助理</b>
+        <button onclick="clearPrep()" title="清空对话">🗑</button>
+        <button onclick="togglePrep()">✕</button>
+    </div>
+    <div class="prep-msgs" id="prepMsgs"></div>
+    <div class="prep-input">
+        <textarea id="prepText" placeholder="问备课设计, 如: 治安管理第一章用哪种课型?&#10;帮我想想实训课的安全注意环节怎么设计?"></textarea>
+        <button id="prepSendBtn" onclick="sendPrep()">发送</button>
+    </div>
+</div>
+
+<script>
+// ═══════════════ 状态与工具 ═══════════════
+const DATA_APP = 'lesson-prep.html';
+let me = null;                 // { email }
+let spaces = [];
+let mySpaceRole = null;
+let courses = [];
+let chapters = [];
+let plans = [];
+let materials = [];
+let templates = [];            // [{key,label,sections}]
+let mtypes = ['讲义','练习','要点卡','课件'];
+let curCourse = '';            // 各视图共享的当前课程
+let pickedMtype = '讲义';
+let uploadChapter = null;      // 上传模态框当前章节名
+let planPollTimer = null;
+let planItems = [];            // 列表原始行
+let matItems = [];
+
+const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const fmtTime = s => s ? new Date(s).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : '';
+const closeModal = id => document.getElementById(id).classList.remove('show');
+
+async function apiCall(method, path, body) {
+    const resp = await fetch(path, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+    return data;
+}
+const lp = (p) => '/app/lesson-prep/' + p + '?space=' + encodeURIComponent(spaceId());
+
+function requireLogin() {
+    if (me) return true;
+    alert('请先通过大厅登录后再使用备课 AI 功能。');
+    return false;
+}
+
+// ═══════════════ 空间 (备课组) ═══════════════
+let spaceId = localStorage.getItem('lessonPrep_space') || '';
+
+async function spaceInit() {
+    const d = await apiCall('GET', '/app/spaces?app=' + encodeURIComponent(DATA_APP));
+    spaces = d.spaces || [];
+    if (spaces.length === 0) {
+        try {
+            const sp = await apiCall('POST', '/app/spaces', { app: DATA_APP, name: '我的备课组' });
+            spaces = [{ id: sp.id, name: '我的备课组' }];
+        } catch (e) { console.warn('space create failed:', e.message); return; }
+    }
+    if (!spaces.find(s => s.id === spaceId)) spaceId = spaces[0].id;
+    localStorage.setItem('lessonPrep_space', spaceId);
+    await spaceRefresh();
+}
+
+async function spaceRefresh() {
+    if (!spaceId) return;
+    try {
+        const d = await apiCall('GET', '/app/spaces/' + encodeURIComponent(spaceId));
+        mySpaceRole = d.my_role;
+    } catch (e) { spaceId = ''; mySpaceRole = null; }
+    localStorage.setItem('lessonPrep_space', spaceId);
+}
+
+async function spaceSwitch(id) {
+    if (id === spaceId) return;
+    spaceId = id;
+    localStorage.setItem('lessonPrep_space', spaceId);
+    await spaceRefresh();
+    curCourse = '';
+    await loadAll();
+}
+
+async function spaceSwitchViewRender() {
+    const bar = document.getElementById('spaceBar');
+    if (!me) { bar.style.display = 'none'; return; }
+    try {
+        const d = await apiCall('GET', '/app/spaces?app=' + encodeURIComponent(DATA_APP));
+        spaces = d.spaces || [];
+        document.getElementById('spaceSelect').innerHTML =
+            spaces.map(s => `<option value="${esc(s.id)}" ${s.id === spaceId ? 'selected' : ''}>${esc(s.name)}${s.archived ? ' (已归档)' : ''}</option>`).join('');
+        const chip = document.getElementById('spaceRoleChip');
+        chip.style.display = '';
+        chip.textContent = mySpaceRole === 'owner' ? '👑 组长' : '🎓 成员';
+        bar.style.display = 'flex';
+    } catch (e) { bar.style.display = 'none'; }
+}
+
+async function openSpaceManage() {
+    document.getElementById('spaceModal').classList.add('show');
+    const box = document.getElementById('spaceManageBody');
+    if (!spaceId) { box.innerHTML = '<div class="hint">尚未加入备课组</div>'; return; }
+    let d;
+    try { d = await apiCall('GET', '/app/spaces/' + encodeURIComponent(spaceId)); }
+    catch (e) { box.innerHTML = '<div class="hint">加载失败: ' + esc(e.message) + '</div>'; return; }
+    mySpaceRole = d.my_role;
+    const owner = mySpaceRole === 'owner';
+    const rows = d.members.map(m => `
+        <tr><td>${esc(m.email)}</td>
+        <td><span class="tag">${m.role === 'owner' ? '组长' : '成员'}</span></td>
+        <td>${owner ? `<button class="btn btn-sm btn-danger-soft" onclick="spaceRemoveMember('${m.user_id}')">移除</button>` : ''}</td></tr>`).join('');
+    box.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <b style="font-size:15px">${esc(d.space.name)}</b>
+            <span class="tag teal">${owner ? '我是组长 👑' : '我是成员 🎓'}</span>
+            <span class="hint" style="flex:1;margin:0">负责人: ${esc(d.owner.email)}</span>
+        </div>
+        ${owner ? `
+        <div style="margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:12px">
+            <div style="font-size:13px;font-weight:600;margin-bottom:8px">邀请备课成员 (平台账号邮箱)</div>
+            <div style="display:flex;gap:8px">
+                <input id="invEmail" placeholder="teacher@school.cn" style="flex:1">
+                <button class="btn btn-primary btn-sm" onclick="spaceInvite()">邀请</button>
+            </div>
+        </div>
+        <div style="margin-top:12px;padding:14px;border:1px solid var(--line);border-radius:12px">
+            <div style="font-size:13px;font-weight:600;margin-bottom:8px">新建备课组</div>
+            <div style="display:flex;gap:8px">
+                <input id="newSpaceName" placeholder="如: 治安管理教研组" style="flex:1">
+                <button class="btn btn-primary btn-sm" onclick="spaceCreateFromModal()">创建</button>
+            </div>
+        </div>` : ''}
+        <div style="margin-top:14px">
+            <div style="font-size:13px;font-weight:600;margin-bottom:6px">成员 (${(d.members.length || 0) + 1})</div>
+            <table style="font-size:13px"><thead><tr><th style="padding:6px 8px">账号</th><th style="padding:6px 8px">角色</th><th></th></tr></thead>
+            <tbody>
+                <tr><td>${esc(d.owner.email)}</td><td><span class="tag teal">组长</span></td><td></td></tr>
+                ${rows || ''}
+            </tbody></table>
+        </div>`;
+}
+async function spaceInvite() {
+    const email = document.getElementById('invEmail').value.trim();
+    if (!email) return alert('请填写老师邮箱');
+    try {
+        await apiCall('POST', '/app/spaces/' + encodeURIComponent(spaceId) + '/members', { email, role: 'teacher' });
+        openSpaceManage();
+    } catch (e) { alert('邀请失败: ' + e.message); }
+}
+async function spaceRemoveMember(uid) {
+    if (!confirm('确定移除该成员?')) return;
+    try {
+        await apiCall('DELETE', '/app/spaces/' + encodeURIComponent(spaceId) + '/members/' + encodeURIComponent(uid));
+        openSpaceManage();
+    } catch (e) { alert('移除失败: ' + e.message); }
+}
+async function spaceCreateFromModal() {
+    const name = document.getElementById('newSpaceName').value.trim();
+    if (!name) return alert('请填写备课组名');
+    try {
+        const sp = await apiCall('POST', '/app/spaces', { app: DATA_APP, name });
+        closeModal('spaceModal');
+        await spaceSwitch(sp.id);
+    } catch (e) { alert('创建失败: ' + e.message); }
+}
+
+// ═══════════════ 登录 ═══════════════
+async function cloudIdentify() {
+    try {
+        const resp = await fetch('/app/auth/me');
+        if (!resp.ok) throw new Error('未登录');
+        const d = await resp.json();
+        me = d.user;
+        document.getElementById('cloudText').textContent = '👩‍🏫 ' + me.email;
+        document.getElementById('cloudChip').classList.add('ok');
+        document.getElementById('cloudForm').style.display = 'none';
+        document.getElementById('cloudActions').style.display = 'block';
+        document.getElementById('cloudInfo').innerHTML = '已登录 <b>' + esc(me.email) + '</b>';
+        await spaceInit();
+        await spaceSwitchViewRender();
+        await loadAll();
+    } catch (e) {
+        me = null;
+        document.getElementById('cloudText').textContent = '未登录 · 点击登录';
+        document.getElementById('cloudChip').classList.remove('ok');
+        document.getElementById('cloudForm').style.display = 'block';
+        document.getElementById('cloudActions').style.display = 'none';
+        document.getElementById('cloudInfo').textContent = '使用 AppBase 大厅账号, 登录后打开本应用即可自动关联。浏览无需登录, AI 功能需登录。';
+    }
+}
+async function cloudLogout() {
+    await fetch('/app/auth/logout', { method: 'POST' }).catch(() => {});
+    location.reload();
+}
+function openCloudModal() {
+    document.getElementById('cloudModal').classList.add('show');
+}
+
+// ═══════════════ 导航 ═══════════════
+function switchView(id, btn) {
+    document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
+    (btn || document.querySelector(`.nav button[data-view="${id}"]`)).classList.add('active');
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.getElementById('view-' + id).classList.add('active');
+    if (id === 'textbook') renderTextbook();
+    if (id === 'plans') { syncCourseSelect('planCourse'); onPlanCourseChange(); loadPlans(); }
+    if (id === 'materials') { syncCourseSelect('matCourse'); onMatCourseChange(); loadMaterials(); }
+}
+
+// ═══════════════ 课程 ═══════════════
+async function loadCourses() {
+    if (!me || !spaceId) { courses = []; renderCourses(); return; }
+    try {
+        const d = await apiCall('GET', lp('courses'));
+        courses = d.items || [];
+        mySpaceRole = d.my_role || mySpaceRole;
+    } catch (e) { courses = []; toastList('courseList', e.message); return; }
+    renderCourses();
+}
+
+function renderCourses() {
+    const box = document.getElementById('courseList');
+    document.getElementById('mCourses').textContent = courses.length;
+    document.getElementById('mChunks').textContent = courses.reduce((a, c) => a + (c.chunk_count || 0), 0);
+    document.getElementById('mPlans').textContent = courses.reduce((a, c) => a + (c.plan_ready || 0), 0);
+    document.getElementById('mMaterials').textContent = courses.reduce((a, c) => a + (c.material_count || 0), 0);
+    if (!courses.length) {
+        box.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="icon">📚</div><h3>还没有课程</h3><p>点击「新建课程」开始备课</p></div>`;
+        return;
+    }
+    box.innerHTML = courses.map(c => `
+        <div class="course-card" onclick="openCourseTextbook('${c.id}')">
+            <h3>${esc(c.name)}</h3>
+            <div class="desc">${esc(c.description || '')}</div>
+            <div class="nums">
+                <span>章节 <b>${c.chapter_count}</b></span>
+                <span>切片 <b>${c.chunk_count}</b></span>
+                <span>教案 <b>${c.plan_ready}</b></span>
+                <span>材料 <b>${c.material_count}</b></span>
+            </div>
+            <div class="prep-bar" title="教案覆盖度 ${c.prep_ratio}%"><i style="width:${c.prep_ratio || 0}%"></i></div>
+            <div class="ops" onclick="event.stopPropagation()">
+                <button class="btn btn-ghost btn-sm" onclick="openCourseTextbook('${c.id}')">📖 教材</button>
+                <button class="btn btn-ghost btn-sm" onclick="gotoPlans('${c.id}')">📝 教案</button>
+                <button class="btn btn-ghost btn-sm" onclick="gotoMaterials('${c.id}')">🧰 材料</button>
+                <button class="btn btn-primary btn-sm" onclick="openBatchModal('${c.id}')">⚡ 一键备课</button>
+                ${mySpaceRole === 'owner' ? `<button class="btn btn-danger-soft btn-sm" onclick="delCourse('${c.id}')">删除</button>` : ''}
+            </div>
+        </div>`).join('');
+}
+
+function openCourseModal() {
+    if (!requireLogin()) return;
+    document.getElementById('courseName').value = '';
+    document.getElementById('courseDesc').value = '';
+    document.getElementById('courseModal').classList.add('show');
+}
+async function saveCourse() {
+    const name = document.getElementById('courseName').value.trim();
+    if (!name) return alert('请填写课程名');
+    try {
+        await apiCall('POST', lp('courses'), { name, description: document.getElementById('courseDesc').value.trim() });
+        closeModal('courseModal');
+        await loadCourses();
+        fillCourseSelects();
+    } catch (e) { alert('创建失败: ' + e.message); }
+}
+async function delCourse(id) {
+    const c = courses.find(x => x.id === id);
+    if (!confirm(`删除课程「${c?.name}」? 其章节、教材、教案与材料将一并删除。`)) return;
+    try { await apiCall('DELETE', lp('courses/' + id)); await loadCourses(); fillCourseSelects(); }
+    catch (e) { alert('删除失败: ' + e.message); }
+}
+function openCourseTextbook(id) { setCurCourse(id, () => { switchView('textbook'); renderTextbook(); }); }
+function gotoPlans(id) { setCurCourse(id, () => { switchView('plans'); }); }
+function gotoMaterials(id) { setCurCourse(id, () => { switchView('materials'); }); }
+
+// ═══════════════ 课程选择联动 ═══════════════
+function fillCourseSelects() {
+    for (const selId of ['tbCourse', 'planCourse', 'matCourse', 'batchCourse']) {
+        syncCourseSelect(selId);
+    }
+}
+function syncCourseSelect(selId) {
+    const sel = document.getElementById(selId);
+    if (!sel) return;
+    const keep = curCourse || (courses[0] || {}).id || '';
+    sel.innerHTML = courses.map(c => `<option value="${esc(c.id)}" ${c.id === keep ? 'selected' : ''}>${esc(c.name)}</option>`).join('')
+        || '<option value="">(请先新建课程)</option>';
+    if (!curCourse && courses.length) curCourse = courses[0].id;
+}
+function setCurCourse(id, then) {
+    curCourse = id || curCourse;
+    fillCourseSelects();
+    if (then) then();
+}
+
+// ═══════════════ 教材 (章节 + 切片) ═══════════════
+async function loadChapters() {
+    if (!me || !curCourse) { chapters = []; return; }
+    try {
+        const d = await apiCall('GET', lp('chapters') + '&course=' + encodeURIComponent(curCourse));
+        chapters = d.items || [];
+    } catch (e) { chapters = []; toastList('chapterList', e.message); }
+}
+async function renderTextbook() {
+    syncCourseSelect('tbCourse');
+    await loadChapters();
+    const box = document.getElementById('chapterList');
+    const c = courses.find(x => x.id === curCourse);
+    if (!c) {
+        box.innerHTML = `<div class="empty"><div class="icon">📖</div><h3>请先创建课程</h3><p>在「课程」页新建课程后再管理教材</p></div>`;
+        return;
+    }
+    if (!chapters.length) {
+        box.innerHTML = `<div class="empty"><div class="icon">🗂</div><h3>还没有章节</h3><p>点击「添加章节」搭建课程骨架, 再为每章上传教材</p></div>`;
+        return;
+    }
+    box.innerHTML = `<table><thead><tr><th>章节</th><th>切片</th><th style="width:280px">操作</th></tr></thead><tbody>` +
+        chapters.map(ch => `
+        <tr>
+            <td><b>${esc(ch.name)}</b></td>
+            <td><span class="tag ${ch.chunk_count > 0 ? 'teal' : 'rose'}">${ch.chunk_count} 片</span></td>
+            <td>
+                <button class="btn btn-ghost btn-sm" onclick="openUploadModal('${esc(ch.name)}')">📤 上传教材 / 查看切片</button>
+                <button class="btn btn-ghost btn-sm" onclick="renameChapter('${ch.id}')">✏️</button>
+                <button class="btn btn-danger-soft btn-sm" onclick="delChapter('${ch.id}')">删除</button>
+            </td>
+        </tr>`).join('') + `</tbody></table>`;
+}
+function openChapterModal() {
+    if (!requireLogin()) return;
+    if (!curCourse) return alert('请先创建课程');
+    document.getElementById('chapterName').value = '';
+    document.getElementById('chapterModal').classList.add('show');
+}
+async function saveChapter() {
+    const name = document.getElementById('chapterName').value.trim();
+    if (!name) return alert('请填写章节名');
+    try {
+        await apiCall('POST', lp('chapters'), { course: curCourse, name });
+        closeModal('chapterModal');
+        renderTextbook();
+    } catch (e) { alert('创建失败: ' + e.message); }
+}
+async function renameChapter(id) {
+    const ch = chapters.find(x => x.id === id);
+    const name = prompt('修改章节名 (已有切片会一并迁移):', ch?.name || '');
+    if (!name || name === ch?.name) return;
+    try { await apiCall('PUT', lp('chapters/' + id), { name }); renderTextbook(); }
+    catch (e) { alert('重命名失败: ' + e.message); }
+}
+async function delChapter(id) {
+    const ch = chapters.find(x => x.id === id);
+    if (!confirm(`删除章节「${ch?.name}」? 该章教材切片一并删除 (教案不受影响)。`)) return;
+    try { await apiCall('DELETE', lp('chapters/' + id)); renderTextbook(); }
+    catch (e) { alert('删除失败: ' + e.message); }
+}
+
+function readFileToText(input) {
+    const f = input.files && input.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => { document.getElementById('docText').value = String(reader.result || ''); };
+    reader.readAsText(f, 'utf-8');
+    input.value = '';
+}
+async function openUploadModal(chapterName) {
+    uploadChapter = chapterName;
+    document.getElementById('uploadTitle').textContent = '📤 ' + chapterName;
+    document.getElementById('docName').value = '';
+    document.getElementById('docText').value = '';
+    document.getElementById('uploadModal').classList.add('show');
+    await loadChunks(chapterName);
+}
+async function loadChunks(chapterName) {
+    const box = document.getElementById('chunkList');
+    try {
+        const d = await apiCall('GET', lp('chunks') + '&course=' + encodeURIComponent(curCourse) + '&chapter=' + encodeURIComponent(chapterName));
+        const items = d.items || [];
+        document.getElementById('chunkCount').textContent = items.length + ' 片';
+        box.innerHTML = items.length ? items.map(k => `
+            <div style="display:flex;gap:8px;align-items:flex-start;padding:7px 4px;border-bottom:1px dashed var(--line);font-size:12.5px">
+                <span class="tag" style="flex-shrink:0">#${k.seq}</span>
+                <span style="flex:1;color:var(--ink-2)">${esc(k.preview)}…</span>
+                <span class="tag">${esc(k.doc_name)}</span>
+                <button class="btn btn-sm btn-danger-soft" onclick="delChunk('${k.id}')">删</button>
+            </div>`).join('') : '<div class="hint" style="padding:8px 0">本章还没有切片</div>';
+    } catch (e) { box.innerHTML = '<div class="hint">加载失败: ' + esc(e.message) + '</div>'; }
+}
+async function uploadChunks() {
+    const text = document.getElementById('docText').value;
+    if (!text.trim()) return alert('请粘贴教材文本或选择文件');
+    try {
+        const d = await apiCall('POST', lp('chunks'), {
+            course: curCourse, chapter: uploadChapter,
+            docName: document.getElementById('docName').value.trim(), text,
+        });
+        alert(`已切出 ${d.chunks} 个切片并入库`);
+        document.getElementById('docText').value = '';
+        await loadChunks(uploadChapter);
+        await loadChapters();
+    } catch (e) { alert('上传失败: ' + e.message); }
+}
+async function delChunk(id) {
+    try { await apiCall('DELETE', lp('chunks/' + id)); await loadChunks(uploadChapter); await loadChapters(); }
+    catch (e) { alert('删除失败: ' + e.message); }
+}
+
+// ═══════════════ 教案 ═══════════════
+async function loadTemplates() {
+    if (!me) return;
+    try {
+        const d = await apiCall('GET', '/app/lesson-prep/templates');
+        templates = d.items || [];
+        mtypes = d.mtypes || mtypes;
+        const sel = document.getElementById('planTemplate');
+        sel.innerHTML = templates.map(t => `<option value="${esc(t.key)}">${esc(t.label)}</option>`).join('');
+        renderMtypePick();
+    } catch (e) { /* 忽略 */ }
+}
+function onPlanCourseChange() { onPlanScopeChange(); }
+function onPlanScopeChange() {
+    const scope = document.getElementById('planScope').value;
+    document.getElementById('planChapterWrap').style.display = scope === 'chapter' ? '' : 'none';
+    if (scope === 'chapter') fillChapterSelect('planChapter');
+}
+function fillChapterSelect(selId) {
+    const sel = document.getElementById(selId);
+    if (!sel) return;
+    sel.innerHTML = chapters.length
+        ? chapters.map(ch => `<option value="${esc(ch.name)}">${esc(ch.name)} (${ch.chunk_count}片)</option>`).join('')
+        : '<option value="">(本章列表为空, 请先在教材页添加章节)</option>';
+}
+async function genPlan() {
+    if (!requireLogin()) return;
+    if (!curCourse) return alert('请先创建课程');
+    const scope = document.getElementById('planScope').value;
+    const chapter = scope === 'chapter' ? document.getElementById('planChapter').value : '';
+    if (scope === 'chapter' && !chapter) return alert('请先在教材页添加章节');
+    const btn = document.getElementById('planGenBtn');
+    btn.disabled = true;
+    try {
+        await apiCall('POST', lp('plans'), {
+            course: curCourse, scope, chapter,
+            template: document.getElementById('planTemplate').value,
+        });
+        switchView('plans');
+        await loadPlans(true);
+    } catch (e) { alert('排队失败: ' + e.message); }
+    finally { btn.disabled = false; }
+}
+async function loadPlans(keepSilent) {
+    if (!me || !spaceId) return;
+    try {
+        const qs = curCourse ? '&course=' + encodeURIComponent(curCourse) : '';
+        const d = await apiCall('GET', lp('plans') + qs);
+        planItems = d.items || [];
+    } catch (e) { if (!keepSilent) toastList('planList', e.message); return; }
+    renderPlans();
+    schedulePlanPoll();
+}
+function renderPlans() {
+    const box = document.getElementById('planList');
+    if (!planItems.length) {
+        box.innerHTML = `<div class="empty"><div class="icon">📝</div><h3>还没有教案</h3><p>在上方选择课程与课型, 点「生成教案」</p></div>`;
+        return;
+    }
+    box.innerHTML = `<table><thead><tr><th>标题</th><th>课型</th><th>状态</th><th>字数</th><th>时间</th><th style="width:250px">操作</th></tr></thead><tbody>` +
+        planItems.map(p => `
+        <tr>
+            <td><b>${esc(p.title)}</b>${p.degraded ? ' <span class="tag amber">模板降级</span>' : ''}
+                <div style="font-size:12px;color:var(--ink-3)">${p.scope === 'chapter' ? '单章' : '整册'} · ${esc(p.created_by_email || '')}</div></td>
+            <td><span class="tag teal">${esc(templateLabel(p.template))}</span></td>
+            <td>${p.status === 'ready' ? '<span class="st-ok">✔ 就绪</span>'
+                : p.status === 'generating' ? '<span class="st-doing">⏳ 生成中…</span>'
+                : '<span class="st-fail">✗ 失败</span>'}</td>
+            <td>${p.content_chars ?? 0}</td>
+            <td style="font-size:12.5px;color:var(--ink-3)">${fmtTime(p.created_at)}</td>
+            <td>
+                <button class="btn btn-ghost btn-sm" onclick="viewPlan('${p.plan_id || p.id}')">查看</button>
+                ${p.status === 'ready' ? `
+                    <button class="btn btn-ghost btn-sm" onclick="exportDoc('plans', '${p.plan_id || p.id}', 'docx')">Word</button>
+                    <button class="btn btn-ghost btn-sm" onclick="exportDoc('plans', '${p.plan_id || p.id}', 'md')">MD</button>` : ''}
+                ${(p.mine || mySpaceRole === 'owner') ? `<button class="btn btn-danger-soft btn-sm" onclick="delPlan('${p.plan_id || p.id}')">删除</button>` : ''}
+            </td>
+        </tr>`).join('') + `</tbody></table>`;
+}
+function templateLabel(key) { return (templates.find(t => t.key === key) || {}).label || key; }
+function schedulePlanPoll() {
+    if (planPollTimer) { clearTimeout(planPollTimer); planPollTimer = null; }
+    if (planItems.some(p => p.status === 'generating')) {
+        planPollTimer = setTimeout(() => loadPlans(true), 3000);
+    }
+}
+async function viewPlan(planId) {
+    try {
+        const p = await apiCall('GET', lp('plans/' + planId));
+        document.getElementById('planViewTitle').textContent = p.title;
+        document.getElementById('planViewMeta').innerHTML =
+            `${p.scope === 'chapter' ? '单章' : '整册'} · ${esc(templateLabel(p.template))} · ${p.degraded ? '<span class="tag amber">模板降级</span>' : '<span class="tag green">AI 生成</span>'} · ${esc(p.created_by_email || '')} · ${fmtTime(p.created_at)}`;
+        document.getElementById('planViewBody').textContent =
+            p.status === 'generating' ? '⏳ 生成中, 请稍后… (整册按章节并行, 内容会逐步出现)'
+            : p.status === 'failed' ? '✗ 生成失败。' + (p.content || '')
+            : (p.content || '(空)');
+        const srcs = p.sources || [];
+        document.getElementById('planViewSources').innerHTML = srcs.length
+            ? `<details><summary style="cursor:pointer">📚 教材溯源 (${srcs.length} 条切片)</summary>` +
+              srcs.map(s => `<div style="padding:3px 0">· ${esc(s.doc_name)} · ${esc(s.chapter)} <span class="tag">${esc(String(s.chunk_id).slice(0, 8))}</span></div>`).join('') + '</details>'
+            : '';
+        document.getElementById('planViewModal').classList.add('show');
+    } catch (e) { alert('加载失败: ' + e.message); }
+}
+async function delPlan(id) {
+    if (!confirm('删除该教案?')) return;
+    try { await apiCall('DELETE', lp('plans/' + id)); await loadPlans(); }
+    catch (e) { alert('删除失败: ' + e.message); }
+}
+
+// ═══════════════ 材料 ═══════════════
+function renderMtypePick() {
+    const box = document.getElementById('mtypePick');
+    if (!box) return;
+    box.innerHTML = mtypes.map(m =>
+        `<button class="btn ${pickedMtype === m ? 'btn-primary' : 'btn-ghost'}" onclick="pickMtype('${m}')">${m}</button>`).join('');
+}
+function pickMtype(m) { pickedMtype = m; renderMtypePick(); }
+function onMatCourseChange() { fillChapterSelect('matChapter'); }
+async function genMaterial() {
+    if (!requireLogin()) return;
+    if (!curCourse) return alert('请先创建课程');
+    const chapter = document.getElementById('matChapter').value;
+    if (!chapter) return alert('请先在教材页添加章节');
+    const btn = document.getElementById('matGenBtn');
+    btn.disabled = true; btn.textContent = '⏳ 生成中…';
+    try {
+        const d = await apiCall('POST', lp('materials'), { course: curCourse, chapter, mtype: pickedMtype });
+        if (d.degraded) alert('AI 暂不可用, 已按模板骨架 + 教材摘录生成 (标记「模板降级」), 请补充完善。');
+        await loadMaterials();
+    } catch (e) { alert('生成失败: ' + e.message); }
+    finally { btn.disabled = false; btn.textContent = '✨ 生成'; }
+}
+async function loadMaterials() {
+    if (!me || !spaceId) return;
+    try {
+        const qs = curCourse ? '&course=' + encodeURIComponent(curCourse) : '';
+        const d = await apiCall('GET', lp('materials') + qs);
+        matItems = d.items || [];
+    } catch (e) { toastList('materialList', e.message); return; }
+    renderMaterials();
+}
+function renderMaterials() {
+    const box = document.getElementById('materialList');
+    const ft = document.getElementById('matFilterType').value;
+    const items = ft ? matItems.filter(m => m.mtype === ft) : matItems;
+    if (!items.length) {
+        box.innerHTML = `<div class="empty"><div class="icon">🧰</div><h3>还没有材料</h3><p>选择章节与类型, 点「生成」</p></div>`;
+        return;
+    }
+    const color = { '讲义': 'teal', '练习': 'sky', '要点卡': 'amber', '课件': 'violet' };
+    box.innerHTML = `<table><thead><tr><th>标题</th><th>类型</th><th>字数</th><th>时间</th><th style="width:230px">操作</th></tr></thead><tbody>` +
+        items.map(m => `
+        <tr>
+            <td><b>${esc(m.title)}</b>${m.degraded ? ' <span class="tag amber">模板降级</span>' : ''}
+                <div style="font-size:12px;color:var(--ink-3)">${esc(m.created_by_email || '')}</div></td>
+            <td><span class="tag ${color[m.mtype] || ''}">${esc(m.mtype)}</span></td>
+            <td>${m.content_chars ?? 0}</td>
+            <td style="font-size:12.5px;color:var(--ink-3)">${fmtTime(m.created_at)}</td>
+            <td>
+                <button class="btn btn-ghost btn-sm" onclick="viewMaterial('${m.id}')">查看</button>
+                <button class="btn btn-ghost btn-sm" onclick="exportDoc('materials', '${m.id}', 'docx')">Word</button>
+                <button class="btn btn-ghost btn-sm" onclick="exportDoc('materials', '${m.id}', 'md')">MD</button>
+                ${(m.mine || mySpaceRole === 'owner') ? `<button class="btn btn-danger-soft btn-sm" onclick="delMaterial('${m.id}')">删除</button>` : ''}
+            </td>
+        </tr>`).join('') + `</tbody></table>`;
+}
+async function viewMaterial(id) {
+    try {
+        const m = await apiCall('GET', lp('materials/' + id));
+        document.getElementById('matViewTitle').textContent = m.title;
+        document.getElementById('matViewMeta').innerHTML =
+            `<span class="tag teal">${esc(m.mtype)}</span> ${m.degraded ? '<span class="tag amber">模板降级</span>' : '<span class="tag green">AI 生成</span>'} · ${esc(m.created_by_email || '')} · ${fmtTime(m.created_at)}`;
+        document.getElementById('matViewBody').textContent = m.content_md || '(空)';
+        const srcs = m.sources || [];
+        document.getElementById('matViewSources').innerHTML = srcs.length
+            ? `<details><summary style="cursor:pointer">📚 教材溯源 (${srcs.length} 条切片)</summary>` +
+              srcs.map(s => `<div style="padding:3px 0">· ${esc(s.doc_name)} · ${esc(s.chapter)} <span class="tag">${esc(String(s.chunk_id).slice(0, 8))}</span></div>`).join('') + '</details>'
+            : '';
+        document.getElementById('matViewModal').classList.add('show');
+    } catch (e) { alert('加载失败: ' + e.message); }
+}
+async function delMaterial(id) {
+    if (!confirm('删除该材料?')) return;
+    try { await apiCall('DELETE', lp('materials/' + id)); await loadMaterials(); }
+    catch (e) { alert('删除失败: ' + e.message); }
+}
+
+// ═══════════════ 导出 ═══════════════
+async function exportDoc(kind, id, fmt) {
+    try {
+        const d = await apiCall('GET', lp(kind + '/' + id + '/export') + '&fmt=' + fmt);
+        if (d.base64) {
+            const bin = atob(d.base64);
+            const arr = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+            downloadBlob(new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }), d.filename);
+        } else {
+            downloadBlob(new Blob([d.content || ''], { type: 'text/markdown;charset=utf-8' }), d.filename);
+        }
+    } catch (e) { alert('导出失败: ' + e.message); }
+}
+function downloadBlob(blob, filename) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename || 'download';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 400);
+}
+
+// ═══════════════ 一键备课 ═══════════════
+let batchRunning = false;
+async function openBatchModal(presetCourse) {
+    if (!requireLogin()) return;
+    if (!courses.length) return alert('请先创建课程');
+    syncCourseSelect('batchCourse');
+    if (presetCourse) document.getElementById('batchCourse').value = presetCourse;
+    document.getElementById('batchProgWrap').style.display = 'none';
+    document.getElementById('batchLog').style.display = 'none';
+    document.getElementById('batchStat').textContent = '';
+    document.getElementById('batchModal').classList.add('show');
+}
+function blog(line) {
+    const box = document.getElementById('batchLog');
+    box.style.display = '';
+    box.textContent += line + '\n';
+    box.scrollTop = box.scrollHeight;
+}
+async function runBatch() {
+    if (batchRunning) return;
+    const courseId = document.getElementById('batchCourse').value;
+    if (!courseId) return alert('请先创建课程');
+    const tasks = [];
+    const wantPlan = document.getElementById('bPlan').checked;
+    const mats = [];
+    if (document.getElementById('bJiangyi').checked) mats.push('讲义');
+    if (document.getElementById('bLianxi').checked) mats.push('练习');
+    if (document.getElementById('bYaodian').checked) mats.push('要点卡');
+    if (document.getElementById('bKejian').checked) mats.push('课件');
+    if (!wantPlan && mats.length === 0) return alert('请至少勾选一项');
+    batchRunning = true;
+    const runBtn = document.getElementById('batchRunBtn');
+    runBtn.disabled = true;
+    document.getElementById('batchProgWrap').style.display = '';
+    let done = 0, failed = 0, total = 0;
+    const tick = () => {
+        document.getElementById('batchProg').style.width = total ? Math.round(done / total * 100) + '%' : '0%';
+        document.getElementById('batchStat').textContent = `进度 ${done}/${total}` + (failed ? ` · 失败 ${failed}` : '');
+    };
+    try {
+        const chaptersRsp = await apiCall('GET', lp('chapters') + '&course=' + encodeURIComponent(courseId));
+        const chs = (chaptersRsp.items || []).filter(c => c.chunk_count > 0);
+        if (wantPlan) total += 1;
+        total += mats.length * chs.length;
+        tick();
+        blog(`开始备课: ${chs.length} 个有教材的章节`);
+        if (wantPlan) {
+            if (!chs.length && !mats.length) { blog('⚠ 该课程没有带教材切片的章节, 请先在「教材」页上传'); }
+            try {
+                const r = await apiCall('POST', lp('plans'), { course: courseId, scope: 'course', template: document.getElementById('planTemplate').value || 'standard' });
+                blog(`✓ 教案已入队 (${r.plan_id.slice(0, 8)}…), 后台按章节并行生成, 可到「教案」页看进度`);
+            } catch (e) { failed++; blog(`✗ 教案排队失败: ${e.message}`); }
+            done++; tick();
+        }
+        for (const ch of chs) {
+            for (const mtype of mats) {
+                try {
+                    const r = await apiCall('POST', lp('materials'), { course: courseId, chapter: ch.name, mtype });
+                    blog(r.degraded ? `△ ${ch.name}·${mtype} 完成 (模板降级)` : `✓ ${ch.name}·${mtype} 完成`);
+                } catch (e) { failed++; blog(`✗ ${ch.name}·${mtype} 失败: ${e.message}`); }
+                done++; tick();
+            }
+        }
+        blog('—— 备课结束 ——');
+        await loadCourses(); fillCourseSelects();
+        if (curCourse === courseId) { loadPlans(true); loadMaterials(); }
+    } catch (e) {
+        blog('✗ 中断: ' + e.message);
+    } finally {
+        batchRunning = false;
+        runBtn.disabled = false;
+    }
+}
+
+// ═══════════════ 备课助理 ═══════════════
+let prepHistory = [];
+let prepOpen = false;
+const prepStoreKey = () => 'lessonPrep_chat_' + (spaceId || 'local');
+
+function togglePrep() {
+    prepOpen = !prepOpen;
+    document.getElementById('prepDrawer').classList.toggle('show', prepOpen);
+    if (prepOpen) {
+        prepHistory = [];
+        try { prepHistory = JSON.parse(localStorage.getItem(prepStoreKey()) || '[]') || []; } catch (e) {}
+        renderPrep();
+        if (!prepHistory.length) addPrepMsg('bot',
+            '你好，我是备课助理 🤖\n我可以基于当前备课组的课程、章节、教材切片和已有教案/材料，给你备课设计建议，比如：\n· 这门课先从哪章开始备课？\n· 实训课和标准课教案有什么区别？\n· 帮我看看哪几章还缺教案？\n(对话要点会存入长期记忆, 下次可接着聊)',
+            false);
+        document.getElementById('prepText').focus();
+    }
+}
+function addPrepMsg(role, text, save = true) {
+    const box = document.getElementById('prepMsgs');
+    const div = document.createElement('div');
+    div.className = 'prep-msg ' + role;
+    div.textContent = text;
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+    if (save) {
+        prepHistory.push({ role: role === 'user' ? 'user' : 'assistant', content: text });
+        try { localStorage.setItem(prepStoreKey(), JSON.stringify(prepHistory.slice(-60))); } catch (e) {}
+    }
+}
+function renderPrep() {
+    const box = document.getElementById('prepMsgs');
+    box.innerHTML = '';
+    prepHistory.forEach(m => {
+        const div = document.createElement('div');
+        div.className = 'prep-msg ' + (m.role === 'user' ? 'user' : 'bot');
+        div.textContent = m.content;
+        box.appendChild(div);
+    });
+    box.scrollTop = box.scrollHeight;
+}
+function clearPrep() {
+    if (!prepHistory.length || !confirm('清空备课助理对话记录？')) return;
+    prepHistory = [];
+    localStorage.removeItem(prepStoreKey());
+    renderPrep();
+}
+function buildPrepContext() {
+    const L = [];
+    L.push('【备课组课程】(' + courses.length + ' 门)');
+    courses.forEach(c => L.push(`- ${c.name}: ${c.chapter_count}章/${c.chunk_count}切片, 教案就绪${c.plan_ready}${c.plan_running ? '(生成中' + c.plan_running + ')' : ''}, 教案覆盖${c.prep_ratio || 0}%, 材料${c.material_count}份`));
+    if (curCourse) {
+        const c = courses.find(x => x.id === curCourse);
+        if (c) {
+            L.push(`【当前课程】${c.name}`);
+            L.push('【章节与教材】');
+            chapters.forEach(ch => L.push(`- ${ch.name}: ${ch.chunk_count} 个教材切片`));
+            const ps = planItems.slice(0, 8);
+            if (ps.length) {
+                L.push('【最近教案】');
+                ps.forEach(p => L.push(`- ${p.title} [${p.status}${p.degraded ? '/模板降级' : ''}] ${p.content_chars || 0}字`));
+            }
+            const ms = matItems.slice(0, 8);
+            if (ms.length) {
+                L.push('【最近材料】');
+                ms.forEach(m => L.push(`- ${m.title} [${m.mtype}${m.degraded ? '/模板降级' : ''}]`));
+            }
+        }
+    }
+    return L.join('\n').slice(0, 10000);
+}
+async function sendPrep() {
+    const ta = document.getElementById('prepText');
+    const btn = document.getElementById('prepSendBtn');
+    const q = ta.value.trim();
+    if (!q || btn.disabled) return;
+    if (!requireLogin()) return;
+    ta.value = '';
+    addPrepMsg('user', q);
+    btn.disabled = true;
+    addPrepMsg('bot', '思考中…', false);
+    try {
+        const d = await apiCall('POST', '/app/lesson-prep/chat', {
+            question: q,
+            context: buildPrepContext(),
+            history: prepHistory.slice(-10),
+        });
+        removeLastPrepDom();
+        addPrepMsg('bot', d.response || '(空回复)');
+    } catch (e) {
+        removeLastPrepDom();
+        addPrepMsg('bot', '✗ 请求失败: ' + e.message + (/401/.test(e.message) ? ' (请回大厅重新登录)' : ''), false);
+    } finally {
+        btn.disabled = false;
+        ta.focus();
+    }
+}
+function removeLastPrepDom() {
+    const box = document.getElementById('prepMsgs');
+    if (box.lastChild) box.removeChild(box.lastChild);
+}
+document.getElementById('prepText').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.isComposing && !e.shiftKey) { e.preventDefault(); sendPrep(); }
+});
+
+// ═══════════════ 杂项 ═══════════════
+function toastList(boxId, msg) {
+    const box = document.getElementById(boxId);
+    if (box) box.innerHTML = `<div class="hint" style="padding:12px 0">⚠ ${esc(msg)}</div>`;
+}
+
+async function loadAll() {
+    await loadCourses();
+    fillCourseSelects();
+    await loadChapters();
+    if (document.getElementById('view-textbook').classList.contains('active')) renderTextbook();
+    await loadPlans();
+    await loadMaterials();
+    await loadTemplates();
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadTemplates().catch(() => {});
+    await cloudIdentify();
+});
+</script>
+</body>
+</html>

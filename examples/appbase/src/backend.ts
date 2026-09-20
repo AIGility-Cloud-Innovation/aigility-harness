@@ -34,6 +34,7 @@ import { getAdminKernel } from "./admin-modules/kernel-ref.js";
 import { initLlmConfig, normalizeLlmBase } from "./admin-modules/llm-config.js";
 import { httpRelayProvider, relayTargets } from "@aigility-harness/layer-infrastructure";
 import { parseEnvText } from "./admin-modules/context.js";
+import { initLessonPrep, lessonPrepHandler } from "./lesson-prep.js";
 
 const scryptAsync = promisify(scrypt) as (
   password: string,
@@ -255,6 +256,12 @@ export async function appBackendHandler(
       if (!relay.ok) return json(res, 400, { error: relay.error });
       res.writeHead(200, { "Content-Type": relay.value.contentType || "text/plain; charset=utf-8" });
       res.end(relay.value.body);
+      return;
+    }
+
+    // ── 教师备课夹: 空间鉴权/课程/教材切片/异步教案队列/四件套/导出/备课助理 (见 lesson-prep.ts) ──
+    if (path.startsWith("/app/lesson-prep/")) {
+      await lessonPrepHandler(req, res);
       return;
     }
 
@@ -1172,6 +1179,8 @@ export async function isKnownGatewayKey(key: string): Promise<boolean> {
 
 export async function initAppBackend(): Promise<void> {
   await ensureSchema();
+  // 教师备课夹建表 (幂等, 独立模块避免 backend.ts 膨胀)
+  await initLessonPrep();
   // 积分账务换装 PG (首笔扣费前; 内存账本仅零依赖原型兜底) —— 钱必须持久
   const { configureCreditStore } = await import("@aigility-harness/layer-infrastructure");
   configureCreditStore({ pool });
