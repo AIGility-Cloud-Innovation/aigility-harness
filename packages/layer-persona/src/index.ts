@@ -159,6 +159,17 @@ export type {
 } from "./fde-assistant.js";
 import { fdeAssistantService, fdeAssistantProvider } from "./fde-assistant.js";
 
+// 备课助理角色形象 (备课问答, 教师备课夹专用)
+export {
+  lessonPrepChatService,
+  lessonPrepChatProvider,
+} from "./lesson-prep-chat.js";
+export type {
+  LessonPrepChatRequest,
+  LessonPrepChatResponse,
+} from "./lesson-prep-chat.js";
+import { lessonPrepChatService, lessonPrepChatProvider } from "./lesson-prep-chat.js";
+
 // ── 服务定义 ─────────────────────────────────────────────────────
 
 export interface TextInputRequest {
@@ -217,9 +228,9 @@ const textInputProvider: Provider<TextInputRequest, TextInputResponse> = {
 export const manifest: PluginManifest = {
   name: "@persona/character",
   layer: LayerId.Persona,
-  description: "角色人格层：感知（文本/语音）+ 角色形象（sales-chat/plugin-helper/app-dev/coding-coach/advisory-chat/harness-guide/timem-support/timem-project-assistant/repair-chat/banban-chat/fde-assistant）",
+  description: "角色人格层：感知（文本/语音）+ 角色形象（sales-chat/plugin-helper/app-dev/coding-coach/advisory-chat/harness-guide/timem-support/timem-project-assistant/repair-chat/banban-chat/fde-assistant/lesson-prep-chat）",
   version: "0.4.0",
-  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, appDevService, codingCoachService, advisoryChatService, harnessGuideService, timemSupportService, timemProjectAssistantService, repairChatService, banbanChatService, fdeAssistantService],
+  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, appDevService, codingCoachService, advisoryChatService, harnessGuideService, timemSupportService, timemProjectAssistantService, repairChatService, banbanChatService, fdeAssistantService, lessonPrepChatService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
 };
@@ -252,6 +263,7 @@ export const plugin: LayerPlugin = {
       repairChatProvider,
       banbanChatProvider,
       fdeAssistantProvider,
+      lessonPrepChatProvider,
     ];
   },
   getState(): PluginState {
