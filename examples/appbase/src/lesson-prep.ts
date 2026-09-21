@@ -77,6 +77,9 @@ export async function initLessonPrep(): Promise<void> {
       created_by  TEXT NOT NULL,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    -- 语句侧(courses/chunks 的 INSERT/SELECT)带 created_by_email; 存量表幂等补列
+    ALTER TABLE lp_courses ADD COLUMN IF NOT EXISTS created_by_email TEXT NOT NULL DEFAULT '';
+    ALTER TABLE lp_chunks  ADD COLUMN IF NOT EXISTS created_by_email TEXT NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS idx_lp_chunks_course ON lp_chunks(course_id, chapter);
     CREATE TABLE IF NOT EXISTS lp_plans (
       id           TEXT PRIMARY KEY,
