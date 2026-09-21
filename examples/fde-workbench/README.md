@@ -48,11 +48,17 @@ pnpm example:fde
 - **记忆**：按工作台登录账号隔离（`agent_id=fde-assistant`），召回/沉淀是 workflow-engine 流内标准节点，未配置 TiMEM 时静默跳过。
 - **LLM 上游**：`BIGMODEL_API_KEY` → bigmodel；`LITELLM_URL/KEY` → litellm；都缺省 → stub 降级（链路仍通，回复带【服务降级】标记）。
 
+## 架构图
+
+完整架构图（前端 / 服务端装配 / 五层两条 Seam 链路 / 人在回路 / TiMEM 记忆 / LLM 上游）：
+服务启动后打开 <http://127.0.0.1:1234/architecture.html>，源文件为自包含 SVG 页 [`app/public/architecture.html`](app/public/architecture.html)。
+
 ## 目录结构
 
 ```
 fde-workbench/
 ├── app/               # 前端源码（React 19 + Vite 7 + Tailwind 3 + shadcn/ui）
+│   ├── public/architecture.html  # 完整架构图（自包含 SVG，构建后 /architecture.html 访问）
 │   └── src/
 │       ├── lib/harness.ts       # 网关客户端：SSE 泵 + fde-assistant/doc-worker 调用
 │       ├── lib/proposalDoc.ts   # 方案 → 文档工人块结构映射
