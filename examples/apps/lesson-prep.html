@@ -516,7 +516,7 @@ async function apiCall(method, path, body) {
     if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
     return data;
 }
-const lp = (p) => '/app/lesson-prep/' + p + '?space=' + encodeURIComponent(spaceId());
+const lp = (p) => '/app/lesson-prep/' + p + '?space=' + encodeURIComponent(spaceId);
 
 function requireLogin() {
     if (me) return true;
