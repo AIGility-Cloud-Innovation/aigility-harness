@@ -18,11 +18,10 @@ export function Login() {
     if (!username.trim() || !password) { setError('请输入账号和密码'); return }
     setLoading(true)
     setError('')
-    setTimeout(() => {
-      const ok = login(username, password)
-      if (!ok) setError('账号或密码不正确，请使用下方演示账号')
-      setLoading(false)
-    }, 500)
+    login(username, password)
+      .then(ok => { if (!ok) setError('账号或密码不正确，请使用下方演示账号') })
+      .catch(() => setError('登录服务不可达，请确认服务已启动'))
+      .finally(() => setLoading(false))
   }
 
   const fill = (u: string, p: string) => { setUsername(u); setPassword(p); setError('') }
@@ -141,13 +140,13 @@ export function Login() {
                 const r = ROLES.find(x => x.id === a.roleId)
                 return (
                   <button
-                    key={a.username}
-                    onClick={() => fill(a.username, a.password)}
+                    key={a.email}
+                    onClick={() => fill(a.email, a.password)}
                     className="group flex w-full items-center justify-between rounded-lg border border-slate-200 px-3 py-2.5 text-left transition-all hover:border-[#3370ff] hover:bg-blue-50/50"
                   >
                     <div>
                       <span className="text-[13px] font-medium text-slate-800">{r?.name} · {r?.title}</span>
-                      <p className="tnum mt-0.5 text-[11px] text-slate-400">{a.username} / {a.password}</p>
+                      <p className="tnum mt-0.5 text-[11px] text-slate-400">{a.email} / {a.password}</p>
                     </div>
                     <ArrowRight className="h-3.5 w-3.5 text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-[#3370ff]" />
                   </button>

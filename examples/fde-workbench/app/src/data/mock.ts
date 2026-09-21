@@ -521,10 +521,11 @@ export const initialDeployments: import('@/types').Deployment[] = [
 ]
 
 /** 登录账号（演示环境，明文仅用于演示） */
+/** 演示账号（真实平台账号, PG users 表; 首次启动由服务端种子创建） */
 export const ACCOUNTS: import('@/types').Account[] = [
-  { username: 'admin', password: 'admin123', roleId: 'admin' },
-  { username: 'zhaopeng', password: 'fde123', roleId: 'captain' },
-  { username: 'chensiyuan', password: 'fde123', roleId: 'engineer' },
+  { email: 'admin@fde.local', password: 'admin123', roleId: 'admin' },
+  { email: 'zhaopeng@fde.local', password: 'fde123', roleId: 'captain' },
+  { email: 'chensiyuan@fde.local', password: 'fde123', roleId: 'engineer' },
 ]
 
 export const initialChannels: Channel[] = [

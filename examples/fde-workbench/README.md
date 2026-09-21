@@ -4,6 +4,10 @@
 
 前端由 Kimi Agent（FDE 工作台）生成，收编进仓库后完成 harness 深度整合。
 
+## 全功能形态（平台账号 + PG 持久化）
+
+工作台**不是纯前端演示**：登录为真实平台账号（复用 AppBase `users` 表，scrypt + HMAC token + 登录限流，与 AppBase 账号互通），业务台账持久化到 PostgreSQL（复用 `/app/data` 应用共享 JSONB 原语，`app:fde-workbench` 虚拟 owner，19 个分片），任何变更 700ms 内自动落库；行动指令确认后即写库；LLM 用量经网关上报 `llm_usage` 表按 key 归集。PG 缺省连 `127.0.0.1:5433/appbase`（`APPBASE_PG_*` 可覆盖），与 AppBase 共库即共账号。
+
 ## 一键启动
 
 ```bash
@@ -79,7 +83,7 @@ fde-workbench/
 | `LLM_MODEL` | `glm-4.6` | workflow-engine 默认模型 |
 | `FDE_WEB_PORT` | `1234` | 工作台前端端口 |
 | `FDE_GATEWAY_PORT` | `1235` | AI 网关端口 |
-| `FDE_GATEWAY_KEY` | 随机生成并打印 | 网关 Bearer 密钥 |
+| `APPBASE_PG_HOST/PORT/DATABASE/USER/PASSWORD` | `127.0.0.1:5433/appbase` | 平台 PG（账号+台账持久化） |
 | `FDE_PUBLIC_HOST` | `127.0.0.1` | 注入前端的网关主机（局域网访问时改本机 IP） |
 | `DOC_WORKER_DIR` | 系统临时目录 | 文档工人落盘目录（同时 base64 回传前端下载） |
 | `TIMEM_API_KEY` / `TIMEM_BASE_URL` | — | TiMEM 记忆云（未配置时记忆节点静默跳过） |

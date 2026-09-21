@@ -38,6 +38,8 @@ import { plugin as cognitivePlugin } from "@aigility-harness/layer-cognitive";
 import { plugin as personaPlugin } from "@aigility-harness/layer-persona";
 import { plugin as orchestrationPlugin } from "@aigility-harness/layer-orchestration";
 import { plugin as actionPlugin } from "@aigility-harness/layer-action";
+import { isKnownGatewayKey } from "@aigility-harness/appbase/backend";
+import { ensureFdePlatform, routePlatform } from "./platform.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -64,7 +66,13 @@ const MIME: Record<string, string> = {
 };
 
 async function main(): Promise<void> {
-  console.log("=== TiMEM FDE 工作台（数字员工 + 文档工人 + AI 网关）===\n");
+  console.log("=== TiMEM FDE 工作台（数字员工 + 文档工人 + AI 网关 + 平台账号/持久化）===\n");
+
+  // 0. 平台底座（复用 AppBase app-backend）：PG schema + 演示账号/应用/网关 key 种子
+  //    必须在内核 bootstrap 前（timem 插件 env 桥先于认知层生效）
+  const platform = await ensureFdePlatform();
+  // 用量收集共享密钥（网关 → /app/usage/collect 上报头）
+  process.env.APPBASE_GATEWAY_KEY ??= randomBytes(24).toString("hex");
 
   // 1. 内核（原型模式，内存实现）
   const kernel = new InMemoryKernelAdapter();
@@ -98,8 +106,8 @@ async function main(): Promise<void> {
   }
   console.log(`bootstrap 成功 (kernel.isReady=${kernel.isReady()})`);
 
-  // 4. AI 网关（http-ingress, :1235）
-  const gatewayKey = process.env.FDE_GATEWAY_KEY ?? randomBytes(24).toString("hex");
+  // 4. AI 网关（http-ingress, :1235）—— key 来自平台 app_keys 表（持久），用量上报进 PG
+  const gatewayKey = platform.gatewayKey;
   const gwCtx = kernel.createContext("fde-gateway", LayerId.Infrastructure);
   const gwResolved = await kernel.registry.resolve({
     id: "@infrastructure/http-ingress",
@@ -114,6 +122,8 @@ async function main(): Promise<void> {
     {
       port: GATEWAY_PORT,
       bearerToken: gatewayKey,
+      tokenVerifier: isKnownGatewayKey,
+      usageReportUrl: `http://127.0.0.1:${WEB_PORT}/app/usage/collect`,
       devPaths: ["/v1/chat/completions", "/v1/messages"],
       agentPaths: ["/api/fde-chat", "/api/fde-doc"],
       agentRoutes: {
@@ -137,8 +147,11 @@ async function main(): Promise<void> {
     return;
   }
 
-  // 5. Web 静态服务（:1234）：app/dist + index.html 注入网关配置（前端零配置）
-  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+  // 5. Web 静态服务（:1234）：/app/* 平台 API（鉴权/数据/计量）+ app/dist 静态 + 注入网关配置
+  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    // 平台 API 优先（AppBase app-backend：/app/auth/* /app/data/* /app/usage/* …）
+    if (await routePlatform(req, res)) return;
+
     const path = (req.url ?? "/").split("?")[0];
     if (req.method !== "GET") {
       res.writeHead(405, { "Content-Type": "application/json" });
@@ -177,11 +190,11 @@ async function main(): Promise<void> {
   await new Promise<void>((r) => server.listen(WEB_PORT, "0.0.0.0", () => r()));
 
   console.log(`\nFDE 工作台已就绪:`);
-  console.log(`  工作台前端:  http://127.0.0.1:${WEB_PORT}/  （打开即用，网关配置已自动注入）`);
+  console.log(`  工作台前端:  http://127.0.0.1:${WEB_PORT}/  （真登录 + PG 持久化，账号与 AppBase 互通）`);
+  console.log(`  演示账号:     admin@fde.local/admin123 · zhaopeng@fde.local/fde123 · chensiyuan@fde.local/fde123`);
   console.log(`  AI 网关:     http://127.0.0.1:${GATEWAY_PORT}/v1/chat/completions (OpenAI 兼容, Bearer 鉴权)`);
   console.log(`               /api/fde-chat → @persona/fde-assistant · /api/fde-doc → @action/doc-worker`);
-  console.log(`  网关密钥:     ${gatewayKey}`);
-  console.log(`  演示账号:     admin/admin123 · zhaopeng/fde123 · chensiyuan/fde123`);
+  console.log(`  网关密钥:     ${gatewayKey}  (app_keys 表持久 · 用量上报 llm_usage)`);
   const llmDesc = process.env.LLM_PROVIDER === "stub"
     ? "stub 降级（未检测到 BIGMODEL_API_KEY / LITELLM_URL，回复带【服务降级】标记）"
     : `${process.env.LLM_PROVIDER} 上游`;

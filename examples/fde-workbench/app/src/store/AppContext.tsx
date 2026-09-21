@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import type {
   Lead, Proposal, Contract, Channel, KnowledgeItem, Activity, ChatMessage, Page,
@@ -11,10 +11,11 @@ import {
   initialLeads, initialProposals, initialContracts, initialChannels,
   initialKnowledge, initialActivities, defaultRules, initialReminders, ROLES,
   initialPurchaseContracts, initialDeliveries, initialModules, initialAllocations, CONTRIBUTION_STAGES,
-  initialChannelCommissions, initialDeployments, ACCOUNTS, type ProcessMemory,
+  initialChannelCommissions, initialDeployments, type ProcessMemory,
   initialSkus, initialPartners, initialRenewals, initialTeamTasks,
 } from '@/data/mock'
 import { getHarnessCfg, streamFdeChat, type FdeChatBody } from '@/lib/harness'
+import { apiLogin, apiLogout, apiMe, fetchSlice, createSlice, saveSlice, type PlatformUser } from '@/lib/api'
 
 const uid = () => Math.random().toString(36).slice(2, 9)
 const now = () => {
@@ -58,7 +59,7 @@ interface Store {
   page: Page
   navigate: (p: Page) => void
   loggedIn: boolean
-  login: (username: string, password: string) => boolean
+  login: (email: string, password: string) => Promise<boolean>
   logout: () => void
   leads: Lead[]
   proposals: Proposal[]
@@ -272,13 +273,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [knowledge, setKnowledge] = useState<KnowledgeItem[]>(initialKnowledge)
   const [activities, setActivities] = useState<Activity[]>(initialActivities)
   const [reminders, setReminders] = useState<Reminder[]>(initialReminders)
-  const [purchaseContracts] = useState<PurchaseContract[]>(initialPurchaseContracts)
+  const [purchaseContracts, setPurchaseContracts] = useState<PurchaseContract[]>(initialPurchaseContracts)
   const [deliveries, setDeliveries] = useState<Delivery[]>(initialDeliveries)
   const [modules, setModules] = useState<ProductModule[]>(initialModules)
   const [allocations, setAllocations] = useState<ContractAllocation[]>(initialAllocations)
   const [channelCommissions, setChannelCommissions] = useState<ChannelCommission[]>(initialChannelCommissions)
   const [deployments, setDeployments] = useState<Deployment[]>(initialDeployments)
-  const [skus] = useState<StandardSku[]>(initialSkus)
+  const [skus, setSkus] = useState<StandardSku[]>(initialSkus)
   const [partners, setPartners] = useState<IntegrationPartner[]>(initialPartners)
   const [renewals, setRenewals] = useState<Renewal[]>(initialRenewals)
   const [importBatches, setImportBatches] = useState<ImportBatch[]>([])
@@ -289,20 +290,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [chatSession] = useState(uid)
   const role = ROLES.find(r => r.id === roleId) ?? ROLES[0]
 
-  const login: Store['login'] = (username, password) => {
-    const acc = ACCOUNTS.find(a => a.username === username.trim() && a.password === password)
-    if (!acc) return false
-    setRoleId(acc.roleId)
-    setUsername(acc.username)
-    setLoggedIn(true)
-    const r = ROLES.find(x => x.id === acc.roleId)
-    toast.success(`欢迎回来，${r?.name}（${r?.title}）`)
-    return true
+
+  const login: Store['login'] = async (email, password) => {
+    try {
+      const u = await apiLogin(email.trim().toLowerCase(), password)
+      applyUser(u)
+      await hydrateFromCloud()
+      setLoggedIn(true)
+      const r = ROLES.find(x => x.id === (u.isAdmin ? 'admin' : 'engineer'))
+      toast.success(`欢迎回来，${u.email}${r ? `（${r.title}）` : ''}`)
+      return true
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '登录失败')
+      return false
+    }
   }
   const logout: Store['logout'] = () => {
-    setLoggedIn(false)
-    setPage({ name: 'dashboard' })
-    toast.success('已退出登录')
+    void apiLogout().finally(() => window.location.reload())
   }
   const setRole = (id: string) => {
     setRoleId(id)
@@ -621,6 +625,124 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   /* ---------- 团队任务 ---------- */
   const [teamTasks, setTeamTasks] = useState<TeamTask[]>(initialTeamTasks)
+
+  // ── 云端持久化（AppBase app-backend /app/data?app=fde-workbench）──────────
+  // 分片 → state 应用器; savedRef 记录已存快照, rowIds 记录 JSONB 行 id
+  const savedRef = useRef<Record<string, string>>({})
+  const rowIdsRef = useRef<Record<string, string | undefined>>({})
+  const hydratedRef = useRef(false)
+  const hydratingRef = useRef(false)
+
+  const applySlice = (slice: string, items: unknown[]) => {
+    switch (slice) {
+      case 'leads': return setLeads(items as Lead[])
+      case 'proposals': return setProposals(items as Proposal[])
+      case 'contracts': return setContracts(items as Contract[])
+      case 'channels': return setChannels(items as Channel[])
+      case 'knowledge': return setKnowledge(items as KnowledgeItem[])
+      case 'activities': return setActivities(items as Activity[])
+      case 'reminders': return setReminders(items as Reminder[])
+      case 'purchaseContracts': return setPurchaseContracts(items as PurchaseContract[])
+      case 'deliveries': return setDeliveries(items as Delivery[])
+      case 'modules': return setModules(items as ProductModule[])
+      case 'allocations': return setAllocations(items as ContractAllocation[])
+      case 'channelCommissions': return setChannelCommissions(items as ChannelCommission[])
+      case 'deployments': return setDeployments(items as Deployment[])
+      case 'skus': return setSkus(items as StandardSku[])
+      case 'partners': return setPartners(items as IntegrationPartner[])
+      case 'renewals': return setRenewals(items as Renewal[])
+      case 'importBatches': return setImportBatches(items as ImportBatch[])
+      case 'teamTasks': return setTeamTasks(items as TeamTask[])
+      case 'chat': return setChat((items as ChatMessage[]).filter(m => m.text))
+      default: return
+    }
+  }
+
+  /** 登录后水合：读云端分片；首次（无行）以当前内存种子初始化建行 */
+  const hydrateFromCloud = async () => {
+    hydratingRef.current = true
+    const SLICES = ['leads', 'proposals', 'contracts', 'channels', 'knowledge', 'activities',
+      'reminders', 'purchaseContracts', 'deliveries', 'modules', 'allocations', 'channelCommissions',
+      'deployments', 'skus', 'partners', 'renewals', 'importBatches', 'teamTasks', 'chat']
+    const snapshot: Record<string, unknown[]> = {
+      leads, proposals, contracts, channels, knowledge, activities, reminders, purchaseContracts,
+      deliveries, modules, allocations, channelCommissions, deployments, skus, partners,
+      renewals, importBatches, teamTasks, chat: chat.filter(m => !m.pending && m.text),
+    }
+    let loaded = 0
+    for (const slice of SLICES) {
+      try {
+        const row = await fetchSlice(slice)
+        if (row) {
+          applySlice(slice, row.items)
+          savedRef.current[slice] = JSON.stringify(row.items)
+          rowIdsRef.current[slice] = row.rowId
+          loaded++
+        } else {
+          const seed = (snapshot[slice] ?? []) as unknown[]
+          rowIdsRef.current[slice] = await createSlice(slice, seed)
+          savedRef.current[slice] = JSON.stringify(seed)
+        }
+      } catch (e) {
+        console.error('[hydrate]', slice, e)
+      }
+    }
+    hydratingRef.current = false
+    hydratedRef.current = true
+    if (loaded > 0) toast.success(`已加载云端台账（${loaded} 个分片）`)
+  }
+
+  /** 变更自动落库: watch 全部分片, 快照 diff 后整片 PUT (debounce 700ms) */
+  useEffect(() => {
+    if (!hydratedRef.current || hydratingRef.current) return
+    const slices: Record<string, unknown[]> = {
+      leads, proposals, contracts, channels, knowledge, activities, reminders, purchaseContracts,
+      deliveries, modules, allocations, channelCommissions, deployments, skus, partners,
+      renewals, importBatches, teamTasks, chat: chat.filter(m => !m.pending && m.text),
+    }
+    const dirty = Object.entries(slices).filter(([k, v]) =>
+      savedRef.current[k] !== undefined && JSON.stringify(v) !== savedRef.current[k])
+    if (dirty.length === 0) return
+    const timer = setTimeout(() => {
+      void (async () => {
+        for (const [k, v] of dirty) {
+          const snapshot = JSON.stringify(v)
+          if (savedRef.current[k] === snapshot) continue
+          savedRef.current[k] = snapshot
+          try {
+            rowIdsRef.current[k] = await saveSlice(k, rowIdsRef.current[k], v)
+          } catch (e) {
+            console.error('[persist]', k, e)
+          }
+        }
+      })()
+    }, 700)
+    return () => clearTimeout(timer)
+  }, [leads, proposals, contracts, channels, knowledge, activities, reminders, purchaseContracts,
+    deliveries, modules, allocations, channelCommissions, deployments, skus, partners,
+    renewals, importBatches, teamTasks, chat])
+
+  const applyUser = (u: PlatformUser) => {
+    setUsername(u.email)
+    // 角色映射: 演示账号固定视角; 管理员 → admin; 其他平台账号 → 工程师视角
+    const map: Record<string, string> = {
+      'admin@fde.local': 'admin', 'zhaopeng@fde.local': 'captain', 'chensiyuan@fde.local': 'engineer',
+    }
+    setRoleId(u.isAdmin ? 'admin' : (map[u.email] ?? 'engineer'))
+  }
+
+  // 会话恢复: token 有效则静默登录并水合云端台账
+  useEffect(() => {
+    void (async () => {
+      try {
+        const u = await apiMe()
+        applyUser(u)
+        await hydrateFromCloud()
+        setLoggedIn(true)
+      } catch { /* 无 token / 过期: 停留在登录页 */ }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const addTeamTask: Store['addTeamTask'] = (data) => {
     setTeamTasks(prev => [{

@@ -37,6 +37,15 @@ echo [INFO] using pnpm at !PNPM_DIR!
 set "PATH=!PNPM_DIR!;%PATH%"
 :pnpm_ok
 
+rem ---- PostgreSQL (reuse AppBase container appbase-pg, host 5433) ----
+set "APPBASE_PG_PASSWORD=appbase"
+where docker >nul 2>nul && (
+  docker start appbase-pg >nul 2>nul
+  if errorlevel 1 docker run -d --name appbase-pg --restart unless-stopped ^
+    -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=%APPBASE_PG_PASSWORD% ^
+    -p 5433:5432 postgres:15 >nul 2>nul
+)
+
 rem ============================================================
 rem  LLM upstream: fill your key (real inference).
 rem  Leave empty -> stub degraded mode (chain still works).
@@ -49,7 +58,7 @@ rem Optional overrides (defaults shown)
 rem set "FDE_WEB_PORT=1234"
 rem set "FDE_GATEWAY_PORT=1235"
 rem set "FDE_PUBLIC_HOST=127.0.0.1"
-rem set "FDE_GATEWAY_KEY=your-fixed-gateway-key"
+rem (gateway key is persisted in PG app_keys table; no need to set)
 
 cd /d "%~dp0"
 
