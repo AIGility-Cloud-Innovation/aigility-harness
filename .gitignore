@@ -37,3 +37,7 @@ examples/wecom-dsh/.state/
 examples/fde-workbench/start-fde-workbench.cmd
 # fde-workbench local test artifacts
 examples/fde-workbench/.tmp/
+
+# feishu local credentials
+feishu/app.local.json
+feishu/user_token.local.json
