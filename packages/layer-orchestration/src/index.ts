@@ -67,6 +67,27 @@ import {
   guidedDesignProvider,
 } from "./guided-design.js";
 export { guidedDesignService, guidedDesignProvider };
+
+// 群聊→任务→工单→PR提醒 流水线（只管理不执行）
+export {
+  taskPipelineService,
+  taskPipelineProvider,
+  collectMessage,
+  clearBuffer,
+  setNotifySend,
+  parseCandidateTasks,
+  buildJudgeMessages,
+  filterDuplicates,
+  normalizeTitle,
+  jaccard,
+} from "./task-pipeline.js";
+export type {
+  TaskPipelineRequest,
+  TaskPipelineResponse,
+  CollectedMessage,
+  CandidateTask,
+} from "./task-pipeline.js";
+import { taskPipelineService, taskPipelineProvider } from "./task-pipeline.js";
 export type {
   GuidedDesignRequest,
   GuidedDesignResponse,
@@ -347,7 +368,7 @@ export const manifest: PluginManifest = {
   layer: LayerId.Orchestration,
   description: "编排规划层：任务规划占位 + 工作流引擎(流内记忆节点) + 插件安装工作流 + Codex 编码代理，消费认知层 LLM 与行动域 TiMEM 记忆",
   version: "0.3.0",
-  provides: [taskPlanningService, workflowEngineService, pluginInstallService, guidedDesignService],
+  provides: [taskPlanningService, workflowEngineService, pluginInstallService, guidedDesignService, taskPipelineService],
   consumes: [llmInferenceRef, { id: "@action/timem-memory", versionRange: "^1.0.0" }, { id: "@action/timem-memory-write", versionRange: "^1.0.0" }],
   preferredCarrier: CarrierKind.Thread,
   dependsOn: ["@cognitive/llm-inference", "@action/tool-execution"],
@@ -366,7 +387,7 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [taskPlanningProvider, workflowEngineProvider, pluginInstallProvider, guidedDesignProvider];
+    return [taskPlanningProvider, workflowEngineProvider, pluginInstallProvider, guidedDesignProvider, taskPipelineProvider];
   },
   getState(): PluginState {
     return pluginState;

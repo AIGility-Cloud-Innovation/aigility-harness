@@ -35,6 +35,14 @@ import { dirname } from "node:path";
 
 // ── 能力契约 ─────────────────────────────────────────────────────
 
+/** 请求级凭证覆盖（不传则读环境变量）。用于网关应用与 API 应用不是同一 app 的装配。 */
+export interface FeishuApiCredentials {
+  appId?: string;
+  appSecret?: string;
+  /** user token 落盘路径覆盖 */
+  tokenStorePath?: string;
+}
+
 export interface FeishuApiRequest {
   /** HTTP 方法，默认 GET */
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -50,6 +58,8 @@ export interface FeishuApiRequest {
   baseUrl?: string;
   /** 请求超时毫秒，默认 20000 */
   timeoutMs?: number;
+  /** 请求级凭证覆盖（与 ingress 不同 app 的装配场景） */
+  credentials?: FeishuApiCredentials;
 }
 
 export interface FeishuApiResponse {
@@ -123,12 +133,14 @@ interface TokenEnv {
   tokenStorePath: string;
 }
 
-export function readTokenEnv(): TokenEnv {
+export function readTokenEnv(overrides?: FeishuApiCredentials): TokenEnv {
   return {
-    appId: process.env.FEISHU_APP_ID ?? "",
-    appSecret: process.env.FEISHU_APP_SECRET ?? "",
+    appId: overrides?.appId ?? process.env.FEISHU_APP_ID ?? "",
+    appSecret: overrides?.appSecret ?? process.env.FEISHU_APP_SECRET ?? "",
     tokenStorePath:
-      process.env.FEISHU_USER_TOKEN_STORE ?? "feishu/user_token.local.json",
+      overrides?.tokenStorePath ??
+      process.env.FEISHU_USER_TOKEN_STORE ??
+      "feishu/user_token.local.json",
   };
 }
 
@@ -211,9 +223,9 @@ export const feishuApiProvider: Provider<FeishuApiRequest, FeishuApiResponse> = 
     request: FeishuApiRequest,
     ctx: SeamContext,
   ): Promise<Result<FeishuApiResponse>> {
-    const env = readTokenEnv();
+    const env = readTokenEnv(request.credentials);
     if (!env.appId || !env.appSecret) {
-      return err("feishu-api: 缺少 FEISHU_APP_ID / FEISHU_APP_SECRET 环境变量");
+      return err("feishu-api: 缺少凭证（FEISHU_APP_ID/SECRET 或 request.credentials）");
     }
     const method = request.method ?? "GET";
     const identity = request.identity ?? "user";

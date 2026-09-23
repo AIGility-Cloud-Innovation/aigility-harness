@@ -81,6 +81,22 @@ export interface FeishuIngressRequest {
   blockedSenderIds?: string[];
   /** 关键词黑名单；content 包含任一关键词则丢弃 */
   keywordBlacklist?: string[];
+
+  // ── 监听模式（免 @bot 收集群聊消息，供编排层做汇总/判定） ──
+  passive?: {
+    enabled: boolean;
+    /** 收集回调（不回复、不打扰群聊）；编排层用它把消息送入汇总缓冲 */
+    onCollect: (m: {
+      messageId: string;
+      chatId: string;
+      senderId: string;
+      text: string;
+      chatType: string;
+      ts: number;
+    }) => void;
+    /** 只监听这些会话；空/未设 = 所有群 */
+    chatIds?: string[];
+  };
 }
 
 export interface FeishuIngressResponse {
@@ -89,6 +105,8 @@ export interface FeishuIngressResponse {
   appId: string;
   /** 断开连接函数 */
   stop: () => Promise<void>;
+  /** 主动发消息（供编排层做群播报，如任务汇总/PR 提醒） */
+  send: (chatId: string, text: string) => Promise<void>;
 }
 
 // ── 服务/清单 ────────────────────────────────────────────────────
@@ -287,6 +305,33 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
     // 收消息 → 过滤/去重/资源下载 → 路由角色 → 回复
     activeUnsubscribe = channel.on({
       message: async (msg: NormalizedMessage) => {
+        // 0. 监听模式：群聊未 @bot 的消息不回复，但按配置收集给编排层
+        const text0 = messageText(msg);
+        if (
+          request.passive?.enabled &&
+          msg.chatType === "group" &&
+          !msg.mentionedBot &&
+          text0 &&
+          !deduper.isDuplicate(`passive:${msg.messageId}`)
+        ) {
+          const ids = request.passive.chatIds;
+          if (!ids || ids.length === 0 || ids.includes(msg.chatId)) {
+            try {
+              request.passive.onCollect({
+                messageId: msg.messageId,
+                chatId: msg.chatId,
+                senderId: msg.senderId,
+                text: text0,
+                chatType: msg.chatType,
+                ts: Date.now(),
+              });
+            } catch (e) {
+              console.log(`[feishu-ingress] passive collect error: ${String(e)}`);
+            }
+          }
+          // 收集后继续走常规过滤：若不满足 @bot 触发条件则到此为止
+        }
+
         // 1. 通用过滤（黑白名单/关键词/trigger 判定）
         if (!shouldProcessMessage(msg, request)) {
           console.log(
@@ -391,6 +436,9 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
       connected: true,
       appId,
       stop: activeStop,
+      send: async (chatId: string, text: string) => {
+        await channel.send(chatId, { text });
+      },
     });
   },
 };

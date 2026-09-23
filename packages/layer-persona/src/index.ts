@@ -82,6 +82,28 @@ export type {
 } from "./timem-project-assistant.js";
 import { timemProjectAssistantService, timemProjectAssistantProvider } from "./timem-project-assistant.js";
 
+// 「项目小助理」协调人格（飞书任务 + Gitea 工单增删改查，只管理不执行具体工作）
+export {
+  feishuTaskAssistantService,
+  feishuTaskAssistantProvider,
+  feishuApiRef,
+  giteaApiRef,
+  parseTaskIntent,
+  formatTaskLine,
+  formatTaskList,
+  formatIssueLine,
+  formatIssueList,
+  formatIssueDetail,
+  matchIssueByRef,
+} from "./feishu-task-assistant.js";
+export type {
+  FeishuTaskAssistantRequest,
+  FeishuTaskAssistantResponse,
+  TaskIntent,
+  IssueLike,
+} from "./feishu-task-assistant.js";
+import { feishuTaskAssistantService, feishuTaskAssistantProvider } from "./feishu-task-assistant.js";
+
 // 就业数据顾问角色形象 (CareerEdu)
 export {
   advisoryChatService,
@@ -228,9 +250,9 @@ const textInputProvider: Provider<TextInputRequest, TextInputResponse> = {
 export const manifest: PluginManifest = {
   name: "@persona/character",
   layer: LayerId.Persona,
-  description: "角色人格层：感知（文本/语音）+ 角色形象（sales-chat/plugin-helper/app-dev/coding-coach/advisory-chat/harness-guide/timem-support/timem-project-assistant/repair-chat/banban-chat/fde-assistant/lesson-prep-chat）",
+  description: "角色人格层：感知（文本/语音）+ 角色形象（sales-chat/plugin-helper/app-dev/coding-coach/advisory-chat/harness-guide/timem-support/timem-project-assistant/repair-chat/banban-chat/fde-assistant/lesson-prep-chat/feishu-task-assistant[项目小助理: 飞书任务+Gitea工单协调]）",
   version: "0.4.0",
-  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, appDevService, codingCoachService, advisoryChatService, harnessGuideService, timemSupportService, timemProjectAssistantService, repairChatService, banbanChatService, fdeAssistantService, lessonPrepChatService],
+  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, appDevService, codingCoachService, advisoryChatService, harnessGuideService, timemSupportService, timemProjectAssistantService, repairChatService, banbanChatService, fdeAssistantService, lessonPrepChatService, feishuTaskAssistantService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
 };
@@ -260,6 +282,7 @@ export const plugin: LayerPlugin = {
       harnessGuideProvider,
       timemSupportProvider,
       timemProjectAssistantProvider,
+      feishuTaskAssistantProvider,
       repairChatProvider,
       banbanChatProvider,
       fdeAssistantProvider,
