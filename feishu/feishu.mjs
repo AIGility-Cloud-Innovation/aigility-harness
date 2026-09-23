@@ -32,7 +32,7 @@ async function getFreshUserToken() {
         refresh_token: t.refresh_token,
     });
     if (!resp.access_token) throw new Error("刷新 token 失败: " + JSON.stringify(resp));
-    const next = { ...t, access_token: resp.access_token, refresh_token: resp.refresh_token, expires_at: new Date(Date.now() + (resp.expires_in - 60) * 1000).toISOString() };
+    const next = { ...t, access_token: resp.access_token, refresh_token: resp.refresh_token ?? t.refresh_token, expires_at: new Date(Date.now() + (resp.expires_in - 60) * 1000).toISOString() };
     write("user_token.local.json", next);
     return next.access_token;
 }

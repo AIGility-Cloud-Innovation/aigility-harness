@@ -67,6 +67,22 @@ export {
 };
 import { TimemClient } from "@timem/dsh-plugin-timem";
 
+// 飞书 Open API 直连（用户/应用身份，token 自动续期；与 D1 feishu-ingress 共用凭证成闭环）
+export {
+  feishuApiService,
+  feishuApiProvider,
+  buildFeishuUrl,
+  isTokenExpired,
+  extractAuthCode,
+  readTokenEnv,
+  getFreshUserToken,
+} from "./feishu-api.js";
+export type { FeishuApiRequest, FeishuApiResponse } from "./feishu-api.js";
+import {
+  feishuApiService,
+  feishuApiProvider,
+} from "./feishu-api.js";
+
 export { textToSpeechService, textToSpeechProvider, minimaxTtsProvider };
 export type { TextToSpeechRequest, TextToSpeechResponse };
 
@@ -152,9 +168,9 @@ const toolExecutionProvider: Provider<
 export const manifest: PluginManifest = {
   name: "@action/tool-execution",
   layer: LayerId.Action,
-  description: "行动执行层：工具执行占位 + 文本转语音（msedge + MiniMax 双 Provider 热替换）+ 编码代理工人(codex/zcode/claude) + 文档工人(docx) + TiMEM 记忆检索/写入",
-  version: "0.4.0",
-  provides: [toolExecutionService, textToSpeechService, codexAgentService, zcodeAgentService, claudeAgentService, docWorkerService, timemMemoryService, timemMemoryWriteService],
+  description: "行动执行层：工具执行占位 + 文本转语音（msedge + MiniMax 双 Provider 热替换）+ 编码代理工人(codex/zcode/claude) + 文档工人(docx) + TiMEM 记忆检索/写入 + 飞书 Open API 直连(用户/应用身份)",
+  version: "0.5.0",
+  provides: [toolExecutionService, textToSpeechService, codexAgentService, zcodeAgentService, claudeAgentService, docWorkerService, timemMemoryService, timemMemoryWriteService, feishuApiService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
 };
@@ -242,6 +258,7 @@ export const plugin: LayerPlugin = {
       docWorkerProvider,
       createTimemMemoryProvider(timemClient),
       createTimemMemoryWriteProvider(timemClient),
+      feishuApiProvider,
     ];
   },
   getState(): PluginState {
