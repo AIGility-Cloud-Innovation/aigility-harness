@@ -180,7 +180,9 @@ describe("profile-composer — 依赖感知成组装载", () => {
       expect(r.results[1].reason).toContain("duplicate");
       expect((ctx as unknown as { timer?: unknown }).timer).toBeTruthy();
 
-      const dry = await mountComposedProfile(ctx, rows, { dryRun: true });
+      // dryRun 同样要走门控求值：不传 evalCtx 会回退真实 platform（linux），
+      // win-only 也会被判 disabled → skipped 变 2。预览语义=同 rows 同求值基准。
+      const dry = await mountComposedProfile(ctx, rows, { dryRun: true, evalCtx: { platform: "win32" } });
       expect(dry.results).toEqual([]);
       expect(dry.skipped).toBe(1);
     } finally {
