@@ -10,6 +10,10 @@ allowBuilds:
   onnxruntime-node: false # 启用 whisper-tiny 时改 true
   ffi-napi: false # 启用 vosk 时改 true
   ref-napi: false
+  '@deepseek-ai/dsh-subprocess-local': true # postinstall 仅 chmod node-pty spawn-helper
+  '@google/genai': false # prepare 脚本实际不存在, no-op
+  koffi: true # dsh-fs-local 原生 FFI, cnoke 预编译下载
+  node-pty: true # dsh-subprocess-local PTY 依赖, 预编译下载
 
 minimumReleaseAgeExclude:
   - '@larksuiteoapi/node-sdk@1.73.1'
