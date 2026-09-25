@@ -1,0 +1,23 @@
+{
+  "name": "team-memory-console",
+  "version": "0.1.0",
+  "description": "团队成员 ↔ 太忆云 user_id 对齐登记与团队记忆查询 (基于 dsh-plugin-timem)",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "cli": "tsx src/cli.ts",
+    "start": "tsx src/cli.ts list"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@timem/dsh-plugin-timem": "git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

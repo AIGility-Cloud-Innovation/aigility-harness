@@ -1,6 +1,8 @@
 packages:
   - "packages/*"
   - "examples/*"
+  # 本地专用(已 gitignore): 直连真实 TiMEM Engine 实测, 不入 workspace 防 lockfile 漂移
+  - "!examples/timem-live-test"
 
 allowBuilds:
   esbuild: true

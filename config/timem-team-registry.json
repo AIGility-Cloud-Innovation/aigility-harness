@@ -1,0 +1,68 @@
+{
+  "$schema": "./timem-team-registry.schema.md",
+  "version": 1,
+  "updated_at": "2026-09-23T10:35:35.647Z",
+  "notes": [
+    "本文件是团队成员 ↔ 太忆云 user_id 的对齐登记表 (single source of truth)。",
+    "timem_user_ids 可填多个: 同一成员在太忆云上有多个账号/数字 id 时全部绑定。",
+    "aliases 用于自然语言查询时的模糊匹配: 中文名、英文名、花名、拼音、飞书/企微显示名都可填。",
+    "新增成员: 复制 members 模板条目; member_id 用稳定英文短横线 id, 不要用中文。",
+    "未登记的 user_id 用 `pnpm --filter team-memory-console cli unknown` 发现并补录。"
+  ],
+  "members": [
+    {
+      "member_id": "member-shahongbin",
+      "name": "shahongbin",
+      "aliases": [
+        "沙红彬 hongbin"
+      ],
+      "timem_user_ids": [
+        "space_418cd47d-0577-4819-a97f-33dfb16a160b"
+      ]
+    },
+    {
+      "member_id": "member-johnny",
+      "name": "johnny",
+      "aliases": [
+        "主账号",
+        "老板"
+      ],
+      "role": "团队负责人 (监控者本人)",
+      "timem_user_ids": [
+        "space_1aa2ac52-9b07-4b87-b946-008cb40b54c4"
+      ]
+    },
+    {
+      "member_id": "member-ljy",
+      "name": "LJY",
+      "aliases": [
+        "ljy",
+        "lanjinyu"
+      ],
+      "notes": "2026-09-23 由用户确认为 LJY (原「待确认-账号3」)",
+      "timem_user_ids": [
+        "space_45931d7f-b231-4f37-be93-4d23289cf87d"
+      ]
+    },
+    {
+      "member_id": "member-anlei",
+      "name": "anlei",
+      "aliases": [
+        "安磊 Anlei"
+      ],
+      "timem_user_ids": [
+        "space_c398da06-14bc-4299-b7c1-1b4eb920b7f5"
+      ]
+    },
+    {
+      "member_id": "member-liutuo",
+      "name": "liutuo",
+      "aliases": [
+        "刘拓 LiuTuo"
+      ],
+      "timem_user_ids": [
+        "space_f633f568-00a8-4e69-8300-7a99f47303a2"
+      ]
+    }
+  ]
+}
