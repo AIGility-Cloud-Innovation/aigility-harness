@@ -14,7 +14,7 @@
  * 运行前准备（仓库根 .env）：
  *   FEISHU_APP_ID=cli_a9e24e913a39dcd6
  *   FEISHU_APP_SECRET=xxx
- *   # 用户身份 token 落盘（首次授权用 feishu/oauth-manual.ps1，app.local.json 里放本应用凭证）
+ *   # 用户身份 token 落盘（首次授权用 npx tsx packages/layer-action/authorize-feishu.ts，app.local.json 里放本应用凭证）
  *   FEISHU_USER_TOKEN_STORE=feishu/user_token.local.json
  *   # Gitea（可选：默认读 ~/.gitea-token 与 TiMEM-AI/timem-platform-backend）
  *   # GITEA_TOKEN=xxx

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildFeishuUrl,
+  buildAuthorizeUrl,
   isTokenExpired,
   extractAuthCode,
   readTokenEnv,
@@ -50,6 +51,39 @@ describe("isTokenExpired", () => {
   it("过去时间返回 true，非法串返回 true", () => {
     expect(isTokenExpired(new Date(Date.now() - 1000).toISOString())).toBe(true);
     expect(isTokenExpired("not-a-date")).toBe(true);
+  });
+});
+
+describe("buildAuthorizeUrl", () => {
+  it("默认参数生成标准授权链接（回调/scope 走约定默认，state 自动生成）", () => {
+    const a = buildAuthorizeUrl({ appId: "cli_a123" });
+    expect(a.redirectUri).toBe("http://localhost:18080/callback");
+    expect(a.scopes).toBe("task:task:read task:task:write");
+    expect(a.state).toMatch(/^[0-9a-f]{32}$/);
+    expect(a.url).toBe(
+      "https://accounts.feishu.cn/open-apis/authen/v1/authorize" +
+        `?app_id=cli_a123` +
+        `&redirect_uri=${encodeURIComponent("http://localhost:18080/callback")}` +
+        `&scope=${encodeURIComponent("task:task:read task:task:write")}` +
+        `&state=${a.state}`,
+    );
+  });
+
+  it("scopes 数组合并为空格分隔（飞书约定逗号会报 20043）", () => {
+    const a = buildAuthorizeUrl({ appId: "x", scopes: ["a:b:c", "d:e"] });
+    expect(a.scopes).toBe("a:b:c d:e");
+    expect(a.url).toContain(`scope=${encodeURIComponent("a:b:c d:e")}`);
+  });
+
+  it("自定义 state 与 redirectUri 生效", () => {
+    const a = buildAuthorizeUrl({
+      appId: "x",
+      state: "my-state",
+      redirectUri: "http://localhost:9999/cb",
+    });
+    expect(a.state).toBe("my-state");
+    expect(a.url).toContain("state=my-state");
+    expect(a.url).toContain(`redirect_uri=${encodeURIComponent("http://localhost:9999/cb")}`);
   });
 });
 

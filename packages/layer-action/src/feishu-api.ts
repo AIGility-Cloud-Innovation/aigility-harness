@@ -12,11 +12,13 @@
  *   FEISHU_APP_ID / FEISHU_APP_SECRET   — 必填，应用凭证（两种身份都依赖）
  *   FEISHU_USER_TOKEN_STORE             — 可选，user token 落盘路径，
  *                                         默认 <cwd>/feishu/user_token.local.json
- *                                         （由 feishu/oauth-manual.ps1 或
- *                                          feishu.mjs auth 首次授权生成）
+ *                                         （本地凭证仓，整个 feishu/ 已 gitignore）
  *
- * 用户 token 过期自动用 refresh_token 续期并回写落盘；续期失败返回 ok:false
- * 并提示重新跑一次 OAuth 授权。
+ * 用户身份首次授权由本插件内置完成：buildAuthorizeUrl 生成授权链接 +
+ * exchangeAuthCode 换 token 落盘；配套交互脚本 packages/layer-action/
+ * authorize-feishu.ts（自动本地回调 / 手动两模式，替代已退役的
+ * feishu/oauth-*.ps1 与 feishu.mjs）。token 过期自动用 refresh_token
+ * 续期并回写落盘；续期失败返回 ok:false 并提示重新授权。
  *
  * 备注：本机 Schannel（Windows 系统 TLS）损坏时 Node 内置 fetch/OpenSSL 不受影响，
  * 本插件全部走 node:fetch。
@@ -32,6 +34,7 @@ import type {
 } from "@aigility-harness/core";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
+import { randomUUID } from "node:crypto";
 
 // ── 能力契约 ─────────────────────────────────────────────────────
 
@@ -72,15 +75,21 @@ export interface FeishuApiResponse {
 
 export const feishuApiService: ServiceDefinition<FeishuApiRequest, FeishuApiResponse> = {
   id: "@action/feishu-api",
-  version: "1.0.0",
+  version: "1.1.0",
   layer: LayerId.Action,
   description:
-    "飞书 Open API 直连（用户身份/应用身份透传任意接口，token 自动续期；与 feishu-ingress 共用凭证）",
+    "飞书 Open API 直连（用户身份/应用身份透传任意接口，token 自动续期 + 用户 OAuth 授权引导；与 feishu-ingress 共用凭证）",
 };
 
 // ── 纯函数（导出供测试） ─────────────────────────────────────────
 
 const DEFAULT_BASE = "https://open.feishu.cn";
+const AUTHORIZE_BASE = "https://accounts.feishu.cn";
+
+/** OAuth 回调地址约定：须与飞书开放平台应用注册的重定向 URL 一致 */
+export const DEFAULT_REDIRECT_URI = "http://localhost:18080/callback";
+/** 默认授权范围：空格分隔（飞书约定，逗号分隔会报 20043） */
+export const DEFAULT_SCOPES = "task:task:read task:task:write";
 
 /** 拼接完整 URL（query 值做 URI 编码） */
 export function buildFeishuUrl(
@@ -118,6 +127,38 @@ export function extractAuthCode(callbackUrlOrCode: string): string | null {
   return /^[A-Za-z0-9._-]+$/.test(callbackUrlOrCode) ? callbackUrlOrCode : null;
 }
 
+export interface AuthorizeUrlOptions {
+  appId: string;
+  /** 回调地址，默认 DEFAULT_REDIRECT_URI */
+  redirectUri?: string;
+  /** 授权范围（空格分隔串或数组），默认 DEFAULT_SCOPES */
+  scopes?: string | string[];
+  /** 防 CSRF 串，缺省自动生成 32 位 hex */
+  state?: string;
+}
+
+export interface AuthorizeUrl {
+  url: string;
+  redirectUri: string;
+  state: string;
+  scopes: string;
+}
+
+/** 生成用户身份 OAuth 授权链接（浏览器打开 → 同意 → 跳到 redirectUri 带 code） */
+export function buildAuthorizeUrl(opts: AuthorizeUrlOptions): AuthorizeUrl {
+  const redirectUri = opts.redirectUri ?? DEFAULT_REDIRECT_URI;
+  const scopes =
+    (Array.isArray(opts.scopes) ? opts.scopes.join(" ") : opts.scopes) ?? DEFAULT_SCOPES;
+  const state = opts.state ?? randomUUID().replaceAll("-", "");
+  const url = buildFeishuUrl(AUTHORIZE_BASE, "/open-apis/authen/v1/authorize", {
+    app_id: opts.appId,
+    redirect_uri: redirectUri,
+    scope: scopes,
+    state,
+  });
+  return { url, redirectUri, state, scopes };
+}
+
 // ── Token 管理 ───────────────────────────────────────────────────
 
 interface UserTokenRecord {
@@ -127,7 +168,7 @@ interface UserTokenRecord {
   scope?: string;
 }
 
-interface TokenEnv {
+export interface TokenEnv {
   appId: string;
   appSecret: string;
   tokenStorePath: string;
@@ -173,6 +214,49 @@ async function loadUserRecord(env: TokenEnv): Promise<UserTokenRecord> {
   return JSON.parse(raw) as UserTokenRecord;
 }
 
+async function persistUserRecord(env: TokenEnv, rec: UserTokenRecord): Promise<void> {
+  await mkdir(dirname(env.tokenStorePath), { recursive: true });
+  await writeFile(env.tokenStorePath, JSON.stringify(rec, null, 2), "utf8");
+}
+
+/** 授权码换用户 token 并落盘（首次 OAuth 授权的最后一步） */
+export async function exchangeAuthCode(
+  env: TokenEnv,
+  code: string,
+  opts?: { baseUrl?: string; redirectUri?: string },
+): Promise<UserTokenRecord> {
+  const baseUrl = opts?.baseUrl ?? DEFAULT_BASE;
+  const r = await fetch(`${baseUrl}/open-apis/authen/v2/oauth/token`, {
+    method: "POST",
+    headers: { "content-type": "application/json; charset=utf-8" },
+    body: JSON.stringify({
+      grant_type: "authorization_code",
+      client_id: env.appId,
+      client_secret: env.appSecret,
+      code,
+      redirect_uri: opts?.redirectUri ?? DEFAULT_REDIRECT_URI,
+    }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  const j = (await r.json()) as {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+    scope?: string;
+  };
+  if (!j.access_token || !j.refresh_token) {
+    throw new Error(`feishu-api: 授权码换 token 失败: ${JSON.stringify(j)}`);
+  }
+  const rec: UserTokenRecord = {
+    access_token: j.access_token,
+    refresh_token: j.refresh_token,
+    expires_at: new Date(Date.now() + ((j.expires_in ?? 7200) - 60) * 1000).toISOString(),
+    scope: j.scope,
+  };
+  await persistUserRecord(env, rec);
+  return rec;
+}
+
 /** 用户身份 token：读取落盘记录，过期自动 refresh 并回写 */
 export async function getFreshUserToken(env: TokenEnv, baseUrl: string): Promise<string> {
   const rec = await loadUserRecord(env);
@@ -197,7 +281,7 @@ export async function getFreshUserToken(env: TokenEnv, baseUrl: string): Promise
   };
   if (!j.access_token || !j.refresh_token) {
     throw new Error(
-      "feishu-api: 用户 token 续期失败（refresh_token 可能已失效），请重新走一次 OAuth 授权（feishu/oauth-manual.ps1 或 feishu.mjs auth）",
+      "feishu-api: 用户 token 续期失败（refresh_token 可能已失效），请重新走一次 OAuth 授权（npx tsx packages/layer-action/authorize-feishu.ts）",
     );
   }
   const next: UserTokenRecord = {
@@ -207,8 +291,7 @@ export async function getFreshUserToken(env: TokenEnv, baseUrl: string): Promise
     expires_at: new Date(Date.now() + ((j.expires_in ?? 7200) - 60) * 1000).toISOString(),
     scope: j.scope ?? rec.scope,
   };
-  await mkdir(dirname(env.tokenStorePath), { recursive: true });
-  await writeFile(env.tokenStorePath, JSON.stringify(next, null, 2), "utf8");
+  await persistUserRecord(env, next);
   return next.access_token;
 }
 

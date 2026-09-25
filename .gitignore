@@ -38,7 +38,5 @@ examples/fde-workbench/start-fde-workbench.cmd
 # fde-workbench local test artifacts
 examples/fde-workbench/.tmp/
 
-# feishu local credentials
-feishu/app.local.json
-feishu/user_token.local.json
-feishu/user_token.*.json
+# feishu 本地凭证仓（整个目录不入库；首次授权引导脚本在 packages/layer-action/authorize-feishu.ts）
+feishu/
