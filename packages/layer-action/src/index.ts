@@ -83,6 +83,26 @@ import {
   feishuApiProvider,
 } from "./feishu-api.js";
 
+// Gitea v1 API 直连（git.aigility.cloud；公共 DNS 绕行污染 + token 认证，实例经验固化自 ~/.agents/skills/gitea-aigility）
+export {
+  giteaApiService,
+  giteaApiProvider,
+  buildGiteaUrl,
+  isValidIPv4,
+  readGiteaEnv,
+  resolveHostIp,
+  loadGiteaToken,
+} from "./gitea-api.js";
+export type {
+  GiteaApiRequest,
+  GiteaApiResponse,
+  GiteaApiCredentials,
+} from "./gitea-api.js";
+import {
+  giteaApiService,
+  giteaApiProvider,
+} from "./gitea-api.js";
+
 export { textToSpeechService, textToSpeechProvider, minimaxTtsProvider };
 export type { TextToSpeechRequest, TextToSpeechResponse };
 
@@ -168,9 +188,9 @@ const toolExecutionProvider: Provider<
 export const manifest: PluginManifest = {
   name: "@action/tool-execution",
   layer: LayerId.Action,
-  description: "行动执行层：工具执行占位 + 文本转语音（msedge + MiniMax 双 Provider 热替换）+ 编码代理工人(codex/zcode/claude) + 文档工人(docx) + TiMEM 记忆检索/写入 + 飞书 Open API 直连(用户/应用身份)",
-  version: "0.5.0",
-  provides: [toolExecutionService, textToSpeechService, codexAgentService, zcodeAgentService, claudeAgentService, docWorkerService, timemMemoryService, timemMemoryWriteService, feishuApiService],
+  description: "行动执行层：工具执行占位 + 文本转语音（msedge + MiniMax 双 Provider 热替换）+ 编码代理工人(codex/zcode/claude) + 文档工人(docx) + TiMEM 记忆检索/写入 + 飞书 Open API 直连(用户/应用身份) + Gitea v1 API 直连(git.aigility.cloud 工单, DNS 绕行)",
+  version: "0.6.0",
+  provides: [toolExecutionService, textToSpeechService, codexAgentService, zcodeAgentService, claudeAgentService, docWorkerService, timemMemoryService, timemMemoryWriteService, feishuApiService, giteaApiService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
 };
@@ -259,6 +279,7 @@ export const plugin: LayerPlugin = {
       createTimemMemoryProvider(timemClient),
       createTimemMemoryWriteProvider(timemClient),
       feishuApiProvider,
+      giteaApiProvider,
     ];
   },
   getState(): PluginState {
