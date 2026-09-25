@@ -317,6 +317,7 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
           const ids = request.passive.chatIds;
           if (!ids || ids.length === 0 || ids.includes(msg.chatId)) {
             try {
+              console.log(`[feishu-ingress] passive collect: chat=${msg.chatId} sender=${msg.senderId} text="${text0.slice(0, 50)}"`);
               request.passive.onCollect({
                 messageId: msg.messageId,
                 chatId: msg.chatId,

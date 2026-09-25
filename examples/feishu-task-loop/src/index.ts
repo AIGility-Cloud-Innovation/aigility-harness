@@ -105,6 +105,11 @@ async function main(): Promise<void> {
     .map((s) => s.trim())
     .filter(Boolean);
   const intervalMs = Number(process.env["TASK_PIPELINE_INTERVAL_MS"] ?? "600000");
+  // 监听白名单：只收这些群的消息；空 = 收机器人所在的所有群
+  const listenChatIds = (process.env["TASK_LISTEN_CHAT_IDS"] ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   const ctx = kernel.createContext("feishu-task-loop", LayerId.Infrastructure);
   const persona = FEISHU_AGENT_ROUTES[appId] ?? "@persona/feishu-task-assistant";
   const start = await feishuIngressProvider.execute(
@@ -115,6 +120,7 @@ async function main(): Promise<void> {
       perceptionId: persona,
       passive: {
         enabled: true,
+        chatIds: listenChatIds.length > 0 ? listenChatIds : undefined,
         onCollect: (m) => collectMessage(m),
       },
     },
