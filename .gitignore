@@ -41,3 +41,4 @@ examples/fde-workbench/.tmp/
 # feishu local credentials
 feishu/app.local.json
 feishu/user_token.local.json
+feishu/user_token.*.json
