@@ -50,17 +50,42 @@ describe("parseTaskIntent", () => {
 });
 
 describe("parseTaskIntent — Gitea 工单意图", () => {
-  it("建工单：<标题>（单行）", () => {
-    expect(parseTaskIntent("建工单：修复登录页白屏")).toEqual({
+  it("建工单 @组织/仓库：<标题>（单行，显式全名）", () => {
+    expect(
+      parseTaskIntent("建工单 @TiMEM-AI/timem-platform-backend：修复登录页白屏"),
+    ).toEqual({
       kind: "issue-create",
+      repo: "TiMEM-AI/timem-platform-backend",
       title: "修复登录页白屏",
       body: undefined,
     });
   });
 
-  it("建工单多行：首行标题其余为正文", () => {
-    expect(parseTaskIntent("建工单：修复登录页白屏\n复现步骤：打开首页即白屏\n环境：prod")).toEqual({
+  it("建工单 @短名：<标题> —— 短名原样保留，full_name 解析在执行层", () => {
+    expect(parseTaskIntent("建工单@video：修复登录页白屏")).toEqual({
       kind: "issue-create",
+      repo: "video",
+      title: "修复登录页白屏",
+      body: undefined,
+    });
+  });
+
+  it("建工单缺仓库 → issue-need-repo（反问分支，不静默落默认仓库）", () => {
+    expect(parseTaskIntent("建工单：修复登录页白屏")).toEqual({
+      kind: "issue-need-repo",
+      title: "修复登录页白屏",
+      body: undefined,
+    });
+  });
+
+  it("建工单多行 @仓库：首行标题其余为正文", () => {
+    expect(
+      parseTaskIntent(
+        "建工单 @AIGility-Cloud-Innovation/nx-telecom-video-platform：修复登录页白屏\n复现步骤：打开首页即白屏\n环境：prod",
+      ),
+    ).toEqual({
+      kind: "issue-create",
+      repo: "AIGility-Cloud-Innovation/nx-telecom-video-platform",
       title: "修复登录页白屏",
       body: "复现步骤：打开首页即白屏\n环境：prod",
     });
@@ -68,6 +93,11 @@ describe("parseTaskIntent — Gitea 工单意图", () => {
 
   it("标题为空的建工单不算创建意图", () => {
     expect(parseTaskIntent("建工单：")).toEqual({ kind: "help" });
+  });
+
+  it("extractRepoSpec：邮箱误触防护", () => {
+    expect(parseTaskIntent("建工单：bob@example.com 收到投诉").kind).toBe("issue-need-repo");
+    expect(parseTaskIntent("工单列表 @user")).toEqual({ kind: "issue-list", repo: "user" });
   });
 
   it("工单列表（多个触发词）", () => {
@@ -276,7 +306,7 @@ describe("provider execute — 工单流程（stub ctx.call）", () => {
       },
     });
     const r = await feishuTaskAssistantProvider.execute(
-      { user_input: "建工单：修复登录页白屏" },
+      { user_input: "建工单 @TiMEM-AI/timem-platform-backend：修复登录页白屏" },
       ctx,
     );
     expect(r.ok).toBe(true);
@@ -284,6 +314,80 @@ describe("provider execute — 工单流程（stub ctx.call）", () => {
     expect(response).toContain("已有同名工单");
     expect(response).toContain("#7");
     expect(calls.filter((c) => c.req.method === "POST")).toHaveLength(0);
+  });
+
+  it("建工单缺仓库：反问并列出可访问仓库，不发查重/POST", async () => {
+    const { ctx, calls } = makeFakeCtx({
+      "@action/gitea-api": () => ({
+        ok: true,
+        value: {
+          status: 200,
+          data: [
+            { full_name: "AIGility-Cloud-Innovation/nx-telecom-video-platform" },
+            { full_name: "TiMEM-AI/timem-platform-backend" },
+          ],
+        },
+      }),
+    });
+    const r = await feishuTaskAssistantProvider.execute(
+      { user_input: "建工单：修复登录页白屏" },
+      ctx,
+    );
+    const response = (r as { value: { response: string } }).value.response;
+    expect(response).toContain("请指定工单仓库");
+    expect(response).toContain("@组织/仓库：修复登录页白屏");
+    expect(response).toContain("nx-telecom-video-platform");
+    // 只允许一次 repos/search 读请求，零写请求、零查重
+    expect(calls).toHaveLength(1);
+    expect(calls[0].req.path).toBe("/api/v1/repos/search");
+    expect(calls[0].req.method).toBe("GET");
+  });
+
+  it("建工单 @短名：在可访问仓库中唯一命中后按 full_name 创建", async () => {
+    const { ctx, calls } = makeFakeCtx({
+      "@action/gitea-api": (req) => {
+        if ((req.path as string) === "/api/v1/repos/search") {
+          return {
+            ok: true,
+            value: {
+              status: 200,
+              data: [
+                { full_name: "AIGility-Cloud-Innovation/nx-telecom-video-platform" },
+                { full_name: "TiMEM-AI/timem-platform-backend" },
+              ],
+            },
+          };
+        }
+        if (req.method === "GET") {
+          return { ok: true, value: { status: 200, data: [] } };
+        }
+        return {
+          ok: true,
+          value: {
+            status: 201,
+            data: {
+              number: 8,
+              title: "修复登录页白屏",
+              state: "open",
+              html_url:
+                "https://git.aigility.cloud/AIGility-Cloud-Innovation/nx-telecom-video-platform/issues/8",
+            },
+          },
+        };
+      },
+    });
+    const r = await feishuTaskAssistantProvider.execute(
+      { user_input: "建工单 @video：修复登录页白屏" },
+      ctx,
+    );
+    const response = (r as { value: { response: string } }).value.response;
+    expect(response).toContain("已建工单");
+    expect(response).toContain("AIGility-Cloud-Innovation/nx-telecom-video-platform #8");
+    const post = calls.find((c) => c.req.method === "POST");
+    expect(post).toBeDefined();
+    expect(post!.req.path).toBe(
+      "/api/v1/repos/AIGility-Cloud-Innovation/nx-telecom-video-platform/issues",
+    );
   });
 
   it("建工单：无同名时 POST 创建并回链", async () => {
@@ -307,11 +411,11 @@ describe("provider execute — 工单流程（stub ctx.call）", () => {
       },
     });
     const r = await feishuTaskAssistantProvider.execute(
-      { user_input: "建工单：修复登录页白屏" },
+      { user_input: "建工单 @TiMEM-AI/timem-platform-backend：修复登录页白屏" },
       ctx,
     );
     const response = (r as { value: { response: string } }).value.response;
-    expect(response).toContain("已建工单 #8");
+    expect(response).toContain("已建工单 TiMEM-AI/timem-platform-backend #8");
     expect(response).toContain("issues/8");
     const post = calls.find((c) => c.req.method === "POST");
     expect(post).toBeDefined();

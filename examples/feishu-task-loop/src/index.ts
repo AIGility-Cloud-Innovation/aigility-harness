@@ -148,7 +148,7 @@ async function main(): Promise<void> {
   }
   console.log(`\n✅ 飞书机器人已连接 (appId=${appId}) → ${persona}`);
   console.log("   飞书里 @项目小助理：「建任务：xxx」「我的任务」「完成 xxx」");
-  console.log("   Gitea 工单：「建工单：xxx」「工单列表」「关闭工单 #n」「项目概览」");
+  console.log("   Gitea 工单：「建工单 @仓库：xxx」「工单列表」「关闭工单 #n」「项目概览」");
   console.log(`   流水线: 监听汇总 → 建工单 → PR 提醒 (interval=${intervalMs}ms, repos=${repos.join(",")})`);
   if (!notifyChatId) console.log("   ⚠️ 未配置 TASK_NOTIFY_CHAT_ID，播报与 PR 提醒已关闭");
 

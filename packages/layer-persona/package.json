@@ -1,6 +1,6 @@
 {
   "name": "@aigility-harness/layer-persona",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "角色人格层：特性打包为可交互 Agent 角色（性格/接收方式/表达方式）",
   "type": "module",
   "main": "./dist/index.js",
