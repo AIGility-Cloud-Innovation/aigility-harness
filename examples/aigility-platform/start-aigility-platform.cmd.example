@@ -63,7 +63,7 @@ rem set "LITELLM_KEY=[FILL_LITELLM_KEY]"
 rem Optional overrides (defaults shown)
 rem set "AIGILITY_WEB_PORT=1236"
 rem set "AIGILITY_GATEWAY_PORT=1237"
-rem set "AIGILITY_PUBLIC_HOST=127.0.0.1"
+rem set "AIGILITY_PUBLIC_HOST=127.0.0.1" rem (deprecated, no longer used)
 
 cd /d "%~dp0"
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { marketAgents, agentCats, type MarketAgent } from '../mock/data'
 import { getCurrentUser } from '../lib/api'
-import { getHarnessCfg, streamPersonaChat, fetchRegistry, type PersonaInfo, type SkillInfo } from '../lib/harness'
+import { streamPersonaChat, fetchRegistry, type PersonaInfo, type SkillInfo } from '../lib/harness'
 import { Search, Star, ArrowLeft, Bot, CheckCircle2, BookOpen, Wrench, Play, Radio, Send, Store, Loader2, Settings2, ScrollText } from 'lucide-react'
 
 export default function MarketPage({ go }: { go: (p: string) => void }) {
@@ -175,7 +175,6 @@ function RealAgentDetail({ persona, llm, back }: { persona: PersonaInfo; llm: st
   const [msgs, setMsgs] = useState<RealChatMsg[]>([])
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
-  const [gwMissing, setGwMissing] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const sessionId = useRef(`zy-market-${Date.now().toString(36)}`)
 
@@ -184,13 +183,11 @@ function RealAgentDetail({ persona, llm, back }: { persona: PersonaInfo; llm: st
   const send = async () => {
     const q = draft.trim()
     if (!q || busy) return
-    const cfg = getHarnessCfg()
-    if (!cfg.url) { setGwMissing(true); return }
     setDraft('')
     setBusy(true)
     setMsgs(m => [...m, { role: 'user', text: q }, { role: 'assistant', text: '', streaming: true }])
     try {
-      const full = await streamPersonaChat(cfg, persona.route, {
+      const full = await streamPersonaChat(persona.route, {
         user_input: q, session_id: sessionId.current, user_key: getCurrentUser()?.email ?? 'fde-local',
       }, full => {
         setMsgs(m => m.map((x, i) => i === m.length - 1 ? { ...x, text: full } : x))
@@ -198,7 +195,7 @@ function RealAgentDetail({ persona, llm, back }: { persona: PersonaInfo; llm: st
       setMsgs(m => m.map((x, i) => i === m.length - 1 ? { ...x, text: full, streaming: false } : x))
     } catch (e) {
       setMsgs(m => m.map((x, i) => i === m.length - 1
-        ? { ...x, text: `网关调用失败：${e instanceof Error ? e.message : String(e)}`, streaming: false, error: true }
+        ? { ...x, text: `对话调用失败：${e instanceof Error ? e.message : String(e)}`, streaming: false, error: true }
         : x))
     } finally {
       setBusy(false)
@@ -251,7 +248,7 @@ function RealAgentDetail({ persona, llm, back }: { persona: PersonaInfo; llm: st
             <div className="flex gap-2">
               <input value={draft} onChange={e => setDraft(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) void send() }}
-                placeholder={gwMissing ? '网关未接入（无网关注入）' : '输入问题，Enter 发送（真对话）…'}
+                placeholder="输入问题，Enter 发送（真对话）…"
                 disabled={busy}
                 className="flex-1 text-sm border border-slate-200 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 disabled:bg-slate-50" />
               <button disabled={busy || !draft.trim()} onClick={() => void send()}

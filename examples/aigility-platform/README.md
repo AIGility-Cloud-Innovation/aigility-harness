@@ -20,7 +20,7 @@ pnpm example:aigility
 
 | 入口 | 地址 | 说明 |
 |---|---|---|
-| 平台前端 | <http://127.0.0.1:1236/> | 登录后进入（AppBase 平台账号），网关配置自动注入 |
+| 平台前端 | <http://127.0.0.1:1236/> | 登录后进入（AppBase 平台账号），对话走同源会话代理（网关主密钥仅服务端持有，不注入前端） |
 | AI 网关 | <http://127.0.0.1:1237/v1/chat/completions> | OpenAI 兼容，Bearer 鉴权（app_keys 表持久） |
 | 登录/注册/会话 | `POST :1236/app/auth/login\|register\|logout` | AppBase users 表 scrypt + HMAC token + 登录限流 |
 | 数字员工对话 | `POST :1237/api/aigility-chat` | → `@persona/aigility-agent`（工厂技能 + 平台管家） |
@@ -128,7 +128,7 @@ aigility-platform/
 | `LLM_MODEL` | `glm-4.6` | workflow-engine 默认模型（本机用 `deepseek-v4-flash`） |
 | `AIGILITY_WEB_PORT` | `1236` | 平台前端端口 |
 | `AIGILITY_GATEWAY_PORT` | `1237` | AI 网关端口 |
-| `AIGILITY_PUBLIC_HOST` | `127.0.0.1` | 注入前端的网关主机（局域网访问时改本机 IP） |
+| `AIGILITY_PUBLIC_HOST` | `127.0.0.1` | （已废弃，不再使用；网关密钥不再下发前端） |
 | `TIMEM_API_KEY` / `TIMEM_BASE_URL` | — | TiMEM 记忆（未配置时记忆节点静默跳过；配置不可达时 TiMEM 空间如实上报） |
 | `APPBASE_PG_HOST/PORT/DATABASE/USER/PASSWORD` | `127.0.0.1:5433/appbase` | AppBase 平台 PG（登录账号 + 网关 key 持久化 + 用量计量 + dsh_plugins 注册表） |
 

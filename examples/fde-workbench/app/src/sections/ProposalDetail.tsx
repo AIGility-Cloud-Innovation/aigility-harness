@@ -81,9 +81,10 @@ export function ProposalDetail({ id }: { id: string }) {
   const [harnessOk, setHarnessOk] = useState(false)
   const [testing, setTesting] = useState(false)
 
-  // 已配置网关时自动探测（fde-workbench 静态托管会注入 window.FDE_GATEWAY，打开页面即连接）
+  // 手工配置了网关 → 探测直连；未配置 → 走同源会话代理（服务端持有主密钥），视为可用
   useEffect(() => {
     if (harnessCfg.url) testHarnessConnection(harnessCfg.url).then(setHarnessOk)
+    else setHarnessOk(true)
   }, [harnessCfg.url])
 
   const realExport = async (kind: 'ppt' | 'word' | 'excel') => {
@@ -92,7 +93,7 @@ export function ProposalDetail({ id }: { id: string }) {
     const label = kind === 'ppt' ? '方案 PPT' : kind === 'word' ? '解决方案 Word' : '报价 Excel'
     try {
       // Word 优先移交 D3 文档工人（服务端 doc-worker 确定性渲染），不可用再回退浏览器引擎
-      if (kind === 'word' && harnessOk && harnessCfg.url) {
+      if (kind === 'word' && harnessOk) {
         try {
           const r = await generateProposalDocx(harnessCfg, buildProposalDoc(p, lead, skus))
           toast.success(`D3 文档工人已产出 ${r.filename}`, {

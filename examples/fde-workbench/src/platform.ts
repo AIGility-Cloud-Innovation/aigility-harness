@@ -18,6 +18,7 @@ import { promisify } from "node:util";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   appBackendHandler,
+  bearerUser,
   ensureAppKey,
   initAppBackend,
   pool,
@@ -95,9 +96,14 @@ export async function ensureFdePlatform(): Promise<FdePlatform> {
      SELECT $1, id FROM users ON CONFLICT DO NOTHING`,
     [FDE_APP_ID]);
 
-  // 4. 应用网关 key（持久化；前端经注入免配置）
+  // 4. 应用网关 key（持久化；仅服务端持有, 对话走同源会话代理）
   const gatewayKey = await ensureAppKey(FDE_APP_ID, adminId);
   return { gatewayKey };
+}
+
+/** AppBase 会话校验（本示例 /api/fde-* 代理路由用）：Bearer token → 用户 id, 无效返回 null */
+export function sessionUserId(req: IncomingMessage): string | null {
+  return bearerUser(req);
 }
 
 /**

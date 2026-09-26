@@ -289,8 +289,8 @@ export function EmployeePanel() {
               : cfg.url ? 'border-amber-200 bg-amber-50 text-amber-600'
               : 'border-slate-200 bg-slate-50 text-slate-400 hover:border-slate-300')}
           >
-            <span className={cn('h-1.5 w-1.5 rounded-full', cfg.url && online ? 'bg-emerald-500' : cfg.url ? 'bg-amber-500' : 'bg-slate-300')} />
-            {cfg.url ? (online ? 'Harness 流式' : 'Harness 离线') : '内置演示引擎'}
+            <span className={cn('h-1.5 w-1.5 rounded-full', cfg.url ? (online ? 'bg-emerald-500' : 'bg-amber-500') : 'bg-emerald-500')} />
+            {cfg.url ? (online ? 'Harness 流式' : 'Harness 离线') : '同源代理 · 流式'}
             <Settings2 className="h-3 w-3" />
           </button>
           <button onClick={() => setChatOpen(false)} className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100">
@@ -399,14 +399,14 @@ export function EmployeePanel() {
               <Settings2 className="h-4 w-4 text-[#3370ff]" />连接本地 Harness 网关
             </DialogTitle>
             <DialogDescription>
-              行动指令（推进/提醒/生成方案）始终本地识别、人确认后执行；开放问答接入 aigility-harness 后走 SSE 逐字流式输出。
+              行动指令（推进/提醒/生成方案）始终本地识别、人确认后执行；开放问答缺省走同源会话代理（服务端持有网关密钥），SSE 逐字流式输出。也可手工指向其他自备网关。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <Input
               value={cfg.url ?? ''}
               onChange={e => setCfg(c => ({ ...c, url: e.target.value }))}
-              placeholder="网关地址，如 http://127.0.0.1:1235（pnpm example:fde 启动时自动注入）"
+              placeholder="网关地址（可选覆盖，留空 = 同源会话代理）"
             />
             <Input
               type="password"
@@ -426,8 +426,8 @@ export function EmployeePanel() {
               <Button className="flex-1 bg-[#3370ff] hover:bg-[#2952cc]" onClick={saveCfg}>保存配置</Button>
             </div>
             <p className="text-[11px] leading-relaxed text-slate-400">
-              当前状态：{cfg.url ? (online ? '已连接，开放问答走流式输出' : '网关离线或未配置') : '未配置网关，使用内置演示引擎'}。
-              开放问答走 @persona/fde-assistant（服务端注入工作台数据快照与记忆）；pnpm example:fde 启动时网关配置自动注入，无需手工填写。
+              当前状态：{cfg.url ? (online ? '已连接手工网关，开放问答走流式输出' : '手工网关离线或地址有误') : '缺省同源会话代理（登录会话直通 fde-assistant，无需填写）'}。
+              开放问答走 @persona/fde-assistant（服务端注入工作台数据快照与记忆）；仅在需要指向其他网关时才手工填写地址与 key。
             </p>
           </div>
         </DialogContent>

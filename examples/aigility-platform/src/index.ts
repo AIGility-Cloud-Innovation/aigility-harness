@@ -4,7 +4,9 @@
  *
  * 一个进程两个端口（与 fde-workbench 同构）：
  *   - Web  :1236  静态前端（app/dist）+ 封装 API + AppBase 平台底座（/app/* 鉴权/数据/计量）
+ *                 + 对话同源代理（/api/aigility/chat 等, 校验 AppBase 会话后转发网关, SSE 透传）
  *   - 网关 :1237  http-ingress（Bearer 鉴权）：OpenAI 兼容 dev 链路 + 数字员工 agent 链路
+ *                 （主密钥仅服务端持有, 不注入前端页面 —— 浏览器对话一律走同源会话代理）
  *
  * 登录鉴权：复用 AppBase 平台账号（users 表 scrypt + HMAC token + 登录限流, 账号与 AppBase 互通）
  *   - 登录/注册/会话: POST /app/auth/login|register|logout · GET /app/auth/me（appBackendHandler 内置）
@@ -56,7 +58,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const WEB_PORT = Number(process.env.AIGILITY_WEB_PORT ?? 1236);
 const GATEWAY_PORT = Number(process.env.AIGILITY_GATEWAY_PORT ?? 1237);
-const PUBLIC_HOST = process.env.AIGILITY_PUBLIC_HOST ?? "127.0.0.1";
 const DIST_DIR = resolve(__dirname, "../app/dist");
 
 const MIME: Record<string, string> = {
@@ -195,6 +196,47 @@ async function main(): Promise<void> {
   //    key 来自 app_keys 表（持久, 与 AppBase 共体系）; 用量上报 llm_usage
   const personas = enumeratePersonas();
   const gatewayKey = platform.gatewayKey;
+
+  /** 会话代理：浏览器 → 同源（AppBase 会话已校验）→ 网关（Bearer 主密钥）→ SSE 透传。
+   *  主密钥只在服务端进程内使用, 永不下发浏览器；客户端提前断开时中止上游请求。
+   *  断连判定用 res 'close' + writableEnded（req 'close' 在请求体读完时同样触发, 不能用）。 */
+  const proxyAgent = async (req: IncomingMessage, res: ServerResponse, upstreamPath: string): Promise<void> => {
+    const abort = new AbortController();
+    res.on("close", () => { if (!res.writableEnded) abort.abort(); });
+    let upstream: Response;
+    try {
+      upstream = await fetch(`http://127.0.0.1:${GATEWAY_PORT}${upstreamPath}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${gatewayKey}` },
+        body: await readBody(req),
+        signal: abort.signal,
+      });
+    } catch (err) {
+      json(res, 502, { error: `网关不可达: ${String(err)}` });
+      return;
+    }
+    res.writeHead(upstream.status, {
+      "Content-Type": upstream.headers.get("content-type") ?? "application/json; charset=utf-8",
+      "Cache-Control": "no-cache",
+    });
+    if (!upstream.body) {
+      res.end();
+      return;
+    }
+    const reader = upstream.body.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(Buffer.from(value));
+      }
+    } catch {
+      // 上游中断：SSE 已流出的帧不受影响, 尽力收尾
+    } finally {
+      res.end();
+    }
+  };
+
   const agentRoutes: Record<string, string> = {
     "/api/aigility-chat": "@persona/aigility-agent",
   };
@@ -236,7 +278,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  // 5. Web 服务（:1236）：/app/* 平台 API（鉴权/数据/计量）+ 封装 API + 静态 + 注入网关配置
+  // 5. Web 服务（:1236）：/app/* 平台 API（鉴权/数据/计量）+ 封装 API + 对话代理 + 静态
   const startedAt = Date.now();
   /** Web 侧 Seam 调用（外部入口走 D1 上下文, 与网关同模式） */
   const seamCall = async <T = { ok: boolean; total?: number; results?: Array<{ content: string; score?: number; memory_id?: string }>; error?: string }>(
@@ -257,6 +299,17 @@ async function main(): Promise<void> {
     // ── 封装 API（/api/aigility/*, 全部要求 AppBase 登录会话）──
     if (path.startsWith("/api/aigility/")) {
       if (!requireUser(req, res)) return;
+
+      // 对话代理（同源会话 → 网关 agent 链路, SSE 透传）：主密钥仅服务端持有
+      if (path === "/api/aigility/chat" && req.method === "POST") {
+        await proxyAgent(req, res, "/api/aigility-chat");
+        return;
+      }
+      const personaChat = path.match(/^\/api\/aigility\/p\/([\w-]+)\/chat$/);
+      if (personaChat && req.method === "POST") {
+        await proxyAgent(req, res, `/api/aigility/p/${personaChat[1]}/chat`);
+        return;
+      }
 
       if (path === "/api/aigility/registry" && req.method === "GET") {
         json(res, 200, {
@@ -473,26 +526,18 @@ async function main(): Promise<void> {
     }
 
     const type = MIME[extname(filePath).toLowerCase()] ?? "application/octet-stream";
-    if (type.startsWith("text/html")) {
-      // 注入网关配置：前端 getHarnessCfg() 优先读 localStorage, 缺省回落到注入值
-      const html = readFileSync(filePath, "utf-8");
-      const inject = `<script>window.AIGILITY_GATEWAY = { url: "http://${PUBLIC_HOST}:${GATEWAY_PORT}", key: "${gatewayKey}" };</script>`;
-      res.writeHead(200, { "Content-Type": type });
-      res.end(html.replace("<head>", "<head>\n    " + inject));
-      return;
-    }
     res.writeHead(200, { "Content-Type": type });
     res.end(readFileSync(filePath));
   });
   await new Promise<void>((r) => server.listen(WEB_PORT, "0.0.0.0", () => r()));
 
   console.log(`\nAigility 智悦智能平台已就绪:`);
-  console.log(`  平台前端:     http://127.0.0.1:${WEB_PORT}/  （登录 → 市场真 persona + 工厂真发布 + 对话真网关）`);
+  console.log(`  平台前端:     http://127.0.0.1:${WEB_PORT}/  （登录 → 市场真 persona + 工厂真发布 + 对话同源会话代理）`);
   console.log(`  演示账号:     admin@aigility.local/admin123 · fde@aigility.local/fde123 · demo@aigility.local/demo123（与 AppBase 共库共账号）`);
   console.log(`  AI 网关:      http://127.0.0.1:${GATEWAY_PORT}/v1/chat/completions (OpenAI 兼容, Bearer 鉴权)`);
   console.log(`                /api/aigility-chat → @persona/aigility-agent（工厂技能 + 平台管家）`);
   console.log(`                ${personas.map((p) => p.personaId.replace("@persona/", "")).join(" · ")} → 引擎原生角色`);
-  console.log(`  网关密钥:     ${gatewayKey}  (app_keys 表持久 · 用量上报 llm_usage)`);
+  console.log(`  网关密钥:     仅服务端持有（app_keys 表持久 · 用量上报 llm_usage · 不注入前端页面）`);
   console.log(`  已发布技能:   ${listSkills().length} 个 (data/aigility-skills.json)`);
   const llmDesc = process.env.LLM_PROVIDER === "stub"
     ? "stub 降级（未检测到 BIGMODEL_API_KEY / LITELLM_URL, 回复带【服务降级】标记）"

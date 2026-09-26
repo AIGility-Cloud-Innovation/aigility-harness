@@ -22,7 +22,7 @@ pnpm example:fde
 
 | 入口 | 地址 | 说明 |
 |---|---|---|
-| 工作台前端 | <http://127.0.0.1:1234/> | 打开即用，网关配置自动注入（`window.FDE_GATEWAY`） |
+| 工作台前端 | <http://127.0.0.1:1234/> | 打开即用，对话走同源会话代理（网关主密钥仅服务端持有，不注入前端） |
 | AI 网关 | <http://127.0.0.1:1235/v1/chat/completions> | OpenAI 兼容，Bearer 鉴权，密钥启动时打印 |
 | 数字员工问答 | `POST :1235/api/fde-chat` | → `@persona/fde-assistant` |
 | 文档工人 | `POST :1235/api/fde-doc` | → `@action/doc-worker` |
@@ -84,7 +84,7 @@ fde-workbench/
 | `FDE_WEB_PORT` | `1234` | 工作台前端端口 |
 | `FDE_GATEWAY_PORT` | `1235` | AI 网关端口 |
 | `APPBASE_PG_HOST/PORT/DATABASE/USER/PASSWORD` | `127.0.0.1:5433/appbase` | 平台 PG（账号+台账持久化） |
-| `FDE_PUBLIC_HOST` | `127.0.0.1` | 注入前端的网关主机（局域网访问时改本机 IP） |
+| `FDE_PUBLIC_HOST` | `127.0.0.1` | （已废弃，不再使用；网关密钥不再下发前端） |
 | `DOC_WORKER_DIR` | 系统临时目录 | 文档工人落盘目录（同时 base64 回传前端下载） |
 | `TIMEM_API_KEY` / `TIMEM_BASE_URL` | — | TiMEM 记忆云（未配置时记忆节点静默跳过） |
 

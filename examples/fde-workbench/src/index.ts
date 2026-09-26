@@ -2,7 +2,8 @@
  * TiMEM FDE 工作台 —— 产品装配（examples/fde-workbench）
  *
  * 一个进程两个端口：
- *   - Web  :1234  静态前端（app/dist），index.html 注入 window.FDE_GATEWAY（网关地址+密钥），前端零配置对接
+ *   - Web  :1234  静态前端（app/dist）+ /app/* 平台底座 + 对话/文档同源代理
+ *                 （校验 AppBase 会话后转发网关, SSE/JSON 透传; 网关主密钥不注入前端页面）
  *   - 网关 :1235  http-ingress（Bearer 鉴权）：OpenAI 兼容 dev 链路 + FDE agent 链路
  *
  * 深度整合链路（五域全走 Seam，无业务旁路）：
@@ -39,13 +40,12 @@ import { plugin as personaPlugin } from "@aigility-harness/layer-persona";
 import { plugin as orchestrationPlugin } from "@aigility-harness/layer-orchestration";
 import { plugin as actionPlugin } from "@aigility-harness/layer-action";
 import { isKnownGatewayKey } from "@aigility-harness/appbase/backend";
-import { ensureFdePlatform, routePlatform } from "./platform.js";
+import { ensureFdePlatform, routePlatform, sessionUserId } from "./platform.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const WEB_PORT = Number(process.env.FDE_WEB_PORT ?? 1234);
 const GATEWAY_PORT = Number(process.env.FDE_GATEWAY_PORT ?? 1235);
-const PUBLIC_HOST = process.env.FDE_PUBLIC_HOST ?? "127.0.0.1";
 const DIST_DIR = resolve(__dirname, "../app/dist");
 
 const MIME: Record<string, string> = {
@@ -64,6 +64,15 @@ const MIME: Record<string, string> = {
   ".ttf": "font/ttf",
   ".map": "application/json",
 };
+
+function readBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolveBody, reject) => {
+    let data = "";
+    req.on("data", (chunk) => (data += chunk));
+    req.on("end", () => resolveBody(data));
+    req.on("error", reject);
+  });
+}
 
 async function main(): Promise<void> {
   console.log("=== TiMEM FDE 工作台（数字员工 + 文档工人 + AI 网关 + 平台账号/持久化）===\n");
@@ -108,6 +117,48 @@ async function main(): Promise<void> {
 
   // 4. AI 网关（http-ingress, :1235）—— key 来自平台 app_keys 表（持久），用量上报进 PG
   const gatewayKey = platform.gatewayKey;
+
+  /** 会话代理：浏览器 → 同源（AppBase 会话已校验）→ 网关（Bearer 主密钥）→ SSE/JSON 透传。
+   *  主密钥只在服务端进程内使用, 永不下发浏览器；客户端提前断开时中止上游请求。
+   *  断连判定用 res 'close' + writableEnded（req 'close' 在请求体读完时同样触发, 不能用）。 */
+  const proxyAgent = async (req: IncomingMessage, res: ServerResponse, upstreamPath: string): Promise<void> => {
+    const abort = new AbortController();
+    res.on("close", () => { if (!res.writableEnded) abort.abort(); });
+    let upstream: Response;
+    try {
+      upstream = await fetch(`http://127.0.0.1:${GATEWAY_PORT}${upstreamPath}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${gatewayKey}` },
+        body: await readBody(req),
+        signal: abort.signal,
+      });
+    } catch (err) {
+      res.writeHead(502, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: `网关不可达: ${String(err)}` }));
+      return;
+    }
+    res.writeHead(upstream.status, {
+      "Content-Type": upstream.headers.get("content-type") ?? "application/json; charset=utf-8",
+      "Cache-Control": "no-cache",
+    });
+    if (!upstream.body) {
+      res.end();
+      return;
+    }
+    const reader = upstream.body.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(Buffer.from(value));
+      }
+    } catch {
+      // 上游中断：SSE 已流出的帧不受影响, 尽力收尾
+    } finally {
+      res.end();
+    }
+  };
+
   const gwCtx = kernel.createContext("fde-gateway", LayerId.Infrastructure);
   const gwResolved = await kernel.registry.resolve({
     id: "@infrastructure/http-ingress",
@@ -147,12 +198,29 @@ async function main(): Promise<void> {
     return;
   }
 
-  // 5. Web 静态服务（:1234）：/app/* 平台 API（鉴权/数据/计量）+ app/dist 静态 + 注入网关配置
+  // 5. Web 静态服务（:1234）：/app/* 平台 API（鉴权/数据/计量）+ 对话/文档同源代理 + app/dist 静态
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     // 平台 API 优先（AppBase app-backend：/app/auth/* /app/data/* /app/usage/* …）
     if (await routePlatform(req, res)) return;
 
     const path = (req.url ?? "/").split("?")[0];
+
+    // 对话/文档代理（同源会话 → 网关 agent 链路）：校验登录会话, 主密钥仅服务端持有
+    if (path === "/api/fde-chat" || path === "/api/fde-doc") {
+      if (req.method !== "POST") {
+        res.writeHead(405, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Method not allowed" }));
+        return;
+      }
+      if (!sessionUserId(req)) {
+        res.writeHead(401, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "未登录或会话已过期" }));
+        return;
+      }
+      await proxyAgent(req, res, path);
+      return;
+    }
+
     if (req.method !== "GET") {
       res.writeHead(405, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Method not allowed" }));
@@ -176,25 +244,17 @@ async function main(): Promise<void> {
     }
 
     const type = MIME[extname(filePath).toLowerCase()] ?? "application/octet-stream";
-    if (type.startsWith("text/html")) {
-      // 注入网关配置：前端 getHarnessCfg() 优先读 localStorage，缺省回落到注入值
-      const html = readFileSync(filePath, "utf-8");
-      const inject = `<script>window.FDE_GATEWAY = { url: "http://${PUBLIC_HOST}:${GATEWAY_PORT}", key: "${gatewayKey}" };</script>`;
-      res.writeHead(200, { "Content-Type": type });
-      res.end(html.replace("<head>", "<head>\n    " + inject));
-      return;
-    }
     res.writeHead(200, { "Content-Type": type });
     res.end(readFileSync(filePath));
   });
   await new Promise<void>((r) => server.listen(WEB_PORT, "0.0.0.0", () => r()));
 
   console.log(`\nFDE 工作台已就绪:`);
-  console.log(`  工作台前端:  http://127.0.0.1:${WEB_PORT}/  （真登录 + PG 持久化，账号与 AppBase 互通）`);
+  console.log(`  工作台前端:  http://127.0.0.1:${WEB_PORT}/  （真登录 + PG 持久化，账号与 AppBase 互通 · 对话走同源会话代理）`);
   console.log(`  演示账号:     admin@fde.local/admin123 · zhaopeng@fde.local/fde123 · chensiyuan@fde.local/fde123`);
   console.log(`  AI 网关:     http://127.0.0.1:${GATEWAY_PORT}/v1/chat/completions (OpenAI 兼容, Bearer 鉴权)`);
   console.log(`               /api/fde-chat → @persona/fde-assistant · /api/fde-doc → @action/doc-worker`);
-  console.log(`  网关密钥:     ${gatewayKey}  (app_keys 表持久 · 用量上报 llm_usage)`);
+  console.log(`  网关密钥:     仅服务端持有（app_keys 表持久 · 用量上报 llm_usage · 不注入前端页面）`);
   const llmDesc = process.env.LLM_PROVIDER === "stub"
     ? "stub 降级（未检测到 BIGMODEL_API_KEY / LITELLM_URL，回复带【服务降级】标记）"
     : `${process.env.LLM_PROVIDER} 上游`;

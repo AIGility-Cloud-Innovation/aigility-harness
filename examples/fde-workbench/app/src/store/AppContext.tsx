@@ -995,8 +995,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     const parsed = parseCommand(text, leads, knowledge)
     const cfg = getHarnessCfg()
-    // 行动/查询指令本地识别（人在回路确认不变）；开放问答走 Harness 网关 fde-assistant 角色链路
-    if (!parsed.action && !parsed.card && cfg.url) {
+    // 行动/查询指令本地识别（人在回路确认不变）；开放问答走 fde-assistant 角色链路（缺省同源会话代理, 手工网关可覆盖）
+    if (!parsed.action && !parsed.card) {
       const body: FdeChatBody = {
         user_input: text,
         user_key: username || role.name,

@@ -1,54 +1,32 @@
 /**
- * aigility-harness 网关接入（与 fde-workbench 的 harness.ts 同构）：
- *   - 配置解析：localStorage > 服务端注入 window.AIGILITY_GATEWAY（静态托管时自动写入）
- *   - 对话链路：OpenAI 兼容 SSE 逐帧解析
- *     · streamAigilityChat → /api/aigility-chat（@persona/aigility-agent：工厂技能 + 平台管家）
- *     · streamPersonaChat → /api/aigility/p/<key>/chat（引擎 layer-persona 原生角色）
+ * 平台封装 API 客户端（全部同源 :1236, 均要求 AppBase 登录会话）：
+ *   - 对话链路：同源会话代理（服务端校验会话后持主密钥转发网关, SSE 透传;
+ *     网关主密钥仅服务端持有, 不进浏览器）, OpenAI 兼容 SSE 逐帧解析
+ *     · streamAigilityChat → /api/aigility/chat →（服务端）→ /api/aigility-chat（@persona/aigility-agent：工厂技能 + 平台管家）
+ *     · streamPersonaChat → /api/aigility/p/<key>/chat →（服务端）→ 引擎 layer-persona 原生角色
  *   - 封装 API（同源, 需 AppBase 登录会话）：注册表 / 技能发布 / 能力总线 / 模型上游 / 指标 / TiMEM
  */
 
-import { authJsonFetch, getCurrentUser } from './api'
+import { authJsonFetch, getToken, getCurrentUser, clearToken } from './api'
 
-export interface HarnessCfg {
-  url?: string
-  key?: string
-}
+// ── 会话 SSE 客户端（同源代理）───────────────────────────────────
 
-const KEY = 'aigility-harness-cfg'
-
-declare global {
-  interface Window {
-    /** 服务端注入的网关缺省配置（examples/aigility-platform 静态托管时自动写入） */
-    AIGILITY_GATEWAY?: { url?: string; key?: string }
+/** 登录会话请求头（服务端代理据此校验 AppBase 会话, 401 统一清会话切登录屏） */
+function sessionHeaders(): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
   }
 }
-
-/** 配置优先级：localStorage（用户手工配置）> 服务端注入 window.AIGILITY_GATEWAY > 空 */
-export function getHarnessCfg(): HarnessCfg {
-  let saved: HarnessCfg = {}
-  try {
-    saved = JSON.parse(localStorage.getItem(KEY) ?? '{}')
-  } catch {
-    saved = {}
-  }
-  const injected = typeof window !== 'undefined' ? window.AIGILITY_GATEWAY : undefined
-  const merged: HarnessCfg = {
-    url: saved.url || injected?.url,
-    key: saved.key || injected?.key,
-  }
-  if (!localStorage.getItem(KEY) && merged.url) saveHarnessCfg(merged)
-  return merged
-}
-
-export function saveHarnessCfg(cfg: HarnessCfg) {
-  localStorage.setItem(KEY, JSON.stringify(cfg))
-}
-
-// ── OpenAI 兼容 SSE 逐帧解析 ─────────────────────────────────────
 
 /** 逐帧解析 OpenAI 兼容 SSE，onToken 回调累计全文；失败抛错由调用方回退 */
 async function pumpOpenAiSse(res: Response, onToken: (full: string) => void): Promise<string> {
-  if (!res.ok || !res.body) throw new Error(`网关响应 ${res.status}`)
+  if (res.status === 401) {
+    clearToken()
+    window.dispatchEvent(new CustomEvent('aigility-unauth'))
+    throw new Error('登录已过期，请重新登录')
+  }
+  if (!res.ok || !res.body) throw new Error(`对话代理响应 ${res.status}`)
   const reader = res.body.getReader()
   const dec = new TextDecoder()
   let buf = ''
@@ -82,15 +60,6 @@ async function pumpOpenAiSse(res: Response, onToken: (full: string) => void): Pr
   return full
 }
 
-function gatewayHeaders(cfg: HarnessCfg): Record<string, string> {
-  return {
-    'Content-Type': 'application/json',
-    ...(cfg.key ? { Authorization: `Bearer ${cfg.key}` } : {}),
-  }
-}
-
-const gatewayBase = (cfg: HarnessCfg) => (cfg.url ?? '').replace(/\/+$/, '')
-
 export interface AigilityChatBody {
   user_input: string
   /** 智能体工厂发布的技能 id（缺省走平台管家） */
@@ -100,30 +69,28 @@ export interface AigilityChatBody {
   history?: Array<{ role: 'user' | 'assistant'; content: string }>
 }
 
-/** 数字员工对话 → /api/aigility-chat（@persona/aigility-agent，记忆按技能隔离） */
+/** 数字员工对话 → 同源 /api/aigility/chat（服务端代理 → @persona/aigility-agent，记忆按技能隔离） */
 export async function streamAigilityChat(
-  cfg: HarnessCfg,
   body: AigilityChatBody,
   onToken: (full: string) => void,
 ): Promise<string> {
-  const res = await fetch(`${gatewayBase(cfg)}/api/aigility-chat`, {
+  const res = await fetch('/api/aigility/chat', {
     method: 'POST',
-    headers: gatewayHeaders(cfg),
+    headers: sessionHeaders(),
     body: JSON.stringify({ ...body, stream: true }),
   })
   return pumpOpenAiSse(res, onToken)
 }
 
-/** 引擎原生角色对话 → /api/aigility/p/<key>/chat（registry 下发的 route） */
+/** 引擎原生角色对话 → 同源 /api/aigility/p/<key>/chat（registry 下发的 route, 服务端代理 → 网关） */
 export async function streamPersonaChat(
-  cfg: HarnessCfg,
   route: string,
   body: { user_input: string; session_id?: string; user_key?: string },
   onToken: (full: string) => void,
 ): Promise<string> {
-  const res = await fetch(`${gatewayBase(cfg)}${route}`, {
+  const res = await fetch(route, {
     method: 'POST',
-    headers: gatewayHeaders(cfg),
+    headers: sessionHeaders(),
     body: JSON.stringify({ ...body, stream: true }),
   })
   return pumpOpenAiSse(res, onToken)

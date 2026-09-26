@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { chatScripts, mcpTools, type ChatScript, type Skill } from '../mock/data'
 import FlowCanvas from '../components/FlowCanvas'
 import { getCurrentUser } from '../lib/api'
-import { getHarnessCfg, streamAigilityChat, fetchRegistry, type SkillInfo } from '../lib/harness'
+import { streamAigilityChat, fetchRegistry, type SkillInfo } from '../lib/harness'
 import { Bot, Send, Wrench, CheckCircle2, Clock, User, Sparkles, Plug, PlusCircle, ChevronRight, Loader2, ShieldCheck, Play, Bug, History, Rocket, Radio } from 'lucide-react'
 
 interface Msg {
@@ -47,8 +47,6 @@ export default function AgentPage({ skillList }: { skillList: Skill[] }) {
   const sendLive = async () => {
     const q = draft.trim()
     if (!q || running || liveBusy) return
-    const cfg = getHarnessCfg()
-    if (!cfg.url) return
     setDraft('')
     setRunning(true); setLiveBusy(true); setApproved(false); setCtx(null)
     setMsgs(m => [...m, { role: 'user', text: q }, { role: 'agent', text: '', streaming: true, liveName: activeName }])
@@ -58,7 +56,7 @@ export default function AgentPage({ skillList }: { skillList: Skill[] }) {
       content: m.text!,
     }))
     try {
-      const full = await streamAigilityChat(cfg, {
+      const full = await streamAigilityChat({
         user_input: q,
         ...(activeSkillId ? { skill_id: activeSkillId } : {}),
         session_id: sessionId.current,
@@ -70,7 +68,7 @@ export default function AgentPage({ skillList }: { skillList: Skill[] }) {
       setMsgs(m => m.map((x, i) => i === m.length - 1 ? { ...x, text: full, streaming: false } : x))
     } catch (e) {
       setMsgs(m => m.map((x, i) => i === m.length - 1
-        ? { ...x, text: `网关调用失败：${e instanceof Error ? e.message : String(e)}`, streaming: false, error: true }
+        ? { ...x, text: `对话调用失败：${e instanceof Error ? e.message : String(e)}`, streaming: false, error: true }
         : x))
     } finally {
       setRunning(false); setLiveBusy(false)

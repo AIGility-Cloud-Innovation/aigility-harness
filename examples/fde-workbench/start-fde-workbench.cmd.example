@@ -57,7 +57,7 @@ rem set "LITELLM_KEY=[FILL_LITELLM_KEY]"
 rem Optional overrides (defaults shown)
 rem set "FDE_WEB_PORT=1234"
 rem set "FDE_GATEWAY_PORT=1235"
-rem set "FDE_PUBLIC_HOST=127.0.0.1"
+rem set "FDE_PUBLIC_HOST=127.0.0.1" rem (deprecated, no longer used)
 rem (gateway key is persisted in PG app_keys table; no need to set)
 
 cd /d "%~dp0"
