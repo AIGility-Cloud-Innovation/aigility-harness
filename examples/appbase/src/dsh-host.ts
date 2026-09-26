@@ -25,7 +25,27 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 type AnyCtx = {
   plugin: (p: unknown, cfg: unknown) => Promise<unknown> | unknown;
   destroy?: () => Promise<void> | void;
+  /** cordis 服务取用: ctx.get("tools") 即 dsh-tools 注册表 (mcp-client 等把工具注册到这里) */
+  get?: (key: string) => unknown;
 };
+
+/** dsh-tools 工具注册表的进程内最小视图 (结构化类型, 不 import 官方包) */
+interface DshToolsLike {
+  view: (scope?: unknown) => { visible: Map<string, DshToolDefinition> };
+}
+
+interface DshToolDefinition {
+  name: string;
+  description?: string;
+  parameters?: unknown;
+  execute?: (args: unknown, exec: unknown) => Promise<unknown>;
+}
+
+export interface DshToolInfo {
+  name: string;
+  description: string;
+  parameters: unknown;
+}
 
 interface HostState {
   ctx: AnyCtx;
@@ -41,6 +61,7 @@ export interface DshPluginRecord {
   name: string;
   package: string;
   export_name: string;
+  description?: string;
   config: Record<string, unknown>;
 }
 
@@ -143,6 +164,47 @@ export async function dshDestroyHost(): Promise<void> {
     await host.ctx.destroy?.();
   } catch { /* 尽力而为 */ }
   host = null;
+}
+
+// ── 工具访问器 (ctx.tools → harness 侧) ──────────────────────────
+// mcp-client 等插件把外部工具注册到 ctx.tools (公共名 mcp__<serverName>__<rawName>)。
+// 这里提供进程内枚举与直调, 供上层桥成 Seam 能力 (如 @action/dsh-tool)。
+
+/** 取宿主侧 dsh-tools 服务（未装载返回 null; cordis 服务经 ctx.get 访问） */
+function dshToolsService(): DshToolsLike | null {
+  if (!host) return null;
+  try {
+    return ((host.ctx as { get?: (k: string) => unknown }).get?.("tools") as DshToolsLike) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** 枚举宿主 ctx.tools 当前可见工具 (宿主未启动 / dsh-tools 未装载时为空) */
+export function dshListTools(): DshToolInfo[] {
+  const tools = dshToolsService();
+  if (!tools) return [];
+  return [...tools.view().visible.values()]
+    .filter((d) => d.name !== "run_code" && typeof d.execute === "function")
+    .map((d) => ({ name: d.name, description: d.description ?? "", parameters: d.parameters ?? {} }));
+}
+
+/** 直调一个已注册工具。非图片工具的 execute 只依赖 exec.signal ——
+ *  守卫/呈现等 agent 会话管线属 agent 职责, 进程内桥不模拟。 */
+export async function dshCallTool(
+  name: string,
+  args: Record<string, unknown>,
+): Promise<{ ok: boolean; value?: unknown; error?: string }> {
+  const tools = dshToolsService();
+  if (!tools) return { ok: false, error: "DSH 工具服务未装载 (需启用 @deepseek-ai/dsh-tools 插件)" };
+  const def = tools.view().visible.get(name);
+  if (!def || typeof def.execute !== "function") return { ok: false, error: `工具 "${name}" 不存在` };
+  try {
+    const value = await def.execute(args ?? {}, { signal: new AbortController().signal });
+    return { ok: true, value };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 /** 加载全部启用的插件 (宿主重建/首次拉起用); 返回逐个结果 */

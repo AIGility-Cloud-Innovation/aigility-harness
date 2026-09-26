@@ -38,6 +38,10 @@
     "./backend": {
       "types": "./src/backend.ts",
       "default": "./src/backend.ts"
+    },
+    "./dsh-host": {
+      "types": "./src/dsh-host.ts",
+      "default": "./src/dsh-host.ts"
     }
   }
 }
