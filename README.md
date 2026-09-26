@@ -597,7 +597,7 @@ aigility-harness/
     ├── feishu-ingress-design.md      # 飞书入口设计
     ├── policy-agent.md               # 策略 Agent 设计
     ├── task-orchestration-workflow-design.md  # 任务编排工作流设计
-    └── plugin-integration-design.md   # 插件接入设计文档 v0.2（历史草案，术语为当时的五层口径）
+    └── plugin-integration-design.md   # 插件接入设计文档 v0.2（历史草案，术语为早期的「五层」口径，现统一为「五域」）
 ```
 
 ---

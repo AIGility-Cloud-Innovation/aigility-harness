@@ -70,7 +70,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // 1. 内核（原型模式）+ 装配五层插件（action 层含 @action/feishu-api）
+  // 1. 内核（原型模式）+ 装配五域插件（action 层含 @action/feishu-api）
   const kernel = new InMemoryKernelAdapter();
   const plugins = [
     infrastructurePlugin,

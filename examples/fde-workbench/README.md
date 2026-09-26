@@ -1,6 +1,6 @@
 # TiMEM FDE 工作台（fde-workbench）
 
-面向 FDE（Forward Deployed Engineer）的交付一体化工作台示例：线索、方案、合同、交付、部署、渠道、知识沉淀、续费台账全流程，**深度接入 aigility-harness 五层架构**。
+面向 FDE（Forward Deployed Engineer）的交付一体化工作台示例：线索、方案、合同、交付、部署、渠道、知识沉淀、续费台账全流程，**深度接入 aigility-harness 五域架构**。
 
 前端由 Kimi Agent（FDE 工作台）生成，收编进仓库后完成 harness 深度整合。
 
@@ -29,7 +29,7 @@ pnpm example:fde
 
 演示账号：`admin/admin123`、`zhaopeng/fde123`、`chensiyuan/fde123`（角色视角不同）。
 
-## 深度整合链路（五层全走 Seam）
+## 深度整合链路（五域全走 Seam）
 
 ```
 数字员工开放问答（逐字流式）
@@ -54,7 +54,7 @@ pnpm example:fde
 
 ## 架构图
 
-完整架构图（前端 / 服务端装配 / 五层两条 Seam 链路 / 人在回路 / TiMEM 记忆 / LLM 上游）：
+完整架构图（前端 / 服务端装配 / 五域两条 Seam 链路 / 人在回路 / TiMEM 记忆 / LLM 上游）：
 服务启动后打开 <http://127.0.0.1:1234/architecture.html>，源文件为自包含 SVG 页 [`app/public/architecture.html`](app/public/architecture.html)。
 
 ## 目录结构
@@ -68,7 +68,7 @@ fde-workbench/
 │       ├── lib/proposalDoc.ts   # 方案 → 文档工人块结构映射
 │       ├── store/AppContext.tsx # 业务状态 + 业务快照组装 + 问答链路
 │       └── ...
-├── src/index.ts       # 服务端装配：内存内核 + 五层插件 + 网关 + 静态托管
+├── src/index.ts       # 服务端装配：内存内核 + 五域插件 + 网关 + 静态托管
 └── src/defaults.ts    # LLM 上游按环境自动选择（先于 layer-* 求值）
 ```
 

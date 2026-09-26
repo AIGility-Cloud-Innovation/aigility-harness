@@ -5,7 +5,7 @@
  *   - Web  :1234  静态前端（app/dist），index.html 注入 window.FDE_GATEWAY（网关地址+密钥），前端零配置对接
  *   - 网关 :1235  http-ingress（Bearer 鉴权）：OpenAI 兼容 dev 链路 + FDE agent 链路
  *
- * 深度整合链路（五层全走 Seam，无业务旁路）：
+ * 深度整合链路（五域全走 Seam，无业务旁路）：
  *   数字员工问答  POST /api/fde-chat → @persona/fde-assistant
  *                 （前端注入工作台实时数据快照 + TiMEM 记忆召回/沉淀节点）
  *                 → @orchestration/workflow-engine → @cognitive/llm-inference
@@ -77,7 +77,7 @@ async function main(): Promise<void> {
   // 1. 内核（原型模式，内存实现）
   const kernel = new InMemoryKernelAdapter();
 
-  // 2. 装配五层插件（fde-assistant 已注册进 layer-persona，doc-worker 已注册进 layer-action）
+  // 2. 装配五域插件（fde-assistant 已注册进 layer-persona，doc-worker 已注册进 layer-action）
   const plugins = [
     infrastructurePlugin,
     cognitivePlugin,

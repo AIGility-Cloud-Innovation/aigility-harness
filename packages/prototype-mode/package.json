@@ -1,7 +1,7 @@
 {
   "name": "prototype-mode",
   "version": "0.1.0",
-  "description": "原型模式示例：内存版 KernelAdapter + 五层插件组装",
+  "description": "原型模式示例：内存版 KernelAdapter + 五域插件组装",
   "type": "module",
   "private": true,
   "main": "./src/index.ts",

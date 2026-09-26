@@ -1,5 +1,5 @@
 /**
- * prototype-mode 入口 —— 组装五层插件并演示跨层调用
+ * prototype-mode 入口 —— 组装五域插件并演示跨层调用
  *
  * 链路：orchestration 层 Consumer 调用 cognitive 层 Provider
  * （@orchestration/task-planning 消费 @cognitive/llm-inference）
@@ -74,13 +74,13 @@ function log(tag: string, msg: string): void {
 }
 
 async function main(): Promise<void> {
-  console.log("=== 五层可插拔 AI Agent 架构 · 原型模式 ===\n");
+  console.log("=== 五域可插拔 AI Agent 架构 · 原型模式 ===\n");
 
   // 1. 创建内存 KernelAdapter
   const kernel = new InMemoryKernelAdapter();
   console.log("1. KernelAdapter:", kernel.info.name, `v${kernel.info.version}`);
 
-  // 2. 组装五层插件
+  // 2. 组装五域插件
   const plugins = [
     infrastructurePlugin,
     cognitivePlugin,
