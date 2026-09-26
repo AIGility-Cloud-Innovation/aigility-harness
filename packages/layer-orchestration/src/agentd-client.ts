@@ -161,6 +161,25 @@ export async function createFromMessage(
   return parseUdsJson<CreateFromMessageResult>(resp);
 }
 
+/** GET /v1/projects — 已注册项目列表 */
+export async function listProjects(
+  endpoint: AgentdEndpoint,
+): Promise<Array<{ id?: string; name?: string; rootPaths?: string[]; available?: boolean }>> {
+  const [socketPath, token] = ep(endpoint);
+  const resp = await udsRequest(socketPath, token, "GET", "/v1/projects");
+  return parseUdsJson(resp);
+}
+
+/** POST /v1/projects — 注册项目（id 短名，rootPaths 为本地绝对路径） */
+export async function registerProject(
+  endpoint: AgentdEndpoint,
+  body: { id: string; name: string; rootPaths: string[]; order?: number; available?: boolean },
+): Promise<{ id?: string; name?: string }> {
+  const [socketPath, token] = ep(endpoint);
+  const resp = await udsRequest(socketPath, token, "POST", "/v1/projects", body);
+  return parseUdsJson(resp);
+}
+
 /** POST /v1/tasks/{id}/confirm-project — 项目归属确认(pending_project → pending_confirm) */
 export async function confirmProject(
   endpoint: AgentdEndpoint,

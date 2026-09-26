@@ -25,6 +25,7 @@ __pycache__/
 examples/appbase/src/.token-secret
 # AppBase 本机一键启动脚本 (含密钥, 不入库); 模板: start-appbase.cmd.example
 examples/appbase/start-appbase.cmd
+examples/appbase/start-appbase.sh
 
 # ZCode CLI 在仓库内运行时的产物
 .zcode/
@@ -35,6 +36,7 @@ examples/.dsh-home/
 
 # DSH web UI one-click start script (contains key, not committed); template: start-dsh-web.cmd.example
 examples/appbase/start-dsh-web.cmd
+examples/appbase/start-dsh-web.sh
 
 # local workspace helpers (not committed)
 .workbuddy/

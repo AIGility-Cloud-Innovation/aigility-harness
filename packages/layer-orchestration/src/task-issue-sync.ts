@@ -28,6 +28,9 @@
  * 写代码由 agentd 内的 codex 系工人完成。
  */
 
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { homedir } from "node:os";
 import {
   LayerId,
   PluginState,
@@ -552,11 +555,14 @@ import {
   type AgentdEndpoint,
   type AgentdTask,
   cancelTask as agentdCancel,
+  confirmProject as agentdConfirmProject,
   confirmPrompt as agentdConfirmPrompt,
   createFromMessage as agentdCreateFromMessage,
   defaultSocketPath,
   defaultToken,
+  listProjects as agentdListProjects,
   listTasks as agentdListTasks,
+  registerProject as agentdRegisterProject,
   runTask as agentdRunTask,
   CANCELABLE_STATUSES,
 } from "./agentd-client.js";
@@ -594,6 +600,25 @@ export function buildDispatchPrompt(repo: string, issue: { number?: number; titl
 }
 
 /** 派发核心：工单 → agentd 任务（pending_confirm + delayMs 闸门）→ 回执文本 */
+/** 项目自动注册：agentd 已注册则复用；未注册且本地 ~/AI/<短名> 存在则注册；否则 undefined（不自动克隆） */
+async function ensureProjectRegistered(repo: string): Promise<string | undefined> {
+  const shortName = repo.split("/")[1] ?? repo;
+  const endpoint: AgentdEndpoint = { socketPath: defaultSocketPath(), token: defaultToken() };
+  const projects = await agentdListProjects(endpoint).catch(() => [] as Array<{ id?: string; name?: string }>);
+  const hit = projects.find((p) => p.id === shortName || p.name === shortName);
+  if (hit?.id) return hit.id;
+  const localRoot = resolve(join(homedir(), "AI", shortName));
+  if (!existsSync(localRoot)) return undefined;
+  const reg = await agentdRegisterProject(endpoint, {
+    id: shortName,
+    name: shortName,
+    rootPaths: [localRoot],
+    available: true,
+  }).catch((e: Error) => e);
+  if (reg instanceof Error || !reg.id) return undefined;
+  return reg.id ?? shortName;
+}
+
 async function dispatchIssue(
   ctx: SeamContext,
   repo: string,
@@ -626,7 +651,15 @@ async function dispatchIssue(
   // ③ 项目归属闸门：identify 已解析则自动确认（高置信建单即带 projectId）
   let status = created.status ?? "";
   if (created.pending_project || status === "pending_project") {
-    return `⚠️ 工单 #${issueNo} 的执行任务待确认项目归属（agentd 任务 ${taskId}）。请在 agentd 侧确认后重试派发。`;
+    const projectId = await ensureProjectRegistered(repo);
+    if (!projectId) {
+      return `⚠️ 工单 #${issueNo} 的执行任务待确认项目归属（agentd 任务 ${taskId}）。本地无 ~/AI/${repo.split("/")[1] ?? repo} 目录且 agentd 未注册该项目，请先克隆或手工注册。`;
+    }
+    const confirmedP = await agentdConfirmProject(endpoint, taskId, projectId).catch((e: Error) => e);
+    if (confirmedP instanceof Error) {
+      return `⚠️ 工单 #${issueNo} 项目归属确认失败（${confirmedP.message}），agentd 任务 ${taskId}`;
+    }
+    status = confirmedP.status ?? "pending_confirm";
   }
 
   // ④ 确认闸门：pending_confirm → queued + delayMs 定时（agentd scheduleLoop 自动跑）
@@ -654,6 +687,7 @@ async function writebackOnFinal(
   status: string,
   tasklistGuid: string,
   sections: Partial<Record<SectionKey, string>>,
+  feishuTaskGuid?: string,
 ): Promise<string> {
   const endpoint = dispatchEndpoint();
   const task = await agentdListTasks(endpoint)
@@ -683,17 +717,19 @@ async function writebackOnFinal(
   const sectionGuid = sections[targetKey];
   let moved = false;
   if (sectionGuid) {
-    const tasks = await listSectionTasks(ctx, sectionGuid).catch(() => []);
-    void tasks; // listSectionTasks 仅用于能力自检；目标任务 guid 由标题反查（见下）
-    const fr = await callFeishuApi(ctx, {
-      method: "GET",
-      path: "/open-apis/task/v2/tasks",
-      query: { page_size: 50, user_id_type: "open_id" },
-      identity: "user",
-    });
-    const items = (fr.value?.data as { items?: Array<{ guid?: string; task_id?: string; summary?: string }> })?.items ?? [];
-    const target = items.find((t) => issueNumberFromTaskSummary(t.summary) === issueNo);
-    const guid = target?.guid ?? target?.task_id;
+    // 首选：派发时注册表记住的 guid；降级：全量列表按标题反查（分页可能漏，不可靠）
+    let guid = feishuTaskGuid;
+    if (!guid) {
+      const fr = await callFeishuApi(ctx, {
+        method: "GET",
+        path: "/open-apis/task/v2/tasks",
+        query: { page_size: 100, user_id_type: "open_id" },
+        identity: "user",
+      }).catch(() => undefined);
+      const items = (fr?.value?.data as { items?: Array<{ guid?: string; task_id?: string; summary?: string }> })?.items ?? [];
+      const target = items.find((t) => issueNumberFromTaskSummary(t.summary) === issueNo);
+      guid = target?.guid ?? target?.task_id;
+    }
     if (guid) moved = await moveToSection(ctx, guid, tasklistGuid, sectionGuid);
   }
 
@@ -706,8 +742,8 @@ async function writebackOnFinal(
 
 interface DispatchRuntime {
   timer: ReturnType<typeof setInterval> | null;
-  /** agentd taskId → {repo, issueNo, tasklistGuid}（终态轮询注册表） */
-  inflight: Map<string, { repo: string; issueNo: number; tasklistGuid: string }>;
+  /** agentd taskId → {repo, issueNo, tasklistGuid, feishuTaskGuid}（终态轮询注册表） */
+  inflight: Map<string, { repo: string; issueNo: number; tasklistGuid: string; feishuTaskGuid?: string }>;
 }
 
 const dispatchRuntime: DispatchRuntime = { timer: null, inflight: new Map() };
@@ -854,7 +890,7 @@ export async function runDispatchScan(
     if (!current) continue;
     if (["completed", "needs_review", "failed", "cancelled", "blocked"].includes(current.status ?? "")) {
       dispatchRuntime.inflight.delete(taskId);
-      const msg = await writebackOnFinal(ctx, meta.repo, meta.issueNo, taskId, current.status ?? "", meta.tasklistGuid, sections);
+      const msg = await writebackOnFinal(ctx, meta.repo, meta.issueNo, taskId, current.status ?? "", meta.tasklistGuid, sections, meta.feishuTaskGuid);
       reports.push(msg);
       await dispatchNotify(opts.notifyChatId, msg);
     }
@@ -889,7 +925,12 @@ export async function runDispatchScan(
     // 派发成功（回执含 agentd 任务 id）→ 注册 inflight 轮询
     const created = msg.match(/agentd 任务：(\S+)/);
     if (created) {
-      dispatchRuntime.inflight.set(created[1], { repo, issueNo, tasklistGuid: opts.tasklistGuid });
+      dispatchRuntime.inflight.set(created[1], {
+        repo,
+        issueNo,
+        tasklistGuid: opts.tasklistGuid,
+        feishuTaskGuid: t.guid ?? t.task_id,
+      });
     }
   }
   return reports;
