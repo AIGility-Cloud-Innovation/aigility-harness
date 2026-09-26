@@ -45,6 +45,12 @@ export const giteaApiRef: CapabilityRef = {
   versionRange: "^1.0.0",
 };
 
+/** 消费同层编排域的双建同步原语（工单→飞书任务，与 persona 共用单一真相） */
+export const taskIssueSyncRef: CapabilityRef = {
+  id: "@orchestration/task-issue-sync",
+  versionRange: "^1.0.0",
+};
+
 // ── 请求/响应 ────────────────────────────────────────────────────
 
 export interface TaskPipelineRequest {
@@ -353,6 +359,23 @@ export const taskPipelineProvider: Provider<TaskPipelineRequest, TaskPipelineRes
                 if (r && typeof r.data === "object" && r.data !== null) {
                   const issue = r.data as { number?: number; html_url?: string };
                   created.push(`${repo}#${issue.number ?? "?"} [${c.priority}] ${c.title}`);
+                  // ── C 方案双建：自动建单 → 同步飞书任务挂 org 清单 ──
+                  // 单一真相：复用 @orchestration/task-issue-sync 的 sync-issue 原语；
+                  // 同步失败只记日志不阻断流水线（工单已建，真人可见）
+                  try {
+                    const sr = (await ctx.call(taskIssueSyncRef, {
+                      mode: "sync-issue",
+                      repo,
+                      issue,
+                    })) as { ok?: boolean; value?: { response?: string }; error?: string };
+                    console.log(
+                      `[task-pipeline] 飞书同步 ${repo}#${issue.number}: ${
+                        sr.ok ? (sr.value?.response ?? "ok") : (sr.error ?? "failed")
+                      }`,
+                    );
+                  } catch (e) {
+                    console.error(`[task-pipeline] 飞书同步异常(不阻断): ${String((e as Error)?.message ?? e)}`);
+                  }
                 }
               }
               if (created.length > 0) {

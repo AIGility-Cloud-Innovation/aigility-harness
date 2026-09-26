@@ -1,29 +1,36 @@
 import { describe, it, expect } from "vitest";
-import {
-  feishuTaskAssistantProvider,
-  parseTaskIntent,
-  formatTaskLine,
-  formatTaskList,
-  formatIssueLine,
-  formatIssueList,
-  formatIssueDetail,
-  matchIssueByRef,
-} from "./feishu-task-assistant.js";
+import { extractRepoSpec, parseTaskIntent } from "./feishu-task-assistant.js";
 
-describe("parseTaskIntent", () => {
+describe("parseTaskIntent — 飞书任务意图", () => {
   it("建任务：<标题>", () => {
     expect(parseTaskIntent("建任务：周五交周报")).toEqual({
-      kind: "create",
+      kind: "task-need-repo",
       title: "周五交周报",
-      dueDate: undefined,
     });
   });
 
   it("建任务带截止日期", () => {
     expect(parseTaskIntent("创建任务 写周报 截止 2026-10-16")).toEqual({
+      kind: "task-need-repo",
+      title: "写周报",
+      dueDate: "2026-10-16",
+    });
+  });
+
+  it("建任务 @仓库 → 双建意图（C 方案）", () => {
+    expect(parseTaskIntent("建任务 @video：修复登录页白屏")).toEqual({
+      kind: "create",
+      title: "修复登录页白屏",
+      repo: "video",
+    });
+  });
+
+  it("建任务 @仓库 + 截止日期 → 双建意图带截止", () => {
+    expect(parseTaskIntent("建任务 @TiMEM-AI/x：写周报 截止 2026-10-16")).toEqual({
       kind: "create",
       title: "写周报",
       dueDate: "2026-10-16",
+      repo: "TiMEM-AI/x",
     });
   });
 
@@ -32,16 +39,14 @@ describe("parseTaskIntent", () => {
   });
 
   it("查询意图（多个触发词）", () => {
-    for (const text of ["我的任务", "任务列表", "列出任务", "看看任务"]) {
+    for (const text of ["我的任务", "任务列表", "列出任务", "查任务", "看看任务"]) {
       expect(parseTaskIntent(text)).toEqual({ kind: "list" });
     }
   });
 
   it("完成 <关键字>", () => {
-    expect(parseTaskIntent("完成 写周报")).toEqual({
-      kind: "complete",
-      keyword: "写周报",
-    });
+    expect(parseTaskIntent("完成 周报")).toEqual({ kind: "complete", keyword: "周报" });
+    expect(parseTaskIntent("完成了 周报")).toEqual({ kind: "complete", keyword: "周报" });
   });
 
   it("其他输入 → 帮助", () => {
@@ -57,16 +62,14 @@ describe("parseTaskIntent — Gitea 工单意图", () => {
       kind: "issue-create",
       repo: "TiMEM-AI/timem-platform-backend",
       title: "修复登录页白屏",
-      body: undefined,
     });
   });
 
   it("建工单 @短名：<标题> —— 短名原样保留，full_name 解析在执行层", () => {
-    expect(parseTaskIntent("建工单@video：修复登录页白屏")).toEqual({
+    expect(parseTaskIntent("建工单 @video：修复登录页白屏")).toEqual({
       kind: "issue-create",
       repo: "video",
       title: "修复登录页白屏",
-      body: undefined,
     });
   });
 
@@ -74,20 +77,18 @@ describe("parseTaskIntent — Gitea 工单意图", () => {
     expect(parseTaskIntent("建工单：修复登录页白屏")).toEqual({
       kind: "issue-need-repo",
       title: "修复登录页白屏",
-      body: undefined,
     });
   });
 
   it("建工单多行 @仓库：首行标题其余为正文", () => {
-    expect(
-      parseTaskIntent(
-        "建工单 @AIGility-Cloud-Innovation/nx-telecom-video-platform：修复登录页白屏\n复现步骤：打开首页即白屏\n环境：prod",
-      ),
-    ).toEqual({
+    const intent = parseTaskIntent(
+      "建工单 @video：修复登录页白屏\n复现步骤：打开首页\n期望：不白屏",
+    );
+    expect(intent).toEqual({
       kind: "issue-create",
-      repo: "AIGility-Cloud-Innovation/nx-telecom-video-platform",
+      repo: "video",
       title: "修复登录页白屏",
-      body: "复现步骤：打开首页即白屏\n环境：prod",
+      body: "复现步骤：打开首页\n期望：不白屏",
     });
   });
 
@@ -97,57 +98,57 @@ describe("parseTaskIntent — Gitea 工单意图", () => {
 
   it("extractRepoSpec：邮箱误触防护", () => {
     expect(parseTaskIntent("建工单：bob@example.com 收到投诉").kind).toBe("issue-need-repo");
-    expect(parseTaskIntent("工单列表 @user")).toEqual({ kind: "issue-list", repo: "user" });
   });
 
   it("工单列表（多个触发词）", () => {
-    for (const text of ["工单列表", "我的工单", "列出工单", "看看工单", "查工单列表"]) {
+    for (const text of ["工单列表", "我的工单", "列出工单"]) {
       expect(parseTaskIntent(text)).toEqual({ kind: "issue-list" });
     }
   });
 
   it("查工单 <#编号或关键字>", () => {
-    expect(parseTaskIntent("查工单 #12")).toEqual({ kind: "issue-show", ref: "#12" });
-    expect(parseTaskIntent("查工单：登录页")).toEqual({ kind: "issue-show", ref: "登录页" });
+    expect(parseTaskIntent("查工单 #12")).toEqual({
+      kind: "issue-show",
+      ref: "#12",
+    });
+    expect(parseTaskIntent("查工单 登录页")).toEqual({
+      kind: "issue-show",
+      ref: "登录页",
+    });
   });
 
   it("关闭工单 <#编号或关键字>（多个触发词）", () => {
-    expect(parseTaskIntent("关闭工单 #3")).toEqual({ kind: "issue-close", ref: "#3" });
-    expect(parseTaskIntent("完成工单 修复登录页")).toEqual({
-      kind: "issue-close",
-      ref: "修复登录页",
-    });
-    expect(parseTaskIntent("完结工单：白屏")).toEqual({ kind: "issue-close", ref: "白屏" });
+    for (const text of ["关闭工单 #3", "完成工单 #3", "关单 #3"]) {
+      expect(parseTaskIntent(text)).toEqual({
+        kind: "issue-close",
+        ref: "#3",
+      });
+    }
   });
 
   it("重开工单 <#编号或关键字>", () => {
-    expect(parseTaskIntent("重开工单 12")).toEqual({ kind: "issue-reopen", ref: "12" });
-    expect(parseTaskIntent("重新打开工单 #12")).toEqual({ kind: "issue-reopen", ref: "#12" });
+    expect(parseTaskIntent("重开工单 #3")).toEqual({
+      kind: "issue-reopen",
+      ref: "#3",
+    });
   });
 
   it("评论工单 <#编号> <内容>", () => {
-    expect(parseTaskIntent("评论工单 #12 已定位，今天修复")).toEqual({
+    expect(parseTaskIntent("评论工单 #12 已修复，待发布")).toEqual({
       kind: "issue-comment",
       ref: "12",
-      comment: "已定位，今天修复",
-    });
-    expect(parseTaskIntent("回复工单 12：多行\n内容")).toEqual({
-      kind: "issue-comment",
-      ref: "12",
-      comment: "多行\n内容",
+      comment: "已修复，待发布",
     });
   });
 
   it("「完成工单 x」优先于任务意图「完成 x」，不被吞掉", () => {
-    const intent = parseTaskIntent("完成工单 白屏");
-    expect(intent.kind).toBe("issue-close");
+    expect(parseTaskIntent("完成工单 白屏").kind).toBe("issue-close");
   });
 
-  it("「建任务：修工单流程」仍是飞书任务意图", () => {
+  it("「建任务：修工单流程」仍是飞书任务意图（工单触发词优先但需命中）", () => {
     expect(parseTaskIntent("建任务：修工单流程")).toEqual({
-      kind: "create",
+      kind: "task-need-repo",
       title: "修工单流程",
-      dueDate: undefined,
     });
   });
 
@@ -158,282 +159,19 @@ describe("parseTaskIntent — Gitea 工单意图", () => {
   });
 });
 
-describe("formatIssueLine / formatIssueList / formatIssueDetail", () => {
-  it("单行带序号、状态与标签", () => {
-    expect(
-      formatIssueLine(
-        { number: 12, title: "修复登录页白屏", state: "open", labels: [{ name: "P0" }, { name: "sdk" }] },
-        2,
-      ),
-    ).toBe("2. 🟢 进行中 #12 修复登录页白屏（P0·sdk）");
-  });
-
-  it("已关闭状态", () => {
-    expect(formatIssueLine({ number: 3, title: "X", state: "closed" })).toBe("✅ 已关闭 #3 X");
-  });
-
-  it("空列表提示创建", () => {
-    expect(formatIssueList([])).toContain("建工单");
-  });
-
-  it("列表带序号", () => {
-    const out = formatIssueList([
-      { number: 12, title: "A", state: "open" },
-      { number: 13, title: "B", state: "closed" },
-    ]);
-    expect(out).toContain("共 2 条工单");
-    expect(out).toContain("1. 🟢 进行中 #12 A");
-    expect(out).toContain("2. ✅ 已关闭 #13 B");
-  });
-
-  it("详情含状态、标签与链接", () => {
-    const out = formatIssueDetail({
-      number: 12,
-      title: "修复登录页白屏",
-      state: "open",
-      html_url: "https://git.aigility.cloud/TiMEM-AI/x/issues/12",
-      labels: [{ name: "P0" }],
+describe("extractRepoSpec", () => {
+  it("全名与短名均提取，并从文本剥离", () => {
+    expect(extractRepoSpec("建工单 @TiMEM-AI/x：标题")).toEqual({
+      text: "建工单 ：标题",
+      repo: "TiMEM-AI/x",
     });
-    expect(out).toContain("#12 修复登录页白屏");
-    expect(out).toContain("🟢 进行中");
-    expect(out).toContain("标签：P0");
-    expect(out).toContain("https://git.aigility.cloud/TiMEM-AI/x/issues/12");
-  });
-});
-
-describe("matchIssueByRef", () => {
-  const issues = [
-    { number: 12, title: "修复登录页白屏", state: "open" },
-    { number: 13, title: "白屏复现跟进", state: "closed" },
-    { number: 14, title: "升级依赖", state: "open" },
-  ];
-
-  it("#编号 / 纯数字精确匹配", () => {
-    expect(matchIssueByRef(issues, "#12")?.number).toBe(12);
-    expect(matchIssueByRef(issues, "14")?.number).toBe(14);
-  });
-
-  it("标题关键字包含匹配（大小写不敏感）", () => {
-    expect(matchIssueByRef(issues, "登录页")?.number).toBe(12);
-    expect(matchIssueByRef(issues, "升级依赖")?.number).toBe(14);
-  });
-
-  it("无匹配返回 undefined", () => {
-    expect(matchIssueByRef(issues, "不存在")).toBeUndefined();
-    expect(matchIssueByRef(issues, "#999")).toBeUndefined();
-  });
-});
-
-describe("formatTaskList / formatTaskLine", () => {
-  it("空列表提示创建", () => {
-    expect(formatTaskList([])).toContain("建任务");
-  });
-
-  it("列表带序号与状态", () => {
-    const out = formatTaskList([
-      { summary: "任务A", status: "todo" },
-      { summary: "任务B", status: "done" },
-    ]);
-    expect(out).toContain("共 2 条任务");
-    expect(out).toContain("1. ☐ 待办 任务A");
-    expect(out).toContain("2. ✅ 已完成 任务B");
-  });
-
-  it("单行带截止日期", () => {
-    expect(formatTaskLine({ summary: "X", status: "todo", due: { date: "2026-10-16" } }, 3)).toBe(
-      "3. ☐ 待办 X（截止 2026-10-16）",
-    );
-  });
-});
-
-describe("provider execute — 工单流程（stub ctx.call）", () => {
-  /** 按 action 服务 id 路由的假 ctx，记录全部调用便于断言 */
-  function makeFakeCtx(
-    handlers: Record<string, (req: Record<string, unknown>) => unknown>,
-  ) {
-    const calls: { id: string; req: Record<string, unknown> }[] = [];
-    const ctx = {
-      traceId: "test-trace",
-      sessionId: "test-session",
-      emit: () => {},
-      call: async (ref: { id: string }, req: Record<string, unknown>) => {
-        calls.push({ id: ref.id, req });
-        return handlers[ref.id](req);
-      },
-    };
-    return { ctx: ctx as never, calls };
-  }
-
-  it("关闭工单：编号直取详情 → PATCH → 以响应体 state 做写后验证", async () => {
-    const { ctx } = makeFakeCtx({
-      "@action/gitea-api": (req) => {
-        if (req.method === "GET") {
-          return {
-            ok: true,
-            value: {
-              status: 200,
-              data: { number: 61, title: "BM25 租户 filter", state: "open" },
-            },
-          };
-        }
-        return {
-          ok: true,
-          value: {
-            status: 201, // 本实例 PATCH 怪癖：返回 201
-            data: { number: 61, title: "BM25 租户 filter", state: "closed" },
-          },
-        };
-      },
+    expect(extractRepoSpec("建工单@video：标题")).toEqual({
+      text: "建工单 ：标题",
+      repo: "video",
     });
-    const r = await feishuTaskAssistantProvider.execute({ user_input: "关闭工单 #61" }, ctx);
-    expect(r.ok).toBe(true);
-    expect((r as { value: { response: string } }).value.response).toContain("已关闭工单 #61");
   });
 
-  it("建工单：命中同名工单时查重拦截，不发起 POST", async () => {
-    const { ctx, calls } = makeFakeCtx({
-      "@action/gitea-api": (req) => {
-        if (req.method === "GET") {
-          return {
-            ok: true,
-            value: {
-              status: 200,
-              data: [{ number: 7, title: "修复登录页白屏", state: "open" }],
-            },
-          };
-        }
-        return { ok: true, value: { status: 201, data: { number: 8 } } };
-      },
-    });
-    const r = await feishuTaskAssistantProvider.execute(
-      { user_input: "建工单 @TiMEM-AI/timem-platform-backend：修复登录页白屏" },
-      ctx,
-    );
-    expect(r.ok).toBe(true);
-    const response = (r as { value: { response: string } }).value.response;
-    expect(response).toContain("已有同名工单");
-    expect(response).toContain("#7");
-    expect(calls.filter((c) => c.req.method === "POST")).toHaveLength(0);
-  });
-
-  it("建工单缺仓库：反问并列出可访问仓库，不发查重/POST", async () => {
-    const { ctx, calls } = makeFakeCtx({
-      "@action/gitea-api": () => ({
-        ok: true,
-        value: {
-          status: 200,
-          data: [
-            { full_name: "AIGility-Cloud-Innovation/nx-telecom-video-platform" },
-            { full_name: "TiMEM-AI/timem-platform-backend" },
-          ],
-        },
-      }),
-    });
-    const r = await feishuTaskAssistantProvider.execute(
-      { user_input: "建工单：修复登录页白屏" },
-      ctx,
-    );
-    const response = (r as { value: { response: string } }).value.response;
-    expect(response).toContain("请指定工单仓库");
-    expect(response).toContain("@组织/仓库：修复登录页白屏");
-    expect(response).toContain("nx-telecom-video-platform");
-    // 只允许一次 repos/search 读请求，零写请求、零查重
-    expect(calls).toHaveLength(1);
-    expect(calls[0].req.path).toBe("/api/v1/repos/search");
-    expect(calls[0].req.method).toBe("GET");
-  });
-
-  it("建工单 @短名：在可访问仓库中唯一命中后按 full_name 创建", async () => {
-    const { ctx, calls } = makeFakeCtx({
-      "@action/gitea-api": (req) => {
-        if ((req.path as string) === "/api/v1/repos/search") {
-          return {
-            ok: true,
-            value: {
-              status: 200,
-              data: [
-                { full_name: "AIGility-Cloud-Innovation/nx-telecom-video-platform" },
-                { full_name: "TiMEM-AI/timem-platform-backend" },
-              ],
-            },
-          };
-        }
-        if (req.method === "GET") {
-          return { ok: true, value: { status: 200, data: [] } };
-        }
-        return {
-          ok: true,
-          value: {
-            status: 201,
-            data: {
-              number: 8,
-              title: "修复登录页白屏",
-              state: "open",
-              html_url:
-                "https://git.aigility.cloud/AIGility-Cloud-Innovation/nx-telecom-video-platform/issues/8",
-            },
-          },
-        };
-      },
-    });
-    const r = await feishuTaskAssistantProvider.execute(
-      { user_input: "建工单 @video：修复登录页白屏" },
-      ctx,
-    );
-    const response = (r as { value: { response: string } }).value.response;
-    expect(response).toContain("已建工单");
-    expect(response).toContain("AIGility-Cloud-Innovation/nx-telecom-video-platform #8");
-    const post = calls.find((c) => c.req.method === "POST");
-    expect(post).toBeDefined();
-    expect(post!.req.path).toBe(
-      "/api/v1/repos/AIGility-Cloud-Innovation/nx-telecom-video-platform/issues",
-    );
-  });
-
-  it("建工单：无同名时 POST 创建并回链", async () => {
-    const { ctx, calls } = makeFakeCtx({
-      "@action/gitea-api": (req) => {
-        if (req.method === "GET") {
-          return { ok: true, value: { status: 200, data: [] } };
-        }
-        return {
-          ok: true,
-          value: {
-            status: 201,
-            data: {
-              number: 8,
-              title: "修复登录页白屏",
-              state: "open",
-              html_url: "https://git.aigility.cloud/TiMEM-AI/timem-platform-backend/issues/8",
-            },
-          },
-        };
-      },
-    });
-    const r = await feishuTaskAssistantProvider.execute(
-      { user_input: "建工单 @TiMEM-AI/timem-platform-backend：修复登录页白屏" },
-      ctx,
-    );
-    const response = (r as { value: { response: string } }).value.response;
-    expect(response).toContain("已建工单 TiMEM-AI/timem-platform-backend #8");
-    expect(response).toContain("issues/8");
-    const post = calls.find((c) => c.req.method === "POST");
-    expect(post).toBeDefined();
-    expect((post!.req.path as string).endsWith("/issues")).toBe(true);
-  });
-
-  it("项目概览：飞书与 Gitea 单侧失败不影响另一侧", async () => {
-    const { ctx } = makeFakeCtx({
-      "@action/feishu-api": () => ({ ok: false, error: "OAuth 过期" }),
-      "@action/gitea-api": () => ({
-        ok: true,
-        value: { status: 200, data: [{ number: 61, title: "BM25 租户 filter", state: "open" }] },
-      }),
-    });
-    const r = await feishuTaskAssistantProvider.execute({ user_input: "项目概览" }, ctx);
-    const response = (r as { value: { response: string } }).value.response;
-    expect(response).toContain("项目概览");
-    expect(response).toContain("查询失败"); // 飞书侧降级
-    expect(response).toContain("#61"); // Gitea 侧正常
+  it("无仓库片段返回原文", () => {
+    expect(extractRepoSpec("建工单：标题")).toEqual({ text: "建工单：标题" });
   });
 });

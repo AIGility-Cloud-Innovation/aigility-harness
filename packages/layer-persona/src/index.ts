@@ -82,25 +82,18 @@ export type {
 } from "./timem-project-assistant.js";
 import { timemProjectAssistantService, timemProjectAssistantProvider } from "./timem-project-assistant.js";
 
-// 「项目小助理」协调人格（飞书任务 + Gitea 工单增删改查，只管理不执行具体工作）
+// 「项目小助理」交互形象（正则解析+帮助；业务在 @orchestration/task-issue-sync）
 export {
   feishuTaskAssistantService,
   feishuTaskAssistantProvider,
-  feishuApiRef,
-  giteaApiRef,
+  taskIssueSyncRef,
+  extractRepoSpec,
   parseTaskIntent,
-  formatTaskLine,
-  formatTaskList,
-  formatIssueLine,
-  formatIssueList,
-  formatIssueDetail,
-  matchIssueByRef,
 } from "./feishu-task-assistant.js";
 export type {
   FeishuTaskAssistantRequest,
   FeishuTaskAssistantResponse,
   TaskIntent,
-  IssueLike,
 } from "./feishu-task-assistant.js";
 import { feishuTaskAssistantService, feishuTaskAssistantProvider } from "./feishu-task-assistant.js";
 

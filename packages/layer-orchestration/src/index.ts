@@ -29,11 +29,34 @@ import {
   timemProjectTaskProvider,
   enableTimemProjectTask,
 } from "./timem-project-task.js";
+import {
+  taskIssueSyncService,
+  taskIssueSyncProvider,
+} from "./task-issue-sync.js";
 export { timemProjectTaskService, timemProjectTaskProvider, enableTimemProjectTask };
 export type {
   TimemProjectTaskRequest,
   TimemProjectTaskResponse,
 } from "./timem-project-task.js";
+export {
+  taskIssueSyncService,
+  taskIssueSyncProvider,
+  formatTaskLine,
+  formatTaskList,
+  issueLabels,
+  formatIssueLine,
+  formatIssueList,
+  formatIssueDetail,
+  matchIssueByRef,
+  syncTaskSummary,
+  tasklistNameForRepo,
+} from "./task-issue-sync.js";
+export type {
+  TaskIssueSyncRequest,
+  TaskIssueSyncResponse,
+  TaskIntent,
+  IssueLike,
+} from "./task-issue-sync.js";
 
 export { RequirementStore } from "./requirement-store.js";
 export type {
@@ -368,7 +391,7 @@ export const manifest: PluginManifest = {
   layer: LayerId.Orchestration,
   description: "编排规划层：任务规划占位 + 工作流引擎(流内记忆节点) + 插件安装工作流 + Codex 编码代理，消费认知层 LLM 与行动域 TiMEM 记忆",
   version: "0.3.0",
-  provides: [taskPlanningService, workflowEngineService, pluginInstallService, guidedDesignService, taskPipelineService],
+  provides: [taskPlanningService, workflowEngineService, pluginInstallService, guidedDesignService, taskPipelineService, taskIssueSyncService],
   consumes: [llmInferenceRef, { id: "@action/timem-memory", versionRange: "^1.0.0" }, { id: "@action/timem-memory-write", versionRange: "^1.0.0" }],
   preferredCarrier: CarrierKind.Thread,
   dependsOn: ["@cognitive/llm-inference", "@action/tool-execution"],
@@ -387,7 +410,7 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [taskPlanningProvider, workflowEngineProvider, pluginInstallProvider, guidedDesignProvider, taskPipelineProvider];
+    return [taskPlanningProvider, workflowEngineProvider, pluginInstallProvider, guidedDesignProvider, taskPipelineProvider, taskIssueSyncProvider];
   },
   getState(): PluginState {
     return pluginState;
