@@ -351,7 +351,14 @@ async function hallAppsHandler(req: any, res: any): Promise<void> {
         .sort((a: any, b: any) => b.mtime - a.mtime);
     const isAdmin = await backend.isAdminUser(userId);
     const names = new Set(await backend.visibleHallApps(all.map((a: any) => a.name), userId, isAdmin));
-    return json(200, { apps: all.filter((a: any) => names.has(a.name)), isAdmin });
+    // 按应用标注 owner (管理权 = owner ∪ 平台管理员, 服务端 manage 路由同款闸门; 前端据此渲染「设置」入口)
+    const owned = new Set((await backend.pool.query(
+      "SELECT id FROM apps WHERE owner_id = $1 AND category = 'hall'", [userId])
+    ).rows.map((r: any) => r.id));
+    return json(200, {
+      apps: all.filter((a: any) => names.has(a.name)).map((a: any) => ({ ...a, owner: owned.has(a.name) })),
+      isAdmin,
+    });
   }
 
   // 创建新应用 (空模板) — 仅管理员 (工作台/开发员属管理功能)

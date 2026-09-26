@@ -144,7 +144,7 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
   <div class="panel">
     <div class="phead"><b>⚙ 应用管理 — <span id="mgAppName"></span></b><button class="btn-x" onclick="closeMg()">✕</button></div>
     <div class="pbody">
-      <div class="sec">
+      <div class="sec" id="verSec">
         <h3>🕘 版本历史</h3>
         <div class="sh">编码代理每次改动前自动快照；可恢复到任一版本（恢复前会自动再快照当前状态，误恢复可回退）</div>
         <div id="verList"><div class="sub" style="font-size:12px;color:var(--ink2)">加载中…</div></div>
@@ -201,7 +201,7 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
         <div class="sh">应用自带的后端 daemon 交给平台统一纳管：注册启动命令后在此启停、看日志。启停状态落库——平台重启只恢复「运行中」的应用，明确停止过的不拉起；平台已在跑的实例会被收编不双起。启动命令继承平台环境变量（含域包插件 env 桥），声明的依赖插件未就绪时会提示。</div>
         <div id="procBody"><div class="sub" style="font-size:12px;color:var(--ink2)">加载中…</div></div>
       </div>
-      <div class="sec">
+      <div class="sec" id="uninstallSec">
         <h3>🗑 卸载应用</h3>
         <div class="sh">从大厅删除该应用文件，删除后无法找回（.backups 里的历史快照仍保留在磁盘上）。仅管理员可操作。</div>
         <button class="mbtn danger" onclick="armConfirm(this, uninstallApp)">🗑 卸载此应用</button>
@@ -371,7 +371,8 @@ function loadApps() {
         + '<div class="ds">' + (a.size/1024).toFixed(1) + ' KB · ' + new Date(a.mtime).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) + '</div>'
         + '<div class="ops">'
         + '<button onclick="event.stopPropagation();openApp(\'' + encodeURIComponent(a.name) + '\')">打开</button>'
-        + (isAdmin ? '<button class="mg" onclick="event.stopPropagation();openMg(\'' + encodeURIComponent(a.name) + '\')">设置</button>' : '')
+        // 管理权 = owner ∪ 平台管理员 (与服务端 /app/hall/manage 闸门一致); 使用权用户不出现入口
+        + ((isAdmin || a.owner) ? '<button class="mg" onclick="event.stopPropagation();openMg(\'' + encodeURIComponent(a.name) + '\')">设置</button>' : '')
         + '</div></div>';
     });
     if (!hallApps.length && !isAdmin) {
@@ -412,8 +413,12 @@ function openApp(enc) {
 function openMg(enc) {
   mgApp = decodeURIComponent(enc);
   document.getElementById('mgAppName').textContent = mgApp.replace('.html','');
+  // 管理权 = owner ∪ 平台管理员; 版本历史/卸载是平台管理员专属 (服务端同样仅管理员), 非管理员 owner 隐藏
+  var adminOnly = isAdmin ? '' : 'none';
+  document.getElementById('verSec').style.display = adminOnly;
+  document.getElementById('uninstallSec').style.display = adminOnly;
   loadManage();
-  loadVersions();
+  if (isAdmin) loadVersions();
   loadProc();
   document.getElementById('mgDrawer').classList.add('show');
 }
