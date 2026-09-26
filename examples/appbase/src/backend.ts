@@ -35,6 +35,7 @@ import { initLlmConfig, normalizeLlmBase } from "./admin-modules/llm-config.js";
 import { httpRelayProvider, relayTargets } from "@aigility-harness/layer-infrastructure";
 import { parseEnvText } from "./admin-modules/context.js";
 import { initLessonPrep, lessonPrepHandler } from "./lesson-prep.js";
+import { procInfo, procLogs, procStart, procStop, procUnregister, recoverAppProcesses } from "./process-host.js";
 
 const scryptAsync = promisify(scrypt) as (
   password: string,
@@ -203,6 +204,22 @@ async function ensureSchema(): Promise<void> {
       updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_apps_owner ON apps(owner_id);
+    -- 应用后端进程注册表 (进程宿主 process-host): desired_state 是启停事实源,
+    -- 平台重启只恢复 running 的应用, 明确停止过的不拉起 (见 process-host.ts)
+    CREATE TABLE IF NOT EXISTS app_processes (
+      app_id           TEXT PRIMARY KEY,
+      command          TEXT NOT NULL,
+      cwd              TEXT NOT NULL DEFAULT '',
+      env              JSONB NOT NULL DEFAULT '{}'::jsonb,
+      port             INTEGER,
+      required_plugins JSONB NOT NULL DEFAULT '[]'::jsonb,
+      desired_state    TEXT NOT NULL DEFAULT 'stopped',
+      pid              INTEGER,
+      last_exit_code   INTEGER,
+      last_started_at  TIMESTAMPTZ,
+      last_exited_at   TIMESTAMPTZ,
+      updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
 }
 
@@ -665,6 +682,59 @@ export async function appBackendHandler(
         void writeAudit(await emailOf(userId), "appaccount.reset", appId, accRow2[0]?.username ?? "");
         return json(res, 200, { ok: true });
       }
+      // ── 应用后端进程纳管 (进程宿主): 注册/启停/状态/日志, desired_state 落库为启停事实源 ──
+      if (path === "/app/hall/manage/proc" && method === "GET") {
+        return json(res, 200, await procInfo(appId));
+      }
+      if (path === "/app/hall/manage/proc" && method === "PUT") {
+        const body = await readBody(req);
+        const command = String(body.command ?? "").trim();
+        if (!command) return json(res, 400, { error: "command 必填 (如: node log-monitor-daemon.js)" });
+        const env = body.envText !== undefined ? parseEnvText(String(body.envText)) : {};
+        // 脱敏回显保护: 列表接口对机密值返回 ••••, 前端原样传回时保留库里旧值
+        if (body.envText !== undefined) {
+          const { rows: prevRows } = await pool.query("SELECT env FROM app_processes WHERE app_id=$1", [appId]);
+          const prev = (prevRows[0]?.env ?? {}) as Record<string, string>;
+          for (const [k, v] of Object.entries(env)) {
+            if (v === "••••" && prev[k] !== undefined) env[k] = prev[k];
+          }
+        }
+        const portRaw = Number(body.port);
+        const port = Number.isInteger(portRaw) && portRaw > 0 && portRaw < 65536 ? portRaw : null;
+        const requiredRaw = body.requiredPlugins ?? [];
+        const required = (Array.isArray(requiredRaw) ? requiredRaw.map(String) : String(requiredRaw).split(","))
+          .map((s: string) => s.trim()).filter(Boolean);
+        await pool.query(
+          `INSERT INTO app_processes (app_id, command, cwd, env, port, required_plugins, desired_state, updated_at)
+           VALUES ($1,$2,$3,$4::jsonb,$5,$6::jsonb,'stopped', now())
+           ON CONFLICT (app_id) DO UPDATE SET command=$2, cwd=$3, env=$4::jsonb, port=$5,
+             required_plugins=$6::jsonb, updated_at=now()`,
+          [appId, command, String(body.cwd ?? "").trim(), JSON.stringify(env), port, JSON.stringify(required)]);
+        void writeAudit(await emailOf(userId), "app.proc.save", appId, command);
+        return json(res, 200, { ok: true });
+      }
+      if (path === "/app/hall/manage/proc" && method === "DELETE") {
+        const r = await procUnregister(appId);
+        if (!r.ok) return json(res, 400, r);
+        void writeAudit(await emailOf(userId), "app.proc.remove", appId);
+        return json(res, 200, { ok: true });
+      }
+      if (path === "/app/hall/manage/proc/start" && method === "POST") {
+        const r = await procStart(appId);
+        if (!r.ok) return json(res, 400, r);
+        void writeAudit(await emailOf(userId), "app.proc.start", appId);
+        return json(res, 200, r);
+      }
+      if (path === "/app/hall/manage/proc/stop" && method === "POST") {
+        const r = await procStop(appId);
+        if (!r.ok) return json(res, 400, r);
+        void writeAudit(await emailOf(userId), "app.proc.stop", appId);
+        return json(res, 200, r);
+      }
+      if (path === "/app/hall/manage/proc/logs" && method === "GET") {
+        return json(res, 200, { logs: await procLogs(appId) });
+      }
+
       return json(res, 404, { error: "manage: not found" });
     }
 
@@ -1307,6 +1377,26 @@ export async function initAppBackend(): Promise<void> {
   } catch (e) {
     console.warn("[dsh] 启用插件自启失败(忽略):", e);
   }
+
+  // 应用后端进程注册表种子: log-monitor 监察 daemon (首个纳管样例)。
+  // desired_state 默认 stopped —— 是否运行由管理员在大厅抽屉里显式决定, 平台不擅自拉起。
+  try {
+    await pool.query(
+      `INSERT INTO app_processes (app_id, command, cwd, env, port, required_plugins, desired_state)
+       VALUES ('log-monitor.html', 'node log-monitor-daemon.js', 'examples/apps', '{}'::jsonb, 39467, '[]'::jsonb, 'stopped')
+       ON CONFLICT (app_id) DO NOTHING`);
+  } catch (e) {
+    console.warn("[proc-host] 注册表种子失败(忽略):", e);
+  }
+
+  // 应用进程恢复扫描: 只恢复 desired_state='running' 的应用 (收编既有实例或重新拉起);
+  // 必须排在 DSH 插件装载之后 —— 域包插件先激活待命, 依赖它的应用进程才拉起。
+  try {
+    await recoverAppProcesses();
+  } catch (e) {
+    console.warn("[proc-host] 应用进程恢复失败(忽略):", e);
+  }
+
   console.log(`AppBase 后端已就绪 (PG ${PG_CONFIG.host}:${PG_CONFIG.port}/${PG_CONFIG.database})`);
 }
 // ── 兼容 re-export: 原语已迁至 admin-modules/context.ts (管理界面插件化) ──
