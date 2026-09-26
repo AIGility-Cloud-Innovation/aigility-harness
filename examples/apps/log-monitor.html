@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>日志监察员</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #f0f2f5; color: #1f2329; padding: 20px; }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: #646a73; font-size: 13px; margin-bottom: 16px; }
+  .card { background: #fff; border-radius: 10px; padding: 18px; margin-bottom: 14px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+  .card h2 { font-size: 15px; margin-bottom: 12px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+  .field { flex: 1 1 200px; }
+  label { display: block; font-size: 12px; color: #646a73; margin-bottom: 4px; }
+  input { width: 100%; padding: 8px 10px; border: 1px solid #dee0e3; border-radius: 6px; font-size: 13px; }
+  input:focus { outline: none; border-color: #3370ff; }
+  button { padding: 8px 16px; border: none; border-radius: 6px; font-size: 13px; cursor: pointer; background: #3370ff; color: #fff; }
+  button.ghost { background: #eef1f6; color: #1f2329; }
+  button.danger { background: #f54a45; }
+  button.small { padding: 4px 10px; font-size: 12px; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .status { display: flex; align-items: center; gap: 10px; font-size: 13px; flex-wrap: wrap; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .dot.on { background: #34c724; box-shadow: 0 0 6px #34c724; }
+  .dot.off { background: #dee0e3; }
+  .dot.err { background: #f54a45; }
+  .count { font-size: 12px; color: #646a73; }
+  pre { background: #1f2329; color: #e8e9ea; font-size: 12px; line-height: 1.6; padding: 12px; border-radius: 8px; overflow: auto; max-height: 320px; white-space: pre-wrap; word-break: break-all; }
+  .err-item { border-left: 3px solid #f54a45; padding: 8px 10px; background: #fff5f5; border-radius: 4px; margin-bottom: 8px; font-size: 12px; }
+  .err-item .t { color: #8f959e; margin-bottom: 2px; }
+  .err-item .src { color: #3370ff; }
+  .err-item .line { font-family: Consolas, monospace; word-break: break-all; }
+  .msg { font-size: 13px; margin-top: 8px; min-height: 18px; }
+  .msg.ok { color: #34c724; }
+  .msg.bad { color: #f54a45; }
+  .toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .switch { position: relative; width: 40px; height: 22px; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider { position: absolute; inset: 0; background: #dee0e3; border-radius: 22px; transition: .2s; cursor: pointer; }
+  .slider:before { content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s; }
+  .switch input:checked + .slider { background: #34c724; }
+  .switch input:checked + .slider:before { transform: translateX(18px); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #f0f2f5; vertical-align: middle; }
+  th { color: #646a73; font-size: 12px; font-weight: normal; }
+  td .p { font-weight: 600; }
+  td .s { color: #646a73; font-size: 12px; }
+  td .last { color: #8f959e; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🛰️ 日志监察员</h1>
+  <div class="sub">定期拉取线上日志，发现错误即通过飞书群机器人通知（可同时监控多条自动化，页面需保持打开）</div>
+
+  <div class="card">
+    <h2>监控状态</h2>
+    <div class="status">
+      <span class="dot off" id="dot"></span>
+      <span id="stateText">未启动</span>
+      <span class="count" id="meta"></span>
+      <div style="flex:1"></div>
+      <button class="ghost" id="btnCheckAll">全部立即检查</button>
+    </div>
+    <div class="msg" id="msg"></div>
+  </div>
+
+  <div class="card">
+    <h2>自动化列表 <button class="small" style="float:right" id="btnAdd">＋ 新增自动化</button></h2>
+    <div id="autoList"></div>
+  </div>
+
+  <div class="card" id="formCard" style="display:none">
+    <h2 id="formTitle">新增自动化</h2>
+    <div class="row">
+      <div class="field"><label>项目_分支 (p)</label><input id="cfgP" placeholder="timem-space_test"></div>
+      <div class="field"><label>服务名称 (s)</label><input id="cfgS" placeholder="app"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>日志服务器地址</label><input id="cfgHost" placeholder="http://<日志服务器IP>:19434"></div>
+      <div class="field"><label>拉取行数 (n)</label><input id="cfgN" type="number" value="150"></div>
+      <div class="field"><label>检查间隔（分钟）</label><input id="cfgInterval" type="number" value="5" min="1"></div>
+    </div>
+    <div class="row" style="justify-content:flex-end">
+      <button class="ghost" id="btnCancel">取消</button>
+      <button id="btnSaveAuto">保存自动化</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>通知设置</h2>
+    <div class="row">
+      <div class="field" style="flex:3"><label>飞书群机器人 Webhook URL（所有自动化共用）</label><input id="cfgWebhook" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx"></div>
+    </div>
+    <div class="row">
+      <div class="field" style="flex:3"><label>错误关键字（逗号分隔，不区分大小写，所有自动化共用）</label><input id="cfgKeywords" value="ERROR,Traceback,Exception"></div>
+    </div>
+    <div class="row" style="justify-content:flex-end">
+      <button id="btnSaveGlobal">保存设置</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>🖥️ 后台守护进程（无需保持页面打开）</h2>
+    <div class="status">
+      <span class="dot off" id="dDot"></span>
+      <span id="dState">未连接</span>
+      <span class="count" id="dMeta"></span>
+      <div style="flex:1"></div>
+      <button class="ghost" id="btnSyncCfg">⬆ 下发配置到守护进程</button>
+      <button class="ghost" id="btnReloadD">刷新状态</button>
+    </div>
+    <div class="msg" id="dMsg" style="color:#646a73">页面内监控只在浏览器打开时运行；守护进程在服务器上 7×24 运行。启动命令：<code>node log-monitor-daemon.js</code>（或 pm2 常驻），API 端口默认 39467。修改自动化后点「下发配置」同步给守护进程。</div>
+    <div id="dErrs" style="margin-top:10px"></div>
+  </div>
+
+  <div class="card">
+    <h2>最近发现的错误 <span class="count" id="errCount"></span>
+      <button class="danger" style="float:right;padding:4px 10px;font-size:12px" id="btnClear">清空</button>
+    </h2>
+    <div id="errList"></div>
+  </div>
+
+  <div class="card">
+    <h2>最近一次拉取的日志原文 <span class="count" id="rawSrc"></span></h2>
+    <pre id="rawLog">（尚未拉取）</pre>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var LS_CFG = "logmon.cfg.v2", LS_ERRS = "logmon.errs.v2", LS_SEEN = "logmon.seen.v2";
+  var $ = function (id) { return document.getElementById(id); };
+
+  // 全局配置: webhook/keywords 共用；每条自动化单独配置目标与间隔
+  var g = { webhook: "", keywords: "ERROR,Traceback,Exception" };
+  var autos = [];  // [{id, host, p, s, n, interval, on, nextAt, checking, pending, lastAt, lastErr}]
+  var errs = [];   // [{t, src, line}]
+  var seen = {};   // autoId -> { hash: 1 }
+  var editingId = null;
+  var autoSeq = 1;
+
+  function load() {
+    try { Object.assign(g, JSON.parse(localStorage.getItem(LS_CFG) || "{}").g || {}); } catch (e) {}
+    var saved = [];
+    try { saved = JSON.parse(localStorage.getItem(LS_CFG) || "{}").autos || []; } catch (e) {}
+    // 迁移 v1 单监控配置
+    try {
+      var v1 = JSON.parse(localStorage.getItem("logmon.cfg.v1") || "null");
+      if (v1 && !saved.length && (v1.on || v1.p)) {
+        saved = [{ host: v1.host, p: v1.p, s: v1.s, n: v1.n, interval: v1.interval, on: !!v1.on }];
+        g.webhook = g.webhook || v1.webhook || "";
+        g.keywords = v1.keywords || g.keywords;
+        var oldSeen = JSON.parse(localStorage.getItem("logmon.seen.v1") || "{}");
+        if (Object.keys(oldSeen).length) seen["_migrated_" + saved[0].p] = oldSeen;
+        try { localStorage.removeItem("logmon.cfg.v1"); localStorage.removeItem("logmon.seen.v1"); } catch (e2) {}
+      }
+    } catch (e) {}
+    saved.forEach(function (a) {
+      a.id = "a" + (autoSeq++);
+      a.checking = false; a.pending = false; a.nextAt = 0; a.lastAt = 0; a.lastErr = "";
+      autos.push(a);
+    });
+    try { errs = JSON.parse(localStorage.getItem(LS_ERRS) || "[]"); } catch (e) {}
+    try { seen = JSON.parse(localStorage.getItem(LS_SEEN) || "{}") || {}; } catch (e) {}
+  }
+  function save() {
+    var plain = autos.map(function (a) {
+      return { host: a.host, p: a.p, s: a.s, n: a.n, interval: a.interval, on: a.on };
+    });
+    localStorage.setItem(LS_CFG, JSON.stringify({ g: g, autos: plain }));
+    localStorage.setItem(LS_ERRS, JSON.stringify(errs.slice(0, 100)));
+    localStorage.setItem(LS_SEEN, JSON.stringify(seen));
+  }
+
+  function msg(text, ok) { var m = $("msg"); m.textContent = text; m.className = "msg " + (ok ? "ok" : "bad"); }
+  function hash(s) { var h = 0; for (var i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; } return "" + h; }
+  function markSeen(autoId, h) {
+    var m = seen[autoId] = seen[autoId] || {};
+    m[h] = 1;
+    var keys = Object.keys(m);
+    if (keys.length > 500) delete m[keys[0]];
+  }
+
+  function setState() {
+    var running = autos.filter(function (a) { return a.on; }).length;
+    var anyErr = autos.some(function (a) { return a.lastErr; });
+    $("dot").className = "dot " + (anyErr ? "err" : running ? "on" : "off");
+    $("stateText").textContent = running ? running + " 条自动化监控中" : "未启动";
+  }
+
+  function logUrl(a) {
+    return a.host + "/look_log?p=" + encodeURIComponent(a.p) +
+      "&s=" + encodeURIComponent(a.s) + "&n=" + a.n;
+  }
+
+  function matchKeywords(line) {
+    var kws = (g.keywords || "ERROR").split(",").map(function (k) { return k.trim().toLowerCase(); }).filter(Boolean);
+    var low = line.toLowerCase();
+    for (var i = 0; i < kws.length; i++) if (low.indexOf(kws[i]) >= 0) return kws[i];
+    return null;
+  }
+
+  function sendFeishu(text) {
+    if (!g.webhook) return Promise.reject(new Error("未配置飞书 Webhook"));
+    return fetch(g.webhook, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ msg_type: "text", content: { text: text } })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.code !== undefined && d.code !== 0) throw new Error("飞书返回: " + (d.msg || d.code));
+      return d;
+    });
+  }
+
+  function checkOnce(a, manual) {
+    // 同一条自动化的请求进行中时记 pending，完成后立刻按最新配置补查一次，
+    // 避免保存配置后的立即检查被旧请求吞掉
+    if (a.checking) { a.pending = true; if (manual) msg("上一次检查仍在进行，将在完成后立即按新配置重查", true); return; }
+    a.checking = true; a.lastErr = "";
+    // 同源转发 (AppBase http-relay): 目标 host 配置在服务端 APPBASE_RELAY_TARGETS, 无 CORS 问题
+    fetch("/app/relay/look_log?" + logUrl(a).split("?")[1])
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status + " " + (r.headers.get("x-relay-error") || "")); return r.text(); })
+      .then(function (text) {
+        $("rawLog").textContent = text || "（空）";
+        $("rawSrc").textContent = "· " + a.p + " / " + a.s;
+        var lines = text.split(/\r?\n/).filter(function (l) { return l.trim(); });
+        var fresh = [];
+        lines.forEach(function (l) {
+          if (!matchKeywords(l)) return;
+          var h = hash(l);
+          if (seen[a.id] && seen[a.id][h]) return;
+          markSeen(a.id, h);
+          fresh.push(l);
+        });
+        a.lastAt = Date.now();
+        a.nextAt = a.lastAt + a.interval * 60 * 1000;
+        var done = function () {
+          a.checking = false; setState(); renderAutos(); save();
+          if (a.pending) { a.pending = false; checkOnce(a, false); }
+        };
+        if (fresh.length) {
+          var now = new Date().toLocaleString("zh-CN");
+          fresh.slice(0, 5).forEach(function (l) { errs.unshift({ t: now, src: a.p + " / " + a.s, line: l }); });
+          errs = errs.slice(0, 100);
+          renderErrs();
+          var notice = "🚨 日志监察员发现 " + fresh.length + " 条新错误\n" +
+            "目标: " + a.p + " / " + a.s + "\n" +
+            "时间: " + now + "\n\n" + fresh.slice(0, 10).join("\n").slice(0, 2500) +
+            "\n\n查看: " + logUrl(a);
+          sendFeishu(notice).then(function () {
+            msg("[" + a.p + "] 发现 " + fresh.length + " 条新错误，已发送飞书通知", true);
+            done();
+          }, function (e) {
+            msg("[" + a.p + "] 发现 " + fresh.length + " 条新错误，但飞书通知失败: " + e.message, false);
+            done();
+          });
+        } else {
+          if (manual) msg("[" + a.p + "] 检查完成，无新错误", true);
+          done();
+        }
+      })
+      .catch(function (e) {
+        a.checking = false; a.lastErr = e.message; setState(); renderAutos(); save();
+        msg("[" + a.p + "] 日志拉取失败: " + e.message, false);
+        if (a.pending) { a.pending = false; checkOnce(a, false); }
+      });
+  }
+
+  function renderAutos() {
+    var box = $("autoList");
+    if (!autos.length) { box.innerHTML = '<div class="count">暂无自动化，点击右上角「＋ 新增自动化」创建</div>'; setState(); return; }
+    var rows = autos.map(function (a, i) {
+      var last = a.lastAt ? new Date(a.lastAt).toLocaleTimeString("zh-CN") : "—";
+      return '<tr>' +
+        '<td><span class="p"></span><br><span class="s"></span></td>' +
+        '<td>' + a.interval + ' 分钟<br><span class="last">上次: ' + last + (a.lastErr ? ' · <span style="color:#f54a45">失败</span>' : '') + '</span></td>' +
+        '<td><label class="switch"><input type="checkbox" data-tgl="' + i + '"' + (a.on ? " checked" : "") + '><span class="slider"></span></label></td>' +
+        '<td style="white-space:nowrap">' +
+          '<button class="ghost small" data-chk="' + i + '">检查</button> ' +
+          '<button class="ghost small" data-edt="' + i + '">编辑</button> ' +
+          '<button class="danger small" data-del="' + i + '">删除</button>' +
+        '</td></tr>';
+    }).join("");
+    box.innerHTML = '<table><tr><th>目标</th><th>间隔</th><th>启用</th><th>操作</th></tr>' + rows + '</table>';
+    box.querySelectorAll("tr").forEach(function (tr, idx) {
+      if (idx === 0) return;
+      var a = autos[idx - 1];
+      tr.querySelector(".p").textContent = a.p;
+      tr.querySelector(".s").textContent = a.s + " @ " + a.host;
+    });
+    box.querySelectorAll("[data-tgl]").forEach(function (el) {
+      el.onchange = function () { autos[+el.dataset.tgl].on = el.checked; save(); renderAutos(); setState(); };
+    });
+    box.querySelectorAll("[data-chk]").forEach(function (el) {
+      el.onclick = function () { checkOnce(autos[+el.dataset.chk], true); };
+    });
+    box.querySelectorAll("[data-edt]").forEach(function (el) {
+      el.onclick = function () { openForm(autos[+el.dataset.edt]); };
+    });
+    box.querySelectorAll("[data-del]").forEach(function (el) {
+      el.onclick = function () {
+        var a = autos[+el.dataset.del];
+        if (!confirm("删除自动化 " + a.p + " / " + a.s + "？")) return;
+        autos.splice(+el.dataset.del, 1);
+        delete seen[a.id];
+        save(); renderAutos(); setState();
+        if (editingId === a.id) closeForm();
+      };
+    });
+    setState();
+  }
+
+  function renderErrs() {
+    $("errCount").textContent = errs.length ? "(" + errs.length + ")" : "";
+    $("errList").innerHTML = errs.length
+      ? errs.map(function (e) {
+          return '<div class="err-item"><div class="t">' + e.t + (e.src ? ' · <span class="src"></span>' : '') + '</div><div class="line"></div></div>';
+        }).join("")
+      : '<div class="count">暂无</div>';
+    var nodes = $("errList").querySelectorAll(".err-item");
+    errs.forEach(function (e, i) {
+      if (nodes[i]) {
+        if (nodes[i].querySelector(".src")) nodes[i].querySelector(".src").textContent = e.src;
+        nodes[i].querySelector(".line").textContent = e.line;
+      }
+    });
+  }
+
+  function openForm(a) {
+    editingId = a ? a.id : null;
+    $("formTitle").textContent = a ? "编辑自动化 · " + a.p : "新增自动化";
+    $("cfgHost").value = a ? a.host : (autos[0] ? autos[0].host : "");
+    $("cfgP").value = a ? a.p : "";
+    $("cfgS").value = a ? a.s : "app";
+    $("cfgN").value = a ? a.n : 150;
+    $("cfgInterval").value = a ? a.interval : 5;
+    $("formCard").style.display = "block";
+    $("formCard").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+  function closeForm() { editingId = null; $("formCard").style.display = "none"; }
+
+  $("btnAdd").onclick = function () { openForm(null); };
+  $("btnCancel").onclick = closeForm;
+  $("btnSaveAuto").onclick = function () {
+    var host = $("cfgHost").value.trim().replace(/\/+$/, "");
+    var p = $("cfgP").value.trim();
+    if (!p) { msg("请填写 项目_分支 (p)", false); return; }
+    var data = {
+      host: host, p: p, s: $("cfgS").value.trim() || "app",
+      n: Math.max(10, parseInt($("cfgN").value, 10) || 150),
+      interval: Math.max(1, parseInt($("cfgInterval").value, 10) || 5),
+      on: true
+    };
+    var a;
+    var existing = autos.filter(function (x) { return x.id === editingId; })[0];
+    if (existing) {
+      // 编辑时换成了新目标: 重置去重表，确保立即检查能以新配置发现新日志
+      if (existing.p !== data.p || existing.s !== data.s) delete seen[existing.id];
+      Object.assign(existing, data); a = existing;
+    } else {
+      a = Object.assign({ id: "a" + (autoSeq++), checking: false, pending: false, nextAt: 0, lastAt: 0, lastErr: "" }, data);
+      autos.push(a);
+    }
+    // 保存但不立即检查，按间隔到点后由调度器首次检查
+    a.nextAt = Date.now() + a.interval * 60 * 1000;
+    save(); closeForm(); renderAutos(); setState();
+    msg("自动化已保存（不立即检查，" + a.interval + " 分钟后按计划首次检查；也可点「检查」手动触发）", true);
+  };
+  $("btnSaveGlobal").onclick = function () {
+    g.webhook = $("cfgWebhook").value.trim();
+    g.keywords = $("cfgKeywords").value.trim() || "ERROR";
+    save();
+    msg("通知设置已保存", true);
+  };
+  $("btnCheckAll").onclick = function () {
+    if (!autos.length) { msg("还没有自动化，请先新增", false); return; }
+    autos.forEach(function (a) { checkOnce(a, true); });
+  };
+  $("btnClear").onclick = function () {
+    if (!confirm("清空错误记录？")) return;
+    errs = []; renderErrs(); save();
+  };
+
+  // 统一调度器: 每 15s 扫描，到点的自动化执行检查
+  setInterval(function () {
+    var now = Date.now();
+    autos.forEach(function (a) { if (a.on && !a.checking && now >= a.nextAt) checkOnce(a, false); });
+  }, 15000);
+
+  load();
+  $("cfgWebhook").value = g.webhook; $("cfgKeywords").value = g.keywords;
+  autos.forEach(function (a) { if (a.on) a.nextAt = 0; }); // 打开页面即各查一次
+  renderAutos(); renderErrs();
+  autos.forEach(function (a) { if (a.on) checkOnce(a, false); });
+
+  // ===== 后台守护进程对接（API 由 log-monitor-daemon.js 提供，端口需与页面所在主机一致）=====
+  var DAEMON = location.protocol + "//" + location.hostname + ":39467";
+  function dMsg(text) { $("dMsg").textContent = text; }
+  function loadDaemon() {
+    fetch(DAEMON + "/status?errs=10").then(function (r) { return r.json(); }).then(function (d) {
+      var on = d.autos.filter(function (a) { return a.on; }).length;
+      var anyErr = d.autos.some(function (a) { return a.lastErr; });
+      $("dDot").className = "dot " + (anyErr ? "err" : on ? "on" : "off");
+      $("dState").textContent = "守护进程运行中 · PID " + d.pid;
+      $("dMeta").textContent = on + " 条自动化 · 已检查 " + d.checkCount + " 次 · 启动于 " + new Date(d.startedAt).toLocaleString("zh-CN");
+      var box = $("dErrs");
+      box.innerHTML = d.errs.length
+        ? d.errs.map(function (e) {
+            return '<div class="err-item"><div class="t">' + e.t + ' · <span class="src"></span></div><div class="line"></div></div>';
+          }).join("")
+        : "";
+      var nodes = box.querySelectorAll(".err-item");
+      d.errs.forEach(function (e, i) {
+        if (nodes[i]) {
+          nodes[i].querySelector(".src").textContent = e.src;
+          nodes[i].querySelector(".line").textContent = e.line;
+        }
+      });
+    }).catch(function () {
+      $("dDot").className = "dot off";
+      $("dState").textContent = "未连接";
+      $("dMeta").textContent = "";
+      $("dErrs").innerHTML = "";
+      dMsg("连不上守护进程（" + DAEMON + "）。请在服务器上运行: node log-monitor-daemon.js（pm2 start 可常驻），当前仅页面内监控生效。");
+    });
+  }
+  $("btnReloadD").onclick = loadDaemon;
+  $("btnSyncCfg").onclick = function () {
+    fetch(DAEMON + "/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ webhook: g.webhook, keywords: g.keywords, autos: autos })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.ok) { dMsg("配置已下发，守护进程已按新配置立即检查一次 ✓"); loadDaemon(); }
+      else dMsg("下发失败: " + (d.error || "未知错误"));
+    }).catch(function () {
+      dMsg("下发失败：连不上守护进程（" + DAEMON + "），请确认已在服务器上启动 node log-monitor-daemon.js");
+    });
+  };
+  loadDaemon();
+  setInterval(loadDaemon, 30000);
+})();
+</script>
+</body>
+</html>

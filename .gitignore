@@ -11,8 +11,10 @@ coverage/
 examples/wecom-timem/kb_index/
 # AppBase: codex 生成器产物目录 (运行时可重建, 不入库)
 # 例外: teacher-notebook.html 作为示例应用保留入库
+# 例外: log-monitor.html 日志监控看板入库 (部署相关地址一律用占位符/空默认, 真实值在本地 daemon-config)
 examples/apps/*
 !examples/apps/teacher-notebook.html
+!examples/apps/log-monitor.html
 __pycache__/
 *.pyc
 examples/appbase/src/.token-secret
