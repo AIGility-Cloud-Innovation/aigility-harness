@@ -1,5 +1,6 @@
 /**
  * L4 编排层: task-issue-sync —「项目小助理」业务域服务 + 工单/任务双建同步
+ *                        + 状态队列（P/D/C/A）+ 派发执行域（2026-09-26 定稿）
  *
  * ③ 架构收法（2026-09-26 拍板）：业务逻辑全部下沉编排层，persona 只留脸
  * （正则解析 + 帮助文本 + 回复信封）。本服务承接原 persona 的全部意图处理
@@ -14,7 +15,17 @@
  * 单一真相：task-pipeline 被动流水线自动建单后，经 sync-issue 模式调同一份
  * 飞书同步逻辑；主动指令与被动流水线不再各自维护同步代码。
  *
- * 只管理，不执行：本服务不写代码，执行由 codex 系工人/真人完成。
+ * 执行闭环（2026-09-26 定稿，飞书自定义分组=状态主源）：
+ *   P 计划中（plan-gate：去重+LLM 目标核对 → 完备自动挪 D；
+ *             不完备 needs-input + 群提问；手动挪 D = 跳核对强授权）
+ *   D 执行中（dispatch-scan 每 10min：agentd 去重 → create-from-message
+ *             → confirm-prompt delayMs=15min 确认闸门 → 群通知可取消；
+ *             「确认派发 #N」= run 提前执行；「取消 #N」= DELETE 任务）
+ *   C 待测试（终态 completed → 工单评论产出 → 自动关单 → 任务挪 C）
+ *   A 待修复（终态 failed/blocked/cancelled → 工单评论原因 → 任务挪 A）
+ *
+ * 只管理，不执行代码：本服务派发任务给 agentd（timem-project，代码零改动），
+ * 写代码由 agentd 内的 codex 系工人完成。
  */
 
 import {
@@ -30,6 +41,8 @@ import type {
   HealthStatus,
   CapabilityRef,
 } from "@aigility-harness/core";
+// 复用 pipeline 的判定/去重纯函数与 LLM 引用（单一真相，不复制实现）
+import { jaccard, llmInferenceRef } from "./task-pipeline.js";
 
 // ── 消费引用 ─────────────────────────────────────────────────────
 
@@ -61,6 +74,10 @@ export type TaskIntent =
   | { kind: "issue-need-repo"; title: string; body?: string }
   /** 建任务未指定仓库（C 方案要求同步建工单）：反问，不写任何数据 */
   | { kind: "task-need-repo"; title: string; dueDate?: string }
+  /** 派发确认：「确认派发 #N」（提前执行已过 15min 闸门的任务） */
+  | { kind: "dispatch-confirm"; ref: string }
+  /** 派发取消：「取消派发 #N」（撤销 agentd 任务 + 工单退回 P） */
+  | { kind: "dispatch-cancel"; ref: string }
   | { kind: "overview" }
   | { kind: "help" };
 
@@ -79,6 +96,16 @@ export type TaskIssueSyncRequest =
       /** 仓库 full_name（org/仓库） */
       repo: string;
       issue: { number?: number; title?: string; html_url?: string };
+    }
+  | {
+      /** 定时扫描模式：装配层接飞书 ingress 后周期调用（plan-gate + dispatch-scan + 终态回写） */
+      mode: "scan";
+      /** org 任务清单 guid（分组挂其下；与 tasklistName 二选一，guid 优先） */
+      tasklistGuid?: string;
+      /** org 任务清单名（如 TiMEM-AI；内部解析为 guid） */
+      tasklistName?: string;
+      /** 群通知目标会话；未设则只返回报告不播报 */
+      notifyChatId?: string;
     };
 
 export interface TaskIssueSyncResponse {
@@ -418,6 +445,498 @@ async function syncIssueToTask(
   return { ok: true, detail: `已同步飞书任务并挂清单「${listName}」` };
 }
 
+// ── 状态队列（飞书自定义分组 P/D/C/A = 状态主源；SDK 源码考证端点） ──
+
+/** 四状态分组名（清单内自定义分组；缺则自动创建） */
+export const SECTION_NAMES = { plan: "P 计划中", doing: "D 执行中", check: "C 待测试", fix: "A 待修复" } as const;
+export type SectionKey = keyof typeof SECTION_NAMES;
+
+interface SectionLike {
+  guid?: string;
+  name?: string;
+}
+
+/** 进程内 清单guid → {分组名→section guid} 缓存 */
+const sectionGuidCache = new Map<string, Partial<Record<SectionKey, string>>>();
+
+/** 列清单下的自定义分组（GET /sections?resource_type=tasklist&resource_id=…） */
+async function listSections(ctx: SeamContext, tasklistGuid: string): Promise<SectionLike[]> {
+  const r = await callFeishuApi(ctx, {
+    method: "GET",
+    path: "/open-apis/task/v2/sections",
+    query: { resource_type: "tasklist", resource_id: tasklistGuid, page_size: 50, user_id_type: "open_id" },
+    identity: "user",
+  });
+  if (!r.ok || (r.value?.code ?? -1) !== 0) return [];
+  return (r.value?.data as { items?: SectionLike[] })?.items ?? [];
+}
+
+/** 创建自定义分组（POST /sections，resource_type=tasklist） */
+async function createSection(ctx: SeamContext, tasklistGuid: string, name: string): Promise<string | undefined> {
+  const r = await callFeishuApi(ctx, {
+    method: "POST",
+    path: "/open-apis/task/v2/sections",
+    query: { user_id_type: "open_id" },
+    identity: "user",
+    body: { name, resource_type: "tasklist", resource_id: tasklistGuid },
+  });
+  if (!r.ok || (r.value?.code ?? -1) !== 0) {
+    console.error(`[task-issue-sync] 建分组「${name}」失败: ${r.ok ? r.value?.msg : r.error}`);
+    return undefined;
+  }
+  return (r.value?.data as { section?: SectionLike })?.section?.guid;
+}
+
+/** 确保四分组存在，返回 分组名→guid（缺自动建；单组建失败置 undefined 不阻塞其余） */
+export async function ensureSections(
+  ctx: SeamContext,
+  tasklistGuid: string,
+): Promise<Partial<Record<SectionKey, string>>> {
+  const cached = sectionGuidCache.get(tasklistGuid);
+  if (cached && (Object.keys(cached).length as number) === Object.keys(SECTION_NAMES).length) return cached;
+  const existing = await listSections(ctx, tasklistGuid);
+  const map: Partial<Record<SectionKey, string>> = {};
+  for (const [key, name] of Object.entries(SECTION_NAMES) as [SectionKey, string][]) {
+    map[key] = existing.find((s) => (s.name ?? "").trim() === name)?.guid
+      ?? (await createSection(ctx, tasklistGuid, name));
+  }
+  if (Object.values(map).every(Boolean)) sectionGuidCache.set(tasklistGuid, map);
+  return map;
+}
+
+/** 任务挪进某分组（add_tasklist 带 section_guid；同组幂等返回成功） */
+export async function moveToSection(
+  ctx: SeamContext,
+  taskGuid: string,
+  tasklistGuid: string,
+  sectionGuid: string,
+): Promise<boolean> {
+  const r = await callFeishuApi(ctx, {
+    method: "POST",
+    path: `/open-apis/task/v2/tasks/${taskGuid}/add_tasklist`,
+    query: { user_id_type: "open_id" },
+    identity: "user",
+    body: { tasklist_guid: tasklistGuid, section_guid: sectionGuid },
+  });
+  if (!r.ok || (r.value?.code ?? -1) !== 0) {
+    console.error(`[task-issue-sync] 挪任务进分组失败: ${r.ok ? r.value?.msg : r.error}`);
+    return false;
+  }
+  return true;
+}
+
+/** 列某分组内的任务（GET /sections/:guid/tasks，completed=false 只取未完成） */
+async function listSectionTasks(
+  ctx: SeamContext,
+  sectionGuid: string,
+): Promise<Array<{ guid?: string; task_id?: string; summary?: string; description?: string }>> {
+  const r = await callFeishuApi(ctx, {
+    method: "GET",
+    path: `/open-apis/task/v2/sections/${sectionGuid}/tasks`,
+    query: { completed: false, page_size: 50, user_id_type: "open_id" },
+    identity: "user",
+  });
+  if (!r.ok || (r.value?.code ?? -1) !== 0) return [];
+  return (r.value?.data as { items?: Array<{ guid?: string; task_id?: string; summary?: string; description?: string }> })?.items ?? [];
+}
+
+/** 双建任务标题 [org/repo#N] 标题 → 工单号（解析不出返回 undefined） */
+export function issueNumberFromTaskSummary(summary: string | undefined): number | undefined {
+  const m = (summary ?? "").match(/\[([^\]#/]+)\/([^\]#]+)#(\d+)\]/);
+  return m ? Number(m[3]) : undefined;
+}
+
+// ── 派发执行域（agentd UDS 客户端复用 agentd-client；delayMs 闸门在 agentd 侧） ──
+
+import {
+  type AgentdEndpoint,
+  type AgentdTask,
+  cancelTask as agentdCancel,
+  confirmPrompt as agentdConfirmPrompt,
+  createFromMessage as agentdCreateFromMessage,
+  defaultSocketPath,
+  defaultToken,
+  listTasks as agentdListTasks,
+  runTask as agentdRunTask,
+  CANCELABLE_STATUSES,
+} from "./agentd-client.js";
+
+/** 派发域配置（env 可覆盖） */
+export function dispatchDelayMs(): number {
+  const env = Number(process.env["TIMEM_DISPATCH_CONFIRM_MS"]);
+  return Number.isFinite(env) && env >= 0 ? env : 15 * 60_000; // 15 分钟确认闸门
+}
+
+function dispatchEndpoint(): AgentdEndpoint {
+  return { socketPath: defaultSocketPath(), token: defaultToken() };
+}
+
+/** agentd 活跃任务里是否已有该工单派生任务（sourceMessageId=issue:{repo}#{n} 约定） */
+async function agentdHasActiveForIssue(endpoint: AgentdEndpoint, repo: string, issueNo: number): Promise<AgentdTask | undefined> {
+  const tasks = await agentdListTasks(endpoint).catch(() => [] as AgentdTask[]);
+  const marker = `issue:${repo}#${issueNo}`;
+  return tasks.find(
+    (t) =>
+      (t.sourceMessageId ?? "") === marker &&
+      [...CANCELABLE_STATUSES, "queued", "needs_review"].includes(t.status ?? ""),
+  );
+}
+
+/** 执行提示词组装（工单标题+正文全文；agentd 内部工人自行探索代码库） */
+export function buildDispatchPrompt(repo: string, issue: { number?: number; title?: string; body?: string }): string {
+  return [
+    `请完成 ${repo} 工单 #${issue.number ?? "?"}：${issue.title?.trim() ?? "(无标题)"}`,
+    issue.body?.trim() ? `\n工单正文：\n${issue.body.trim()}` : "",
+    `\n完成后按项目惯例提交（commit 信息引用工单号 #${issue.number ?? "?"}）。`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** 派发核心：工单 → agentd 任务（pending_confirm + delayMs 闸门）→ 回执文本 */
+async function dispatchIssue(
+  ctx: SeamContext,
+  repo: string,
+  issue: IssueLike & { body?: string },
+  notifyChatId?: string,
+): Promise<string> {
+  const issueNo = issue.number;
+  if (!issueNo) return "❌ 派发失败：工单缺少编号";
+  const endpoint = dispatchEndpoint();
+
+  // ① agentd 去重：同工单已有活跃任务则不重复派发
+  const active = await agentdHasActiveForIssue(endpoint, repo, issueNo);
+  if (active) {
+    return `⏭️ 工单 #${issueNo} 已有进行中的执行任务（${active.status}），不重复派发。`;
+  }
+
+  // ② 建任务：sourceMessageId=issue:{repo}#{n}（确定性映射，零存储防重）
+  const prompt = buildDispatchPrompt(repo, issue);
+  const created = await agentdCreateFromMessage(endpoint, {
+    source: "harness-dispatch",
+    sourceMessageId: `issue:${repo}#${issueNo}`,
+    sourceConversationId: notifyChatId ?? "",
+    title: `#${issueNo} ${issue.title?.trim() ?? ""}`.slice(0, 80),
+    description: prompt,
+    text: prompt,
+  });
+  const taskId = created.id ?? created.taskId ?? "";
+  if (!taskId) return "❌ 派发失败：agentd 未返回任务 ID（执行引擎未就绪或参数被拒）";
+
+  // ③ 项目归属闸门：identify 已解析则自动确认（高置信建单即带 projectId）
+  let status = created.status ?? "";
+  if (created.pending_project || status === "pending_project") {
+    return `⚠️ 工单 #${issueNo} 的执行任务待确认项目归属（agentd 任务 ${taskId}）。请在 agentd 侧确认后重试派发。`;
+  }
+
+  // ④ 确认闸门：pending_confirm → queued + delayMs 定时（agentd scheduleLoop 自动跑）
+  if (status === "pending_confirm") {
+    const confirmed = await agentdConfirmPrompt(endpoint, taskId, { delayMs: dispatchDelayMs() });
+    status = confirmed.status ?? "queued";
+  }
+
+  const mins = Math.round(dispatchDelayMs() / 60_000);
+  return [
+    `⚙️ 已取走工单 #${issueNo}，安排 code agent 执行：`,
+    `${issue.title?.trim() ?? ""}`,
+    `· 确认闸门：${mins} 分钟内回复「取消派发 #${issueNo}」可撤销，超时自动执行`,
+    `· 回复「确认派发 #${issueNo}」立即执行`,
+    status === "queued" ? `· agentd 任务：${taskId}` : `· agentd 任务：${taskId}（状态 ${status}）`,
+  ].join("\n");
+}
+
+/** 终态回写：工单评论(+成功自动关单) + 飞书任务挪 C/A；返回给群的通知文本 */
+async function writebackOnFinal(
+  ctx: SeamContext,
+  repo: string,
+  issueNo: number,
+  taskId: string,
+  status: string,
+  tasklistGuid: string,
+  sections: Partial<Record<SectionKey, string>>,
+): Promise<string> {
+  const endpoint = dispatchEndpoint();
+  const task = await agentdListTasks(endpoint)
+    .then((all) => all.find((t) => t.id === taskId))
+    .catch(() => undefined);
+  const okRun = status === "completed" || status === "needs_review";
+
+  // 工单评论：成功=完成通告+自动关单；失败=原因留单
+  const comment = okRun
+    ? `🤖 code agent 已完成本工单（agentd 任务 ${taskId}，状态 ${status}），请测试验收。`
+    : `🤖 code agent 执行未成功（agentd 任务 ${taskId}，状态 ${status}）${task?.lastError ? `：${task.lastError}` : ""}。工单保留，可修复后重新派发。`;
+  await callGiteaApi(ctx, {
+    method: "POST",
+    path: `${issuesBaseFor(repo)}/${issueNo}/comments`,
+    body: { body: comment },
+  }).catch(() => undefined);
+  if (okRun) {
+    await callGiteaApi(ctx, {
+      method: "PATCH",
+      path: `${issuesBaseFor(repo)}/${issueNo}`,
+      body: { state: "closed" },
+    }).catch(() => undefined);
+  }
+
+  // 飞书任务挪 C/A
+  const targetKey: SectionKey = okRun ? "check" : "fix";
+  const sectionGuid = sections[targetKey];
+  let moved = false;
+  if (sectionGuid) {
+    const tasks = await listSectionTasks(ctx, sectionGuid).catch(() => []);
+    void tasks; // listSectionTasks 仅用于能力自检；目标任务 guid 由标题反查（见下）
+    const fr = await callFeishuApi(ctx, {
+      method: "GET",
+      path: "/open-apis/task/v2/tasks",
+      query: { page_size: 50, user_id_type: "open_id" },
+      identity: "user",
+    });
+    const items = (fr.value?.data as { items?: Array<{ guid?: string; task_id?: string; summary?: string }> })?.items ?? [];
+    const target = items.find((t) => issueNumberFromTaskSummary(t.summary) === issueNo);
+    const guid = target?.guid ?? target?.task_id;
+    if (guid) moved = await moveToSection(ctx, guid, tasklistGuid, sectionGuid);
+  }
+
+  return okRun
+    ? `✅ 工单 #${issueNo} 执行完成${moved ? `，任务已挪「${SECTION_NAMES.check}」` : ""}；工单已评论并自动关闭，请测试验收。`
+    : `❌ 工单 #${issueNo} 执行未成功（${status}）${moved ? `，任务已挪「${SECTION_NAMES.fix}」` : ""}；原因已评论到工单。`;
+}
+
+// ── 定时扫描域（plan-gate 扫 P + dispatch-scan 扫 D；与 pipeline 同节奏） ──
+
+interface DispatchRuntime {
+  timer: ReturnType<typeof setInterval> | null;
+  /** agentd taskId → {repo, issueNo, tasklistGuid}（终态轮询注册表） */
+  inflight: Map<string, { repo: string; issueNo: number; tasklistGuid: string }>;
+}
+
+const dispatchRuntime: DispatchRuntime = { timer: null, inflight: new Map() };
+
+/** 群通知注入（装配层 set；与 task-pipeline.setNotifySend 同款约定） */
+let dispatchNotifySend: ((chatId: string, text: string) => Promise<void>) | undefined;
+export function setDispatchNotifySend(fn: ((chatId: string, text: string) => Promise<void>) | undefined): void {
+  dispatchNotifySend = fn;
+}
+
+async function dispatchNotify(chatId: string | undefined, text: string): Promise<void> {
+  if (!chatId || !dispatchNotifySend) return;
+  try {
+    await dispatchNotifySend(chatId, text);
+  } catch (e) {
+    console.error(`[task-issue-sync] dispatch notify failed: ${String(e)}`);
+  }
+}
+
+/**
+ * plan-gate：加工 P 分组（去重 → LLM 目标核对 → 完备自动挪 D）。
+ * 手动挪 D = 跳过核对（本函数只看 P 分组）；不完备打 needs-input 描述前缀，下轮跳过重判省 token。
+ */
+export async function runPlanGate(
+  ctx: SeamContext,
+  opts: { tasklistGuid: string; notifyChatId?: string; model?: string; threshold?: number },
+): Promise<string[]> {
+  const reports: string[] = [];
+  const sections = await ensureSections(ctx, opts.tasklistGuid);
+  const planGuid = sections.plan;
+  const doingGuid = sections.doing;
+  if (!planGuid || !doingGuid) return ["状态分组不可用（P/D 缺失且自动建失败）"];
+
+  const planTasks = await listSectionTasks(ctx, planGuid);
+  if (planTasks.length === 0) return reports;
+
+  // 现有 open 工单标题（去重基准；阈值与 pipeline 一致 0.5）
+  const threshold = opts.threshold ?? 0.5;
+  const existingTitles: string[] = [];
+  const dr = await callGiteaApi(ctx, {
+    method: "GET",
+    path: issuesBaseFor(),
+    query: { state: "open", limit: 50, type: "issues" },
+  });
+  if (dr.ok && is2xx(dr.value?.status ?? 0)) {
+    for (const it of (dr.value?.data as IssueLike[]) ?? []) {
+      if (it.title) existingTitles.push(it.title);
+    }
+  }
+
+  for (const t of planTasks) {
+    const guid = t.guid ?? t.task_id ?? "";
+    const summary = t.summary ?? "";
+    if (!guid) continue;
+    const issueNo = issueNumberFromTaskSummary(summary);
+
+    // ① 去重：与 open 工单（排除自身对应单）Jaccard 相似
+    const dupHit = existingTitles.find(
+      (title) =>
+        jaccard(title, summary.replace(/^\[[^\]]+\]\s*/, "")) >= threshold &&
+        issueNo === undefined, // 双建任务自身必有对应工单，编号可解析则跳过工单查重
+    );
+    if (dupHit) {
+      reports.push(`🧹 「${summary.slice(0, 40)}」与现有工单「${dupHit.slice(0, 40)}」疑似重复，已留 P 待人工确认。`);
+      continue;
+    }
+
+    // needs-input 前缀 = 已提问等补充，跳过 LLM 重判（用户改描述后去掉前缀才重核）
+    if (summary.includes("【待补充】")) continue;
+
+    // ② LLM 目标核对：目标物/动作/验收线索 三要素
+    const model = opts.model ?? process.env.TASK_PIPELINE_MODEL ?? "glm-4-flash";
+    const llm = (await ctx.call(llmInferenceRef, {
+      model,
+      messages: [
+        {
+          role: "system",
+          content:
+            `你是任务验收官。判断下面这条任务描述是否具备可执行要素：目标物（对什么对象做）+ 动作（做什么）+ 验收线索（怎么算做好，可有可无但影响评分）。\n` +
+            `只输出纯 JSON：{"ready": true|false, "missing": "缺什么（ready=false 时必填，一句话，面向提问）"}\n` +
+            `规则：描述具体明确（有页面/接口/文件/行为指向）→ ready=true；空泛（如"修一下那个问题""优化下性能"无指向）→ ready=false。`,
+        },
+        { role: "user", content: summary + (t.description ? `\n${t.description.slice(0, 500)}` : "") },
+      ],
+      temperature: 0.2,
+      max_tokens: 300,
+    })) as { ok: boolean; value?: { text?: string }; error?: string };
+
+    let ready = true;
+    let missing = "";
+    if (llm.ok && llm.value?.text) {
+      try {
+        const m = llm.value.text.match(/\{[\s\S]*\}/);
+        const parsed = m ? (JSON.parse(m[0]) as { ready?: boolean; missing?: string }) : null;
+        ready = parsed?.ready !== false;
+        missing = String(parsed?.missing ?? "");
+      } catch {
+        ready = true; // 解析失败不拦任务（宁多走闸门不卡队列）
+      }
+    }
+
+    if (ready) {
+      // ③ 完备 → 自动挪 D（授权执行）
+      const moved = await moveToSection(ctx, guid, opts.tasklistGuid, doingGuid);
+      reports.push(
+        moved
+          ? `✅ 「${summary.slice(0, 40)}」目标核对通过，已挪入「${SECTION_NAMES.doing}」，下轮扫描派发执行。`
+          : `⚠️ 「${summary.slice(0, 40)}」核对通过但挪分组失败，请手动挪入 D。`,
+      );
+    } else {
+      // ④ 不完备 → 群提问 + 打【待补充】标记（改描述后下轮重核）
+      await callFeishuApi(ctx, {
+        method: "PATCH",
+        path: `/open-apis/task/v2/tasks/${guid}`,
+        query: { user_id_type: "open_id" },
+        identity: "user",
+        body: { summary: `【待补充】${summary.replace(/^【待补充】/, "")}` },
+      }).catch(() => undefined);
+      reports.push(`❓ 「${summary.slice(0, 40)}」目标不完备：${missing || "缺少明确的执行目标"}。请直接编辑任务描述补充，补齐后自动进入执行。`);
+      await dispatchNotify(opts.notifyChatId, `❓ 任务「${summary.slice(0, 40)}」需要补充信息：${missing || "描述不够具体"}\n请编辑飞书任务描述，补齐后我会自动继续。`);
+    }
+  }
+  return reports;
+}
+
+/**
+ * dispatch-scan + 终态回写：扫 D 分组派发，并轮询 inflight 任务终态做回写。
+ */
+export async function runDispatchScan(
+  ctx: SeamContext,
+  opts: { tasklistGuid: string; notifyChatId?: string },
+): Promise<string[]> {
+  const reports: string[] = [];
+  const sections = await ensureSections(ctx, opts.tasklistGuid);
+  const doingGuid = sections.doing;
+  if (!doingGuid) return ["状态分组不可用（D 缺失且自动建失败）"];
+
+  // ① inflight 终态轮询（上轮派发的任务）
+  const endpoint = dispatchEndpoint();
+  for (const [taskId, meta] of dispatchRuntime.inflight) {
+    const current = await import("./agentd-client.js")
+      .then((m) => m.getTask(endpoint, taskId))
+      .catch(() => undefined);
+    if (!current) continue;
+    if (["completed", "needs_review", "failed", "cancelled", "blocked"].includes(current.status ?? "")) {
+      dispatchRuntime.inflight.delete(taskId);
+      const msg = await writebackOnFinal(ctx, meta.repo, meta.issueNo, taskId, current.status ?? "", meta.tasklistGuid, sections);
+      reports.push(msg);
+      await dispatchNotify(opts.notifyChatId, msg);
+    }
+  }
+
+  // ② 扫 D 分组 → 派发
+  const doingTasks = await listSectionTasks(ctx, doingGuid);
+  for (const t of doingTasks) {
+    const summary = t.summary ?? "";
+    const issueNo = issueNumberFromTaskSummary(summary);
+    if (issueNo === undefined) continue; // 非双建任务不自动派发（人工在工单侧补建后重挪）
+    const repoFromTitle = summary.match(/^\[([^\]#/]+)\/([^\]#]+)#\d+\]/);
+    const repo = repoFromTitle ? `${repoFromTitle[1]}/${repoFromTitle[2]}` : giteaRepo();
+    if (dispatchRuntime.inflight.size >= 3) {
+      reports.push(`⏳ 并发上限（3），工单 #${issueNo} 留 D 下轮派发。`);
+      continue;
+    }
+    // 工单详情（正文组装提示词）
+    const r = await callGiteaApi(ctx, { method: "GET", path: `${issuesBaseFor(repo)}/${issueNo}` });
+    if (!r.ok || !is2xx(r.value?.status ?? 0)) {
+      reports.push(`⚠️ 工单 #${issueNo} 读取失败，留 D 下轮重试。`);
+      continue;
+    }
+    const issue = r.value?.data as IssueLike & { body?: string };
+    if ((issue.state ?? "open") !== "open") {
+      reports.push(`⏭️ 工单 #${issueNo} 已关闭，跳过派发（请把任务挪出 D）。`);
+      continue;
+    }
+    const msg = await dispatchIssue(ctx, repo, issue, opts.notifyChatId);
+    reports.push(msg);
+    await dispatchNotify(opts.notifyChatId, msg);
+    // 派发成功（回执含 agentd 任务 id）→ 注册 inflight 轮询
+    const created = msg.match(/agentd 任务：(\S+)/);
+    if (created) {
+      dispatchRuntime.inflight.set(created[1], { repo, issueNo, tasklistGuid: opts.tasklistGuid });
+    }
+  }
+  return reports;
+}
+
+/** 停止定时扫描（装配层重启用） */
+export function stopDispatchScan(): void {
+  if (dispatchRuntime.timer) clearInterval(dispatchRuntime.timer);
+  dispatchRuntime.timer = null;
+}
+
+// ── 派发确认/取消意图处理 ────────────────────────────────────────
+
+/** 「确认派发 #N」：inflight 或 D 分组的 agentd 任务 → run 提前执行 */
+async function handleDispatchConfirm(ctx: SeamContext, ref: string): Promise<string> {
+  const num = ref.trim().match(/^#?(\d+)$/);
+  if (!num) return "用法：确认派发 #工单号";
+  const issueNo = Number(num[1]);
+  const endpoint = dispatchEndpoint();
+  const marker = `issue:${giteaRepo()}#${issueNo}`;
+  const tasks = await agentdListTasks(endpoint).catch(() => [] as AgentdTask[]);
+  const target = tasks.find(
+    (t) => (t.sourceMessageId ?? "") === marker && ["pending_confirm", "queued"].includes(t.status ?? ""),
+  );
+  if (!target?.id) return `没有找到工单 #${issueNo} 的待确认派发任务。`;
+  const run = await agentdRunTask(endpoint, target.id).catch((e: Error) => e);
+  if (run instanceof Error) return `❌ 立即执行失败：${run.message}`;
+  return `🚀 工单 #${issueNo} 已立即安排执行（跳过剩余等待时间）。完成后我会汇报并回写工单。`;
+}
+
+/** 「取消派发 #N」：撤销 agentd 任务（工单留 open，任务挪回 P） */
+async function handleDispatchCancel(ctx: SeamContext, ref: string): Promise<string> {
+  const num = ref.trim().match(/^#?(\d+)$/);
+  if (!num) return "用法：取消派发 #工单号";
+  const issueNo = Number(num[1]);
+  const endpoint = dispatchEndpoint();
+  const marker = `issue:${giteaRepo()}#${issueNo}`;
+  const tasks = await agentdListTasks(endpoint).catch(() => [] as AgentdTask[]);
+  const target = tasks.find(
+    (t) => (t.sourceMessageId ?? "") === marker && CANCELABLE_STATUSES.includes(t.status ?? ""),
+  );
+  if (!target?.id) return `没有找到工单 #${issueNo} 的可取消任务。`;
+  await agentdCancel(endpoint, target.id);
+  dispatchRuntime.inflight.delete(target.id);
+  return `🛑 已取消工单 #${issueNo} 的执行任务。工单保持打开，可补充描述后重新挪入 D 再派发。`;
+}
+
 // ── 意图处理（自 persona 迁入；建单/建任务接入双建同步） ──────────
 
 /** 工单意图处理（增删改查 + 评论）；repo=意图显式 @仓库（短名在此解析为 full_name） */
@@ -694,12 +1213,39 @@ const taskIssueSyncProvider: Provider<TaskIssueSyncRequest, TaskIssueSyncRespons
       });
     }
 
+    if (request.mode === "scan") {
+      // 定时扫描模式：清单解析（guid 优先，名字回落）→ plan-gate → dispatch-scan
+      let listGuid = request.tasklistGuid;
+      if (!listGuid) {
+        const name = request.tasklistName ?? "TiMEM-AI";
+        const list = await ensureTasklist(ctx, name);
+        if (list.error || !list.guid) {
+          return ok({ response: `⚠️ 扫描跳过：任务清单「${name}」不可用：${list.error}` });
+        }
+        listGuid = list.guid;
+      }
+      const planReports = await runPlanGate(ctx, {
+        tasklistGuid: listGuid,
+        notifyChatId: request.notifyChatId,
+      });
+      const dispatchReports = await runDispatchScan(ctx, {
+        tasklistGuid: listGuid,
+        notifyChatId: request.notifyChatId,
+      });
+      const all = [...planReports, ...dispatchReports];
+      return ok({ response: all.length ? all.join("\n") : "（本轮无待处理任务）" });
+    }
+
     const intent = request.intent;
     let response: string;
     if (intent.kind === "help") {
       response = "（帮助文本由 persona 层提供）";
     } else if (intent.kind === "overview") {
       response = await buildOverview(ctx);
+    } else if (intent.kind === "dispatch-confirm") {
+      response = await handleDispatchConfirm(ctx, intent.ref);
+    } else if (intent.kind === "dispatch-cancel") {
+      response = await handleDispatchCancel(ctx, intent.ref);
     } else if (intent.kind === "task-need-repo" || intent.kind === "create" || intent.kind === "list" || intent.kind === "complete") {
       response = await handleTaskIntent(intent, ctx);
     } else {

@@ -42,6 +42,8 @@ import {
 import {
   collectMessage,
   setNotifySend,
+  setDispatchNotifySend,
+  taskIssueSyncProvider,
   taskPipelineProvider,
 } from "@aigility-harness/layer-orchestration";
 import { loadEnv, REPO_ROOT } from "./env.js";
@@ -146,6 +148,27 @@ async function main(): Promise<void> {
     console.error("task-pipeline 启动失败:", pipeline.error);
     process.exit(1);
   }
+
+  // 5. 启动状态队列扫描（P 加工 + D 派发 + 终态回写；与流水线同节奏）
+  setDispatchNotifySend(start.value.send);
+  const tasklistName = process.env["FEISHU_TASKLIST_NAME"] ?? "TiMEM-AI";
+  let scanTimer: ReturnType<typeof setInterval> | null = null;
+  const scanTick = async (): Promise<void> => {
+    try {
+      const r = await taskIssueSyncProvider.execute(
+        { mode: "scan", tasklistName, notifyChatId: notifyChatId || undefined },
+        ctx,
+      );
+      if (r.ok && r.value?.response && r.value.response !== "（本轮无待处理任务）") {
+        console.log(`[dispatch-scan] ${r.value.response}`);
+      }
+    } catch (e) {
+      console.error(`[dispatch-scan] tick error: ${String(e)}`);
+    }
+  };
+  await scanTick();
+  scanTimer = setInterval(() => void scanTick(), intervalMs);
+  console.log(`   状态队列: P 加工（去重+目标核对）→ D 派发（15min 闸门）→ 终态回写 (interval=${intervalMs}ms, tasklist=${tasklistName})`);
   console.log(`\n✅ 飞书机器人已连接 (appId=${appId}) → ${persona}`);
   console.log("   飞书里 @项目小助理：「建任务：xxx」「我的任务」「完成 xxx」");
   console.log("   Gitea 工单：「建工单 @仓库：xxx」「工单列表」「关闭工单 #n」「项目概览」");
@@ -154,6 +177,7 @@ async function main(): Promise<void> {
 
   const stop = async () => {
     pipeline.value.stop();
+    if (scanTimer) clearInterval(scanTimer);
     await start.value.stop();
     await shutdown(kernel, scheduler);
     process.exit(0);

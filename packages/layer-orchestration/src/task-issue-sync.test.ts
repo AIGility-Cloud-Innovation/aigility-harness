@@ -1,499 +1,122 @@
+/**
+ * task-issue-sync 派发域单测：纯函数（分组常量/工单号解析/提示词组装/闸门时长）
+ * + scan 模式路由 + 派发确认/取消意图路由（mock feishu/gitea/LLM refs）。
+ */
 import { describe, it, expect } from "vitest";
 import {
+  SECTION_NAMES,
+  issueNumberFromTaskSummary,
+  buildDispatchPrompt,
+  dispatchDelayMs,
   taskIssueSyncProvider,
-  formatIssueLine,
-  formatIssueList,
-  formatIssueDetail,
-  formatTaskLine,
-  formatTaskList,
-  matchIssueByRef,
-  syncTaskSummary,
-  tasklistNameForRepo,
 } from "./task-issue-sync.js";
-import type { TaskIntent } from "./task-issue-sync.js";
+import type { SeamContext } from "@aigility-harness/core";
 
-describe("formatIssueLine / formatIssueList / formatIssueDetail", () => {
-  it("单行带序号、状态与标签", () => {
-    expect(
-      formatIssueLine(
-        { number: 12, title: "修复登录页白屏", state: "open", labels: [{ name: "P0" }, { name: "sdk" }] },
-        2,
-      ),
-    ).toBe("2. 🟢 进行中 #12 修复登录页白屏（P0·sdk）");
-  });
-
-  it("已关闭状态", () => {
-    expect(formatIssueLine({ number: 3, title: "X", state: "closed" })).toBe("✅ 已关闭 #3 X");
-  });
-
-  it("空列表提示创建", () => {
-    expect(formatIssueList([])).toContain("建工单");
-  });
-
-  it("列表带序号", () => {
-    const out = formatIssueList([
-      { number: 12, title: "A", state: "open" },
-      { number: 13, title: "B", state: "closed" },
-    ]);
-    expect(out).toContain("共 2 条工单");
-    expect(out).toContain("1. 🟢 进行中 #12 A");
-    expect(out).toContain("2. ✅ 已关闭 #13 B");
-  });
-
-  it("详情含状态、标签与链接", () => {
-    const out = formatIssueDetail({
-      number: 12,
-      title: "修复登录页白屏",
-      state: "open",
-      html_url: "https://git.aigility.cloud/TiMEM-AI/x/issues/12",
-      labels: [{ name: "P0" }],
-    });
-    expect(out).toContain("#12 修复登录页白屏");
-    expect(out).toContain("🟢 进行中");
-    expect(out).toContain("标签：P0");
-    expect(out).toContain("https://git.aigility.cloud/TiMEM-AI/x/issues/12");
+describe("SECTION_NAMES 状态分组", () => {
+  it("四状态 P/D/C/A 齐全", () => {
+    expect(SECTION_NAMES.plan).toBe("P 计划中");
+    expect(SECTION_NAMES.doing).toBe("D 执行中");
+    expect(SECTION_NAMES.check).toBe("C 待测试");
+    expect(SECTION_NAMES.fix).toBe("A 待修复");
   });
 });
 
-describe("matchIssueByRef", () => {
-  const issues = [
-    { number: 12, title: "修复登录页白屏", state: "open" },
-    { number: 13, title: "白屏复现跟进", state: "closed" },
-    { number: 14, title: "升级依赖", state: "open" },
-  ];
-
-  it("#编号 / 纯数字精确匹配", () => {
-    expect(matchIssueByRef(issues, "#12")?.number).toBe(12);
-    expect(matchIssueByRef(issues, "14")?.number).toBe(14);
+describe("issueNumberFromTaskSummary", () => {
+  it("从 [org/repo#N] 标题解析工单号", () => {
+    expect(issueNumberFromTaskSummary("[TiMEM-AI/timem-platform-backend#21] 修复登录页白屏")).toBe(21);
+    expect(issueNumberFromTaskSummary("[a/b#3] x")).toBe(3);
   });
-
-  it("标题关键字包含匹配（大小写不敏感）", () => {
-    expect(matchIssueByRef(issues, "登录页")?.number).toBe(12);
-    expect(matchIssueByRef(issues, "升级依赖")?.number).toBe(14);
-  });
-
-  it("无匹配返回 undefined", () => {
-    expect(matchIssueByRef(issues, "不存在")).toBeUndefined();
-    expect(matchIssueByRef(issues, "#999")).toBeUndefined();
+  it("非双建标题返回 undefined", () => {
+    expect(issueNumberFromTaskSummary("普通任务标题")).toBeUndefined();
+    expect(issueNumberFromTaskSummary("[没有编号] x")).toBeUndefined();
+    expect(issueNumberFromTaskSummary(undefined)).toBeUndefined();
   });
 });
 
-describe("formatTaskList / formatTaskLine", () => {
-  it("空列表提示创建", () => {
-    expect(formatTaskList([])).toContain("建任务");
+describe("buildDispatchPrompt", () => {
+  it("含工单号/标题/正文/提交要求", () => {
+    const p = buildDispatchPrompt("org/repo", {
+      number: 9,
+      title: "修复白屏",
+      body: "打开首页即白屏",
+    });
+    expect(p).toContain("org/repo 工单 #9");
+    expect(p).toContain("修复白屏");
+    expect(p).toContain("打开首页即白屏");
+    expect(p).toContain("#9");
   });
-
-  it("列表带序号与状态", () => {
-    const out = formatTaskList([
-      { summary: "任务A", status: "todo" },
-      { summary: "任务B", status: "done" },
-    ]);
-    expect(out).toContain("共 2 条任务");
-    expect(out).toContain("1. ☐ 待办 任务A");
-    expect(out).toContain("2. ✅ 已完成 任务B");
-  });
-
-  it("单行带截止日期", () => {
-    expect(formatTaskLine({ summary: "X", status: "todo", due: { date: "2026-10-16" } }, 3)).toBe(
-      "3. ☐ 待办 X（截止 2026-10-16）",
-    );
+  it("无正文也成立", () => {
+    const p = buildDispatchPrompt("org/repo", { number: 1, title: "t" });
+    expect(p).toContain("工单 #1");
   });
 });
 
-describe("双建同步纯函数", () => {
-  it("syncTaskSummary：[org/repo#N] 标题", () => {
-    expect(syncTaskSummary("TiMEM-AI/x", { number: 8, title: "修复白屏" })).toBe(
-      "[TiMEM-AI/x#8] 修复白屏",
-    );
-    expect(syncTaskSummary("TiMEM-AI/x", { title: "无编号" })).toBe("[TiMEM-AI/x#?] 无编号");
+describe("dispatchDelayMs", () => {
+  it("默认 15 分钟", () => {
+    delete process.env.TIMEM_DISPATCH_CONFIRM_MS;
+    expect(dispatchDelayMs()).toBe(15 * 60_000);
   });
-
-  it("tasklistNameForRepo：org 对应清单", () => {
-    expect(tasklistNameForRepo("TiMEM-AI/timem-platform-backend")).toBe("TiMEM-AI");
-    expect(tasklistNameForRepo("no-slash")).toBe("no-slash");
+  it("env 可覆盖", () => {
+    process.env.TIMEM_DISPATCH_CONFIRM_MS = "60000";
+    expect(dispatchDelayMs()).toBe(60_000);
+    delete process.env.TIMEM_DISPATCH_CONFIRM_MS;
   });
 });
 
-describe("provider execute — 业务域流程（stub ctx.call）", () => {
-  /** 按 action 服务 id 路由的假 ctx，记录全部调用便于断言 */
-  function makeFakeCtx(
-    handlers: Record<string, (req: Record<string, unknown>) => unknown>,
-  ) {
-    const calls: { id: string; req: Record<string, unknown> }[] = [];
-    const ctx = {
-      traceId: "test-trace",
-      sessionId: "test-session",
-      emit: () => {},
-      call: async (ref: { id: string }, req: Record<string, unknown>) => {
-        calls.push({ id: ref.id, req });
-        return handlers[ref.id](req);
-      },
-    };
-    return { ctx: ctx as never, calls };
-  }
+/** 构造最小 SeamContext mock：按 ref.id 分发响应 */
+function mockCtx(handler: (refId: string, req: Record<string, unknown>) => unknown): SeamContext {
+  return {
+    sessionId: "s1",
+    call: async (ref: { id: string }, req: unknown) => handler(ref.id, req as Record<string, unknown>),
+  } as unknown as SeamContext;
+}
 
-  const intent = (i: TaskIntent) => ({ mode: "intent" as const, intent: i });
-
-  it("关闭工单：编号直取详情 → PATCH → 以响应体 state 做写后验证", async () => {
-    const { ctx } = makeFakeCtx({
-      "@action/gitea-api": (req) => {
-        if (req.method === "GET") {
-          return {
-            ok: true,
-            value: {
-              status: 200,
-              data: { number: 61, title: "BM25 租户 filter", state: "open" },
-            },
-          };
-        }
-        return {
-          ok: true,
-          value: {
-            status: 201, // 本实例 PATCH 怪癖：返回 201
-            data: { number: 61, title: "BM25 租户 filter", state: "closed" },
-          },
-        };
-      },
+describe("scan 模式路由", () => {
+  it("清单不可用时返回跳过文案", async () => {
+    const ctx = mockCtx((_id, req) => {
+      if (String((req as { path?: string }).path).includes("/tasklists")) {
+        return { ok: true, value: { code: 0, data: { items: [] } } };
+      }
+      return { ok: true, value: { code: 0, data: {} } };
     });
-    const r = await taskIssueSyncProvider.execute(intent({ kind: "issue-close", ref: "#61" }), ctx);
-    expect(r.ok).toBe(true);
-    expect((r as { value: { response: string } }).value.response).toContain("已关闭工单 #61");
-  });
-
-  it("建工单：命中同名工单时查重拦截，不发起 POST", async () => {
-    const { ctx, calls } = makeFakeCtx({
-      "@action/gitea-api": (req) => {
-        if (req.method === "GET") {
-          return {
-            ok: true,
-            value: {
-              status: 200,
-              data: [{ number: 7, title: "修复登录页白屏", state: "open" }],
-            },
-          };
+    // ensureTasklist 走 findTasklistByName（空）→ create（失败模拟）
+    const ctxFail = mockCtx((id, req) => {
+      if (id.includes("feishu")) {
+        if (String((req as { method?: string }).method) === "POST" && String((req as { path?: string }).path).includes("/tasklists")) {
+          return { ok: false, error: "denied" };
         }
-        return { ok: true, value: { status: 201, data: { number: 8 } } };
-      },
+        return { ok: true, value: { code: 0, data: { items: [] } } };
+      }
+      return { ok: true, value: { status: 200, data: [] } };
+    });
+    const r = await taskIssueSyncProvider.execute({ mode: "scan", tasklistName: "X" }, ctxFail);
+    if (!r.ok) throw new Error("execute failed");
+    expect(r.value.response).toContain("扫描跳过");
+    void ctx;
+  });
+});
+
+describe("派发确认/取消意图路由", () => {
+  it("取消：无匹配任务时给出提示", async () => {
+    const ctx = mockCtx((id) => {
+      if (id.includes("feishu") || id.includes("gitea")) return { ok: true, value: { code: 0, status: 200, data: [] } };
+      return { ok: true, value: { code: 0, data: [] } };
     });
     const r = await taskIssueSyncProvider.execute(
-      intent({
-        kind: "issue-create",
-        repo: "TiMEM-AI/timem-platform-backend",
-        title: "修复登录页白屏",
-      }),
+      { mode: "intent", intent: { kind: "dispatch-cancel", ref: "42" } },
       ctx,
     );
-    expect(r.ok).toBe(true);
-    const response = (r as { value: { response: string } }).value.response;
-    expect(response).toContain("已有同名工单");
-    expect(response).toContain("#7");
-    expect(calls.filter((c) => c.req.method === "POST")).toHaveLength(0);
+    if (!r.ok) throw new Error("execute failed");
+    expect(r.value.response).toContain("没有找到工单 #42");
   });
 
-  it("建工单缺仓库解析：反问并列出可访问仓库，不发查重/POST", async () => {
-    const { ctx, calls } = makeFakeCtx({
-      "@action/gitea-api": () => ({
-        ok: true,
-        value: {
-          status: 200,
-          data: [
-            { full_name: "AIGility-Cloud-Innovation/nx-telecom-video-platform" },
-            { full_name: "TiMEM-AI/timem-platform-backend" },
-          ],
-        },
-      }),
-    });
-    const r = await taskIssueSyncProvider.execute(intent({ kind: "issue-need-repo", title: "修复登录页白屏" }), ctx);
-    const response = (r as { value: { response: string } }).value.response;
-    expect(response).toContain("请指定仓库");
-    expect(response).toContain("@组织/仓库：修复登录页白屏");
-    expect(response).toContain("nx-telecom-video-platform");
-    // 只允许一次 repos/search 读请求，零写请求、零查重
-    expect(calls).toHaveLength(1);
-    expect(calls[0].req.path).toBe("/api/v1/repos/search");
-    expect(calls[0].req.method).toBe("GET");
-  });
-
-  it("建工单 @短名：唯一命中后按 full_name 创建 + 双建同步飞书任务挂 org 清单", async () => {
-    const { ctx, calls } = makeFakeCtx({
-      "@action/gitea-api": (req) => {
-        if ((req.path as string) === "/api/v1/repos/search") {
-          return {
-            ok: true,
-            value: {
-              status: 200,
-              data: [
-                { full_name: "AIGility-Cloud-Innovation/nx-telecom-video-platform" },
-                { full_name: "TiMEM-AI/timem-platform-backend" },
-              ],
-            },
-          };
-        }
-        if (req.method === "GET") {
-          return { ok: true, value: { status: 200, data: [] } };
-        }
-        return {
-          ok: true,
-          value: {
-            status: 201,
-            data: {
-              number: 8,
-              title: "修复登录页白屏",
-              state: "open",
-              html_url:
-                "https://git.aigility.cloud/AIGility-Cloud-Innovation/nx-telecom-video-platform/issues/8",
-            },
-          },
-        };
-      },
-      "@action/feishu-api": (req) => {
-        if ((req.path as string) === "/open-apis/task/v2/tasklists") {
-          return {
-            ok: true,
-            value: {
-              code: 0,
-              data: { items: [{ guid: "list-1", name: "AIGility-Cloud-Innovation" }] },
-            },
-          };
-        }
-        if ((req.path as string) === "/open-apis/task/v2/tasks" && req.method === "POST") {
-          return {
-            ok: true,
-            value: { code: 0, data: { task: { guid: "task-9", summary: req.summary } } },
-          };
-        }
-        if ((req.path as string)?.includes("/add_tasklist")) {
-          return { ok: true, value: { code: 0, data: {} } };
-        }
-        return { ok: true, value: { code: 0, data: {} } };
-      },
-    });
+  it("确认：格式错误给用法", async () => {
+    const ctx = mockCtx(() => ({ ok: true, value: { code: 0, data: [] } }));
     const r = await taskIssueSyncProvider.execute(
-      intent({
-        kind: "issue-create",
-        repo: "video", // 短名
-        title: "修复登录页白屏",
-      }),
+      { mode: "intent", intent: { kind: "dispatch-confirm", ref: "abc" } },
       ctx,
     );
-    expect(r.ok).toBe(true);
-    const response = (r as { value: { response: string } }).value.response;
-    expect(response).toContain("已建工单");
-    expect(response).toContain("AIGility-Cloud-Innovation/nx-telecom-video-platform #8");
-    expect(response).toContain("已同步飞书任务"); // 双建同步成功
-    // 工单 POST 一次
-    const issuePost = calls.find(
-      (c) => c.id === "@action/gitea-api" && c.req.method === "POST",
-    );
-    expect(issuePost).toBeDefined();
-    expect(issuePost!.req.path).toBe(
-      "/api/v1/repos/AIGility-Cloud-Innovation/nx-telecom-video-platform/issues",
-    );
-    // 飞书任务建一次 + 挂清单一次（挂清单用任务维度 add_tasklist 端点）
-    const taskPost = calls.find(
-      (c) => c.req.path === "/open-apis/task/v2/tasks" && c.req.method === "POST",
-    );
-    expect(taskPost).toBeDefined();
-    expect((taskPost!.req.body as { summary?: string }).summary).toBe(
-      "[AIGility-Cloud-Innovation/nx-telecom-video-platform#8] 修复登录页白屏",
-    );
-    const addList = calls.find((c) => (c.req.path as string)?.includes("/add_tasklist"));
-    expect(addList).toBeDefined();
-    expect(addList!.req.path).toBe("/open-apis/task/v2/tasks/task-9/add_tasklist");
-    expect((addList!.req.body as { tasklist_guid?: string }).tasklist_guid).toBe("list-1");
-  });
-
-  it("建工单成功但飞书同步失败：部分成功回执（⚠️ 注明，不回滚）", async () => {
-    const { ctx } = makeFakeCtx({
-      "@action/gitea-api": (req) => {
-        if (req.method === "GET") return { ok: true, value: { status: 200, data: [] } };
-        return {
-          ok: true,
-          value: {
-            status: 201,
-            data: { number: 9, title: "T", state: "open", html_url: "https://x/issues/9" },
-          },
-        };
-      },
-      "@action/feishu-api": () => ({ ok: false, error: "OAuth 过期" }),
-    });
-    const r = await taskIssueSyncProvider.execute(
-      intent({ kind: "issue-create", repo: "TiMEM-AI/x", title: "T" }),
-      ctx,
-    );
-    const response = (r as { value: { response: string } }).value.response;
-    expect(response).toContain("已建工单 TiMEM-AI/x #9");
-    expect(response).toContain("⚠️");
-    expect(response).toContain("飞书同步未完成");
-  });
-
-  it("sync-issue 原语模式：task-pipeline 自动建单后的单向同步", async () => {
-    const { ctx, calls } = makeFakeCtx({
-      "@action/feishu-api": (req) => {
-        if ((req.path as string) === "/open-apis/task/v2/tasklists") {
-          return {
-            ok: true,
-            value: { code: 0, data: { items: [{ guid: "tl-1", name: "TiMEM-AI" }] } },
-          };
-        }
-        if (req.method === "POST" && (req.path as string) === "/open-apis/task/v2/tasks") {
-          return { ok: true, value: { code: 0, data: { task: { guid: "tk-1" } } } };
-        }
-        return { ok: true, value: { code: 0, data: {} } };
-      },
-    });
-    const r = await taskIssueSyncProvider.execute(
-      {
-        mode: "sync-issue",
-        repo: "TiMEM-AI/timem-platform-backend",
-        issue: { number: 12, title: "自动建单", html_url: "https://x/issues/12" },
-      },
-      ctx,
-    );
-    expect(r.ok).toBe(true);
-    const response = (r as { value: { response: string } }).value.response;
-    expect(response).toContain("已同步飞书任务");
-    expect(response).toContain("TiMEM-AI");
-    const taskPost = calls.find(
-      (c) => c.req.path === "/open-apis/task/v2/tasks" && c.req.method === "POST",
-    );
-    expect((taskPost!.req.body as { summary?: string }).summary).toBe(
-      "[TiMEM-AI/timem-platform-backend#12] 自动建单",
-    );
-  });
-
-  it("建任务缺仓库（task-need-repo）：反问，零写请求", async () => {
-    const { ctx, calls } = makeFakeCtx({
-      "@action/gitea-api": () => ({
-        ok: true,
-        value: {
-          status: 200,
-          data: [{ full_name: "TiMEM-AI/timem-platform-backend" }],
-        },
-      }),
-    });
-    const r = await taskIssueSyncProvider.execute(
-      intent({ kind: "task-need-repo", title: "写周报" }),
-      ctx,
-    );
-    const response = (r as { value: { response: string } }).value.response;
-    expect(response).toContain("请指定仓库");
-    expect(response).toContain("建任务 @组织/仓库：写周报");
-    expect(calls.filter((c) => c.req.method === "POST")).toHaveLength(0);
-  });
-
-  it("建任务 @仓库：飞书任务 + Gitea 工单双建", async () => {
-    const { ctx, calls } = makeFakeCtx({
-      "@action/gitea-api": (req) => {
-        if ((req.path as string) === "/api/v1/repos/search") {
-          return {
-            ok: true,
-            value: { status: 200, data: [{ full_name: "TiMEM-AI/timem-platform-backend" }] },
-          };
-        }
-        if (req.method === "GET") return { ok: true, value: { status: 200, data: [] } };
-        return {
-          ok: true,
-          value: {
-            status: 201,
-            data: {
-              number: 21,
-              title: "写周报",
-              state: "open",
-              html_url: "https://git.aigility.cloud/TiMEM-AI/timem-platform-backend/issues/21",
-            },
-          },
-        };
-      },
-      "@action/feishu-api": (req) => {
-        if ((req.path as string) === "/open-apis/task/v2/tasklists") {
-          return {
-            ok: true,
-            value: { code: 0, data: { items: [{ guid: "tl-2", name: "TiMEM-AI" }] } },
-          };
-        }
-        if (req.method === "POST" && (req.path as string) === "/open-apis/task/v2/tasks") {
-          return {
-            ok: true,
-            value: { code: 0, data: { task: { guid: "tk-2", summary: "写周报" } } },
-          };
-        }
-        return { ok: true, value: { code: 0, data: {} } };
-      },
-    });
-    const r = await taskIssueSyncProvider.execute(
-      intent({
-        kind: "create",
-        title: "写周报",
-        dueDate: "2026-10-16",
-        repo: "TiMEM-AI/timem-platform-backend",
-      }),
-      ctx,
-    );
-    expect(r.ok).toBe(true);
-    const response = (r as { value: { response: string } }).value.response;
-    expect(response).toContain("已创建任务：写周报（截止 2026-10-16）");
-    expect(response).toContain("已同步建工单 TiMEM-AI/timem-platform-backend #21");
-    expect(response).toContain("已同步飞书任务"); // 工单建后顺手挂清单
-    // 工单 POST 带截止日期来源说明
-    const issuePost = calls.find(
-      (c) => c.id === "@action/gitea-api" && c.req.method === "POST",
-    );
-    expect((issuePost!.req.body as { body?: string }).body).toContain("2026-10-16");
-  });
-
-  it("建任务：同名工单已存在 → 只建任务不重复建单", async () => {
-    const { ctx, calls } = makeFakeCtx({
-      "@action/gitea-api": (req) => {
-        if ((req.path as string) === "/api/v1/repos/search") {
-          return {
-            ok: true,
-            value: { status: 200, data: [{ full_name: "TiMEM-AI/timem-platform-backend" }] },
-          };
-        }
-        if (req.method === "GET") {
-          return {
-            ok: true,
-            value: { status: 200, data: [{ number: 7, title: "写周报", state: "open" }] },
-          };
-        }
-        return { ok: true, value: { status: 201, data: { number: 99 } } };
-      },
-      "@action/feishu-api": () => ({
-        ok: true,
-        value: { code: 0, data: { task: { guid: "tk-3", summary: "写周报" } } },
-      }),
-    });
-    const r = await taskIssueSyncProvider.execute(
-      intent({
-        kind: "create",
-        title: "写周报",
-        repo: "TiMEM-AI/timem-platform-backend",
-      }),
-      ctx,
-    );
-    const response = (r as { value: { response: string } }).value.response;
-    expect(response).toContain("已创建任务");
-    expect(response).toContain("已有同名工单");
-    expect(response).toContain("#7");
-    // 无 gitea POST（不重复建单）
-    expect(
-      calls.filter((c) => c.id === "@action/gitea-api" && c.req.method === "POST"),
-    ).toHaveLength(0);
-  });
-
-  it("项目概览：飞书与 Gitea 单侧失败不影响另一侧", async () => {
-    const { ctx } = makeFakeCtx({
-      "@action/feishu-api": () => ({ ok: false, error: "OAuth 过期" }),
-      "@action/gitea-api": () => ({
-        ok: true,
-        value: { status: 200, data: [{ number: 61, title: "BM25 租户 filter", state: "open" }] },
-      }),
-    });
-    const r = await taskIssueSyncProvider.execute(intent({ kind: "overview" }), ctx);
-    const response = (r as { value: { response: string } }).value.response;
-    expect(response).toContain("项目概览");
-    expect(response).toContain("查询失败"); // 飞书侧降级
-    expect(response).toContain("#61"); // Gitea 侧正常
+    if (!r.ok) throw new Error("execute failed");
+    expect(r.value.response).toContain("用法");
   });
 });

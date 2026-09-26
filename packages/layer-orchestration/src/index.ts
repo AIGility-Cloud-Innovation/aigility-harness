@@ -50,12 +50,23 @@ export {
   matchIssueByRef,
   syncTaskSummary,
   tasklistNameForRepo,
+  SECTION_NAMES,
+  ensureSections,
+  moveToSection,
+  issueNumberFromTaskSummary,
+  buildDispatchPrompt,
+  dispatchDelayMs,
+  runPlanGate,
+  runDispatchScan,
+  stopDispatchScan,
+  setDispatchNotifySend,
 } from "./task-issue-sync.js";
 export type {
   TaskIssueSyncRequest,
   TaskIssueSyncResponse,
   TaskIntent,
   IssueLike,
+  SectionKey,
 } from "./task-issue-sync.js";
 
 export { RequirementStore } from "./requirement-store.js";

@@ -28,7 +28,7 @@ import type {
   LlmInferenceRequest,
   LlmInferenceResponse,
 } from "@aigility-harness/core";
-import { request as httpRequest } from "node:http";
+// (UDS transport 已抽至 agentd-client.ts)
 import { execFile } from "node:child_process";
 import { RequirementStore } from "./requirement-store.js";
 import type { Consolidation, Requirement } from "./requirement-store.js";
@@ -182,81 +182,17 @@ async function classifyWithLlm(
   }
 }
 
-// ---- UDS 配置 ----
+// ---- UDS 配置 / transport / agentd 原语：已抽至 agentd-client.ts（编排层共享）----
 
-/** agentd socket 默认路径(与 timem-project cmd/timem-agentd 一致) */
-export function defaultSocketPath(): string {
-  const fromEnv = process.env["TIMEM_AGENTD_SOCK"];
-  if (fromEnv) return fromEnv;
-  const configHome = process.env["XDG_CONFIG_HOME"] ?? `${process.env["HOME"] ?? ""}/.config`;
-  return `${configHome}/TiMEM Project/agentd.sock`;
-}
+import {
+  defaultSocketPath,
+  defaultToken,
+  parseUdsJson,
+  udsRequest,
+  type UdsResponse,
+} from "./agentd-client.js";
 
-/** agentd bearer token(agentd 启动时生成, harness 侧由部署方注入 env) */
-export function defaultToken(): string {
-  return process.env["TIMEM_AGENTD_TOKEN"] ?? "";
-}
-
-// ---- UDS HTTP client (node http.request 支持 socketPath) ----
-
-interface UdsResponse {
-  status: number;
-  body: string;
-}
-
-function udsRequest(
-  socketPath: string,
-  token: string,
-  method: string,
-  path: string,
-  body?: unknown,
-  timeoutMs = 30_000,
-): Promise<UdsResponse> {
-  return new Promise((resolve, reject) => {
-    const payload = body === undefined ? undefined : JSON.stringify(body);
-    const req = httpRequest(
-      {
-        socketPath,
-        method,
-        path,
-        timeout: timeoutMs,
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(payload ? { "Content-Type": "application/json" } : {}),
-        },
-      },
-      (res) => {
-        let data = "";
-        res.on("data", (c) => (data += c));
-        res.on("end", () => {
-          console.log(`[timem-project-task] UDS ${method} ${path} → HTTP ${res.statusCode} body=${data.slice(0, 200)}`);
-          resolve({ status: res.statusCode ?? 0, body: data });
-        });
-      },
-    );
-    req.on("timeout", () => {
-      req.destroy(new Error(`agentd request timeout (${timeoutMs}ms)`));
-    });
-    req.on("error", reject);
-    if (payload) req.write(payload);
-    req.end();
-  });
-}
-
-/** 解析 agentd application.Response/纯 JSON, 失败抛错 */
-function parseUdsJson<T>(resp: UdsResponse): T {
-  let parsed: any;
-  try {
-    parsed = JSON.parse(resp.body || "{}");
-  } catch {
-    throw new Error(`agentd 响应非 JSON: HTTP ${resp.status} ${resp.body.slice(0, 120)}`);
-  }
-  if (resp.status >= 400) {
-    const msg = parsed?.message ?? parsed?.error ?? `HTTP ${resp.status}`;
-    throw new Error(String(msg));
-  }
-  return parsed as T;
-}
+export { defaultSocketPath, defaultToken };
 
 // ---- ② identify: 归仓 ----
 

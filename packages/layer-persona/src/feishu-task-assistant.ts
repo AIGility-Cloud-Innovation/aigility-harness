@@ -55,6 +55,10 @@ export type TaskIntent =
   | { kind: "issue-need-repo"; title: string; body?: string }
   /** 建任务未指定仓库（C 方案要求同步建工单）：反问，不写任何数据 */
   | { kind: "task-need-repo"; title: string; dueDate?: string }
+  /** 派发确认：「确认派发 #N」（闸门内提前执行） */
+  | { kind: "dispatch-confirm"; ref: string }
+  /** 派发取消：「取消派发 #N」（撤销 agentd 任务） */
+  | { kind: "dispatch-cancel"; ref: string }
   | { kind: "overview" }
   | { kind: "help" };
 
@@ -143,6 +147,12 @@ export function parseTaskIntent(input: string): TaskIntent {
   const stripped = extractRepoSpec(text);
   const repoSpec = stripped.repo;
   const body = stripped.text;
+
+  // ── 派发确认/取消（闸门交互；「取消派发 #N」「确认派发 #N」） ──
+  let dm = body.match(/^(?:确认派发|立即执行|马上执行)\s*[:：]?\s*#?(\d+)\s*$/);
+  if (dm) return { kind: "dispatch-confirm", ref: dm[1] };
+  dm = body.match(/^(?:取消派发|别派发|撤销派发)\s*[:：]?\s*#?(\d+)\s*$/);
+  if (dm) return { kind: "dispatch-cancel", ref: dm[1] };
 
   if (/^(?:工单列表|我的工单|列出工单|看看工单|查工单列表)$/.test(body)) {
     return issueIntentFrom("issue-list", { repo: repoSpec });
