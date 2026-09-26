@@ -34,6 +34,7 @@
 | [[设计-企业微信接入]] | wecom-chat 设计：复用 wecom-ingress 的零新框架代码接入方案（§5 含 wecom-dsh 现状） |
 | [[设计-飞书入口]] | feishu-ingress 设计（**已实现**：`layer-infrastructure/src/feishu-ingress.ts`） |
 | [[设计-应用管理]] | AppBase 账号 / API Key / 用量监控 |
+| [[设计-应用授权]] | 两权分离（使用权/管理权，**已实现**）+ manager 按应用授权（设计定稿待实施） |
 | [[设计-插件集成]] | 插件集成设计（plugin-integration） |
 | [[设计-任务编排工作流]] | 任务意图识别 + workflow-engine 编排 |
 | [[设计-PolicyAgent]] | 策略型 Agent 设计 |
