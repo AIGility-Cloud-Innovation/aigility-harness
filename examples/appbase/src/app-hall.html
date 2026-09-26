@@ -144,7 +144,7 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
   <div class="panel">
     <div class="phead"><b>⚙ 应用管理 — <span id="mgAppName"></span></b><button class="btn-x" onclick="closeMg()">✕</button></div>
     <div class="pbody">
-      <div class="sec">
+      <div class="sec" id="verSec">
         <h3>🕘 版本历史</h3>
         <div class="sh">编码代理每次改动前自动快照；可恢复到任一版本（恢复前会自动再快照当前状态，误恢复可回退）</div>
         <div id="verList"><div class="sub" style="font-size:12px;color:var(--ink2)">加载中…</div></div>
@@ -197,6 +197,11 @@ body { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",san
         <span id="envMsg" style="font-size:12px;color:var(--ink2);margin-left:8px"></span>
       </div>
       <div class="sec">
+        <h3>⚙ 后端进程</h3>
+        <div class="sh">应用自带的后端 daemon 交给平台统一纳管：注册启动命令后在此启停、看日志。启停状态落库——平台重启只恢复「运行中」的应用，明确停止过的不拉起；平台已在跑的实例会被收编不双起。启动命令继承平台环境变量（含域包插件 env 桥），声明的依赖插件未就绪时会提示。</div>
+        <div id="procBody"><div class="sub" style="font-size:12px;color:var(--ink2)">加载中…</div></div>
+      </div>
+      <div class="sec" id="uninstallSec">
         <h3>🗑 卸载应用</h3>
         <div class="sh">从大厅删除该应用文件，删除后无法找回（.backups 里的历史快照仍保留在磁盘上）。仅管理员可操作。</div>
         <button class="mbtn danger" onclick="armConfirm(this, uninstallApp)">🗑 卸载此应用</button>
@@ -366,7 +371,8 @@ function loadApps() {
         + '<div class="ds">' + (a.size/1024).toFixed(1) + ' KB · ' + new Date(a.mtime).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) + '</div>'
         + '<div class="ops">'
         + '<button onclick="event.stopPropagation();openApp(\'' + encodeURIComponent(a.name) + '\')">打开</button>'
-        + (isAdmin ? '<button class="mg" onclick="event.stopPropagation();openMg(\'' + encodeURIComponent(a.name) + '\')">设置</button>' : '')
+        // 管理权 = owner ∪ 平台管理员 (与服务端 /app/hall/manage 闸门一致); 使用权用户不出现入口
+        + ((isAdmin || a.owner) ? '<button class="mg" onclick="event.stopPropagation();openMg(\'' + encodeURIComponent(a.name) + '\')">设置</button>' : '')
         + '</div></div>';
     });
     if (!hallApps.length && !isAdmin) {
@@ -407,8 +413,13 @@ function openApp(enc) {
 function openMg(enc) {
   mgApp = decodeURIComponent(enc);
   document.getElementById('mgAppName').textContent = mgApp.replace('.html','');
+  // 管理权 = owner ∪ 平台管理员; 版本历史/卸载是平台管理员专属 (服务端同样仅管理员), 非管理员 owner 隐藏
+  var adminOnly = isAdmin ? '' : 'none';
+  document.getElementById('verSec').style.display = adminOnly;
+  document.getElementById('uninstallSec').style.display = adminOnly;
   loadManage();
-  loadVersions();
+  if (isAdmin) loadVersions();
+  loadProc();
   document.getElementById('mgDrawer').classList.add('show');
 }
 function closeMg() { document.getElementById('mgDrawer').classList.remove('show'); }
@@ -670,6 +681,132 @@ function saveEnv() {
 function revokeKey(id) {
   fetchJSON('/app/hall/manage/key/' + id + '?app=' + encodeURIComponent(mgApp), { method:'DELETE', headers:jheaders() })
     .then(function(){ loadManage(); });
+}
+
+// ── 后端进程纳管 (进程宿主: desired_state 落库, 平台重启只恢复运行中的应用) ──
+function loadProc() {
+  fetchJSON('/app/hall/manage/proc?app=' + encodeURIComponent(mgApp), { headers: jheaders() })
+    .then(renderProc)
+    .catch(function(e) {
+      var el = document.getElementById('procBody');
+      if (el) el.innerHTML = '<div class="sub" style="font-size:12px;color:var(--rose)">加载失败: ' + esc(e.message) + '</div>';
+    });
+}
+function procChip(status) {
+  if (status === 'running') return '<span class="okchip">● 运行中</span>';
+  if (status === 'adopted') return '<span class="okchip">● 运行中 · 平台外实例已收编</span>';
+  if (status === 'exited') return '<span class="openchip">● 已退出（期望运行中，可重新启动）</span>';
+  if (status === 'stopped') return '<span class="offchip" style="display:inline-block;border-radius:10px;padding:2px 8px;font-size:11px">● 已停止</span>';
+  return '';
+}
+function procFormHtml() {
+  return '<input class="minput" id="procCmd" placeholder="启动命令（必填）, 如: node log-monitor-daemon.js">'
+    + '<div style="display:flex;gap:8px">'
+    + '<input class="minput" id="procCwd" placeholder="工作目录（相对仓库根, 选填）, 如: examples/apps">'
+    + '<input class="minput" id="procPort" placeholder="端口(选填)" style="width:110px;flex:none">'
+    + '</div>'
+    + '<textarea class="minput" id="procEnv" style="min-height:56px;font-family:Consolas,monospace;font-size:12px" placeholder="环境变量 KEY=VALUE 每行一条（选填）&#10;LOGMON_PORT=39467"></textarea>'
+    + '<input class="minput" id="procPlugins" placeholder="依赖的域包插件, 逗号分隔（选填）, 如: timem">'
+    + '<button class="mbtn" onclick="saveProc()">保存注册</button>'
+    + '<span id="procMsg" style="font-size:12px;color:var(--ink2);margin-left:8px"></span>';
+}
+function fillProcForm(p) {
+  if (!p) return;
+  var e;
+  if ((e = document.getElementById('procCmd'))) e.value = p.command || '';
+  if ((e = document.getElementById('procCwd'))) e.value = p.cwd || '';
+  if ((e = document.getElementById('procPort'))) e.value = p.port || '';
+  if ((e = document.getElementById('procEnv'))) e.value = p.env ? Object.keys(p.env).map(function(k){ return k + '=' + p.env[k]; }).join('\n') : '';
+  if ((e = document.getElementById('procPlugins'))) e.value = (p.requiredPlugins || []).join(',');
+}
+function renderProc(d) {
+  var el = document.getElementById('procBody');
+  if (!el) return;
+  if (!d.registered) {
+    el.innerHTML = '<div class="sub" style="font-size:12px;color:var(--ink2);margin-bottom:8px">该应用还没注册后端进程，填一下启动命令即可纳管。</div>' + procFormHtml();
+    return;
+  }
+  var readiness = (d.pluginReadiness || []).map(function(r) {
+    return '<div class="rowline"><div class="grow"><b>' + esc(r.name) + '</b>'
+      + '<div class="sub">' + (r.mounted ? '已装载待命' : '未就绪' + (r.error ? ' · ' + esc(r.error) : '') + '；可在 ⚙ 平台设置 → DSH 插件 里配置启用') + '</div></div>'
+      + (r.mounted ? '<span class="okchip">✓</span>' : '<span class="openchip">✗</span>') + '</div>';
+  }).join('');
+  var meta = [];
+  if (d.port) meta.push('端口 ' + d.port);
+  if (d.pid) meta.push('pid ' + d.pid);
+  if (d.lastExitCode !== null && d.lastExitCode !== undefined) meta.push('上次退出码 ' + d.lastExitCode);
+  if (d.lastExitedAt) meta.push('退出于 ' + new Date(d.lastExitedAt).toLocaleString('zh-CN'));
+  el.innerHTML = '<div style="margin-bottom:8px">' + procChip(d.status)
+    + (meta.length ? ' <span class="sub" style="font-size:11.5px;color:var(--ink2)">' + esc(meta.join(' · ')) + '</span>' : '') + '</div>'
+    + '<div class="rowline" style="margin-bottom:8px"><div class="grow"><code style="font-size:11.5px;word-break:break-all">' + esc(d.command) + '</code>'
+    + '<div class="sub">cwd: ' + esc(d.cwd || '(仓库根)') + '</div></div></div>'
+    + (readiness ? '<div class="sub" style="font-size:12px;color:var(--ink2);margin-bottom:6px">依赖的域包插件</div>' + readiness : '')
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">'
+    + (d.status === 'running' || d.status === 'adopted'
+        ? '<button class="mbtn danger" onclick="stopProc()">■ 停止</button>'
+        : '<button class="mbtn" onclick="startProc()">▶ 启动</button>')
+    + '<button class="mbtn g" onclick="toggleProcLogs()">📜 日志</button>'
+    + '<button class="mbtn g" onclick="toggleProcEdit()">✎ 编辑</button>'
+    + '<button class="mbtn g" onclick="armConfirm(this, removeProc)">移除注册</button>'
+    + '</div>'
+    + '<pre id="procLog" style="display:none;max-height:220px;overflow-y:auto;background:#0f172a;color:#cbd5e1;border-radius:10px;padding:10px;font-size:11px;line-height:1.5;white-space:pre-wrap;margin-top:8px"></pre>'
+    + '<div id="procEdit" style="display:none;margin-top:12px;border-top:1px dashed var(--line);padding-top:10px">' + procFormHtml() + '</div>';
+  fillProcForm(d);
+}
+function toggleProcEdit() {
+  var f = document.getElementById('procEdit');
+  if (f) f.style.display = f.style.display === 'none' ? 'block' : 'none';
+}
+function saveProc() {
+  fetchJSON('/app/hall/manage/proc?app=' + encodeURIComponent(mgApp), {
+    method: 'PUT', headers: jheaders(),
+    body: JSON.stringify({
+      command: document.getElementById('procCmd').value.trim(),
+      cwd: document.getElementById('procCwd').value.trim(),
+      port: Number(document.getElementById('procPort').value) || '',
+      envText: document.getElementById('procEnv').value,
+      requiredPlugins: document.getElementById('procPlugins').value
+    })
+  }).then(function(d) {
+    var m = document.getElementById('procMsg');
+    if (m) m.textContent = d.ok ? '✓ 已保存' : '✗ ' + (d.error || '');
+    loadProc();
+  }).catch(function(e) {
+    var m = document.getElementById('procMsg');
+    if (m) m.textContent = '✗ ' + e.message; else toast('✗ 保存失败: ' + e.message);
+  });
+}
+function startProc() {
+  fetchJSON('/app/hall/manage/proc/start?app=' + encodeURIComponent(mgApp), { method: 'POST', headers: jheaders() })
+    .then(function(d) {
+      if (d.warnings && d.warnings.length) toast('⚠ ' + d.warnings[0]);
+      toast(d.adopted ? '✓ 已有实例在跑，收编不双起' : '✓ 已启动');
+      loadProc();
+    })
+    .catch(function(e) { toast('✗ 启动失败: ' + e.message); });
+}
+function stopProc() {
+  fetchJSON('/app/hall/manage/proc/stop?app=' + encodeURIComponent(mgApp), { method: 'POST', headers: jheaders() })
+    .then(function() { toast('✓ 已停止'); loadProc(); })
+    .catch(function(e) { toast('✗ 停止失败: ' + e.message); });
+}
+function removeProc() {
+  fetchJSON('/app/hall/manage/proc?app=' + encodeURIComponent(mgApp), { method: 'DELETE', headers: jheaders() })
+    .then(function() { toast('✓ 已移除注册'); loadProc(); })
+    .catch(function(e) { toast('✗ 移除失败: ' + e.message); });
+}
+function toggleProcLogs() {
+  var pre = document.getElementById('procLog');
+  if (!pre) return;
+  if (pre.style.display === 'none') {
+    pre.style.display = 'block';
+    pre.textContent = '加载中…';
+    fetchJSON('/app/hall/manage/proc/logs?app=' + encodeURIComponent(mgApp), { headers: jheaders() })
+      .then(function(d) { pre.textContent = (d.logs || []).join('\n') || '(暂无日志)'; })
+      .catch(function(e) { pre.textContent = '日志加载失败: ' + e.message; });
+  } else {
+    pre.style.display = 'none';
+  }
 }
 
 // ── 对话抽屉 (角色定义 + 报修工单面板) ──
