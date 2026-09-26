@@ -191,25 +191,30 @@ export async function confirmPrompt(
   return parseUdsJson<AgentdTask>(resp);
 }
 
-/** POST /v1/tasks/{id}/run — 立即执行(queued 可直接 run；会清除定时，提前执行) */
-export async function runTask(endpoint: AgentdEndpoint, taskId: string): Promise<AgentdTask> {
-  const [socketPath, token] = ep(endpoint);
-  const resp = await udsRequest(socketPath, token, "POST", `/v1/tasks/${taskId}/run`, {});
-  return parseUdsJson<AgentdTask>(resp);
-}
-
-/** DELETE /v1/tasks/{id} — 取消(pending_confirm/pending_project/queued/running) */
+/** POST /v1/tasks/{id} — 取消(pending_confirm/pending_project/queued/running) */
 export async function cancelTask(endpoint: AgentdEndpoint, taskId: string): Promise<AgentdTask> {
   const [socketPath, token] = ep(endpoint);
   const resp = await udsRequest(socketPath, token, "DELETE", `/v1/tasks/${taskId}`);
-  return parseUdsJson<AgentdTask>(resp);
+  const parsed = parseUdsJson<AgentdTask | null>(resp);
+  return { id: taskId, ...(parsed ?? {}), status: parsed?.status ?? "cancelled" };
 }
 
 /** GET /v1/tasks/{id} — 查单个任务 */
 export async function getTask(endpoint: AgentdEndpoint, taskId: string): Promise<AgentdTask> {
   const [socketPath, token] = ep(endpoint);
   const resp = await udsRequest(socketPath, token, "GET", `/v1/tasks/${taskId}`);
-  return parseUdsJson<AgentdTask>(resp);
+  const parsed = parseUdsJson<AgentdTask | null>(resp);
+  // 兜底：部分响应体只带 error/message 不带 id，注入调用方已知的 id
+  return { id: taskId, ...(parsed ?? {}) };
+}
+
+/** POST /v1/tasks/{id}/run — 立即执行(queued 可直接 run；会清除定时，提前执行)。
+ *  实测（2026-09-26 活体）：run 受理后任务转 preparing 异步执行，响应体为字面量 null。 */
+export async function runTask(endpoint: AgentdEndpoint, taskId: string): Promise<AgentdTask> {
+  const [socketPath, token] = ep(endpoint);
+  const resp = await udsRequest(socketPath, token, "POST", `/v1/tasks/${taskId}/run`, {});
+  const parsed = parseUdsJson<AgentdTask | null>(resp);
+  return parsed ?? { id: taskId, status: "preparing" };
 }
 
 /** GET /v1/tasks?status=… — 列任务(可选状态过滤) */

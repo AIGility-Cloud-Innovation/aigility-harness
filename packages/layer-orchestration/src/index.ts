@@ -69,6 +69,32 @@ export type {
   SectionKey,
 } from "./task-issue-sync.js";
 
+// agentd UDS 客户端原语（编排层共享，派发域与 timem-project-task 共用）
+export {
+  defaultSocketPath,
+  defaultToken,
+  udsRequest,
+  parseUdsJson,
+  createFromMessage,
+  confirmProject,
+  confirmPrompt,
+  runTask,
+  cancelTask,
+  getTask,
+  listTasks,
+  pollTaskUntilFinal,
+  CANCELABLE_STATUSES,
+  FINAL_STATUSES,
+  pollIntervalMs,
+  pollTimeoutMs,
+} from "./agentd-client.js";
+export type {
+  AgentdEndpoint,
+  AgentdTask,
+  CreateFromMessageResult,
+  UdsResponse,
+} from "./agentd-client.js";
+
 export { RequirementStore } from "./requirement-store.js";
 export type {
   SessionPhase,
