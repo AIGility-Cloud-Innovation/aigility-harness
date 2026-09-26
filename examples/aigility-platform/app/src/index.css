@@ -1,0 +1,137 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5.9% 10%;
+    --radius: 0.625rem;
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+/* ===== 飞书配色体系 ===== */
+:root {
+  --fs-blue: #3370FF;
+  --fs-blue-hover: #295FEF;
+  --fs-blue-active: #2456DB;
+  --fs-blue-light: #EBF1FF;
+  --fs-blue-border: #C7DBFF;
+  --fs-cyan: #14C0FF;
+  --fs-text: #1F2329;
+  --fs-text-2: #646A73;
+  --fs-text-3: #8F959E;
+  --fs-border: #E5E6EB;
+  --fs-bg: #F5F6F7;
+}
+
+body {
+  background: var(--fs-bg);
+  color: var(--fs-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection { background: #C7DBFF; color: #1F2329; }
+
+/* 细滚动条（飞书风格） */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #D0D3D6; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #BBBFC4; }
+
+/* 品牌蓝统一为飞书蓝（覆盖 Tailwind 默认 blue） */
+.bg-blue-600 { background-color: var(--fs-blue) !important; }
+.bg-blue-700 { background-color: var(--fs-blue-hover) !important; }
+.hover\:bg-blue-700:hover { background-color: var(--fs-blue-hover) !important; }
+.hover\:bg-blue-600:hover { background-color: var(--fs-blue) !important; }
+.text-blue-600 { color: var(--fs-blue) !important; }
+.text-blue-700 { color: var(--fs-blue-hover) !important; }
+.hover\:text-blue-600:hover { color: var(--fs-blue) !important; }
+.bg-blue-50 { background-color: var(--fs-blue-light) !important; }
+.hover\:bg-blue-50:hover { background-color: var(--fs-blue-light) !important; }
+.border-blue-600 { border-color: var(--fs-blue) !important; }
+.border-blue-500 { border-color: var(--fs-blue) !important; }
+.border-blue-200 { border-color: var(--fs-blue-border) !important; }
+.ring-blue-500 { --tw-ring-color: var(--fs-blue) !important; }
+.focus\:ring-blue-500:focus { --tw-ring-color: var(--fs-blue) !important; }
+.focus\:border-blue-500:focus { border-color: var(--fs-blue) !important; }
+.from-blue-600 { --tw-gradient-from: var(--fs-blue) var(--tw-gradient-from-position) !important; --tw-gradient-to: rgb(51 112 255 / 0) var(--tw-gradient-to-position) !important; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important; }
+.to-blue-600, .to-blue-700 { --tw-gradient-to: var(--fs-blue) var(--tw-gradient-to-position) !important; }
+.bg-blue-100 { background-color: #D6E4FF !important; }
+.text-blue-500 { color: var(--fs-blue) !important; }
+
+/* 飞书式中性底色与文字 */
+.bg-gray-50, .bg-slate-50 { background-color: var(--fs-bg) !important; }
+.text-gray-900, .text-slate-900, .text-slate-800 { color: var(--fs-text); }
+.text-gray-500, .text-slate-500 { color: var(--fs-text-2); }
+.text-gray-400, .text-slate-400 { color: var(--fs-text-3); }
+
+/* 输入框聚焦统一飞书蓝 */
+input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: none;
+  border-color: var(--fs-blue) !important;
+  box-shadow: 0 0 0 2px rgba(51, 112, 255, 0.15);
+}
