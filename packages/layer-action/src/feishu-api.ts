@@ -89,7 +89,7 @@ const AUTHORIZE_BASE = "https://accounts.feishu.cn";
 /** OAuth 回调地址约定：须与飞书开放平台应用注册的重定向 URL 一致 */
 export const DEFAULT_REDIRECT_URI = "http://localhost:18080/callback";
 /** 默认授权范围：空格分隔（飞书约定，逗号分隔会报 20043） */
-export const DEFAULT_SCOPES = "task:task:read task:task:write";
+export const DEFAULT_SCOPES = "task:task:read task:task:write task:section:read task:section:write";
 
 /** 拼接完整 URL（query 值做 URI 编码） */
 export function buildFeishuUrl(
@@ -226,32 +226,48 @@ export async function exchangeAuthCode(
   opts?: { baseUrl?: string; redirectUri?: string },
 ): Promise<UserTokenRecord> {
   const baseUrl = opts?.baseUrl ?? DEFAULT_BASE;
-  const r = await fetch(`${baseUrl}/open-apis/authen/v2/oauth/token`, {
+  const appResp = await fetch(`${baseUrl}/open-apis/auth/v3/app_access_token/internal`, {
     method: "POST",
     headers: { "content-type": "application/json; charset=utf-8" },
-    body: JSON.stringify({
-      grant_type: "authorization_code",
-      client_id: env.appId,
-      client_secret: env.appSecret,
-      code,
-      redirect_uri: opts?.redirectUri ?? DEFAULT_REDIRECT_URI,
-    }),
+    body: JSON.stringify({ app_id: env.appId, app_secret: env.appSecret }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  const appJson = (await appResp.json()) as { code: number; msg: string; app_access_token?: string };
+  if (appJson.code !== 0 || !appJson.app_access_token) {
+    throw new Error(`feishu-api: 获取 app_access_token 失败: ${appJson.msg} (code=${appJson.code})`);
+  }
+  const r = await fetch(`${baseUrl}/open-apis/authen/v1/oidc/access_token`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      authorization: `Bearer ${appJson.app_access_token}`,
+    },
+    body: JSON.stringify({ grant_type: "authorization_code", code }),
     signal: AbortSignal.timeout(20_000),
   });
   const j = (await r.json()) as {
+    code?: number;
+    data?: {
+      access_token?: string;
+      refresh_token?: string;
+      expires_in?: number;
+      scope?: string;
+    };
     access_token?: string;
     refresh_token?: string;
     expires_in?: number;
     scope?: string;
   };
-  if (!j.access_token || !j.refresh_token) {
+  // v1 oidc 用 data 包裹，旧 v1 为扁平结构，两者兼容
+  const d = j.data ?? j;
+  if (!d.access_token || !d.refresh_token) {
     throw new Error(`feishu-api: 授权码换 token 失败: ${JSON.stringify(j)}`);
   }
   const rec: UserTokenRecord = {
-    access_token: j.access_token,
-    refresh_token: j.refresh_token,
-    expires_at: new Date(Date.now() + ((j.expires_in ?? 7200) - 60) * 1000).toISOString(),
-    scope: j.scope,
+    access_token: d.access_token,
+    refresh_token: d.refresh_token,
+    expires_at: new Date(Date.now() + ((d.expires_in ?? 7200) - 60) * 1000).toISOString(),
+    scope: d.scope,
   };
   await persistUserRecord(env, rec);
   return rec;
@@ -262,34 +278,50 @@ export async function getFreshUserToken(env: TokenEnv, baseUrl: string): Promise
   const rec = await loadUserRecord(env);
   if (!isTokenExpired(rec.expires_at)) return rec.access_token;
 
-  const r = await fetch(`${baseUrl}/open-apis/authen/v2/oauth/token`, {
+  const appResp = await fetch(`${baseUrl}/open-apis/auth/v3/app_access_token/internal`, {
     method: "POST",
     headers: { "content-type": "application/json; charset=utf-8" },
-    body: JSON.stringify({
-      grant_type: "refresh_token",
-      client_id: env.appId,
-      client_secret: env.appSecret,
-      refresh_token: rec.refresh_token,
-    }),
+    body: JSON.stringify({ app_id: env.appId, app_secret: env.appSecret }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  const appJson = (await appResp.json()) as { code: number; msg: string; app_access_token?: string };
+  if (appJson.code !== 0 || !appJson.app_access_token) {
+    throw new Error(`feishu-api: 获取 app_access_token 失败: ${appJson.msg} (code=${appJson.code})`);
+  }
+  const r = await fetch(`${baseUrl}/open-apis/authen/v1/oidc/refresh_access_token`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      authorization: `Bearer ${appJson.app_access_token}`,
+    },
+    body: JSON.stringify({ grant_type: "refresh_token", refresh_token: rec.refresh_token }),
     signal: AbortSignal.timeout(20_000),
   });
   const j = (await r.json()) as {
+    code?: number;
+    data?: {
+      access_token?: string;
+      refresh_token?: string;
+      expires_in?: number;
+      scope?: string;
+    };
     access_token?: string;
     refresh_token?: string;
     expires_in?: number;
     scope?: string;
   };
-  if (!j.access_token || !j.refresh_token) {
+  // v1 oidc 用 data 包裹，旧 v1 为扁平结构，两者兼容
+  const d = j.data ?? j;
+  if (!d.access_token || !d.refresh_token) {
     throw new Error(
       "feishu-api: 用户 token 续期失败（refresh_token 可能已失效），请重新走一次 OAuth 授权（npx tsx packages/layer-action/authorize-feishu.ts）",
     );
   }
   const next: UserTokenRecord = {
-    access_token: j.access_token,
-    // 注意：飞书 refresh 响应不返回新 refresh_token，必须保留旧值，否则下次续期必失败
-    refresh_token: j.refresh_token ?? rec.refresh_token,
-    expires_at: new Date(Date.now() + ((j.expires_in ?? 7200) - 60) * 1000).toISOString(),
-    scope: j.scope ?? rec.scope,
+    access_token: d.access_token,
+    refresh_token: d.refresh_token,
+    expires_at: new Date(Date.now() + ((d.expires_in ?? 7200) - 60) * 1000).toISOString(),
+    scope: d.scope ?? rec.scope,
   };
   await persistUserRecord(env, next);
   return next.access_token;
