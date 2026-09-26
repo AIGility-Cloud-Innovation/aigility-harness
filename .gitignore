@@ -12,9 +12,14 @@ examples/wecom-timem/kb_index/
 # AppBase: codex 生成器产物目录 (运行时可重建, 不入库)
 # 例外: teacher-notebook.html 作为示例应用保留入库
 # 例外: log-monitor.html 日志监控看板入库 (部署相关地址一律用占位符/空默认, 真实值在本地 daemon-config)
+# 例外: log-monitor 前后端+启停脚本入库; 真实 config/state/vbs/cmd 启动器仍被 examples/apps/* 挡住
 examples/apps/*
 !examples/apps/teacher-notebook.html
 !examples/apps/log-monitor.html
+!examples/apps/log-monitor-daemon.js
+!examples/apps/log-monitor-daemon-config.example.json
+!examples/apps/log-monitor-install.cmd
+!examples/apps/log-monitor-uninstall.cmd
 __pycache__/
 *.pyc
 examples/appbase/src/.token-secret

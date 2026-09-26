@@ -1,0 +1,19 @@
+{
+  "webhook": "",
+  "keywords": "ERROR,Traceback,Exception",
+  "autos": [
+    {
+      "id": "d1_example_project",
+      "host": "http://<日志服务器IP>:19434",
+      "p": "project_name",
+      "s": "app",
+      "n": 150,
+      "interval": 5,
+      "on": true,
+      "nextAt": 0,
+      "checking": false,
+      "lastAt": 0,
+      "lastErr": ""
+    }
+  ]
+}

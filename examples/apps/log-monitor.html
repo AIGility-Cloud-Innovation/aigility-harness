@@ -113,7 +113,7 @@
       <button class="ghost" id="btnSyncCfg">⬆ 下发配置到守护进程</button>
       <button class="ghost" id="btnReloadD">刷新状态</button>
     </div>
-    <div class="msg" id="dMsg" style="color:#646a73">页面内监控只在浏览器打开时运行；守护进程在服务器上 7×24 运行。启动命令：<code>node log-monitor-daemon.js</code>（或 pm2 常驻），API 端口默认 39467。修改自动化后点「下发配置」同步给守护进程。</div>
+    <div class="msg" id="dMsg" style="color:#646a73">页面内监控只在浏览器打开时运行；守护进程 7×24 运行。Windows 双击 <code>log-monitor-install.cmd</code> 注册登录自启（隐藏窗口，卸载用 log-monitor-uninstall.cmd）；或前台 <code>node log-monitor-daemon.js</code>（pm2 常驻亦可）。页面也可直接从守护进程打开：<code>http://&lt;主机&gt;:39467/</code>。修改自动化后点「下发配置」同步给守护进程。</div>
     <div id="dErrs" style="margin-top:10px"></div>
   </div>
 
