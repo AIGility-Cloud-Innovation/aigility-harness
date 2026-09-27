@@ -53,7 +53,7 @@ packages/
 ├── kernel-dsh/           # DSH-Cordis 内核适配（插件生命周期 / DI / 事件溯源）
 ├── layer-infrastructure/ # D1 底座：http-ingress / wecom-ingress / feishu-ingress / http-relay / PgBusBridge
 ├── layer-cognitive/      # D2 认知：llm-inference / memory（电站，只供算力）
-├── layer-action/         # D3 行动：codex/zcode/claude 编码工人 / doc-worker 文档工人 / TTS / 工具执行
+├── layer-action/         # D3 行动：codex/zcode/claude 编码工人 / doc-worker 文档工人 / TTS/STT / 工具执行
 ├── layer-orchestration/  # D4 编排：workflow-engine / timem-project-task / guided-design
 ├── layer-persona/        # D5 人格：sales-chat / app-dev / coding-coach / timem-* 等具名角色
 ├── dsh-interop/          # 官方 DSH 能力目录 / profile 组合器

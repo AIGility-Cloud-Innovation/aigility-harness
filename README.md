@@ -41,7 +41,8 @@
 │║  ┌──────────────────────────────────────────────────────────────┐║    │
 │║  │D3 行动执行层 (layer-action) — 手脚                           │║    │
 │║  │   @action/codex-agent/zcode-agent/claude-agent 编码工人      │║    │
-│║  │   @action/text-to-speech · 工具执行 / 多渠道输出             │║    │
+│║  │   @action/text-to-speech / speech-to-text 模态工具           │║    │
+│║  │   @action/tool-execution · 工具执行 / 多渠道输出            │║    │
 │║  └──────────────────────────────────────────────────────────────┘║    │
 │║        │ 依赖 D1                                                 ║    │
 │║        ▼                                                         ║    │
@@ -108,7 +109,7 @@ flowchart TB
         direction TB
         D5["D5 角色人格层 layer-persona<br/>sales-chat / repair-chat / app-dev / coding-coach / harness-guide / timem-support"]
         D4["D4 编排规划层 layer-orchestration<br/>workflow-engine / timem-project-task / guided-design"]
-        D3["D3 行动执行层 layer-action<br/>codex/zcode/claude 编码代理工人 / text-to-speech / 工具执行"]
+        D3["D3 行动执行层 layer-action<br/>codex/zcode/claude 编码代理工人 / text-to-speech / speech-to-text / 工具执行"]
         D2["D2 认知算力层 layer-cognitive<br/>llm-inference / memory"]
         D1["D1 底座基础层 layer-infrastructure<br/>http-ingress / wecom-ingress / http-relay / protocol-adapter / PgBusBridge"]
         D5 -->|依赖| D4
@@ -437,7 +438,8 @@ pnpm --filter wecom-coder start
 | **企业微信入口（特色案例）** | `wecom-ingress`（aibot-node-sdk WebSocket 长连接 → 角色路由 → replyStream）+ 三个开箱案例：`wecom-coder`（@机器人 → app-dev → codex）/ `wecom-guide`（框架介绍员）/ `wecom-timem`（TiMEM 客服） | 任意 IM 通道（钉钉/飞书/微信，同构接入） |
 | **框架介绍员** | `harness-guide` 角色 → `@orchestration/workflow-engine-timem`（YAML 工作流经 py-bridge 驱动 aigility LangGraph） | 任意引导/编排流程 |
 | **TiMEM 记忆客服** | `timem-support` 角色（TiMEM 记忆作对话上下文）+ BM25 检索增强（`aigility.retrieval.bm25` 经 py-bridge） | 任意记忆/检索服务 |
-| TTS | `text-to-speech` | 任意 TTS 引擎 |
+| TTS | `text-to-speech`（msedge / MiniMax 双 Provider 热替换） | 任意 TTS 引擎 |
+| STT | `speech-to-text`（vosk 离线 / whisper ONNX，运行时可选依赖） | 任意 ASR 引擎 |
 | **Python 能力桥接** | `py-bridge`（JSON-RPC over stdio → aigility ADK） | 任意 Python 包，声明式配置接入 |
 | **工作流编排** | `aigility.workflow.WorkflowEngine`（YAML → LangGraph） | 任意编排引擎，通过 Seam 契约替换 |
 | **RAG 检索** | `aigility.rag.RAGService`（通过 py-bridge） | 任意 RAG 实现 |
@@ -553,9 +555,9 @@ aigility-harness/
 │   │                              #   PluginManifest.adminPanels 管理面板贡献点 / SeamRegistry.listAllServices
 │   ├── kernel-dsh/                # DSH-Cordis 内核适配器（Seam Registry / Effect Manager / Carrier Manager）
 │   ├── layer-cognitive/           # D2 认知算力层（LLM 推理：stub + litellm + timem-memory-provider）
-│   ├── layer-persona/            # D5 角色人格层（sales-chat / repair-chat / app-dev / coding-coach / plugin-helper / advisory-chat / harness-guide / timem-support / banban-chat / fde-assistant / lesson-prep-chat / speech-to-text）
+│   ├── layer-persona/            # D5 角色人格层（sales-chat / repair-chat / app-dev / coding-coach / plugin-helper / advisory-chat / harness-guide / timem-support / banban-chat / fde-assistant / lesson-prep-chat；模态能力只声明，本体在 layer-action）
 │   ├── layer-orchestration/       # D4 编排规划层（任务规划 + plugin-install + timem-project-task 需求缓冲工作流 + guided-design）
-│   ├── layer-action/              # D3 行动执行层（编码代理工人 codex/zcode/claude + 文档工人 doc-worker(docx) + TTS + 沙箱快照 + TiMEM 记忆检索/写入）
+│   ├── layer-action/              # D3 行动执行层（编码代理工人 codex/zcode/claude + 文档工人 doc-worker(docx) + 模态工具 TTS/STT + 沙箱快照 + TiMEM 记忆检索/写入）
 │   ├── layer-infrastructure/      # D1 底座基础层（config/logging/protocol-adapter/http-ingress/wecom-ingress/http-relay/PgBusBridge）
 │   │   └── src/
 │   │       ├── protocol-adapter.ts    # 协议翻译（Anthropic/OpenAI/Responses → 内部标准，类型取自 core 契约）
