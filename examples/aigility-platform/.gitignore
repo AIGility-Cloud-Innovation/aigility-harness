@@ -2,3 +2,4 @@ node_modules
 app/dist
 data/*.json
 *.local
+data/workflows/

@@ -132,6 +132,23 @@ aigility-platform/
 | `TIMEM_API_KEY` / `TIMEM_BASE_URL` | — | TiMEM 记忆（未配置时记忆节点静默跳过；配置不可达时 TiMEM 空间如实上报） |
 | `APPBASE_PG_HOST/PORT/DATABASE/USER/PASSWORD` | `127.0.0.1:5433/appbase` | AppBase 平台 PG（登录账号 + 网关 key 持久化 + 用量计量 + dsh_plugins 注册表） |
 
+## 工作流执行通道（workflow 执行器 · 待 SDK 落地即通）
+
+任务板执行器 `workflow`（复杂任务自动拆解）：Plan 阶段 LLM 拆解为子任务 DAG → 生成 aigility workflow YAML（`data/workflows/<taskId>.yaml`，复用 layer-orchestration consolidation 纯函数）→ 人审 YAML → 批准后经 py-bridge 执行。
+
+SDK 侧 `aigility.workflow.runtime.run_yaml_workflow(config_path, **state)` 落地后，在 `config/py-plugins.json` 的 aigility-workflow 插件 capabilities 追加即通（其余零改动）：
+
+```json
+{
+  "id": "@orchestration/workflow-runtime",
+  "layer": "orchestration",
+  "function": "aigility.workflow.runtime.run_yaml_workflow",
+  "env": { "LITELLM_URL": "http://127.0.0.1:48724", "LITELLM_KEY": "sk-1234", "LLM_MODEL": "qwen2.5:7b" }
+}
+```
+
+注意：py-bridge 任一 capability 初始化失败会拖垮插件 onLoad（服务无法启动）——runtime.py 未落地前**不要**提前加该声明；未声明时批准执行会优雅失败并提示指引。
+
 ## LLM 上游说明
 
 - 优先级：`app_llm_config` 表 `platform:*` 且 `is_active=true` 的行会在启动时热应用（覆盖 env）；该行失效时对话自动降级 stub 并带【服务降级】标记。

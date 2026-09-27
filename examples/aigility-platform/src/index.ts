@@ -54,6 +54,8 @@ import { aigilityAgentPlugin } from "./aigility-agent.js";
 import { dshToolBridgePlugin } from "./dsh-tool.js";
 import { listSkills, upsertSkill, removeSkill, usageSnapshot, type AigilitySkillInput } from "./skill-registry.js";
 import type { DshToolBridgeResponse } from "./dsh-tool.js";
+import { planTask, WORKFLOW_DIR } from "./planner.js";
+import { existsSync as fileExists } from "node:fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -316,6 +318,7 @@ async function main(): Promise<void> {
   };
 
   const dispatchExecutorTask = (task: TaskRow): void => {
+    if (task.executor === "workflow") return void dispatchWorkflowPlanner(task);
     void (async () => {
       try {
         await transitionTask(task.id, "open", "running");
@@ -342,6 +345,60 @@ async function main(): Promise<void> {
       } catch (err) {
         await transitionTask(task.id, "running", "failed", { kind: "error", text: String(err) });
         console.error(`[task] 执行器失败「${task.title}」:`, err);
+      }
+    })();
+  };
+
+  // ── workflow 执行器 · Plan 段：LLM 拆解 → YAML 落盘 → review 人审 ──
+  const dispatchWorkflowPlanner = (task: TaskRow): void => {
+    void (async () => {
+      try {
+        await transitionTask(task.id, "open", "running");
+        const plan = await planTask(task.id, task.title, task.detail, async (messages) => {
+          const r = await seamCall<{ text?: string }>("@cognitive/llm-inference", {
+            model: process.env.LLM_MODEL ?? "qwen2.5:7b",
+            messages,
+            temperature: 0,
+          });
+          if (!r.ok) throw new Error(String(r.error ?? "llm-inference 调用失败"));
+          return r.value?.text ?? "";
+        });
+        await transitionTask(task.id, "running", "review", {
+          kind: "workflow", yaml: plan.yamlText, yamlPath: plan.yamlPath,
+          items: plan.items.map((i) => i.taskTitle), designDoc: plan.designDoc,
+        });
+        console.log(`[task] 拆解完成「${task.title}」(${plan.items.length} 个子任务) → review`);
+      } catch (err) {
+        await transitionTask(task.id, "running", "failed", { kind: "error", text: `拆解失败：${String(err)}` });
+        console.error(`[task] 拆解失败「${task.title}」:`, err);
+      }
+    })();
+  };
+
+  // ── workflow 执行器 · Do 段：人审批准 → py-bridge 执行 YAML ──
+  const executeWorkflowYaml = (task: TaskRow): void => {
+    void (async () => {
+      const result = (task.result ?? {}) as { yamlPath?: string };
+      const yamlPath = result.yamlPath ?? resolve(WORKFLOW_DIR, `${task.id}.yaml`);
+      try {
+        if (!fileExists(yamlPath)) throw new Error(`工作流文件缺失: ${yamlPath}`);
+        const r = await seamCall<Record<string, unknown>>("@orchestration/workflow-runtime", {
+          config_path: yamlPath,
+          user_input: `【任务】${task.title}\n${task.detail ?? ""}`,
+        });
+        // 注意：seamCall 失败是值形式（{ok:false,error}），不抛异常 —— 必须显式检查
+        if (!r.ok) throw new Error(String(r.error ?? "workflow-runtime 调用失败"));
+        const state = r.value ?? {};
+        const text = String((state as { result?: unknown }).result ?? JSON.stringify(state).slice(0, 2000));
+        await transitionTask(task.id, "running", "done", { kind: "text", text });
+        console.log(`[task] 工作流执行完成「${task.title}」`);
+      } catch (err) {
+        const msg = String(err);
+        const hint = msg.includes("resolve 失败") || msg.includes("Failed to resolve") || msg.includes("workflow-runtime")
+          ? `${msg}（等待 aigility SDK runtime.py 落地后，在 config/py-plugins.json 声明 @orchestration/workflow-runtime 即通，见 README）`
+          : msg;
+        await transitionTask(task.id, "running", "failed", { kind: "error", text: hint });
+        console.error(`[task] 工作流执行失败「${task.title}」:`, err);
       }
     })();
   };
@@ -505,7 +562,7 @@ async function main(): Promise<void> {
             json(res, 400, { ok: false, error: "title 必填" });
             return;
           }
-          const executor = ["human", "content", "docx"].includes(body.executor ?? "") ? body.executor! : "human";
+          const executor = ["human", "content", "docx", "workflow"].includes(body.executor ?? "") ? body.executor! : "human";
           const userId = requireUser(req, res);
           if (!userId) return;
           const email = (await emailById(userId)) ?? "unknown";
@@ -530,7 +587,7 @@ async function main(): Promise<void> {
         try {
           const body = JSON.parse((await readBody(req)) || "{}") as { to?: string };
           const to = body.to ?? "";
-          const legal: Record<string, string[]> = { open: ["done"], review: ["done", "rejected"], running: ["failed"] };
+          const legal: Record<string, string[]> = { open: ["done"], review: ["done", "rejected", "running"], running: ["failed", "done"], failed: ["running"] };
           const userId = requireUser(req, res);
           if (!userId) return;
           const email = (await emailById(userId)) ?? "unknown";
@@ -543,6 +600,9 @@ async function main(): Promise<void> {
           const updated = await transitionTask(transMatch[1], current.status, to, to === "done" && current.result ? current.result : undefined);
           if (!updated) { json(res, 409, { ok: false, error: "状态已被并发修改" }); return; }
           void writeAudit("task.transition", email, `${current.title}: ${current.status} → ${to}`);
+          if (current.status === "review" && to === "running" && current.executor === "workflow") {
+            executeWorkflowYaml(current);
+          }
           json(res, 200, { ok: true, task: updated });
         } catch (err) {
           json(res, 400, { ok: false, error: String(err) });

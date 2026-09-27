@@ -46,7 +46,7 @@ export default function WorkspacePage({ go }: { go: (p: string) => void }) {
   const openTasks = tasks.filter(t => t.status === 'open' || t.status === 'running' || t.status === 'failed')
   const reviewTasks = tasks.filter(t => t.status === 'review')
   const doneCount = tasks.filter(t => t.status === 'done').length
-  const execLabel: Record<string, string> = { human: '人工', content: 'Agent 产出', docx: 'Agent 文档', code: '研发派发' }
+  const execLabel: Record<string, string> = { human: '人工', content: 'Agent 产出', docx: 'Agent 文档', code: '研发派发', workflow: '工作流编排' }
 
   const me = getCurrentUser()
   const summary = usage?.summary
@@ -109,12 +109,13 @@ export default function WorkspacePage({ go }: { go: (p: string) => void }) {
                   <option value="human">人工完成</option>
                   <option value="content">Agent 产出文本</option>
                   <option value="docx">Agent 产出文档（docx）</option>
+                  <option value="workflow">工作流（复杂任务自动拆解）</option>
                 </select>
                 <button onClick={() => void newTask()} disabled={ntBusy || !ntTitle.trim()}
                   className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1">
                   {ntBusy ? <Loader2 size={11} className="animate-spin" /> : <PlusCircle size={11} />}发布任务
                 </button>
-                <span className="text-[10px] text-slate-400">Agent 类任务发布后自动执行，产出落审批区</span>
+                <span className="text-[10px] text-slate-400">Agent 类任务发布后自动执行；工作流任务先拆解成 YAML 供人审</span>
               </div>
             </div>
           )}
@@ -176,19 +177,32 @@ export default function WorkspacePage({ go }: { go: (p: string) => void }) {
           </div>
           <div className="space-y-3">
             {reviewTasks.map(t => {
-              const r = (t.result ?? {}) as { kind?: string; text?: string; filename?: string }
+              const r = (t.result ?? {}) as { kind?: string; text?: string; filename?: string; yaml?: string; items?: string[] }
+              const isWorkflow = r.kind === 'workflow'
               return (
-                <div key={t.id} className="rounded-lg border border-slate-100 bg-slate-50/60 p-3">
+                <div key={t.id} className={`rounded-lg border p-3 ${isWorkflow ? 'border-sky-200 bg-sky-50/40' : 'border-slate-100 bg-slate-50/60'}`}>
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-xs font-medium text-slate-700">{t.title}</div>
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 whitespace-nowrap">{execLabel[t.executor] ?? t.executor}</span>
                   </div>
+                  {isWorkflow && (
+                    <div className="mt-1.5 text-[11px] text-slate-500 leading-relaxed">
+                      拆解为 {r.items?.length ?? 0} 个子任务：{r.items?.join(' → ')}
+                    </div>
+                  )}
                   {r.kind === 'file' && r.filename && (
                     <button onClick={() => downloadTaskFile(t.result as { filename: string; base64: string })} className="text-[11px] mt-2 text-blue-600 hover:underline flex items-center gap-1"><FileText size={11} />下载产出 {r.filename}</button>
                   )}
-                  {r.text && <div className="text-[11px] text-slate-500 mt-1.5 leading-relaxed max-h-24 overflow-y-auto whitespace-pre-wrap">{r.text.slice(0, 400)}</div>}
+                  {r.kind === 'workflow' && r.yaml ? (
+                    <pre className="text-[10px] font-mono bg-slate-900 text-sky-200 rounded-lg px-3 py-2 mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap">{r.yaml}</pre>
+                  ) : (
+                    r.text && <div className="text-[11px] text-slate-500 mt-1.5 leading-relaxed max-h-24 overflow-y-auto whitespace-pre-wrap">{r.text.slice(0, 400)}</div>
+                  )}
                   <div className="flex gap-2 mt-2.5">
-                    <button onClick={() => void doTransition(t, 'done')} className="text-[11px] px-2.5 py-1 rounded-md bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-1"><CheckCircle2 size={11} />通过</button>
+                    <button onClick={() => void doTransition(t, isWorkflow ? 'running' : 'done')}
+                      className="text-[11px] px-2.5 py-1 rounded-md bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-1">
+                      <CheckCircle2 size={11} />{isWorkflow ? '批准执行' : '通过'}
+                    </button>
                     <button onClick={() => void doTransition(t, 'rejected')} className="text-[11px] px-2.5 py-1 rounded-md border border-slate-200 text-slate-500 hover:bg-white">驳回</button>
                   </div>
                 </div>
