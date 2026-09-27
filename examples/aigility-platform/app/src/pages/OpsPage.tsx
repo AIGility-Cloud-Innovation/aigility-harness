@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import EChart from '../components/EChart'
-import { opsStats, opsTrend, opsCatShare, opsToken, opsTasks } from '../mock/data'
+import { opsStats, opsCatShare, opsToken, opsTasks } from '../mock/data'
 import { fetchMetrics, fetchUsage, type MetricsPayload, type UsagePayload } from '../lib/harness'
 import { CheckCircle2, Clock, Wallet, TrendingUp, Radio } from 'lucide-react'
 
@@ -22,15 +22,20 @@ export default function OpsPage() {
     return () => clearInterval(t)
   }, [])
 
+  // 趋势图（真 · token-metering byDay）：调用次数 + Token 消耗双系列
+  const realDays = usage?.summary?.byDay ?? []
   const trendOption = {
     tooltip: { trigger: 'axis' },
-    legend: { data: ['智能体调用', '工具调用'], textStyle: { fontSize: 11, color: '#64748b' }, top: 0, right: 0 },
-    grid: { left: 40, right: 16, top: 32, bottom: 24 },
-    xAxis: { type: 'category', data: opsTrend.days, axisLine: { lineStyle: { color: '#e2e8f0' } }, axisLabel: { fontSize: 11, color: '#94a3b8' } },
-    yAxis: { type: 'value', splitLine: { lineStyle: { color: '#f1f5f9' } }, axisLabel: { fontSize: 11, color: '#94a3b8' } },
+    legend: { data: ['LLM 调用', 'Token 消耗'], textStyle: { fontSize: 11, color: '#64748b' }, top: 0, right: 0 },
+    grid: { left: 52, right: 52, top: 32, bottom: 24 },
+    xAxis: { type: 'category', data: realDays.map(d => d.key), axisLine: { lineStyle: { color: '#e2e8f0' } }, axisLabel: { fontSize: 11, color: '#94a3b8' } },
+    yAxis: [
+      { type: 'value', name: '调用', splitLine: { lineStyle: { color: '#f1f5f9' } }, axisLabel: { fontSize: 10, color: '#94a3b8' } },
+      { type: 'value', name: 'Token', splitLine: { show: false }, axisLabel: { fontSize: 10, color: '#94a3b8' } },
+    ],
     series: [
-      { name: '智能体调用', type: 'line', smooth: true, data: opsTrend.agent, lineStyle: { width: 2.5, color: '#3370FF' }, itemStyle: { color: '#3370FF' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(51,112,255,.18)' }, { offset: 1, color: 'rgba(51,112,255,0)' }] } }, symbolSize: 5 },
-      { name: '工具调用', type: 'line', smooth: true, data: opsTrend.tool, lineStyle: { width: 2.5, color: '#14C0FF' }, itemStyle: { color: '#14C0FF' }, symbolSize: 5 },
+      { name: 'LLM 调用', type: 'line', smooth: true, yAxisIndex: 0, data: realDays.map(d => d.calls), lineStyle: { width: 2.5, color: '#3370FF' }, itemStyle: { color: '#3370FF' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(51,112,255,.18)' }, { offset: 1, color: 'rgba(51,112,255,0)' }] } }, symbolSize: 5 },
+      { name: 'Token 消耗', type: 'line', smooth: true, yAxisIndex: 1, data: realDays.map(d => d.totalTokens), lineStyle: { width: 2.5, color: '#14C0FF' }, itemStyle: { color: '#14C0FF' }, symbolSize: 5 },
     ],
   }
 
@@ -104,7 +109,10 @@ export default function OpsPage() {
 
       <div className="grid lg:grid-cols-[1.6fr_1fr] gap-4">
         <div className="bg-white rounded-xl border border-slate-200/80 p-5">
-          <div className="font-medium text-slate-800 text-sm mb-2">调用趋势（{range}）</div>
+          <div className="font-medium text-slate-800 text-sm mb-2 flex items-center justify-between flex-wrap gap-1">
+            <span>调用与 Token 趋势 <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 align-middle">真</span></span>
+            {realDays.length === 0 && <span className="text-[11px] text-slate-400 font-normal">暂无数据，对话后按日累计</span>}
+          </div>
           <EChart option={trendOption as any} height={260} />
         </div>
         <div className="bg-white rounded-xl border border-slate-200/80 p-5">

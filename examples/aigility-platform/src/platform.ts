@@ -98,6 +98,27 @@ export async function ensureAigilityPlatform(): Promise<AigilityPlatform> {
      SELECT $1, id FROM users ON CONFLICT DO NOTHING`,
     [AIGILITY_APP_ID]);
 
+  // 3.5 任务表（平台级通用实体, 与 audit_log/credit 同级）—— 迁移幂等
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS task (
+      id          uuid PRIMARY KEY,
+      title       text NOT NULL,
+      detail      text DEFAULT '',
+      executor    text NOT NULL DEFAULT 'human',
+      status      text NOT NULL DEFAULT 'open',
+      priority    text DEFAULT '中',
+      due_at      timestamptz,
+      created_by  text NOT NULL,
+      result      jsonb,
+      session_id  text,
+      trace_id    text,
+      created_at  timestamptz DEFAULT now(),
+      updated_at  timestamptz DEFAULT now()
+    )`);
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_task_status ON task (status)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_task_created_by ON task (created_by)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_task_due ON task (due_at)");
+
   // 4. DSH 工具桥种子（幂等）：dsh-tools 提供 ctx.tools 服务, dsh-mcp-client
   //    把外部 MCP server 工具注册进来（公共名 mcp__<serverName>__<rawName>）。
   //    演示 server 用官方 @modelcontextprotocol/server-everything (stdio, npx 首跑拉包)。
@@ -125,8 +146,15 @@ export async function ensureAigilityPlatform(): Promise<AigilityPlatform> {
   for (const row of dshRows) {
     const loaded = status.plugins[row.name];
     if (loaded?.at || loaded?.error) continue;
-    await dshLoadPlugin(row);
+    const r = await dshLoadPlugin(row);
+    console.log(`[dsh] 装载 ${row.name}: ${r.ok ? "ok" : `失败 → ${r.error ?? "?"}`}`);
   }
+
+  // 4.5 联网工具（#1 快赢）：DSH 官方 web 工具（fetch 无需 key; search 需 DEEPSEEK_API_KEY）
+  await pool.query(
+    `INSERT INTO dsh_plugins (name, package, export_name, description, enabled, config)
+     VALUES ('web-tool','@deepseek-ai/dsh-tool-web','','DSH 网页抓取/搜索工具（search 需 DEEPSEEK_API_KEY）',true,'{"fetch":true,"searchTimeoutMs":60000}'::jsonb)
+     ON CONFLICT (name) DO NOTHING`);
 
   // 5. 应用网关 key（持久化；前端经注入免配置）
   const gatewayKey = await ensureAppKey(AIGILITY_APP_ID, adminId);
@@ -188,4 +216,65 @@ export async function recentAudit(limit = 20): Promise<Array<{ at: string; actor
 export async function emailById(userId: string): Promise<string | null> {
   const { rows } = await pool.query("SELECT email FROM users WHERE id = $1", [userId]);
   return rows[0]?.email ?? null;
+}
+
+// ── 任务表（真表, 平台级通用实体）────────────────────────────────
+
+export interface TaskRow {
+  id: string;
+  title: string;
+  detail: string;
+  executor: string;
+  status: string;
+  priority: string;
+  dueAt: string | null;
+  createdBy: string;
+  result: unknown;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function mapTask(r: any): TaskRow {
+  return {
+    id: r.id, title: r.title, detail: r.detail ?? "", executor: r.executor,
+    status: r.status, priority: r.priority ?? "中",
+    dueAt: r.due_at ?? null, createdBy: r.created_by,
+    result: r.result ?? null,
+    createdAt: r.created_at, updatedAt: r.updated_at,
+  };
+}
+
+export async function createTask(t: { title: string; detail?: string; executor: string; priority?: string; createdBy: string }): Promise<TaskRow> {
+  const id = randomUUID();
+  const { rows } = await pool.query(
+    `INSERT INTO task (id, title, detail, executor, status, priority, created_by)
+     VALUES ($1,$2,$3,$4,'open',$5,$6) RETURNING *`,
+    [id, t.title, t.detail ?? "", t.executor, t.priority ?? "中", t.createdBy]);
+  return mapTask(rows[0]);
+}
+
+export async function listTasks(opts?: { status?: string; createdBy?: string; limit?: number }): Promise<TaskRow[]> {
+  const conds: string[] = [];
+  const args: unknown[] = [];
+  if (opts?.status) { args.push(opts.status); conds.push(`status = $${args.length}`); }
+  if (opts?.createdBy) { args.push(opts.createdBy); conds.push(`created_by = $${args.length}`); }
+  const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+  args.push(opts?.limit ?? 100);
+  const { rows } = await pool.query(
+    `SELECT * FROM task ${where} ORDER BY created_at DESC LIMIT $${args.length}`, args);
+  return rows.map(mapTask);
+}
+
+export async function getTask(id: string): Promise<TaskRow | null> {
+  const { rows } = await pool.query("SELECT * FROM task WHERE id = $1", [id]);
+  return rows[0] ? mapTask(rows[0]) : null;
+}
+
+/** CAS 状态流转：仅在当前状态匹配期望值时更新（timem-project 同款语义），可附带产出物 */
+export async function transitionTask(id: string, from: string, to: string, result?: unknown): Promise<TaskRow | null> {
+  const { rows } = await pool.query(
+    `UPDATE task SET status = $2, result = COALESCE($3::jsonb, result), updated_at = now()
+     WHERE id = $1 AND status = $4 RETURNING *`,
+    [id, to, result !== undefined ? JSON.stringify(result) : null, from]);
+  return rows[0] ? mapTask(rows[0]) : null;
 }

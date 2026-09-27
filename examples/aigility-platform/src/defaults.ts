@@ -14,3 +14,11 @@ if (!process.env.LLM_PROVIDER) {
       ? "litellm"
       : "stub";
 }
+
+// requirement-store（code 执行器的需求缓冲）缺省纯内存重启即丢 —— 示例默认落盘到 data/
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+if (!process.env.TIMEM_REQUIREMENT_STORE_PATH) {
+  process.env.TIMEM_REQUIREMENT_STORE_PATH = resolve(
+    dirname(fileURLToPath(import.meta.url)), "../data/requirement-store.json");
+}

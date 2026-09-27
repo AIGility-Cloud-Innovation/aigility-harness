@@ -357,6 +357,118 @@ export async function generateDoc(doc: { title: string; subtitle?: string; block
   return { filename: j.filename, bytes: j.bytes ?? blob.size }
 }
 
+// ── 任务板（真 · task 表 + 执行器路由）────────────────────────────
+
+export interface TaskItem {
+  id: string
+  title: string
+  detail: string
+  executor: string
+  status: string
+  priority: string
+  dueAt: string | null
+  createdBy: string
+  result: unknown
+  createdAt: string
+  updatedAt: string
+}
+
+export interface TaskResult {
+  kind?: 'text' | 'file' | 'error'
+  text?: string
+  filename?: string
+  base64?: string
+  bytes?: number
+}
+
+/** 任务列表（可按状态/是否本人过滤） */
+export async function fetchTasks(opts?: { status?: string; mine?: boolean }): Promise<TaskItem[]> {
+  const q = new URLSearchParams()
+  if (opts?.status) q.set('status', opts.status)
+  if (opts?.mine) q.set('mine', '1')
+  const j = await authJsonFetch<{ ok: boolean; tasks: TaskItem[] }>(`/api/aigility/tasks?${q}`)
+  return j.tasks
+}
+
+export interface NewTaskInput {
+  title: string
+  detail?: string
+  executor: string
+  priority?: string
+}
+
+/** 发布任务：human 留 open；content/docx 服务端自动派发执行器 */
+export async function createTask(t: NewTaskInput): Promise<TaskItem> {
+  const j = await authJsonFetch<{ ok: boolean; task: TaskItem; error?: string }>('/api/aigility/tasks', {
+    method: 'POST',
+    body: JSON.stringify(t),
+  })
+  return j.task
+}
+
+/** 任务状态流转（open→done / review→done|rejected，CAS） */
+export async function transitionTask(id: string, to: string): Promise<TaskItem> {
+  const j = await authJsonFetch<{ ok: boolean; task: TaskItem; error?: string }>(
+    `/api/aigility/tasks/${encodeURIComponent(id)}/transition`,
+    { method: 'POST', body: JSON.stringify({ to }) },
+  )
+  return j.task
+}
+
+/** 下载 agent 产出的 docx 文件 */
+export async function downloadTaskFile(result: { filename: string; base64: string }): Promise<void> {
+  const bin = atob(result.base64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = result.filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 3000)
+}
+
+// ── 报告模板（真存储 · AppBase /app/data JSONB 原语）──────────────
+
+export interface ReportTemplate {
+  rowId?: string
+  name: string
+  title: string
+  subtitle: string
+  content: string
+}
+
+const TPL_Q = 'app=aigility-platform'
+const TPL_TABLE = 'report_templates'
+
+export async function fetchReportTemplates(): Promise<ReportTemplate[]> {
+  const j = await authJsonFetch<{ rows: Array<{ id: string; data: { name?: string; title?: string; subtitle?: string; content?: string } }> }>(
+    `/app/data/${TPL_TABLE}?${TPL_Q}`, {})
+  return j.rows.map(r => ({
+    rowId: r.id,
+    name: r.data.name ?? '未命名模板',
+    title: r.data.title ?? '',
+    subtitle: r.data.subtitle ?? '',
+    content: r.data.content ?? '',
+  }))
+}
+
+export async function saveReportTemplate(t: Omit<ReportTemplate, 'rowId'>, rowId?: string): Promise<void> {
+  const payload = JSON.stringify({ data: { name: t.name, title: t.title, subtitle: t.subtitle, content: t.content } })
+  if (rowId) {
+    await authJsonFetch(`/app/data/${TPL_TABLE}/${rowId}?${TPL_Q}`, { method: 'PUT', body: payload })
+  } else {
+    await authJsonFetch(`/app/data/${TPL_TABLE}?${TPL_Q}`, { method: 'POST', body: payload })
+  }
+}
+
+export async function deleteReportTemplate(rowId: string): Promise<void> {
+  await authJsonFetch(`/app/data/${TPL_TABLE}/${rowId}?${TPL_Q}`, { method: 'DELETE' })
+}
+
 export interface TimemMemoryHit {
   content: string
   score?: number

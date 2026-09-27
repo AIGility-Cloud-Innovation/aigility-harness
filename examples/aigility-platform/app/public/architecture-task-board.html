@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>工作台任务板 · 执行器路由架构（待确认稿）</title>
+<style>
+  :root { --blue:#3370FF; --ink:#1F2329; --sub:#646A73; --line:#E5E6EB; --bg:#F6F7F9; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "PingFang SC","Microsoft YaHei",system-ui,sans-serif; background: var(--bg); color: var(--ink); padding: 28px 20px 60px; }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 20px; margin-bottom: 6px; }
+  .subtitle { font-size: 13px; color: var(--sub); margin-bottom: 14px; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--sub); margin-bottom: 22px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 26px; height: 0; border-top: 2.5px solid var(--blue); display: inline-block; }
+  .sw.dash { border-top-style: dashed; border-top-color: #F59E0B; }
+  .sw.gray { border-top-style: dashed; border-top-color: #CBD5E1; }
+  .layer { background: #fff; border: 1.5px solid var(--line); border-radius: 14px; padding: 16px 18px; margin-bottom: 0; }
+  .layer-tag { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--blue); margin-bottom: 10px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .box { background: #FAFBFC; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 12.5px; line-height: 1.55; flex: 1; min-width: 170px; }
+  .box b { display: block; font-size: 13px; margin-bottom: 3px; }
+  .box code { font-family: ui-monospace,Menlo,monospace; font-size: 11.5px; color: #1D4ED8; background: #EFF4FF; padding: 1px 5px; border-radius: 4px; }
+  .box.real { border-color: #A7F3D0; background: #F0FDF7; }
+  .box.plan { border-style: dashed; border-color: #FCD34D; background: #FFFBEB; }
+  .box.gray { border-style: dashed; border-color: #CBD5E1; background: #F8FAFC; color: #94A3B8; }
+  .arrow { text-align: center; padding: 7px 0; font-size: 12px; color: var(--sub); }
+  .arrow b { color: var(--blue); font-weight: 600; }
+  .arrow .glyph { font-size: 15px; color: #94A3B8; margin: 0 6px; }
+  .lanes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 12px; }
+  @media (max-width: 980px) { .lanes { grid-template-columns: repeat(2, 1fr); } }
+  .lane { border: 1px solid var(--line); border-radius: 10px; background: #FAFBFC; padding: 10px; font-size: 12px; }
+  .lane h4 { font-size: 12.5px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .tag { font-size: 10px; padding: 1px 7px; border-radius: 999px; font-weight: 600; }
+  .tag.real { background: #D1FAE5; color: #059669; }
+  .tag.plan { background: #FEF3C7; color: #B45309; }
+  .tag.gray { background: #F1F5F9; color: #94A3B8; }
+  .chain { display: flex; flex-direction: column; gap: 0; }
+  .step { background: #fff; border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px; }
+  .step code { font-size: 11px; color: #1D4ED8; }
+  .v { text-align: center; color: #94A3B8; font-size: 12px; line-height: 1.15; padding: 1px 0; }
+  .store { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+  @media (max-width: 980px) { .store { grid-template-columns: 1fr; } }
+  .confirm { margin-top: 26px; background: #fff; border: 1.5px solid var(--blue); border-radius: 14px; padding: 16px 18px; }
+  .confirm h2 { font-size: 15px; margin-bottom: 10px; }
+  .confirm ol { margin-left: 18px; font-size: 13px; line-height: 2; color: var(--ink); }
+  .confirm ol b { color: var(--blue); }
+  .foot { margin-top: 18px; font-size: 11.5px; color: #94A3B8; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>工作台任务板 · 执行器路由架构（待确认稿）</h1>
+  <div class="subtitle">Aigility 智悦智能平台 · 业务待办与 agent 可执行任务统一看板 · 依托五域引擎现成资源，零新造存储与执行器</div>
+  <div class="legend">
+    <span><i class="sw"></i>已有真链路（现成资源）</span>
+    <span><i class="sw dash"></i>本轮 #1–4 待实现</span>
+    <span><i class="sw gray"></i>扩展位（引擎暂无执行器）</span>
+  </div>
+
+  <!-- 第 1 层：前端 -->
+  <div class="layer">
+    <div class="layer-tag">前端 · 工作台任务板（WorkspacePage 今日任务看板）</div>
+    <div class="row">
+      <div class="box plan"><b>业务待办区（human）</b>人办的运营任务：审批工单、确认文档… 勾选闭环，存 task 表</div>
+      <div class="box plan"><b>agent 产物审批区（review）</b>agent 产出统一落"需确认"，人审通过才 done —— 人机分工收口</div>
+      <div class="box plan"><b>研发任务进度区（code）</b>派发给 agentd 的研发任务：轮询 requirement-store / agentd list 回显进度</div>
+      <div class="box plan"><b>新建任务</b>标题 + 说明 + <b>执行器选择</b>（human / content / docx / code / mcp 工具）</div>
+    </div>
+  </div>
+
+  <div class="arrow"><b>REST /api/aigility/tasks*</b><span class="glyph">↓</span>Bearer 会话（AppBase token）· 读写经 Web 层</div>
+
+  <!-- 第 2 层：Web -->
+  <div class="layer">
+    <div class="layer-tag">Web 层 · aigility-platform 服务（:1236，src/platform.ts + index.ts）</div>
+    <div class="row">
+      <div class="box plan"><b>任务 CRUD + CAS 状态机</b><code>listTasks / createTask / transitionTask</code><br/>流转 guarded：<code>UPDATE … WHERE status=期望态</code>（timem-project 同款）</div>
+      <div class="box plan"><b>执行器路由 dispatch</b><br/>switch(executor) → 经 Seam 调各域能力；路由器薄、无状态（v1 不沉插件）</div>
+      <div class="box real"><b>审计留痕</b><br/>任务流转写 <code>audit_log</code>（现成链路复用）</div>
+      <div class="box real"><b>task 表（PG appbase）</b><br/><code>id·title·detail·executor·status·priority·due_at·created_by·result(jsonb)</code><br/>索引：status / created_by / due_at —— 平台级通用实体，与 audit_log 同级</div>
+    </div>
+  </div>
+
+  <div class="arrow"><b>dispatch：switch(executor) → Seam ctx.call</b><span class="glyph">↓</span>五个现成执行器 + 两个扩展位</div>
+
+  <!-- 第 3 层：执行器泳道 -->
+  <div class="layer">
+    <div class="layer-tag">执行器泳道（全部为五域引擎现成能力；v1 先通前四条）</div>
+    <div class="lanes">
+      <div class="lane">
+        <h4>human <span class="tag plan">#2 本轮</span></h4>
+        <div class="chain">
+          <div class="step">任务停在 <code>open</code></div>
+          <div class="v">↓</div>
+          <div class="step">工作台勾选 → <code>done</code></div>
+          <div class="v">↓</div>
+          <div class="step">audit_log 留痕</div>
+        </div>
+      </div>
+      <div class="lane">
+        <h4>content（文本产出） <span class="tag plan">#2 本轮</span></h4>
+        <div class="chain">
+          <div class="step">D4 <code>@orchestration/workflow-engine</code></div>
+          <div class="v">↓ 记忆召回→推理→沉淀</div>
+          <div class="step">D2 <code>@cognitive/llm-inference</code><br/>litellm 代理 · deepseek-v4-flash</div>
+          <div class="v">↓</div>
+          <div class="step">产出 text → <code>review</code></div>
+        </div>
+      </div>
+      <div class="lane">
+        <h4>docx（文件产出） <span class="tag plan">#2 本轮</span></h4>
+        <div class="chain">
+          <div class="step">content 产出文本</div>
+          <div class="v">↓</div>
+          <div class="step">D3 <code>@action/doc-worker</code><br/>结构化块 → 服务端 docx（已验证 8.8KB）</div>
+          <div class="v">↓</div>
+          <div class="step">文件引用 → <code>review</code> → 下载</div>
+        </div>
+      </div>
+      <div class="lane">
+        <h4>code（研发） <span class="tag plan">#2 本轮</span></h4>
+        <div class="chain">
+          <div class="step">D4 <code>@orchestration/timem-project-task</code></div>
+          <div class="v">↓ classify→归仓→派发</div>
+          <div class="step">agentd UDS（本机在跑）<br/>create-from-message → run → 轮询</div>
+          <div class="v">↓</div>
+          <div class="step">requirement-store 状态 + agentd list 回查进度</div>
+        </div>
+      </div>
+      <div class="lane">
+        <h4>mcp:&lt;tool&gt;（外部能力） <span class="tag real">已通</span></h4>
+        <div class="chain">
+          <div class="step">D3 <code>@action/dsh-tool</code> 桥</div>
+          <div class="v">↓</div>
+          <div class="step">DSH <code>ctx.tools</code>（dsh-tools 服务）</div>
+          <div class="v">↓</div>
+          <div class="step">dsh-mcp-client → 外部 MCP server<br/>（现有 13 工具，加 server 行即扩）</div>
+        </div>
+      </div>
+      <div class="lane">
+        <h4>audio（语音） <span class="tag real">provider 已注册</span></h4>
+        <div class="chain">
+          <div class="step">D3 <code>@action/text-to-speech</code> / vosk·whisper</div>
+          <div class="v">↓</div>
+          <div class="step">需 TTS key / 模型资产，到位即通</div>
+        </div>
+      </div>
+      <div class="lane gray">
+        <h4>video（视频） <span class="tag gray">扩展位</span></h4>
+        <div class="chain">
+          <div class="step">引擎暂无执行器</div>
+          <div class="v">↓</div>
+          <div class="step">将来：视频生成 MCP server<br/>或 py-bridge Python 执行器</div>
+          <div class="v">↓</div>
+          <div class="step">任务模型不改，只加执行器</div>
+        </div>
+      </div>
+      <div class="lane gray">
+        <h4>更多… <span class="tag gray">扩展位</span></h4>
+        <div class="chain">
+          <div class="step">任何"能被 agent 处理"的新能力</div>
+          <div class="v">↓</div>
+          <div class="step">新域能力 = 新执行器一行路由</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow"><b>产出统一落 review → 工作台审批区 → 通过 = done</b><span class="glyph">↓</span>可选沉淀 TiMEM 记忆（链路现成）</div>
+
+  <!-- 存储三层 -->
+  <div class="layer">
+    <div class="layer-tag">存储分工（三层各司其职，任务板只站在聚合层）</div>
+    <div class="store">
+      <div class="box plan"><b>① task 表（PG appbase）—— 平台聚合层</b>任务记录 + 状态机 + 产出物<b>引用</b>；研发类只存 agentd taskId 引用，不复制正身</div>
+      <div class="box real"><b>② requirement-store —— 编排层（code 执行器）</b>会话状态机 + 需求条目 + 汇总单；内存 + JSON 落盘（env <code>TIMEM_REQUIREMENT_STORE_PATH</code>，缺省不落盘——本轮补上）</div>
+      <div class="box real"><b>③ agentd —— 执行正身（本机在跑）</b><code>timem.sqlite3</code> 任务正身 · <code>worktrees/</code> git 工作树 · <code>task-artifacts/</code> 产出物；进度经 agentd list/get 回查，零复制</div>
+    </div>
+  </div>
+
+  <!-- 待确认清单 -->
+  <div class="confirm">
+    <h2>请确认的 5 个设计点</h2>
+    <ol>
+      <li><b>task 真表</b>替代 /app/data JSONB 分片（任务与 audit_log/credit 同级的平台实体）—— 是否认可？</li>
+      <li><b>执行器清单</b>：v1 先通 human / content / docx / code 四条（全现成），audio 待 key、video 留扩展位 —— 范围是否同意？</li>
+      <li><b>人机分工收口</b>：agent 产出一律落 review 状态进工作台审批区，通过才 done（+ 可选 TiMEM 记忆沉淀）—— 是否同意？</li>
+      <li><b>存储三层分工</b>：task 表存引用不存正身，agentd 进度经 list/get 回查 —— 是否认可？</li>
+      <li><b>路由器不沉插件</b>：v1 薄路由放 Web 层，出现重试/队列需求再沉 D4 插件 —— 是否同意？</li>
+    </ol>
+  </div>
+
+  <div class="foot">Aigility 智悦智能平台 · 任务板架构待确认稿 · 实线 = 现成真链路 / 黄虚线 = 本轮 #1–4 / 灰虚线 = 扩展位</div>
+</div>
+</body>
+</html>

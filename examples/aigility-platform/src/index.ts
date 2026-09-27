@@ -47,8 +47,9 @@ import { plugin as cognitivePlugin } from "@aigility-harness/layer-cognitive";
 import { plugin as personaPlugin } from "@aigility-harness/layer-persona";
 import { plugin as orchestrationPlugin } from "@aigility-harness/layer-orchestration";
 import { plugin as actionPlugin } from "@aigility-harness/layer-action";
-import { isKnownGatewayKey } from "@aigility-harness/appbase/backend";
-import { ensureAigilityPlatform, routePlatform, sessionUserId, listTeamMembers, recentAudit, emailById } from "./platform.js";
+import { isKnownGatewayKey, writeAudit } from "@aigility-harness/appbase/backend";
+import { ensureAigilityPlatform, routePlatform, sessionUserId, listTeamMembers, recentAudit, emailById,
+  createTask, listTasks, transitionTask, getTask, type TaskRow } from "./platform.js";
 import { aigilityAgentPlugin } from "./aigility-agent.js";
 import { dshToolBridgePlugin } from "./dsh-tool.js";
 import { listSkills, upsertSkill, removeSkill, usageSnapshot, type AigilitySkillInput } from "./skill-registry.js";
@@ -290,6 +291,60 @@ async function main(): Promise<void> {
     if (!resolved.ok) return { ok: false, error: resolved.error };
     return (await resolved.value.execute(request, ctx)) as { ok: boolean; value?: T; error?: unknown };
   };
+
+  // ── 执行器路由（content/docx）：workflow-engine 产出 → review 人在回路 ──
+  const TASK_EXECUTOR_PROMPT = [
+    "你是 Aigility 任务执行器。根据任务标题与说明产出高质量结果。",
+    "- 产出正文用中文；如需结构化，用 Markdown（'# ' 小标题 / '- ' 要点）。",
+    "- 只依据任务说明与你的知识产出, 不虚构数据; 说明不充分时给出合理假设并列明。",
+  ].join("\n");
+
+  const parseBlocks = (text: string) => {
+    const blocks: Array<Record<string, unknown>> = [];
+    let bullets: string[] = [];
+    const flush = () => { if (bullets.length) { blocks.push({ type: "bullets", items: bullets }); bullets = []; } };
+    for (const raw of String(text).split("\n")) {
+      const line = raw.trim();
+      if (!line) { flush(); continue; }
+      if (line.startsWith("- ")) { bullets.push(line.slice(2)); continue; }
+      flush();
+      if (line.startsWith("# ")) blocks.push({ type: "heading", text: line.slice(2), level: 2 });
+      else blocks.push({ type: "paragraph", text: line });
+    }
+    flush();
+    return blocks;
+  };
+
+  const dispatchExecutorTask = (task: TaskRow): void => {
+    void (async () => {
+      try {
+        await transitionTask(task.id, "open", "running");
+        const wf = await seamCall<{ result?: string; response?: string }>("@orchestration/workflow-engine", {
+          user_input: `【任务】${task.title}\n${task.detail ?? ""}`,
+          system_prompt: TASK_EXECUTOR_PROMPT,
+          agent_name: "Aigility 任务执行器",
+          user_key: task.createdBy,
+        });
+        const text = (wf.ok ? (wf.value?.result ?? wf.value?.response) : null) ?? "";
+        if (!wf.ok || !text.trim()) throw new Error(wf.ok ? "执行器无产出" : String(wf.error ?? "workflow-engine 调用失败"));
+        if (task.executor === "docx") {
+          const doc = await seamCall<{ filename?: string; base64?: string; bytes?: number; error?: string }>("@action/doc-worker", {
+            title: task.title, subtitle: `执行器产出 · ${task.createdBy}`, blocks: parseBlocks(text),
+          });
+          if (!doc.ok || !doc.value?.base64) throw new Error(doc.value?.error ?? "doc-worker 生成失败");
+          await transitionTask(task.id, "running", "review", {
+            kind: "file", text, filename: doc.value.filename, base64: doc.value.base64, bytes: doc.value.bytes,
+          });
+        } else {
+          await transitionTask(task.id, "running", "review", { kind: "text", text });
+        }
+        console.log(`[task] 执行器完成「${task.title}」→ review`);
+      } catch (err) {
+        await transitionTask(task.id, "running", "failed", { kind: "error", text: String(err) });
+        console.error(`[task] 执行器失败「${task.title}」:`, err);
+      }
+    })();
+  };
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     // 平台 API 优先（AppBase app-backend：/app/auth/* /app/data/* /app/usage/* …）
     if (await routePlatform(req, res)) return;
@@ -431,6 +486,67 @@ async function main(): Promise<void> {
           args: body.args ?? {},
         });
         json(res, 200, r.ok ? r.value : { ok: false, error: String(r.error ?? "桥调用失败") });
+        return;
+      }
+      if (path === "/api/aigility/tasks" && req.method === "GET") {
+        const url = new URL(req.url ?? "/", "http://x");
+        const tasks = await listTasks({
+          status: url.searchParams.get("status") ?? undefined,
+          createdBy: url.searchParams.get("mine") === "1" ? sessionUserId(req) ?? undefined : undefined,
+        });
+        json(res, 200, { ok: true, tasks });
+        return;
+      }
+      if (path === "/api/aigility/tasks" && req.method === "POST") {
+        // 新建任务：human 留 open 待人办；content/docx 立即异步派发执行器（open→running→review）
+        try {
+          const body = JSON.parse((await readBody(req)) || "{}") as { title?: string; detail?: string; executor?: string; priority?: string };
+          if (!body.title?.trim()) {
+            json(res, 400, { ok: false, error: "title 必填" });
+            return;
+          }
+          const executor = ["human", "content", "docx"].includes(body.executor ?? "") ? body.executor! : "human";
+          const userId = requireUser(req, res);
+          if (!userId) return;
+          const email = (await emailById(userId)) ?? "unknown";
+          const task = await createTask({
+            title: body.title.trim(),
+            detail: body.detail?.trim(),
+            executor,
+            priority: body.priority?.trim() || undefined,
+            createdBy: email,
+          });
+          if (executor !== "human") void dispatchExecutorTask(task);
+          console.log(`[task] 新建 ${executor} 任务「${task.title}」 (${task.id})`);
+          json(res, 200, { ok: true, task });
+        } catch (err) {
+          json(res, 400, { ok: false, error: String(err) });
+        }
+        return;
+      }
+      const transMatch = path.match(/^\/api\/aigility\/tasks\/([\w-]+)\/transition$/);
+      if (transMatch && req.method === "POST") {
+        // 人在回路流转：human 完成（open→done）/ 审批（review→done|rejected），CAS + 审计
+        try {
+          const body = JSON.parse((await readBody(req)) || "{}") as { to?: string };
+          const to = body.to ?? "";
+          const legal: Record<string, string[]> = { open: ["done"], review: ["done", "rejected"], running: ["failed"] };
+          const userId = requireUser(req, res);
+          if (!userId) return;
+          const email = (await emailById(userId)) ?? "unknown";
+          const current = await getTask(transMatch[1]);
+          if (!current) { json(res, 404, { ok: false, error: "任务不存在" }); return; }
+          if (!legal[current.status]?.includes(to)) {
+            json(res, 400, { ok: false, error: `非法流转 ${current.status} → ${to}` });
+            return;
+          }
+          const updated = await transitionTask(transMatch[1], current.status, to, to === "done" && current.result ? current.result : undefined);
+          if (!updated) { json(res, 409, { ok: false, error: "状态已被并发修改" }); return; }
+          void writeAudit("task.transition", email, `${current.title}: ${current.status} → ${to}`);
+          json(res, 200, { ok: true, task: updated });
+        } catch (err) {
+          json(res, 400, { ok: false, error: String(err) });
+        }
         return;
       }
       if (path === "/api/aigility/usage" && req.method === "GET") {

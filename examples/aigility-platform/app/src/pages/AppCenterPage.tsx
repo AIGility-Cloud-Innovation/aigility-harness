@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { centerApps, meetingDetail, type CenterApp } from '../mock/data'
-import { generateDoc, type DocBlock } from '../lib/harness'
+import { generateDoc, fetchReportTemplates, saveReportTemplate, deleteReportTemplate, type ReportTemplate, type DocBlock } from '../lib/harness'
 import { ArrowLeft, PlusCircle, CheckCircle2, Clock, Loader2, FileText, CalendarClock, BarChart3, Workflow, ClipboardList, Headset, FileBarChart, MessageSquareText, FolderOpen, Sparkles } from 'lucide-react'
 
 const appIcon: Record<string, any> = {
@@ -186,11 +186,33 @@ function parseBlocks(text: string): DocBlock[] {
 function ReportApp({ back }: { back: () => void }) {
   const [title, setTitle] = useState('周运行报告')
   const [subtitle, setSubtitle] = useState('Aigility 智悦智能平台 · 文档工人自动生成')
+  const [templates, setTemplates] = useState<ReportTemplate[]>([])
+  const [activeTpl, setActiveTpl] = useState('')
   const [content, setContent] = useState(
     '# 一、运行摘要\n本周平台对话与 MCP 工具调用运行正常。\n- 数字员工对话链路全通\n- MCP 工具总线 13 个工具可用\n\n# 二、下一步\n- 挂载更多客户系统工具\n- 审批沉淀规则入库')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState('')
+
+  const loadTpl = () => { fetchReportTemplates().then(setTemplates).catch(() => {}) }
+  useEffect(() => { loadTpl() }, [])
+  const applyTpl = (name: string) => {
+    const t = templates.find(x => x.name === name)
+    if (!t) return
+    setActiveTpl(name); setTitle(t.title); setSubtitle(t.subtitle); setContent(t.content)
+  }
+  const saveTpl = async () => {
+    if (!title.trim()) return
+    const existing = templates.find(x => x.name === title.trim())
+    await saveReportTemplate({ name: title.trim(), title: title.trim(), subtitle, content }, existing?.rowId)
+    loadTpl()
+  }
+  const delTpl = async (name: string) => {
+    const t = templates.find(x => x.name === name)
+    if (t?.rowId) await deleteReportTemplate(t.rowId)
+    if (activeTpl === name) setActiveTpl('')
+    loadTpl()
+  }
 
   const gen = async () => {
     if (busy || !title.trim()) return
@@ -220,6 +242,19 @@ function ReportApp({ back }: { back: () => void }) {
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200/80 p-6 space-y-4 max-w-3xl">
+        {/* 模板库（真存储 · /app/data JSONB） */}
+        <div className="rounded-lg border border-slate-100 bg-slate-50/60 p-3 flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-slate-500 flex items-center gap-1"><FolderOpen size={13} className="text-slate-400" />模板库
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100">真 · /app/data</span>
+          </span>
+          <select value={activeTpl} onChange={e => applyTpl(e.target.value)}
+            className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white">
+            <option value="">选择模板套用…</option>
+            {templates.map(t => <option key={t.rowId ?? t.name} value={t.name}>{t.name}</option>)}
+          </select>
+          <button onClick={() => void saveTpl()} disabled={!title.trim()} className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50">另存为模板</button>
+          {activeTpl && <button onClick={() => void delTpl(activeTpl)} className="text-xs px-2.5 py-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50">删除</button>}
+        </div>
         <div className="grid md:grid-cols-2 gap-4">
           <div>
             <label className="text-xs text-slate-400 block mb-1">报告标题 *</label>
