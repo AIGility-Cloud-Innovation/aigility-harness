@@ -26,10 +26,6 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
-    },
-    "./timem-memory-provider": {
-      "types": "./src/timem-memory-provider.ts",
-      "default": "./src/timem-memory-provider.ts"
     }
   }
 }
