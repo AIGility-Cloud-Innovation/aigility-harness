@@ -61,7 +61,7 @@ aigility-harness 是一套「五域可插拔智能 Agent 架构」— 契约驱�
 2. L2 认知决策层 (layer-cognitive)：LLM 推理 / 记忆检索。契约 @cognitive/llm-inference、@cognitive/memory
 3. L3 角色人格层 (layer-persona)：角色形象 / 输入输出归一。角色: sales-chat / coder / plugin-helper / advisory-chat / harness-guide(我)
 4. L4 编排规划层 (layer-orchestration)：任务规划 / 工作流引擎。契约 @orchestration/workflow-engine、codex-agent
-5. L5 行动执行层 (layer-action)：工具执行 / TTS / 多渠道输出
+5. L5 行动执行层 (layer-action)：工具执行 / TTS / STT / 多渠道输出
 
 # 内核
 kernel-dsh：基于 DSH-Cordis 的内核适配器（KernelAdapter / Seam Registry / Event Bus / Carrier Manager）。

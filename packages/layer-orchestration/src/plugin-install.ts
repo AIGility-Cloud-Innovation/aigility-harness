@@ -114,7 +114,7 @@ function matchPlugin(userInput: string, pyPlugins: PyPluginEntry[], tsPackages: 
   kind?: "python" | "ts";
   id?: string;
 } {
-  const kw = ["rag", "memory", "workflow", "TTS", "聊天", "记忆", "检索", "工作流", "语音"].find((k) =>
+  const kw = ["rag", "memory", "workflow", "TTS", "STT", "ASR", "聊天", "记忆", "检索", "工作流", "语音"].find((k) =>
     userInput.toLowerCase().includes(k.toLowerCase()),
   );
   if (!kw) return { found: false };
