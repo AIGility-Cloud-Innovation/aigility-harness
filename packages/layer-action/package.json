@@ -16,6 +16,10 @@
     "msedge-tts": "^2.0.7",
     "docx": "^9.7.1"
   },
+  "optionalDependencies": {
+    "vosk": "^0.3.39",
+    "@huggingface/transformers": "^4.2.0"
+  },
   "devDependencies": {
     "@types/node": "^20.14.0",
     "typescript": "^5.5.0",

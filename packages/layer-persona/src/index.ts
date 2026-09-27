@@ -21,23 +21,6 @@ import type {
   HealthStatus,
 } from "@aigility-harness/core";
 
-export {
-  speechToTextService,
-  voskSttProvider,
-  whisperSttProvider,
-  VOSK_MODEL_PATH,
-  WHISPER_MODEL_ID,
-} from "./speech-to-text.js";
-export type {
-  SpeechToTextRequest,
-  SpeechToTextResponse,
-} from "./speech-to-text.js";
-import {
-  speechToTextService,
-  voskSttProvider,
-  whisperSttProvider,
-} from "./speech-to-text.js";
-
 // 销售客服角色形象
 export {
   salesChatService,
@@ -243,9 +226,9 @@ const textInputProvider: Provider<TextInputRequest, TextInputResponse> = {
 export const manifest: PluginManifest = {
   name: "@persona/character",
   layer: LayerId.Persona,
-  description: "角色人格层：感知（文本/语音）+ 角色形象（sales-chat/plugin-helper/app-dev/coding-coach/advisory-chat/harness-guide/timem-support/timem-project-assistant/repair-chat/banban-chat/fde-assistant/lesson-prep-chat/feishu-task-assistant[项目小助理: 飞书任务+Gitea工单协调]）",
-  version: "0.4.0",
-  provides: [textInputService, speechToTextService, salesChatService, pluginHelperService, appDevService, codingCoachService, advisoryChatService, harnessGuideService, timemSupportService, timemProjectAssistantService, repairChatService, banbanChatService, fdeAssistantService, lessonPrepChatService, feishuTaskAssistantService],
+  description: "角色人格层：感知（文本）+ 角色形象（sales-chat/plugin-helper/app-dev/coding-coach/advisory-chat/harness-guide/timem-support/timem-project-assistant/repair-chat/banban-chat/fde-assistant/lesson-prep-chat/feishu-task-assistant[项目小助理: 飞书任务+Gitea工单协调]）；模态能力（语音等）只声明与委托，本体在 layer-action（D3）",
+  version: "0.5.0",
+  provides: [textInputService, salesChatService, pluginHelperService, appDevService, codingCoachService, advisoryChatService, harnessGuideService, timemSupportService, timemProjectAssistantService, repairChatService, banbanChatService, fdeAssistantService, lessonPrepChatService, feishuTaskAssistantService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
 };
@@ -265,8 +248,6 @@ export const plugin: LayerPlugin = {
   getProviders(): Provider[] {
     return [
       textInputProvider,
-      voskSttProvider,
-      whisperSttProvider,
       salesChatProvider,
       pluginHelperProvider,
       appDevProvider,

@@ -13,10 +13,6 @@
   "dependencies": {
     "@aigility-harness/core": "workspace:*"
   },
-  "optionalDependencies": {
-    "vosk": "^0.3.39",
-    "@huggingface/transformers": "^4.2.0"
-  },
   "devDependencies": {
     "typescript": "^5.5.0",
     "vitest": "^2.0.0",

@@ -1,12 +1,13 @@
 /**
- * @aigility-harness/layer-persona — 语音转文本能力（@persona/speech-to-text）
+ * @aigility-harness/layer-action — 语音转文本能力（@action/speech-to-text）
  *
  * 契约：输入 PCM 16-bit 单声道音频 Buffer + 采样率，输出识别文本。
- * 音频是「外部信号摄入系统」的过程，故归属 Perception 层（感官层）。
+ * 归属 D3 行动域：模态工具族（STT/TTS、视觉、3D 形象）本体在行动域，
+ * D5 人格域只声明与委托、不实现（README 五域表口径）。
  *
  * 两个 Provider 实现同一契约，运行时按配置切换：
- *   - `perception-stt-vosk`    —— Vosk 离线识别器（复用本地模型，零网络）
- *   - `perception-stt-whisper` —— transformers.js whisper（自动下载 ONNX 模型）
+ *   - `action-stt-vosk`    —— Vosk 离线识别器（复用本地模型，零网络）
+ *   - `action-stt-whisper` —— transformers.js whisper（自动下载 ONNX 模型）
  *
  * 引擎均为「运行时可选依赖」：Provider 通过动态 import() 加载引擎，
  * 引擎未安装时 health() 返回 unhealthy，而非拖垮整个包。
@@ -46,9 +47,9 @@ export const speechToTextService: ServiceDefinition<
   SpeechToTextRequest,
   SpeechToTextResponse
 > = {
-  id: "@persona/speech-to-text",
+  id: "@action/speech-to-text",
   version: "1.0.0",
-  layer: LayerId.Persona,
+  layer: LayerId.Action,
   description: "语音转文本（ASR）：PCM 音频 → 文本",
   requestSchema: {
     type: "object",
@@ -131,7 +132,7 @@ async function loadVosk(): Promise<VoskModule | null> {
 
 const voskSttProvider: Provider<SpeechToTextRequest, SpeechToTextResponse> = {
   service: speechToTextService,
-  name: "perception-stt-vosk",
+  name: "action-stt-vosk",
   state: PluginState.Active,
   async execute(
     request: SpeechToTextRequest,
@@ -210,7 +211,7 @@ async function loadWhisper(): Promise<WhisperPipeline | null> {
 
 const whisperSttProvider: Provider<SpeechToTextRequest, SpeechToTextResponse> = {
   service: speechToTextService,
-  name: "perception-stt-whisper",
+  name: "action-stt-whisper",
   state: PluginState.Active,
   async execute(
     request: SpeechToTextRequest,
