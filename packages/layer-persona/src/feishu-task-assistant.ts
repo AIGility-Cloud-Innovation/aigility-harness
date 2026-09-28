@@ -17,7 +17,7 @@
  *         | 查工单 [@仓库] <#n|关键字> | 关闭工单/重开工单 [@仓库] <#n|关键字>
  *         | 评论工单 [@仓库] <#n> <内容>
  *   协调：项目概览 —— 飞书待办 + 进行中工单一屏汇总
- *   其他：LLM 自然语言兜底回复（TASK_ASSISTANT_LLM_FALLBACK=0 关闭；失败回退帮助文本）
+ *   其他：LLM 自然语言兜底回复（TASK_ASSISTANT_LLM_FALLBACK=0 关闭；失败回退帮助文本；输出过防编造过滤）
  */
 
 import {
@@ -42,7 +42,7 @@ import type {
  * 不跨包 import（层间解耦惯例，运行时仅 JSON 透传）——两侧字段须同步改。
  */
 export type TaskIntent =
-  | { kind: "create"; title: string; dueDate?: string; repo?: string }
+  | { kind: "create"; title: string; dueDate?: string; repo?: string; description?: string }
   | { kind: "list" }
   | { kind: "complete"; keyword: string }
   | { kind: "issue-create"; repo: string; title: string; body?: string }
@@ -100,7 +100,7 @@ export const feishuTaskAssistantService: ServiceDefinition<
   FeishuTaskAssistantResponse
 > = {
   id: "@persona/feishu-task-assistant",
-  version: "1.3.0",
+  version: "1.4.0",
   layer: LayerId.Persona,
   description:
     "项目小助理：交互形象（正则意图解析 + LLM 兜底回复），业务委托 @orchestration/task-issue-sync（双建同步）",
@@ -118,7 +118,9 @@ export const feishuTaskAssistantService: ServiceDefinition<
 export function extractRepoSpec(text: string): { text: string; repo?: string } {
   const m = text.match(/\s*@([A-Za-z0-9_-]+(?:\/[A-Za-z0-9._-]+)?)(?![.\w@])/);
   if (!m) return { text };
-  return { text: text.replace(m[0], " ").replace(/\s{2,}/g, " ").trim(), repo: m[1] };
+  // 只压横向空白（[^\S\n]）：多行正文结构保留——建任务/建工单「触发词独占一行、
+  // 标题在下一行」的拆分依赖换行（#1234 事故消息正是该形态）；横向多空格仍归一
+  return { text: text.replace(m[0], " ").replace(/[^\S\n]{2,}/g, " ").trim(), repo: m[1] };
 }
 
 const DUE_RE = /\s*截止[:：]?\s*(\d{4}-\d{2}-\d{2})\s*$/;
@@ -190,10 +192,12 @@ export function parseTaskIntent(input: string): TaskIntent {
 
   m = body.match(/^(?:建工单|创建工单|新建工单|开个工单)[:：，,]?\s*([\s\S]+)$/);
   if (m) {
-    // 首行为标题，其余行作为正文
+    // 首个非空行为标题，其余行作为正文（触发词独占一行时标题在下一行）
     const lines = m[1].split(/\r?\n/);
-    const title = lines[0].trim().replace(/^[:：，,]\s*/, "");
-    const issueBody = lines.slice(1).join("\n").trim();
+    let ti = 0;
+    while (ti < lines.length && !lines[ti].trim()) ti++;
+    const title = (lines[ti] ?? "").trim().replace(/^[:：，,]\s*/, "");
+    const issueBody = lines.slice(ti + 1).join("\n").trim();
     if (title) {
       // 仓库必填：没带 @仓库 就反问（不静默落默认仓库）
       return repoSpec
@@ -203,20 +207,26 @@ export function parseTaskIntent(input: string): TaskIntent {
   }
 
   // ── 飞书任务（C 方案：建任务也要求 @仓库，双向同步建工单） ──
+  // 多行正文可解析（带图/带描述消息）：首个非空行为标题（触发词独占一行时标题
+  // 在下一行，如「建任务：@仓库」剥掉 @仓库 后首行为空）、其余为描述
   const taskStripped = extractRepoSpec(text);
-  m = taskStripped.text.match(/^(?:建任务|创建任务|新建任务|添加任务)[:：，,]?\s*(.+)$/);
+  m = taskStripped.text.match(/^(?:建任务|创建任务|新建任务|添加任务)[:：，,]?\s*([\s\S]+)$/);
   if (m) {
-    let title = m[1].trim().replace(/^[:：，,]\s*/, "");
+    const lines = m[1].split(/\r?\n/);
+    let titleIdx = 0;
+    while (titleIdx < lines.length && !lines[titleIdx].trim()) titleIdx++;
+    let title = (lines[titleIdx] ?? "").trim().replace(/^[:：，,]\s*/, "");
     let dueDate: string | undefined;
     const due = title.match(DUE_RE);
     if (due) {
       dueDate = due[1];
       title = title.slice(0, due.index).trim();
     }
+    const description = lines.slice(titleIdx + 1).join("\n").trim();
     if (title) {
-      // 带 @仓库 → 双建；缺 @仓库 → 反问（不写任何数据）
+      // 带 @仓库 → 双建；缺 @仓库 → 反问（不写任何数据；用户带 @仓库 重发后全量重新解析）
       return taskStripped.repo
-        ? { kind: "create", title, dueDate, repo: taskStripped.repo }
+        ? { kind: "create", title, dueDate, repo: taskStripped.repo, description: description || undefined }
         : { kind: "task-need-repo", title, dueDate };
     }
   }
@@ -263,14 +273,27 @@ function llmFallbackEnabled(): boolean {
   return process.env.TASK_ASSISTANT_LLM_FALLBACK !== "0";
 }
 
-/** 兜底回复模型（可 env 覆盖；默认 qwen-turbo=网关上的非推理轻量模型，实测秒回） */
+/** 兜底回复模型（可 env 覆盖；默认 glm-5.3-flash——可控性优于 qwen-turbo，
+ * 后者在禁编造约束下仍编出 #1234 工单号，已弃用） */
 function fallbackModel(): string {
-  return process.env.TASK_ASSISTANT_MODEL ?? "qwen-turbo";
+  return process.env.TASK_ASSISTANT_MODEL ?? "glm-5.3-flash";
+}
+
+/**
+ * 兜底防编造后置过滤（导出供单测）：兜底能力没有任何工具，不可能执行过任何
+ * 操作——回复中出现「已/刚刚/为您…创建/完成/…」或具体编号（#\d+）即构造性为假
+ * （#1234 事件：prompt 明令禁止仍被无视）。命中即整条丢弃，把「不编造操作」
+ * 从模型自觉变成代码保证。误伤的最坏后果是回退帮助文本，方向安全。
+ */
+export function isFabricatedReply(text: string): boolean {
+  return /#\d+|(?:已(?!知)|刚刚|为您|帮你|帮您)[^。；！？\n]{0,12}(?:创建|建立|建好|建了|建|执行|完成|处理|派发|关闭|重开|评论|更新)/.test(
+    text,
+  );
 }
 
 /**
  * LLM 兜底回复：正则意图未命中时，以「项目小助理」身份生成自然回复。
- * 失败/关闭时回退帮助文本（不比改动前差）。帮助意图仍走静态文本（精确、零成本）。
+ * 输出过防编造过滤（isFabricatedReply），失败/关闭时回退帮助文本（不比改动前差）。
  */
 async function generateFallbackReply(
   userText: string,
@@ -286,16 +309,24 @@ async function generateFallbackReply(
           content:
             "你是飞书群里的「项目小助理」，负责管理飞书任务与 Gitea 工单（git.aigility.cloud）：建任务/工单（须 @仓库）、查列表、关闭/重开/评论、项目概览、任务派发确认（「确认派发 #N」/「取消派发 #N」）。" +
             "用户的消息没有命中任何指令格式。请用友好简洁的中文自然回复（2-4 句）：能帮上忙就直接回应；与任务/工单无关时礼貌说明职责并给出最接近的可用指令示例；闲聊不过度展开。" +
-            "不要编造不存在的任务、工单编号或数据；不要假装执行了任何操作；不确定时引导用户用指令表达。不要输出 markdown 标题或代码块。",
+            "你没有连接任何系统、没有任何工具，永远不可能替用户执行操作：严禁声称已创建/已执行/已完成任何任务或工单，严禁给出具体的任务或工单编号；不确定时引导用户用指令表达。不要输出 markdown 标题或代码块。",
         },
         { role: "user", content: userText },
       ],
-      temperature: 0.6,
+      temperature: 0.2,
       max_tokens: 500,
       userId: "feishu-task-assistant-fallback",
     })) as { ok: boolean; value?: { text?: string }; error?: string };
     const text = r.ok ? (r.value?.text ?? "").trim() : "";
-    if (text) return text;
+    if (text) {
+      if (isFabricatedReply(text)) {
+        console.error(
+          `[feishu-task-assistant] LLM 兜底疑似编造操作（防编造过滤命中），回退帮助文本: ${text.slice(0, 120)}`,
+        );
+        return HELP_TEXT;
+      }
+      return text;
+    }
     console.error(
       `[feishu-task-assistant] LLM 兜底失败，回退帮助文本: ${r.error ?? "空响应"}`,
     );
@@ -321,8 +352,8 @@ export const feishuTaskAssistantProvider: Provider<
     let response: string;
 
     if (intent.kind === "help") {
-      // 正则未命中：LLM 自然语言兜底（失败/关闭回退帮助文本）；
-      // 显式的「帮助」提问也走 LLM 更自然，但静态文本精确零成本，保留
+      // 正则未命中（含显式问「帮助」，均落 help 意图）：LLM 自然语言兜底
+      // （输出过防编造过滤，失败/关闭回退帮助文本）
       response = await generateFallbackReply(request.user_input ?? "", ctx);
     } else {
       // 业务全部委托编排层（含概览；need-repo 反问也在编排层做——
@@ -360,8 +391,8 @@ export const manifest: PluginManifest = {
   name: "@persona/feishu-task-assistant",
   layer: LayerId.Persona,
   description:
-    "角色人格层：「项目小助理」交互形象（意图解析+帮助），业务下沉 @orchestration/task-issue-sync（任务/工单双建同步）",
-  version: "1.3.0",
+    "角色人格层：「项目小助理」交互形象（意图解析+帮助+兜底防编造过滤），业务下沉 @orchestration/task-issue-sync（任务/工单双建同步）",
+  version: "1.4.0",
   provides: [feishuTaskAssistantService],
   consumes: [taskIssueSyncRef, llmInferenceRefForPersona],
   preferredCarrier: CarrierKind.Thread,

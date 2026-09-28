@@ -292,3 +292,109 @@ describe("feishuTaskAssistantProvider — LLM 兜底", () => {
     if (r.ok) expect(r.value.response).toBe("已建任务");
   });
 });
+
+// ── 多行建任务 + 兜底防编造（#1234 事件回归） ─────────────────────────
+
+describe("parseTaskIntent — 多行建任务（带图/带描述消息）", () => {
+  it("建任务 @仓库 多行：首行标题、其余为描述", () => {
+    expect(
+      parseTaskIntent("建任务 @video：修复登录页白屏\n报错：点击导出无响应\n截图见群聊"),
+    ).toEqual({
+      kind: "create",
+      title: "修复登录页白屏",
+      repo: "video",
+      description: "报错：点击导出无响应\n截图见群聊",
+    });
+  });
+
+  it("建任务触发词独占一行（#1234 消息形态：标题在下一行）→ 取首个非空行为标题", () => {
+    expect(
+      parseTaskIntent(
+        "建任务：@platform-backend\n\n账单导出功能会在导出记录中下载到奇怪的表格（期望得到费用账单，但现在表格中没有体现）",
+      ),
+    ).toEqual({
+      kind: "create",
+      repo: "platform-backend",
+      title:
+        "账单导出功能会在导出记录中下载到奇怪的表格（期望得到费用账单，但现在表格中没有体现）",
+    });
+  });
+
+  it("建任务多行缺 @仓库 → 反问（用户带 @仓库 重发后全量重新解析，不写数据）", () => {
+    expect(parseTaskIntent("建任务：账单导出异常\n导出的表格没有费用列")).toEqual({
+      kind: "task-need-repo",
+      title: "账单导出异常",
+    });
+  });
+
+  it("extractRepoSpec 保留多行结构（只压横向空白，换行不压平）", () => {
+    expect(extractRepoSpec("建任务：@platform-backend\n\n账单导出异常")).toEqual({
+      text: "建任务： \n\n账单导出异常",
+      repo: "platform-backend",
+    });
+  });
+});
+
+describe("isFabricatedReply — 兜底防编造后置过滤", () => {
+  it("命中：操作声称 / 具体编号（兜底无工具，构造性为假）", async () => {
+    const { isFabricatedReply } = await import("./feishu-task-assistant.js");
+    expect(
+      isFabricatedReply("好的，已为您在 Gitea 工单中创建任务，工单编号为 #1234，可随时查看进展"),
+    ).toBe(true);
+    expect(isFabricatedReply("已经帮你完成了")).toBe(true);
+    expect(isFabricatedReply("刚刚执行了派发")).toBe(true);
+  });
+
+  it("不命中：能力描述与指令引导（不过滤）", async () => {
+    const { isFabricatedReply } = await import("./feishu-task-assistant.js");
+    expect(isFabricatedReply("可以试试「建任务 @仓库：标题」")).toBe(false);
+    expect(isFabricatedReply("我会帮你同步到 Gitea，但需要你先用指令表达")).toBe(false);
+    expect(isFabricatedReply("已知不能直接处理截图，请把报错文字贴出来")).toBe(false);
+  });
+});
+
+describe("feishuTaskAssistantProvider — 兜底防编造集成", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("LLM 兜底编造操作（#1234 场景）→ 整条丢弃回帮助文本", async () => {
+    const ctx = mockCtx({
+      "@cognitive/llm-inference": () => ({
+        ok: true,
+        value: {
+          text: "已为您在 Gitea 工单中创建任务，工单编号为 #1234，您可以随时查看进展。需要我帮您添加其他信息吗？",
+        },
+      }),
+    });
+    const r = await feishuTaskAssistantProvider.execute(
+      { user_input: "帮我记录一下账单导出的截图问题" },
+      ctx,
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.response).not.toContain("#1234");
+      expect(r.value.response).toContain("建任务 @仓库");
+    }
+  });
+
+  it("兜底无操作声称 → 正常透传", async () => {
+    const pass = "可以帮你管理任务和工单。试试「建任务 @仓库：标题」";
+    const ctx = mockCtx({
+      "@cognitive/llm-inference": () => ({ ok: true, value: { text: pass } }),
+    });
+    const r = await feishuTaskAssistantProvider.execute({ user_input: "你能干嘛" }, ctx);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.response).toBe(pass);
+  });
+
+  it("兜底模型默认 glm-5.3-flash、温度 0.2（可控性替换 qwen-turbo）", async () => {
+    const ctx = mockCtx({
+      "@cognitive/llm-inference": () => ({ ok: true, value: { text: "好的，可以聊聊" } }),
+    });
+    await feishuTaskAssistantProvider.execute({ user_input: "随便聊聊" }, ctx);
+    const { req } = (ctx.calls as unknown[])[0] as { req: Record<string, unknown> };
+    expect(req["model"]).toBe("glm-5.3-flash");
+    expect(req["temperature"]).toBe(0.2);
+  });
+});

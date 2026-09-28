@@ -64,7 +64,7 @@ export const giteaApiRef: CapabilityRef = {
 // ── 意图词汇表（persona 解析产出、本服务消费；类型随服务契约走编排层） ──
 
 export type TaskIntent =
-  | { kind: "create"; title: string; dueDate?: string; repo?: string }
+  | { kind: "create"; title: string; dueDate?: string; repo?: string; description?: string }
   | { kind: "list" }
   | { kind: "complete"; keyword: string }
   | { kind: "issue-create"; repo: string; title: string; body?: string }
@@ -122,7 +122,7 @@ export const taskIssueSyncService: ServiceDefinition<
   TaskIssueSyncResponse
 > = {
   id: "@orchestration/task-issue-sync",
-  version: "1.0.0",
+  version: "1.1.0",
   layer: LayerId.Orchestration,
   description:
     "项目小助理业务域：飞书任务/Gitea 工单增删改查 + 双建同步（org→任务清单，部分失败不回滚）",
@@ -1143,6 +1143,7 @@ async function handleTaskIntent(
     if (dup.error) return `❌ 建任务前查重失败：${dup.error}`;
 
     const body: Record<string, unknown> = { summary: intent.title };
+    if (intent.description) body.description = intent.description;
     if (intent.dueDate) {
       body.due = { is_all_day: true, date: `${intent.dueDate}T00:00:00+08:00` };
     }
@@ -1171,7 +1172,16 @@ async function handleTaskIntent(
       path: issuesBaseFor(repo),
       body: {
         title: intent.title,
-        ...(intent.dueDate ? { body: `> 来源：飞书任务双向同步（截止 ${intent.dueDate}）` } : {}),
+        ...(intent.description || intent.dueDate
+          ? {
+              body: [
+                intent.description ?? "",
+                `> 来源：飞书任务双向同步${intent.dueDate ? `（截止 ${intent.dueDate}）` : ""}`,
+              ]
+                .filter(Boolean)
+                .join("\n\n"),
+            }
+          : {}),
       },
     });
     if (!ir.ok || !is2xx(ir.value?.status ?? 0)) {

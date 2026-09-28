@@ -113,7 +113,7 @@ export interface FeishuIngressResponse {
 
 export const feishuIngressService: ServiceDefinition<FeishuIngressRequest, FeishuIngressResponse> = {
   id: "@infrastructure/feishu-ingress",
-  version: "1.0.0",
+  version: "1.1.0",
   layer: LayerId.Infrastructure,
   description: "飞书机器人入口（WebSocket 长连接 → 角色路由）",
 };
@@ -121,8 +121,8 @@ export const feishuIngressService: ServiceDefinition<FeishuIngressRequest, Feish
 export const manifest: PluginManifest = {
   name: "@infrastructure/feishu",
   layer: LayerId.Infrastructure,
-  description: "底座层：飞书入口（机器人 WebSocket 长连接 → 角色路由，多机器人共用）",
-  version: "1.0.0",
+  description: "底座层：飞书入口（机器人 WebSocket 长连接 → 角色路由，多机器人共用；行首 @mention 剥离）",
+  version: "1.1.0",
   provides: [feishuIngressService],
   consumes: [feishuTimemSupportRef],
   preferredCarrier: CarrierKind.Thread,
@@ -134,10 +134,20 @@ let activeChannel: LarkChannel | null = null;
 let activeUnsubscribe: (() => void) | null = null;
 let activeStop: (() => Promise<void>) | null = null;
 
-/** 从归一化消息提取纯文本正文（去掉 mention 等标记） */
-function messageText(msg: NormalizedMessage): string {
-  let text = msg.content ?? "";
+/**
+ * 从归一化消息提取纯文本正文（导出供单测）。
+ * 行首 @mention 剥离（仅限 @bot 触发的消息）：群聊 @bot 后行首带 mention
+ * 前缀（bot 名或 @_user_N 占位符形态），不剥则 ^ 锚定的意图正则全军覆没、
+ * 业务指令错落进 LLM 兜底（#1234 事件根因）。只剥行首一次——正文中间的
+ * @仓库 片段是 extractRepoSpec 解析仓库的载体不能动；未 @bot 的被动收集
+ * 路径不改写原文。
+ */
+export function messageText(msg: NormalizedMessage): string {
+  let text = (msg.content ?? "").trim();
   // 事件归一化后 content 可能是纯文本（text 消息）或富文本内容
+  if (msg.mentionedBot) {
+    text = text.replace(/^@\S+\s*/, "");
+  }
   return text.trim();
 }
 

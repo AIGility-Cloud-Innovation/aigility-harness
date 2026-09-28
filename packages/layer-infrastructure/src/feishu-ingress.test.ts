@@ -81,3 +81,44 @@ describe("threadAnchorFor", () => {
     expect(threadAnchorFor({ chatType: "p2p", rootId: "om_root_9", ...base })).toBeUndefined();
   });
 });
+
+// ── messageText — 行首 @mention 剥离（#1234 根因回归） ────────────────
+
+describe("messageText — 行首 @mention 剥离", () => {
+  const asMsg = (over: Record<string, unknown>) => over as never;
+
+  it("群聊 @bot 前缀（bot 名形态）→ 剥掉行首一次", async () => {
+    const { messageText } = await import("./feishu-ingress.js");
+    expect(
+      messageText(
+        asMsg({ content: "@项目小助理 建任务：@platform-backend 账单导出异常", mentionedBot: true }),
+      ),
+    ).toBe("建任务：@platform-backend 账单导出异常");
+  });
+
+  it("群聊 @bot 前缀（@_user_1 占位符形态）→ 同样剥掉", async () => {
+    const { messageText } = await import("./feishu-ingress.js");
+    expect(
+      messageText(asMsg({ content: "@_user_1 建任务：修复导出", mentionedBot: true })),
+    ).toBe("建任务：修复导出");
+  });
+
+  it("正文中间的 @仓库 保留（extractRepoSpec 解析仓库的载体）", async () => {
+    const { messageText } = await import("./feishu-ingress.js");
+    expect(
+      messageText(asMsg({ content: "@项目小助理 建任务 @video：修复导出", mentionedBot: true })),
+    ).toBe("建任务 @video：修复导出");
+  });
+
+  it("未 @bot（被动收集路径）→ 不改写原文", async () => {
+    const { messageText } = await import("./feishu-ingress.js");
+    expect(
+      messageText(asMsg({ content: "@张三 帮我看看这个", mentionedBot: false })),
+    ).toBe("@张三 帮我看看这个");
+  });
+
+  it("无 @ 前缀（p2p 私聊）→ 原样返回", async () => {
+    const { messageText } = await import("./feishu-ingress.js");
+    expect(messageText(asMsg({ content: "我的任务", mentionedBot: false }))).toBe("我的任务");
+  });
+});
