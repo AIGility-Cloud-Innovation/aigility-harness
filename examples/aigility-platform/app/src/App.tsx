@@ -12,6 +12,7 @@ import MarketPage from './pages/MarketPage'
 import AppCenterPage from './pages/AppCenterPage'
 import OpsPage from './pages/OpsPage'
 import WorkspacePage from './pages/WorkspacePage'
+import TaskBoardPage from './pages/TaskBoardPage'
 import StudioPage from './pages/StudioPage'
 import ModelsPage from './pages/ModelsPage'
 import ToolsPage from './pages/ToolsPage'
@@ -23,13 +24,13 @@ import {
   type Skill, type Branding,
 } from './mock/data'
 import {
-  LayoutDashboard, Database, Network, Bot, BrainCircuit, GitBranch, Settings, Blocks, ShieldCheck, Zap,
+  LayoutDashboard, Database, Network, Bot, BrainCircuit, GitBranch, Settings, Blocks, ShieldCheck, Zap, ListChecks,
   Store, LayoutGrid, Gauge, Briefcase, Factory, Cpu, Wrench, Search, Bell, ChevronDown, Hexagon,
   CheckCircle2, User, LogOut, Building2, CircleHelp,
 } from 'lucide-react'
 
 const moduleIcon: Record<string, any> = {
-  workspace: Briefcase, agent: Bot, market: Store, apps: LayoutGrid, studio: Factory,
+  workspace: Briefcase, agent: Bot, market: Store, apps: LayoutGrid, studio: Factory, tasks: ListChecks,
   ingest: Database, graph: Network, space: BrainCircuit, process: GitBranch,
   tools: Wrench, models: Cpu, ops: Gauge,
 }
@@ -162,6 +163,7 @@ export default function App() {
     switch (page) {
       case 'home': return <Dashboard go={setPage} branding={branding} />
       case 'workspace': return <WorkspacePage go={setPage} />
+      case 'tasks': return <TaskBoardPage />
       case 'ingest': return <DataIngest go={setPage} />
       case 'graph': return <GraphPage go={setPage} />
       case 'agent': return <AgentPage skillList={skillList} />
@@ -259,11 +261,11 @@ export default function App() {
       </aside>
 
       {/* 主区 */}
-      <main className="flex-1 md:ml-56 p-4 md:p-7 pt-[104px] md:pt-5 max-w-[1400px] w-full">
+      <main className="flex-1 md:ml-56 px-4 md:pl-7 md:pr-5 py-4 md:py-6 pt-[104px] md:pt-6 w-full">
         {/* 顶部工具条（桌面端） */}
         <div className="hidden md:flex items-center gap-3 mb-5">
           {/* 全局搜索 */}
-          <div className="relative flex-1 max-w-md">
+          <div className="relative flex-1">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input ref={searchRef} value={kw} onFocus={() => setSearchOpen(true)}
               onChange={e => { setKw(e.target.value); setSearchOpen(true) }}

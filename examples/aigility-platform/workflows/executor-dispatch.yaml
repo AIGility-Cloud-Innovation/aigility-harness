@@ -13,7 +13,7 @@
 
 workflow:
   name: executor-dispatch
-  description: 任务板执行器路由 —— classify 取 executor 字段 → 条件边分流四种执行器
+  description: 任务板执行器路由 —— classify 取 executor 字段 → 条件边分流五种执行器
   entry_point: classify
 
   nodes:
@@ -47,6 +47,23 @@ workflow:
       description: "PDCA 拆解器 —— Plan 段: LLM 拆子任务 DAG → YAML 落盘 → review 人审"
       function_ref: dispatch_workflow_planner
 
+    code:
+      type: function_node
+      description: "编码执行器 —— 需求交编码代理(Codex)改代码 → review 人审 (git diff 为准)"
+      function_ref: dispatch_code_executor
+      system_prompt: |
+        你是 Aigility 平台的编码代理，负责按需求修改「智悦智能平台」网站的代码。
+        工作目录是 aigility-harness 仓库根（平台前端在 examples/aigility-platform/app，服务端在 examples/aigility-platform/src，框架包在 packages/）。
+        ## 硬性约束
+        - 只做与本次需求直接相关的最小改动；不顺手重构、不加无关文件。
+        - 禁止修改/删除 .env、任何凭证/密钥文件、node_modules、.git；禁止执行 git commit/push。
+        - 改完必须自检：在仓库根运行 pnpm -r --if-present typecheck（或改动包的 tsc -b），有错就修到通过。
+        - 前端页面改动后说明需要 vite build 重新构建才生效；服务端改动说明需要重启服务。
+        ## 汇报格式（最后输出）
+        - 改动文件清单（每个一句话说明）
+        - 自检结果（typecheck 通过与否）
+        - 生效方式（是否需要重新构建/重启）
+
     human:
       type: function_node
       description: 人工任务 —— 不派发执行器, 保持 open 待人处理
@@ -57,6 +74,7 @@ workflow:
       - { from: content, to: __end__ }
       - { from: docx, to: __end__ }
       - { from: workflow, to: __end__ }
+      - { from: code, to: __end__ }
       - { from: human, to: __end__ }
     conditional_edges:
       - from: classify
@@ -66,4 +84,5 @@ workflow:
           - { condition: content, to: content, description: 文本创作任务 }
           - { condition: docx, to: docx, description: 文档生成任务 }
           - { condition: workflow, to: workflow, description: 需拆解的复合任务 }
+          - { condition: code, to: code, description: 网站代码修改任务 }
           - { condition: human, to: human, description: 人工任务 }

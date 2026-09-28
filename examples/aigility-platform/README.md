@@ -173,3 +173,5 @@ SDK 侧 `aigility.workflow.runtime.run_yaml_workflow(config_path, **state)` 落�
 - **aigility-platform**：FDE 的封装产线（登录 → 配数字员工 → 发布 → 贴牌交付客户），水平平台壳，三条真链路 + MCP/四个真数据区块 + AppBase 鉴权先行。
 
 FDE 在工作台签下客户，切到 Aigility 完成配置与交付；市场页的「FDE 交付助手」即 fde-workbench 的 `@persona/fde-assistant`，两条产品线在引擎层互通。长期看 fde-workbench 可作为 Aigility「应用中心」里的一个上架应用。
+
+<!-- 对话式改站链路已打通（平台改进专员端到端验证） -->

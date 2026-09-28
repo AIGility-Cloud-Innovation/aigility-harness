@@ -555,6 +555,7 @@ export const moduleRegistry: ModuleDef[] = [
   { id: 'market', name: '智能体市场', page: 'market', category: '平台层', desc: '12 类通用智能体开箱即用，一键启用按需配置', available: true },
   { id: 'apps', name: '应用中心', page: 'apps', category: '平台层', desc: '8 大场景应用一键开启：问答、文档、会议、分析、审批、督办、客服、报告', available: true },
   { id: 'studio', name: '智能体工厂', page: 'studio', category: '平台层', desc: '五步向导创建智能体、低代码编排画布、草稿/试运行/发布流水线', available: true },
+  { id: 'tasks', name: '任务板', page: 'tasks', category: '平台层', desc: '对话式改站的任务流水线：改进专员落任务、执行器自动执行、编码改动人审', core: true, available: true },
   // TiMEM 上下文层：图谱·记忆·规则·知识中间件（太忆上下文基础设施）
   { id: 'ingest', name: '数据接入', page: 'ingest', category: 'TiMEM 上下文层', desc: '字段表上传、自动理解、清洗建议、跨表本体对齐', core: true, available: true },
   { id: 'graph', name: '知识图谱', page: 'graph', category: 'TiMEM 上下文层', desc: '图谱构建、分项目查看、事件动态关联', available: true, deps: '依赖数据接入产出' },
@@ -599,6 +600,7 @@ export const rolePermissions: Record<string, Record<string, string>> = {
   tools:   { 'r-admin': 'manage', 'r-fde': 'manage', 'r-boss': 'view', 'r-user': '', 'r-agent': 'use' },
   models:  { 'r-admin': 'manage', 'r-fde': 'view', 'r-boss': 'view', 'r-user': '', 'r-agent': '' },
   market:  { 'r-admin': 'manage', 'r-fde': 'manage', 'r-boss': 'use', 'r-user': 'use', 'r-agent': '' },
+  tasks:   { 'r-admin': 'manage', 'r-fde': 'manage', 'r-boss': 'use', 'r-user': 'use', 'r-agent': '' },
   apps:    { 'r-admin': 'manage', 'r-fde': 'manage', 'r-boss': 'manage', 'r-user': 'use', 'r-agent': '' },
   ops:     { 'r-admin': 'manage', 'r-fde': 'view', 'r-boss': 'use', 'r-user': 'view', 'r-agent': '' },
   modules: { 'r-admin': 'manage', 'r-fde': '', 'r-boss': '', 'r-user': '', 'r-agent': '' },

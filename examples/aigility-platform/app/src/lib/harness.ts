@@ -104,7 +104,7 @@ export interface PersonaInfo {
   name: string
   cat: string
   desc: string
-  source: 'harness'
+  source: 'harness' | 'local'
 }
 
 export interface SkillInfo {
@@ -376,6 +376,7 @@ export interface TaskItem {
 export interface TaskResult {
   kind?: 'text' | 'file' | 'error'
   text?: string
+  error?: string
   filename?: string
   base64?: string
   bytes?: number

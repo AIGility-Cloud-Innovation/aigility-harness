@@ -25,6 +25,7 @@ import type {
 } from "@aigility-harness/core";
 
 import { getSkill, bumpSkillUsage } from "./skill-registry.js";
+import { SITE_IMPROVER_SKILL_ID, improverTurn } from "./site-improver.js";
 
 // ── 服务定义 ─────────────────────────────────────────────────────
 
@@ -60,6 +61,9 @@ export interface AigilityAgentResponse {
   trace_id: string;
   /** true = LLM 不可用, 本次回复来自降级 stub */
   degraded?: boolean;
+  /** true = 本次对话落了任务板（平台改进专员技能） */
+  filed?: boolean;
+  task_id?: string;
 }
 
 export const aigilityAgentService: ServiceDefinition<AigilityAgentRequest, AigilityAgentResponse> = {
@@ -99,6 +103,24 @@ export const aigilityAgentProvider: Provider<AigilityAgentRequest, AigilityAgent
     const agentName = skill ? skill.name : "Aigility 平台管家";
     const memAgentId = skill ? `aigility-skill-${skill.id}` : "aigility-butler";
     const memUserId = request.user_key ?? "fde-local";
+
+    // 平台改进专员技能：不走通用 Prompt 装配，委托 improverTurn（聊需求 → 落任务板 → 派编码代理）
+    if (skill?.id === SITE_IMPROVER_SKILL_ID) {
+      const turn = await improverTurn(ctx, {
+        user_input: request.user_input,
+        user_key: memUserId,
+        session_id: request.session_id ?? ctx.sessionId,
+        ...(request.history?.length ? { history: request.history } : {}),
+      });
+      return ok({
+        response: turn.response,
+        agent_name: agentName,
+        skill_id: skill.id,
+        session_id: ctx.sessionId,
+        trace_id: ctx.traceId,
+        ...(turn.filed ? { filed: true, task_id: turn.task_id } : {}),
+      });
+    }
 
     // 技能人设：工厂 Prompt 为主体 + 描述/标签补充边界
     const systemPrompt = skill

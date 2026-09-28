@@ -51,6 +51,7 @@ import { isKnownGatewayKey, writeAudit } from "@aigility-harness/appbase/backend
 import { ensureAigilityPlatform, routePlatform, sessionUserId, listTeamMembers, recentAudit, emailById,
   createTask, listTasks, transitionTask, getTask, type TaskRow } from "./platform.js";
 import { aigilityAgentPlugin } from "./aigility-agent.js";
+import { siteImproverPlugin, SITE_IMPROVER_PERSONA_ID, SITE_IMPROVER_ROUTE, setTaskFiledHook } from "./site-improver.js";
 import { dshToolBridgePlugin } from "./dsh-tool.js";
 import { listSkills, upsertSkill, removeSkill, usageSnapshot, type AigilitySkillInput } from "./skill-registry.js";
 import type { DshToolBridgeResponse } from "./dsh-tool.js";
@@ -102,7 +103,7 @@ interface PersonaEntry {
   name: string;
   cat: string;
   desc: string;
-  source: "harness";
+  source: "harness" | "local";
 }
 
 /** 从 layer-persona 注册表枚举可对话的真实角色（市场页「已接入」区） */
@@ -121,6 +122,15 @@ function enumeratePersonas(): PersonaEntry[] {
       source: "harness",
     });
   }
+  // 示例本地角色（随平台自带, 不入框架层 persona 注册表）
+  out.push({
+    personaId: SITE_IMPROVER_PERSONA_ID,
+    route: SITE_IMPROVER_ROUTE,
+    name: "平台改进专员",
+    cat: "流程辅助",
+    desc: "接收对平台网站的修改意见：聊清需求后自动落任务板并派发编码代理改代码，人审后生效",
+    source: "local",
+  });
   return out;
 }
 
@@ -172,6 +182,7 @@ async function main(): Promise<void> {
     orchestrationPlugin,
     actionPlugin,
     aigilityAgentPlugin,
+    siteImproverPlugin,
     dshToolBridgePlugin,
   ];
   console.log("装配插件:");
@@ -351,6 +362,36 @@ async function main(): Promise<void> {
       }
     })();
 
+  // ── code 执行器：需求交编码代理改代码（平台改进专员链路的执行端） ──
+  // 代理可用 CODE_EXECUTOR_AGENT_ID 切换（默认 @action/codex-agent —— 本机 zcode CLI
+  // headless 模式无法创建模型，交互式账号订阅不适用于无人值守 spawn）。
+  // 安全边界：改动落工作区 git diff，任务进 review 人审（rejected/回滚走 git）；
+  // 编码代理不 commit、不碰凭证，约束写在 YAML 节点的 system_prompt。
+  const REPO_ROOT = resolve(__dirname, "../../..");
+  const CODE_AGENT_ID = process.env.CODE_EXECUTOR_AGENT_ID ?? "@action/codex-agent";
+  const dispatchCodeExecutor = (task: TaskRow, rules: string): Promise<void> =>
+    (async () => {
+      try {
+        const requirement = [`【任务标题】${task.title}`, task.detail ? `【需求详情】\n${task.detail}` : ""]
+          .filter(Boolean)
+          .join("\n\n");
+        const r = await seamCall<{ text?: string; error?: string }>(CODE_AGENT_ID, {
+          prompt: `${rules}\n\n=== 本次改动需求 ===\n${requirement}`,
+          cwd: REPO_ROOT,
+          skipPlanning: true,
+          timeoutMs: Number(process.env.CODE_EXECUTOR_TIMEOUT_MS) || 600_000,
+        });
+        if (!r.ok) throw new Error(String(r.error ?? "编码代理调用失败"));
+        const text = r.value?.text?.trim();
+        if (!text) throw new Error("编码代理无输出");
+        await transitionTask(task.id, "running", "review", { kind: "text", text });
+        console.log(`[task] 编码执行器完成「${task.title}」→ review (待人审 git diff)`);
+      } catch (err) {
+        await transitionTask(task.id, "running", "failed", { kind: "error", text: `编码执行失败：${String(err)}` }).catch(() => {});
+        console.error(`[task] 编码执行失败「${task.title}」:`, err);
+      }
+    })();
+
   // ── 执行器路由驱动器: 读 executor-dispatch.yaml → 校验 → 按任务沿边执行 ──
   const DISPATCH_YAML = resolve(__dirname, "../workflows/executor-dispatch.yaml");
   const dispatchWorkflow = (() => {
@@ -380,6 +421,8 @@ async function main(): Promise<void> {
         },
         // workflow: 交 PDCA 拆解器 (Plan 段, 内部自带状态流转与异常善后)
         dispatch_workflow_planner: (s) => dispatchWorkflowPlanner(s.task),
+        // code: 交 ZCode 编码代理改代码 (约束读 YAML 节点 system_prompt), 产出 → review 人审
+        dispatch_code_executor: (s, node) => dispatchCodeExecutor(s.task, String(node.system_prompt ?? "")),
         // human: 不派发, 保持 open (路由完备性占位; 正常不会走到)
         mark_open: (s) => {
           console.log(`[task] 人工任务「${s.task.title}」保持 open, 不派发执行器`);
@@ -409,6 +452,8 @@ async function main(): Promise<void> {
       }
     })();
   };
+  // 平台改进专员落的任务同样自动派发（对齐 HTTP 建任务接口的 `executor!=="human"` 行为）
+  setTaskFiledHook((t) => dispatchExecutorTask(t));
 
   // ── workflow 执行器 · Do 段：人审批准 → py-bridge 执行 YAML ──
   const executeWorkflowYaml = (task: TaskRow): void => {
@@ -597,7 +642,7 @@ async function main(): Promise<void> {
             json(res, 400, { ok: false, error: "title 必填" });
             return;
           }
-          const executor = ["human", "content", "docx", "workflow"].includes(body.executor ?? "") ? body.executor! : "human";
+          const executor = ["human", "content", "docx", "workflow", "code"].includes(body.executor ?? "") ? body.executor! : "human";
           const userId = requireUser(req, res);
           if (!userId) return;
           const email = (await emailById(userId)) ?? "unknown";
