@@ -179,16 +179,26 @@ function shouldProcessMessage(
       return false;
     }
   }
-  // 5. Trigger 判定：仅 p2p 或 group+@bot 才处理
+  // 5. Trigger 判定：仅 p2p 或 group（含话题群，msg 自带 rootId 区分话题）+@bot 才处理
   if (msg.chatType === "group" && !msg.mentionedBot) {
     return false;
   }
   // chatType 为 p2p 时 always process（不要求 @bot）
-  // 其他 chatType（如 topic）静默丢弃
+  // 其他 chatType（未知类型）静默丢弃
   if (msg.chatType !== "p2p" && msg.chatType !== "group") {
     return false;
   }
   return true;
+}
+
+/** 话题锚定：群聊回复锚到话题串（rootId 优先，无 rootId 的普通群聊锚到触发消息本身）；p2p 不锚 */
+export function threadAnchorFor(msg: {
+  chatType: string;
+  rootId?: string;
+  messageId: string;
+}): string | undefined {
+  if (msg.chatType !== "group") return undefined;
+  return msg.rootId ?? msg.messageId;
 }
 
 /** 内存去重器：Map<messageId, timestamp> + TTL 5 分钟 */
@@ -223,16 +233,40 @@ class MessageDeduper {
   }
 }
 
-/** 资源下载器：将 image 资源下载为 base64，失败不阻塞主流程 */
+/** 将 SDK 下载接口返回的可读流聚合为 Buffer */
+function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+    stream.on("end", () => resolve(Buffer.concat(chunks)));
+    stream.on("error", reject);
+  });
+}
+
+/**
+ * 资源下载器：将 image 资源下载为 base64，失败不阻塞主流程。
+ *
+ * 必须走 messageResource（消息内资源）端点：im.v1.image.get 仅支持
+ * 应用自己上传的图片，用户消息里的图片用它取会报 400 —— 需要
+ * message_id + file_key 成对传给 im.v1.messageResource.get。
+ */
 async function downloadResources(
   channel: LarkChannel,
+  messageId: string,
   resources: ResourceDescriptor[],
 ): Promise<Array<{ type: string; data: string; fileName?: string }>> {
   const results: Array<{ type: string; data: string; fileName?: string }> = [];
   for (const res of resources) {
     if (res.type === "image") {
       try {
-        const buffer = await channel.downloadResource(res.fileKey, "image");
+        if (!messageId) {
+          throw new Error("messageId 为空，无法走消息资源端点");
+        }
+        const resp = await channel.rawClient.im.v1.messageResource.get({
+          path: { message_id: messageId, file_key: res.fileKey },
+          params: { type: "image" },
+        });
+        const buffer = await streamToBuffer(resp.getReadableStream());
         const base64 = buffer.toString("base64");
         results.push({
           type: "image",
@@ -354,19 +388,24 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
         if (!text) return;
 
         // 3. 资源下载（image → base64，失败不阻塞）
-        const resources = await downloadResources(channel, msg.resources);
+        const resources = await downloadResources(channel, msg.messageId, msg.resources);
 
         // 路由：按会话来源 → 通配兜底
         const routeKey = msg.chatId || msg.senderId || "*";
         const roleId = agentRoutes[routeKey] ?? agentRoutes["*"] ?? perceptionId;
 
         try {
-          // 两段式回复（方案 C，零权限）：
+          // 两段式回复（方案 C，零权限）：占位 + 原地编辑，已在群里被 @ 过不再重复；
+          // 话题/回复场景：把回复锚到用户的话题串里（replyTo=话题根），p2p/普通群聊直发
+          const to = msg.chatId || msg.senderId;
+          const threadAnchor = threadAnchorFor(msg);
           // 1) 立即发占位消息「✍️ 正在处理…」（敲键盘提示）
           // 2) 处理完成 → 原地编辑成最终回复（一条消息变内容，无刷屏）
-          const placeholder = await channel.send(msg.chatId || msg.senderId, {
-            text: thinkingText,
-          });
+          const placeholder = await channel.send(
+            to,
+            { text: thinkingText },
+            threadAnchor ? { replyTo: threadAnchor } : undefined,
+          );
           let finalText = "抱歉，处理失败，请稍后重试或查看服务日志。";
           try {
             // ctx.call 人格请求：附带通用会话上下文字段
@@ -379,6 +418,7 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
                 user_id: msg.senderId || "feishu-unknown",
                 conversation_id: msg.chatId,
                 message_id: msg.messageId,
+                root_id: msg.rootId,
                 chat_type: msg.chatType,
                 resources: resources.length > 0 ? resources : undefined,
               },
@@ -393,8 +433,12 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
           try {
             await channel.editMessage(placeholder.messageId, finalText);
           } catch {
-            // 编辑失败（罕见）→ 占位消息已在上方，直接补发最终内容
-            await channel.send(msg.chatId || msg.senderId, { text: finalText });
+            // 编辑失败（罕见）→ 占位消息已在话题串里，直接补发最终内容（同样锚定话题）
+            await channel.send(
+              to,
+              { text: finalText },
+              threadAnchor ? { replyTo: threadAnchor } : undefined,
+            );
           }
         } catch (e) {
           // 占位消息发送失败 → 直接发最终回复

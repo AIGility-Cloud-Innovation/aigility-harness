@@ -1,5 +1,10 @@
-import { describe, it, expect } from "vitest";
-import { extractRepoSpec, parseTaskIntent } from "./feishu-task-assistant.js";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import {
+  extractRepoSpec,
+  parseTaskIntent,
+  feishuTaskAssistantProvider,
+  llmInferenceRefForPersona,
+} from "./feishu-task-assistant.js";
 
 describe("parseTaskIntent — 飞书任务意图", () => {
   it("建任务：<标题>", () => {
@@ -173,5 +178,117 @@ describe("extractRepoSpec", () => {
 
   it("无仓库片段返回原文", () => {
     expect(extractRepoSpec("建工单：标题")).toEqual({ text: "建工单：标题" });
+  });
+});
+
+// ── LLM 兜底回复（正则未命中） ─────────────────────────────────────
+
+/** mock SeamContext：记录 ctx.call 并按服务 id 分发 */
+function mockCtx(handlers: Record<string, (req: unknown) => unknown>) {
+  const calls: { id: string; req: unknown }[] = [];
+  return {
+    calls,
+    sessionId: "sess-test",
+    traceId: "trace-test",
+    async call(ref: { id: string }, req: unknown) {
+      calls.push({ id: ref.id, req });
+      const h = handlers[ref.id];
+      return h ? h(req) : { ok: false as const, error: "no handler" };
+    },
+  } as never;
+}
+
+describe("feishuTaskAssistantProvider — LLM 兜底", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("正则未命中 → 调 @cognitive/llm-inference 生成自然回复", async () => {
+    const ctx = mockCtx({
+      "@cognitive/llm-inference": () => ({
+        ok: true,
+        value: { text: "你好！我是项目小助理，可以帮你管理任务和工单～" },
+      }),
+    });
+    const r = await feishuTaskAssistantProvider.execute(
+      { user_input: "你好呀" },
+      ctx,
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.response).toContain("项目小助理");
+      expect(r.value.response).not.toContain("📋");
+    }
+  });
+
+  it("LLM 失败 → 回退静态帮助文本（不比改动前差）", async () => {
+    const ctx = mockCtx({
+      "@cognitive/llm-inference": () => ({ ok: false, error: "网关不可用" }),
+    });
+    const r = await feishuTaskAssistantProvider.execute(
+      { user_input: "随便说点什么" },
+      ctx,
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.response).toContain("项目小助理");
+      expect(r.value.response).toContain("建任务 @仓库");
+    }
+  });
+
+  it("TASK_ASSISTANT_LLM_FALLBACK=0 → 直接回帮助文本，不调 LLM", async () => {
+    vi.stubEnv("TASK_ASSISTANT_LLM_FALLBACK", "0");
+    const ctx = mockCtx({});
+    const r = await feishuTaskAssistantProvider.execute(
+      { user_input: "你好呀" },
+      ctx,
+    );
+    expect(r.ok).toBe(true);
+    expect(ctx.calls.length).toBe(0);
+    if (r.ok) {
+      expect(r.value.response).toContain("建任务 @仓库");
+    }
+  });
+
+  it("兜底请求形状：模型/消息/max_tokens/userId 完整", async () => {
+    const ctx = mockCtx({
+      "@cognitive/llm-inference": () => ({
+        ok: true,
+        value: { text: "好" },
+      }),
+    });
+    await feishuTaskAssistantProvider.execute({ user_input: "嗨" }, ctx);
+    expect(ctx.calls.length).toBe(1);
+    const { id, req } = (ctx.calls as unknown[])[0] as {
+      id: string;
+      req: Record<string, unknown>;
+    };
+    expect(id).toBe(llmInferenceRefForPersona.id);
+    expect(req["model"]).toBeTypeOf("string");
+    expect(req["max_tokens"]).toBe(500);
+    expect(req["userId"]).toBe("feishu-task-assistant-fallback");
+    const messages = req["messages"] as Array<{ role: string; content: string }>;
+    expect(messages[0].role).toBe("system");
+    expect(messages[0].content).toContain("项目小助理");
+    expect(messages[1]).toEqual({ role: "user", content: "嗨" });
+  });
+
+  it("指令意图不受影响：仍走编排层，零 LLM 调用", async () => {
+    const ctx = mockCtx({
+      "@orchestration/task-issue-sync": () => ({
+        ok: true,
+        value: { response: "已建任务" },
+      }),
+    });
+    const r = await feishuTaskAssistantProvider.execute(
+      { user_input: "我的任务" },
+      ctx,
+    );
+    expect(r.ok).toBe(true);
+    expect(ctx.calls.length).toBe(1);
+    expect((ctx.calls as unknown[])[0]).toMatchObject({
+      id: "@orchestration/task-issue-sync",
+    });
+    if (r.ok) expect(r.value.response).toBe("已建任务");
   });
 });

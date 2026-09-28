@@ -61,3 +61,23 @@ describe("feishu-ingress", () => {
     expect(health.healthy).toBe(false);
   });
 });
+// ── threadAnchorFor — 话题锚定（回复落到话题串下） ───────────────────
+
+describe("threadAnchorFor", () => {
+  const base = { messageId: "om_msg_1" };
+
+  it("群聊带 rootId（话题内发言）→ 锚到话题根", async () => {
+    const { threadAnchorFor } = await import("./feishu-ingress.js");
+    expect(threadAnchorFor({ chatType: "group", rootId: "om_root_9", ...base })).toBe("om_root_9");
+  });
+
+  it("群聊无 rootId（普通群聊 @bot）→ 锚到触发消息本身（回复语义）", async () => {
+    const { threadAnchorFor } = await import("./feishu-ingress.js");
+    expect(threadAnchorFor({ chatType: "group", ...base })).toBe("om_msg_1");
+  });
+
+  it("私聊 → 不锚定（直发）", async () => {
+    const { threadAnchorFor } = await import("./feishu-ingress.js");
+    expect(threadAnchorFor({ chatType: "p2p", rootId: "om_root_9", ...base })).toBeUndefined();
+  });
+});

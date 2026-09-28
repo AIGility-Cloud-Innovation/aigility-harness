@@ -66,7 +66,7 @@ export interface TaskPipelineRequest {
   notifyChatId?: string;
   /** 查重相似度阈值，默认 0.5 */
   dedupThreshold?: number;
-  /** 判定用模型名，默认读 env TASK_PIPELINE_MODEL，再退 "glm-4-flash" */
+  /** 判定用模型名，默认读 env TASK_PIPELINE_MODEL，再退 "qwen-turbo" */
   model?: string;
   /** 立即执行一次 tick（默认 true，方便启动即验证） */
   runOnStart?: boolean;
@@ -293,7 +293,7 @@ export const taskPipelineProvider: Provider<TaskPipelineRequest, TaskPipelineRes
       const bufferLimit = request.bufferLimit ?? 200;
       const repos = request.repos;
       const threshold = request.dedupThreshold ?? 0.5;
-      const model = request.model ?? process.env.TASK_PIPELINE_MODEL ?? "glm-4-flash";
+      const model = request.model ?? process.env.TASK_PIPELINE_MODEL ?? "qwen-turbo";
 
       if (runtime.timer) clearInterval(runtime.timer);
 

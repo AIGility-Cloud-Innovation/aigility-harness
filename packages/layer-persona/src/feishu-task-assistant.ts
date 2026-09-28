@@ -17,7 +17,7 @@
  *         | 查工单 [@仓库] <#n|关键字> | 关闭工单/重开工单 [@仓库] <#n|关键字>
  *         | 评论工单 [@仓库] <#n> <内容>
  *   协调：项目概览 —— 飞书待办 + 进行中工单一屏汇总
- *   其他：能力说明（帮助文本）
+ *   其他：LLM 自然语言兜底回复（TASK_ASSISTANT_LLM_FALLBACK=0 关闭；失败回退帮助文本）
  */
 
 import {
@@ -68,6 +68,12 @@ export const taskIssueSyncRef: CapabilityRef = {
   versionRange: "^1.0.0",
 };
 
+/** 消费认知层 LLM 推理（正则未命中时的自然语言兜底回复） */
+export const llmInferenceRefForPersona: CapabilityRef = {
+  id: "@cognitive/llm-inference",
+  versionRange: "^1.0.0",
+};
+
 // ── 请求/响应 ────────────────────────────────────────────────────
 
 export interface FeishuTaskAssistantRequest {
@@ -94,10 +100,10 @@ export const feishuTaskAssistantService: ServiceDefinition<
   FeishuTaskAssistantResponse
 > = {
   id: "@persona/feishu-task-assistant",
-  version: "1.2.0",
+  version: "1.3.0",
   layer: LayerId.Persona,
   description:
-    "项目小助理：交互形象（正则意图解析 + 帮助文本），业务委托 @orchestration/task-issue-sync（双建同步）",
+    "项目小助理：交互形象（正则意图解析 + LLM 兜底回复），业务委托 @orchestration/task-issue-sync（双建同步）",
 };
 
 // ── 意图解析（导出供单测；类型/语义与编排层 TaskIntent 对齐） ─────
@@ -252,6 +258,53 @@ const HELP_TEXT = `我是「项目小助理」，负责协调你的飞书任务�
 
 // ── Provider 实现：解析 → 委托编排层 → 回复信封 ──────────────────
 
+/** 正则未命中时是否走 LLM 兜底（TASK_ASSISTANT_LLM_FALLBACK=0 关闭，回退帮助文本） */
+function llmFallbackEnabled(): boolean {
+  return process.env.TASK_ASSISTANT_LLM_FALLBACK !== "0";
+}
+
+/** 兜底回复模型（可 env 覆盖；默认 qwen-turbo=网关上的非推理轻量模型，实测秒回） */
+function fallbackModel(): string {
+  return process.env.TASK_ASSISTANT_MODEL ?? "qwen-turbo";
+}
+
+/**
+ * LLM 兜底回复：正则意图未命中时，以「项目小助理」身份生成自然回复。
+ * 失败/关闭时回退帮助文本（不比改动前差）。帮助意图仍走静态文本（精确、零成本）。
+ */
+async function generateFallbackReply(
+  userText: string,
+  ctx: SeamContext,
+): Promise<string> {
+  if (!llmFallbackEnabled()) return HELP_TEXT;
+  try {
+    const r = (await ctx.call(llmInferenceRefForPersona, {
+      model: fallbackModel(),
+      messages: [
+        {
+          role: "system",
+          content:
+            "你是飞书群里的「项目小助理」，负责管理飞书任务与 Gitea 工单（git.aigility.cloud）：建任务/工单（须 @仓库）、查列表、关闭/重开/评论、项目概览、任务派发确认（「确认派发 #N」/「取消派发 #N」）。" +
+            "用户的消息没有命中任何指令格式。请用友好简洁的中文自然回复（2-4 句）：能帮上忙就直接回应；与任务/工单无关时礼貌说明职责并给出最接近的可用指令示例；闲聊不过度展开。" +
+            "不要编造不存在的任务、工单编号或数据；不要假装执行了任何操作；不确定时引导用户用指令表达。不要输出 markdown 标题或代码块。",
+        },
+        { role: "user", content: userText },
+      ],
+      temperature: 0.6,
+      max_tokens: 500,
+      userId: "feishu-task-assistant-fallback",
+    })) as { ok: boolean; value?: { text?: string }; error?: string };
+    const text = r.ok ? (r.value?.text ?? "").trim() : "";
+    if (text) return text;
+    console.error(
+      `[feishu-task-assistant] LLM 兜底失败，回退帮助文本: ${r.error ?? "空响应"}`,
+    );
+  } catch (e) {
+    console.error(`[feishu-task-assistant] LLM 兜底异常，回退帮助文本: ${String(e)}`);
+  }
+  return HELP_TEXT;
+}
+
 export const feishuTaskAssistantProvider: Provider<
   FeishuTaskAssistantRequest,
   FeishuTaskAssistantResponse
@@ -268,7 +321,9 @@ export const feishuTaskAssistantProvider: Provider<
     let response: string;
 
     if (intent.kind === "help") {
-      response = HELP_TEXT;
+      // 正则未命中：LLM 自然语言兜底（失败/关闭回退帮助文本）；
+      // 显式的「帮助」提问也走 LLM 更自然，但静态文本精确零成本，保留
+      response = await generateFallbackReply(request.user_input ?? "", ctx);
     } else {
       // 业务全部委托编排层（含概览；need-repo 反问也在编排层做——
       // 需要实时拉可访问仓库列表）
@@ -306,8 +361,8 @@ export const manifest: PluginManifest = {
   layer: LayerId.Persona,
   description:
     "角色人格层：「项目小助理」交互形象（意图解析+帮助），业务下沉 @orchestration/task-issue-sync（任务/工单双建同步）",
-  version: "1.2.0",
+  version: "1.3.0",
   provides: [feishuTaskAssistantService],
-  consumes: [taskIssueSyncRef],
+  consumes: [taskIssueSyncRef, llmInferenceRefForPersona],
   preferredCarrier: CarrierKind.Thread,
 };
