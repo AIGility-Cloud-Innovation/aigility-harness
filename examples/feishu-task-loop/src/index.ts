@@ -48,6 +48,11 @@ import {
 } from "@aigility-harness/layer-orchestration";
 import { loadEnv, REPO_ROOT } from "./env.js";
 import { isAbsolute, resolve as resolvePath } from "node:path";
+import {
+  acquireSingletonLock,
+  defaultLockPath,
+  type SingletonLock,
+} from "./singleton.js";
 
 /** 网关机器人 AppID → 任务管理人格 */
 const FEISHU_AGENT_ROUTES: Record<string, string> = {
@@ -56,6 +61,17 @@ const FEISHU_AGENT_ROUTES: Record<string, string> = {
 
 async function main(): Promise<void> {
   console.log("=== 飞书任务管理闭环（项目小助理）===\n");
+
+  // 单实例守护：确保同一时刻只有一个运行实例连接飞书（防多实例抢事件）
+  const lock: SingletonLock | null = acquireSingletonLock();
+  if (!lock) {
+    console.error(
+      `❌ 已有运行中的实例（锁: ${defaultLockPath()}），拒绝重复启动。\n` +
+        `   如确认无实例仍在运行，删除锁文件后重试。`,
+    );
+    process.exit(1);
+  }
+  console.log(`🔒 单实例锁已持有: ${defaultLockPath()} (pid=${process.pid})`);
 
   loadEnv();
   // 相对路径的 token store 以仓库根为基准（pnpm --filter 的 cwd 在子包目录）
@@ -180,6 +196,7 @@ async function main(): Promise<void> {
     if (scanTimer) clearInterval(scanTimer);
     await start.value.stop();
     await shutdown(kernel, scheduler);
+    lock.release(); // 释放单实例锁（kill -9 无法走这里，由下次启动僵锁自愈接管）
     process.exit(0);
   };
   process.on("SIGINT", () => void stop());
