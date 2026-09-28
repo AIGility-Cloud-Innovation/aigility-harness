@@ -35,6 +35,7 @@
 │║  │D4 编排规划层 (layer-orchestration) — 小脑                    │║    │
 │║  │   @orchestration/workflow-engine · 任务规划/引导设计          │║    │
 │║  │   timem-project-task(需求缓冲延时汇总) · guided-design       │║    │
+│║  │   YamlWorkflow 数据面驱动器(节点+条件边, 与 aigility 同契约)  │║    │
 │║  └──────────────────────────────────────────────────────────────┘║    │
 │║        │ 依赖 D3 + D2 + D1                                       ║    │
 │║        ▼                                                         ║    │
@@ -437,6 +438,7 @@ pnpm --filter wecom-coder start
 | **最小 Web UI** | http-ingress `GET /` / `/ui`（单文件 HTML, 双角色页签, 零依赖） | 任意前端 |
 | **企业微信入口（特色案例）** | `wecom-ingress`（aibot-node-sdk WebSocket 长连接 → 角色路由 → replyStream）+ 三个开箱案例：`wecom-coder`（@机器人 → app-dev → codex）/ `wecom-guide`（框架介绍员）/ `wecom-timem`（TiMEM 客服） | 任意 IM 通道（钉钉/飞书/微信，同构接入） |
 | **框架介绍员** | `harness-guide` 角色 → `@orchestration/workflow-engine-timem`（YAML 工作流经 py-bridge 驱动 aigility LangGraph） | 任意引导/编排流程 |
+| **任务板执行器路由（YAML）** | aigility-platform `workflows/executor-dispatch.yaml`（节点+条件边路由表）→ `YamlWorkflow` 驱动器（TS 侧数据面执行，契约对齐 aigility `WorkflowConfig`；guided-design / plugin-install 提示词同样外置 `config/*.yaml`，业务可改不动代码） | 任意「节点+条件边」数据面编排 |
 | **TiMEM 记忆客服** | `timem-support` 角色（TiMEM 记忆作对话上下文）+ BM25 检索增强（`aigility.retrieval.bm25` 经 py-bridge） | 任意记忆/检索服务 |
 | TTS | `text-to-speech`（msedge / MiniMax 双 Provider 热替换） | 任意 TTS 引擎 |
 | STT | `speech-to-text`（vosk 离线 / whisper ONNX，运行时可选依赖） | 任意 ASR 引擎 |

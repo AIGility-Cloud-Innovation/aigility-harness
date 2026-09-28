@@ -132,6 +132,12 @@ aigility-platform/
 | `TIMEM_API_KEY` / `TIMEM_BASE_URL` | — | TiMEM 记忆（未配置时记忆节点静默跳过；配置不可达时 TiMEM 空间如实上报） |
 | `APPBASE_PG_HOST/PORT/DATABASE/USER/PASSWORD` | `127.0.0.1:5433/appbase` | AppBase 平台 PG（登录账号 + 网关 key 持久化 + 用量计量 + dsh_plugins 注册表） |
 
+## 执行器路由（数据面编排 · YAML）
+
+任务板非人工任务的派发路由声明在 `workflows/executor-dispatch.yaml`（节点 + 条件边，契约与 aigility `WorkflowConfig` 对齐）——路由表可版本化、可人审：改路由 / 改执行器提示词动 YAML，不动代码。服务启动时经 `@aigility-harness/layer-orchestration` 的 `YamlWorkflow` 驱动器加载并校验（校验失败时任务派发显式 failed，服务不崩、日志指路），按任务 `executor` 字段沿条件边分流到 content / docx / workflow（PDCA 拆解）/ human 四个执行器节点。扩展新执行器（如 code / mcp）：YAML 加节点与分支 + `src/index.ts` 注册对应闭包即可，路由零改动。
+
+边界（对应 AI 治理路线图的编排分类）：YAML 只声明「节点 + 条件边」的数据面；Seam 调用、SQLite 状态流转等执行面逻辑留在节点函数体内，通过注册注入——与 timem-project-task 三段式「不该改编」同理。
+
 ## 工作流执行通道（workflow 执行器 · 待 SDK 落地即通）
 
 任务板执行器 `workflow`（复杂任务自动拆解）：Plan 阶段 LLM 拆解为子任务 DAG → 生成 aigility workflow YAML（`data/workflows/<taskId>.yaml`，复用 layer-orchestration consolidation 纯函数）→ 人审 YAML → 批准后经 py-bridge 执行。

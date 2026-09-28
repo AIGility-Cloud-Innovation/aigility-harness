@@ -1,0 +1,69 @@
+# 任务板执行器路由 (数据面编排) —— 本文件即路由表: 可版本化 / 可人审 / 可移植
+# ─────────────────────────────────────────────────────────────────────────
+# 契约与 aigility/workflow/schema.py (WorkflowConfig) 对齐:
+#   Python 侧同一份格式由 aigility.workflow.WorkflowBuilder 编译为 LangGraph;
+#   TS 侧由 @aigility-harness/layer-orchestration 的 YamlWorkflow 驱动器执行
+#   (见 examples/aigility-platform/src/index.ts)。
+#
+# 边界 (对应 AI 治理路线图的编排分类): 本文件只声明「节点 + 条件边」;
+#   节点函数体 (Seam 调用 / SQLite 流转 / docx 转换) 由 index.ts 注册注入,
+#   不进 YAML —— 这正是执行面逻辑与数据面编排的分界。
+# 扩展新执行器 (如 code / mcp): 在 nodes 加节点 + conditional_edges 加分支,
+#   再在 index.ts 注册对应闭包即可, 路由本身零代码改动。
+
+workflow:
+  name: executor-dispatch
+  description: 任务板执行器路由 —— classify 取 executor 字段 → 条件边分流四种执行器
+  entry_point: classify
+
+  nodes:
+    classify:
+      type: function_node
+      description: 从任务行取 executor 字段, 作为条件边的分支键
+      function_ref: classify
+      output_keys: ["executor"]
+
+    content:
+      type: llm_node
+      description: 文本执行器 —— LLM 产出 Markdown → review 人在回路
+      system_prompt: |
+        你是 Aigility 任务执行器。根据任务标题与说明产出高质量结果。
+        - 产出正文用中文；如需结构化，用 Markdown（'# ' 小标题 / '- ' 要点）。
+        - 只依据任务说明与你的知识产出, 不虚构数据; 说明不充分时给出合理假设并列明。
+      output_keys: ["result"]
+
+    docx:
+      type: llm_node
+      description: 文档执行器 —— LLM 产出正文 → @action/doc-worker 转 docx → review
+      system_prompt: |
+        你是 Aigility 任务执行器。根据任务标题与说明产出高质量结果。
+        - 产出正文用中文；如需结构化，用 Markdown（'# ' 小标题 / '- ' 要点）。
+        - 只依据任务说明与你的知识产出, 不虚构数据; 说明不充分时给出合理假设并列明。
+        - 产出将转换为 docx 文档交付, 请保持标题/要点结构清晰。
+      output_keys: ["result"]
+
+    workflow:
+      type: function_node
+      description: "PDCA 拆解器 —— Plan 段: LLM 拆子任务 DAG → YAML 落盘 → review 人审"
+      function_ref: dispatch_workflow_planner
+
+    human:
+      type: function_node
+      description: 人工任务 —— 不派发执行器, 保持 open 待人处理
+      function_ref: mark_open
+
+  flow:
+    edges:
+      - { from: content, to: __end__ }
+      - { from: docx, to: __end__ }
+      - { from: workflow, to: __end__ }
+      - { from: human, to: __end__ }
+    conditional_edges:
+      - from: classify
+        condition: route_by_executor
+        description: 按 task.executor 分流
+        branches:
+          - { condition: content, to: content, description: 文本创作任务 }
+          - { condition: docx, to: docx, description: 文档生成任务 }
+          - { condition: workflow, to: workflow, description: 需拆解的复合任务 }
+          - { condition: human, to: human, description: 人工任务 }

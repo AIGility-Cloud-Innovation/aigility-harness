@@ -45,7 +45,7 @@ import { InMemoryKernelAdapter } from "prototype-mode/in-memory-kernel";
 import { plugin as infrastructurePlugin, stopHttpServer } from "@aigility-harness/layer-infrastructure";
 import { plugin as cognitivePlugin } from "@aigility-harness/layer-cognitive";
 import { plugin as personaPlugin } from "@aigility-harness/layer-persona";
-import { plugin as orchestrationPlugin } from "@aigility-harness/layer-orchestration";
+import { plugin as orchestrationPlugin, YamlWorkflow, parseWorkflowYaml } from "@aigility-harness/layer-orchestration";
 import { plugin as actionPlugin } from "@aigility-harness/layer-action";
 import { isKnownGatewayKey, writeAudit } from "@aigility-harness/appbase/backend";
 import { ensureAigilityPlatform, routePlatform, sessionUserId, listTeamMembers, recentAudit, emailById,
@@ -294,13 +294,9 @@ async function main(): Promise<void> {
     return (await resolved.value.execute(request, ctx)) as { ok: boolean; value?: T; error?: unknown };
   };
 
-  // ── 执行器路由（content/docx）：workflow-engine 产出 → review 人在回路 ──
-  const TASK_EXECUTOR_PROMPT = [
-    "你是 Aigility 任务执行器。根据任务标题与说明产出高质量结果。",
-    "- 产出正文用中文；如需结构化，用 Markdown（'# ' 小标题 / '- ' 要点）。",
-    "- 只依据任务说明与你的知识产出, 不虚构数据; 说明不充分时给出合理假设并列明。",
-  ].join("\n");
-
+  // ── 执行器路由 (数据面): 编排声明在 workflows/executor-dispatch.yaml ──
+  // 路由表 (节点 + 条件边) 可版本化/人审; 本文件只注册节点函数与条件函数,
+  // 改路由/改提示词动 YAML, 不动代码 (扩展 code/mcp 等新执行器同理)。
   const parseBlocks = (text: string) => {
     const blocks: Array<Record<string, unknown>> = [];
     let bullets: string[] = [];
@@ -317,41 +313,22 @@ async function main(): Promise<void> {
     return blocks;
   };
 
-  const dispatchExecutorTask = (task: TaskRow): void => {
-    if (task.executor === "workflow") return void dispatchWorkflowPlanner(task);
-    void (async () => {
-      try {
-        await transitionTask(task.id, "open", "running");
-        const wf = await seamCall<{ result?: string; response?: string }>("@orchestration/workflow-engine", {
-          user_input: `【任务】${task.title}\n${task.detail ?? ""}`,
-          system_prompt: TASK_EXECUTOR_PROMPT,
-          agent_name: "Aigility 任务执行器",
-          user_key: task.createdBy,
-        });
-        const text = (wf.ok ? (wf.value?.result ?? wf.value?.response) : null) ?? "";
-        if (!wf.ok || !text.trim()) throw new Error(wf.ok ? "执行器无产出" : String(wf.error ?? "workflow-engine 调用失败"));
-        if (task.executor === "docx") {
-          const doc = await seamCall<{ filename?: string; base64?: string; bytes?: number; error?: string }>("@action/doc-worker", {
-            title: task.title, subtitle: `执行器产出 · ${task.createdBy}`, blocks: parseBlocks(text),
-          });
-          if (!doc.ok || !doc.value?.base64) throw new Error(doc.value?.error ?? "doc-worker 生成失败");
-          await transitionTask(task.id, "running", "review", {
-            kind: "file", text, filename: doc.value.filename, base64: doc.value.base64, bytes: doc.value.bytes,
-          });
-        } else {
-          await transitionTask(task.id, "running", "review", { kind: "text", text });
-        }
-        console.log(`[task] 执行器完成「${task.title}」→ review`);
-      } catch (err) {
-        await transitionTask(task.id, "running", "failed", { kind: "error", text: String(err) });
-        console.error(`[task] 执行器失败「${task.title}」:`, err);
-      }
-    })();
+  /** content/docx 共用的 LLM 执行: 走 workflow-engine Seam; 提示词来自 YAML 节点的 system_prompt */
+  const runExecutorLlm = async (task: TaskRow, systemPrompt: string): Promise<string> => {
+    const wf = await seamCall<{ result?: string; response?: string }>("@orchestration/workflow-engine", {
+      user_input: `【任务】${task.title}\n${task.detail ?? ""}`,
+      system_prompt: systemPrompt,
+      agent_name: "Aigility 任务执行器",
+      user_key: task.createdBy,
+    });
+    const text = (wf.ok ? (wf.value?.result ?? wf.value?.response) : null) ?? "";
+    if (!wf.ok || !text.trim()) throw new Error(wf.ok ? "执行器无产出" : String(wf.error ?? "workflow-engine 调用失败"));
+    return text;
   };
 
   // ── workflow 执行器 · Plan 段：LLM 拆解 → YAML 落盘 → review 人审 ──
-  const dispatchWorkflowPlanner = (task: TaskRow): void => {
-    void (async () => {
+  const dispatchWorkflowPlanner = (task: TaskRow): Promise<void> =>
+    (async () => {
       try {
         await transitionTask(task.id, "open", "running");
         const plan = await planTask(task.id, task.title, task.detail, async (messages) => {
@@ -371,6 +348,64 @@ async function main(): Promise<void> {
       } catch (err) {
         await transitionTask(task.id, "running", "failed", { kind: "error", text: `拆解失败：${String(err)}` });
         console.error(`[task] 拆解失败「${task.title}」:`, err);
+      }
+    })();
+
+  // ── 执行器路由驱动器: 读 executor-dispatch.yaml → 校验 → 按任务沿边执行 ──
+  const DISPATCH_YAML = resolve(__dirname, "../workflows/executor-dispatch.yaml");
+  const dispatchWorkflow = (() => {
+    try {
+      const wf = new YamlWorkflow<{ task: TaskRow; executor?: string; result?: string }>(
+        parseWorkflowYaml(readFileSync(DISPATCH_YAML, "utf-8")),
+      );
+      wf.registerNodes({
+        // classify: 取 executor 字段作为条件边分支键
+        classify: (s) => ({ executor: s.task.executor }),
+        // content/docx: LLM 执行器 (提示词读 YAML 节点 system_prompt), 产出 → review 人在回路
+        content: async (s, node) => {
+          const text = await runExecutorLlm(s.task, String(node.system_prompt ?? ""));
+          await transitionTask(s.task.id, "running", "review", { kind: "text", text });
+          console.log(`[task] 执行器完成「${s.task.title}」→ review`);
+        },
+        docx: async (s, node) => {
+          const text = await runExecutorLlm(s.task, String(node.system_prompt ?? ""));
+          const doc = await seamCall<{ filename?: string; base64?: string; bytes?: number; error?: string }>("@action/doc-worker", {
+            title: s.task.title, subtitle: `执行器产出 · ${s.task.createdBy}`, blocks: parseBlocks(text),
+          });
+          if (!doc.ok || !doc.value?.base64) throw new Error(doc.value?.error ?? "doc-worker 生成失败");
+          await transitionTask(s.task.id, "running", "review", {
+            kind: "file", text, filename: doc.value.filename, base64: doc.value.base64, bytes: doc.value.bytes,
+          });
+          console.log(`[task] 执行器完成「${s.task.title}」→ review (docx)`);
+        },
+        // workflow: 交 PDCA 拆解器 (Plan 段, 内部自带状态流转与异常善后)
+        dispatch_workflow_planner: (s) => dispatchWorkflowPlanner(s.task),
+        // human: 不派发, 保持 open (路由完备性占位; 正常不会走到)
+        mark_open: (s) => {
+          console.log(`[task] 人工任务「${s.task.title}」保持 open, 不派发执行器`);
+        },
+      });
+      wf.registerCondition("route_by_executor", (s) => s.executor ?? "");
+      const { errors } = wf.validate();
+      if (errors.length) throw new Error(`路由 YAML 校验失败: ${errors.join("; ")}`);
+      return wf;
+    } catch (e) {
+      console.error(`[task] 执行器路由加载失败 (${DISPATCH_YAML}):`, e);
+      return null;
+    }
+  })();
+
+  /** 派发执行器: open→running 后交 YAML 路由; 任何失败 → running→failed */
+  const dispatchExecutorTask = (task: TaskRow): void => {
+    void (async () => {
+      try {
+        if (!dispatchWorkflow) throw new Error("执行器路由 YAML 不可用 (启动时加载失败, 见服务端日志)");
+        await transitionTask(task.id, "open", "running");
+        const run = await dispatchWorkflow.run({ task, executor: task.executor });
+        if (!run.ok) throw new Error(run.errors.join("; "));
+      } catch (err) {
+        await transitionTask(task.id, "running", "failed", { kind: "error", text: String(err) }).catch(() => {});
+        console.error(`[task] 执行器失败「${task.title}」:`, err);
       }
     })();
   };
