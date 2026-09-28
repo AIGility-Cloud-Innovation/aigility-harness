@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import EChart from '../components/EChart'
+import { TwinGraph3D, type N3 } from '../components/TwinGraph3D'
 import { graphNodes, graphEdges, graphCategories, nodeProject, tenantProjects, eventDemo, eventCategory, type GraphNode } from '../mock/data'
 import { Search, MessageSquareText, BellPlus, BrainCircuit, Zap, X } from 'lucide-react'
 
@@ -9,6 +10,8 @@ export default function GraphPage({ go }: { go: (p: string) => void }) {
   const [kw, setKw] = useState('')
   const [proj, setProj] = useState('all')
   const [eventOn, setEventOn] = useState(false)
+  const [view3d, setView3d] = useState(false)
+  const [selected3d, setSelected3d] = useState<N3 | null>(null)
 
   const allCategories = eventOn ? [...graphCategories, eventCategory] : graphCategories
 
@@ -64,6 +67,31 @@ export default function GraphPage({ go }: { go: (p: string) => void }) {
       }],
     } as any
   }, [enabled, kw, selected, proj, eventOn])
+
+  const twin3dNodes = useMemo<N3[]>(() => {
+    const optionNodes = (option.series as Array<{ data: GraphNode[] }>)[0]?.data ?? []
+    const twinNode: N3 = { id: 'twin', name: '企业数字孪生', group: 'core', color: '#3370ff', val: 10, tip: '企业图谱 · 关系实时同步' }
+    const optionEdges = ((option.series as Array<{ links: Array<{ source: string; target: string; relation: string }> }>)[0]?.links ?? [])
+    const connectedNodes = optionNodes
+      .map(node => ({
+        id: node.id,
+        name: node.name,
+        group: allCategories[node.category]?.name || '实体',
+        color: allCategories[node.category]?.color || '#60a5fa',
+        val: node.category === 0 ? 5 : node.category === 6 ? 4 : 2.5,
+        tip: node.desc || allCategories[node.category]?.name || '业务实体',
+        connected: optionEdges.some(edge => edge.source === node.id || edge.target === node.id),
+      }))
+      .filter(node => node.connected)
+      .map(({ connected: _connected, ...node }) => node)
+
+    return [twinNode, ...connectedNodes]
+  }, [allCategories, option])
+
+  const twin3dLinks = useMemo(() => (
+    ((option.series as Array<{ links: Array<{ source: string; target: string; relation: string }> }>)[0]?.links ?? [])
+      .map(edge => ({ source: edge.source, target: edge.target, rel: edge.relation }))
+  ), [option])
 
   const stats = useMemo(() => {
     const nodes = graphNodes.filter(n => proj === 'all' || nodeProject[n.id] === proj)
@@ -131,6 +159,40 @@ export default function GraphPage({ go }: { go: (p: string) => void }) {
         })}
       </div>
 
+      <div className="flex gap-2 flex-wrap items-center">
+        <button onClick={() => setView3d(false)}
+          className={`text-sm px-4 py-2 rounded-lg border transition ${view3d ? 'bg-white text-slate-600 border-slate-200 hover:border-blue-300' : 'bg-blue-600 text-white border-blue-600'}`}>
+          2D 图谱
+        </button>
+        <button onClick={() => { setView3d(true); setSelected3d(null) }}
+          className={`text-sm px-4 py-2 rounded-lg border transition ${view3d ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'}`}>
+          3D 企业数字孪生
+        </button>
+      </div>
+
+      {view3d ? (
+        <div className="grid lg:grid-cols-[1fr_300px] gap-4">
+          <div className="bg-slate-950 rounded-xl border border-slate-800 p-2">
+            <TwinGraph3D key="platform-twin" nodes={twin3dNodes} links={twin3dLinks} onPick={setSelected3d} />
+          </div>
+          <div className="bg-white rounded-xl border border-slate-200/80 p-5 self-start">
+            {selected3d ? (
+              <>
+                <span className="text-xs px-2 py-0.5 rounded" style={{ background: `${selected3d.color}1a`, color: selected3d.color }}>
+                  {selected3d.group === 'core' ? '孪生核心' : selected3d.group}
+                </span>
+                <h3 className="font-semibold text-slate-800 mt-2.5">{selected3d.name}</h3>
+                <p className="text-sm text-slate-500 mt-2 leading-relaxed">{selected3d.tip}</p>
+              </>
+            ) : (
+              <div className="py-14 text-center">
+                <p className="text-sm text-slate-500">点击 3D 节点查看实体详情</p>
+                <p className="text-xs text-slate-400 mt-1">支持拖拽旋转、滚轮缩放与悬停提示</p>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
       <div className="grid lg:grid-cols-[1fr_300px] gap-4">
         <div className="bg-white rounded-xl border border-slate-200/80 p-2">
           <EChart option={option} height={520} onNodeClick={(p: any) => {
@@ -183,6 +245,7 @@ export default function GraphPage({ go }: { go: (p: string) => void }) {
           </div>
         </div>
       </div>
+      )}
       <style>{`@keyframes fadeSlide { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: none; } }`}</style>
     </div>
   )
