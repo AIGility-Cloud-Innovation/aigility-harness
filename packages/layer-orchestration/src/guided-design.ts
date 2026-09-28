@@ -9,6 +9,10 @@
  * 场景: 编码教练 (@persona/coding-coach) 引导用户一步步设计一个案例应用,
  * 不真正生成/保存任何文件, 最终输出可直接交给网页应用开发员的完整提示词。
  *
+ * 提示词与阶段外置 (业务可改, 改完不用动代码): 阶段与全部话术在
+ * config/guided-design.yaml, 本文件只保留内置默认值兜底 ——
+ * 文件缺失/字段缺失/解析失败时自动回落, 行为与外置前逐字一致。
+ *
  * 契约:
  *   Request  { user_input, history?, session_state? }   ← 前端每轮回传 session_state
  *   Response { result, phase, phase_count, phase_title, progress, done, final_prompt?, session_state }
@@ -29,6 +33,7 @@ import type {
   HealthStatus,
   CapabilityRef,
 } from "@aigility-harness/core";
+import { renderTemplate, loadConfigSection } from "./prompts.js";
 
 // 认知层供能
 const llmInferenceRef: CapabilityRef = {
@@ -36,7 +41,7 @@ const llmInferenceRef: CapabilityRef = {
   versionRange: "^1.0.0",
 };
 
-// ── 阶段定义 (状态机的"边") ──────────────────────────────────────
+// ── 阶段定义 (状态机的"边"; 内置默认值, config/guided-design.yaml 可覆盖) ──
 
 export interface DesignPhase {
   title: string;
@@ -44,7 +49,7 @@ export interface DesignPhase {
   collect: string;
 }
 
-export const DESIGN_PHASES: DesignPhase[] = [
+const DEFAULT_PHASES: DesignPhase[] = [
   {
     title: "需求理解",
     collect: "这个应用给谁用(角色/场景)? 要解决的核心问题是什么? 最重要的那一件事是什么?",
@@ -67,7 +72,75 @@ export const DESIGN_PHASES: DesignPhase[] = [
   },
 ];
 
-const PHASE_COUNT = DESIGN_PHASES.length;
+// ── 提示词模板 (内置默认值, 与 config/guided-design.yaml 逐字一致) ──
+// {{占位符}} 运行时填充: phase_count/phase/phase_title/collect/next_phase/
+// next_title/next_collect/done_count/collected/final_spec
+
+const DEFAULT_PROMPTS = {
+  coach_base: [
+    "你是「编码教练」，正在分步引导用户设计一个案例应用。",
+    "铁律: 你只做引导与设计梳理, 绝不真正生成/保存任何应用文件或代码工程; 语气友好专业, 简体中文, 每次回复简洁 (先小结后提问)。",
+  ].join("\n"),
+  final_context: [
+    "用户已完成前 {{done_count}} 个阶段的设计梳理, 以下是各阶段收集到的结论:",
+    "{{collected}}",
+  ].join("\n"),
+  final_task: [
+    "任务: 结合用户本轮输入(确认/修改/补充), 输出完整应用提示词。格式要求:",
+    "1. 先用一两句话回应用户本轮的确认或修改;",
+    '2. 然后原样输出一个 ```app-prompt 围栏代码块, 块内是完整提示词;',
+    "{{final_spec}}",
+    "除围栏外不要输出其他代码或文件内容。",
+  ].join("\n"),
+  final_spec: [
+    "最终提示词必须是一段可直接粘贴给「网页应用开发员」的完整指令, 覆盖:",
+    "应用名称与目标用户 / 功能清单(按优先级) / 页面结构 / 数据实体与字段 / 关键交互与边界情况 / 技术要求(单 HTML 自包含、后端 API 一律用相对路径空基址、禁止硬编码 127.0.0.1/localhost/内网 IP)。",
+  ].join("\n"),
+  gate_context:
+    "工作流共 {{phase_count}} 个阶段, 当前是第 {{phase}} 阶段「{{phase_title}}」, 该阶段要收集: {{collect}}",
+  gate_instructions: [
+    "请先判断用户最新输入的意图, 输出的第一行只写标签 (不带任何其他字符):",
+    "ADVANCE —— 用户在实质回答本阶段的问题(提供了设计信息)",
+    "CHAT —— 用户在问别的: 问你是谁/是不是某个工具、问流程或阶段含义、闲聊等",
+    "",
+    "第一行标签之后换行, 再输出正文:",
+    "- 若 CHAT: 以教练身份直接回答用户的问题 (可顺势把话题引回应用设计), 不要提下一阶段的问题, 不要把该输入当作设计答案。",
+    "- 若 ADVANCE: ① 用两三句提炼确认用户本轮输入 (有歧义就顺带追问); ② 作为教练提出第 {{next_phase}} 阶段「{{next_title}}」的关键问题, 2-4 个, 编号列出, 问题要围绕: {{next_collect}}",
+    "不要输出任何代码文件, 不要提前输出完整提示词。",
+  ].join("\n"),
+  advance_context:
+    "工作流共 {{phase_count}} 个阶段, 用户刚回答完第 {{phase}} 阶段「{{phase_title}}」。",
+  advance_task: [
+    "任务: ① 用两三句提炼确认用户本轮输入 (有歧义就顺带追问); ② 作为教练提出第 {{next_phase}} 阶段「{{next_title}}」的关键问题, 2-4 个, 编号列出, 问题要围绕: {{next_collect}}",
+    "不要输出任何代码文件, 不要提前输出完整提示词。",
+  ].join("\n"),
+};
+
+type PromptKey = keyof typeof DEFAULT_PROMPTS;
+type Prompts = Record<PromptKey, string>;
+
+interface GuidedDesignFileConfig {
+  phases?: DesignPhase[];
+  prompts?: Partial<Prompts>;
+}
+
+/** 加载业务配置: config/guided-design.yaml, 缺失/不合法的字段逐项回落默认 */
+function loadDesignConfig(): { phases: DesignPhase[]; prompts: Prompts } {
+  const cfg = loadConfigSection<GuidedDesignFileConfig>("guided-design.yaml", "guided_design");
+  const phases =
+    Array.isArray(cfg?.phases) && cfg!.phases!.length > 0 &&
+    cfg!.phases!.every((p) => p && typeof p.title === "string" && typeof p.collect === "string")
+      ? cfg!.phases!
+      : DEFAULT_PHASES;
+  const prompts: Prompts = { ...DEFAULT_PROMPTS, ...(cfg?.prompts ?? {}) };
+  return { phases, prompts };
+}
+
+const CFG = loadDesignConfig();
+const PHASE_COUNT = CFG.phases.length;
+/** 阶段清单 (外置后仍导出: persona-coach 等消费方与配置保持同一份) */
+export const DESIGN_PHASES: DesignPhase[] = CFG.phases;
+const P = CFG.prompts;
 
 // ── 服务定义 ─────────────────────────────────────────────────────
 
@@ -115,16 +188,6 @@ export const guidedDesignService: ServiceDefinition<GuidedDesignRequest, GuidedD
 
 // ── Provider 实现 ────────────────────────────────────────────────
 
-const COACH_BASE_PROMPT = [
-  "你是「编码教练」，正在分步引导用户设计一个案例应用。",
-  "铁律: 你只做引导与设计梳理, 绝不真正生成/保存任何应用文件或代码工程; 语气友好专业, 简体中文, 每次回复简洁 (先小结后提问)。",
-].join("\n");
-
-const FINAL_PROMPT_SPEC = [
-  "最终提示词必须是一段可直接粘贴给「网页应用开发员」的完整指令, 覆盖:",
-  "应用名称与目标用户 / 功能清单(按优先级) / 页面结构 / 数据实体与字段 / 关键交互与边界情况 / 技术要求(单 HTML 自包含、后端 API 一律用相对路径空基址、禁止硬编码 127.0.0.1/localhost/内网 IP)。",
-].join("\n");
-
 function clampPhase(p: unknown): number {
   const n = Number(p);
   if (!Number.isFinite(n)) return 1;
@@ -169,22 +232,21 @@ const guidedDesignProvider: Provider<GuidedDesignRequest, GuidedDesignResponse> 
       return { text: "", degraded: true };
     };
 
-    // ── 最终阶段: 汇总产出完整提示词 (保持 phase, 支持反复迭代) ──
-    if (phase === PHASE_COUNT) {
-      const collected = Object.entries(answers)
+    // 各阶段已收集结论的汇总文本 (按阶段号排序)
+    const collectedText = (): string =>
+      Object.entries(answers)
         .sort(([a], [b]) => Number(a) - Number(b))
         .map(([p, txt]) => `【第${p}阶段·${DESIGN_PHASES[Number(p) - 1]?.title ?? ""}】${txt}`)
         .join("\n");
+
+    // ── 最终阶段: 汇总产出完整提示词 (保持 phase, 支持反复迭代) ──
+    if (phase === PHASE_COUNT) {
+      const collected = collectedText() || "(无, 请基于会话历史与用户本轮输入梳理)";
       const system = [
-        COACH_BASE_PROMPT,
-        "用户已完成前四个阶段的设计梳理, 以下是各阶段收集到的结论:",
-        collected || "(无, 请基于会话历史与用户本轮输入梳理)",
+        P.coach_base,
+        renderTemplate(P.final_context, { done_count: PHASE_COUNT - 1, collected }),
         "",
-        "任务: 结合用户本轮输入(确认/修改/补充), 输出完整应用提示词。格式要求:",
-        "1. 先用一两句话回应用户本轮的确认或修改;",
-        '2. 然后原样输出一个 ```app-prompt 围栏代码块, 块内是完整提示词;',
-        FINAL_PROMPT_SPEC,
-        "除围栏外不要输出其他代码或文件内容。",
+        renderTemplate(P.final_task, { final_spec: P.final_spec }),
       ].join("\n");
       const { text, degraded } = await callLlm(system);
       const finalPrompt = extractFenced(text) ?? (degraded ? undefined : text.trim());
@@ -213,28 +275,22 @@ const guidedDesignProvider: Provider<GuidedDesignRequest, GuidedDesignResponse> 
       });
     }
 
-    // ── 阶段 1..4: 意图闸门 → 实质回答则推进; 问教练/闲聊则以教练身份作答(不推进) ──
+    // ── 阶段 1..N-1: 意图闸门 → 实质回答则推进; 问教练/闲聊则以教练身份作答(不推进) ──
     const cur = DESIGN_PHASES[phase - 1];
     const nextPhase = phase + 1;
     const next = DESIGN_PHASES[nextPhase - 1];
-    const collectedSoFar = Object.entries(answers)
-      .sort(([a], [b]) => Number(a) - Number(b))
-      .map(([p, txt]) => `【第${p}阶段·${DESIGN_PHASES[Number(p) - 1]?.title ?? ""}】${txt}`)
-      .join("\n");
+    const collectedSoFar = collectedText();
 
     // 单次 LLM 调用同时完成「意图判断 + 内容产出」: 第一行 ADVANCE/CHAT 标签, 之后是正文
     const gateSystem = [
-      COACH_BASE_PROMPT,
-      `工作流共 ${PHASE_COUNT} 个阶段, 当前是第 ${phase} 阶段「${cur.title}」, 该阶段要收集: ${cur.collect}`,
+      P.coach_base,
+      renderTemplate(P.gate_context, {
+        phase_count: PHASE_COUNT, phase, phase_title: cur.title, collect: cur.collect,
+      }),
       "",
-      "请先判断用户最新输入的意图, 输出的第一行只写标签 (不带任何其他字符):",
-      "ADVANCE —— 用户在实质回答本阶段的问题(提供了设计信息)",
-      "CHAT —— 用户在问别的: 问你是谁/是不是某个工具、问流程或阶段含义、闲聊等",
-      "",
-      "第一行标签之后换行, 再输出正文:",
-      "- 若 CHAT: 以教练身份直接回答用户的问题 (可顺势把话题引回应用设计), 不要提下一阶段的问题, 不要把该输入当作设计答案。",
-      `- 若 ADVANCE: ① 用两三句提炼确认用户本轮输入 (有歧义就顺带追问); ② 作为教练提出第 ${nextPhase} 阶段「${next.title}」的关键问题, 2-4 个, 编号列出, 问题要围绕: ${next.collect}`,
-      "不要输出任何代码文件, 不要提前输出完整提示词。",
+      renderTemplate(P.gate_instructions, {
+        next_phase: nextPhase, next_title: next.title, next_collect: next.collect,
+      }),
     ].join("\n");
     const gate = await callLlm(gateSystem);
     const gateTag = /^\s*(ADVANCE|CHAT)\b/.exec(gate.text);
@@ -259,13 +315,16 @@ const guidedDesignProvider: Provider<GuidedDesignRequest, GuidedDesignResponse> 
     // ADVANCE (或 LLM 不可用时的确定性推进): 记录本轮答案 → 提炼确认 → 下一阶段问题
     answers[phase] = request.user_input;
     const system = [
-      COACH_BASE_PROMPT,
-      `工作流共 ${PHASE_COUNT} 个阶段, 用户刚回答完第 ${phase} 阶段「${cur.title}」。`,
+      P.coach_base,
+      renderTemplate(P.advance_context, {
+        phase_count: PHASE_COUNT, phase, phase_title: cur.title,
+      }),
       "此前各阶段收集到的结论:",
       collectedSoFar,
       "",
-      `任务: ① 用两三句提炼确认用户本轮输入 (有歧义就顺带追问); ② 作为教练提出第 ${nextPhase} 阶段「${next.title}」的关键问题, 2-4 个, 编号列出, 问题要围绕: ${next.collect}`,
-      "不要输出任何代码文件, 不要提前输出完整提示词。",
+      renderTemplate(P.advance_task, {
+        next_phase: nextPhase, next_title: next.title, next_collect: next.collect,
+      }),
     ].join("\n");
     const { text, degraded } = gate.degraded
       ? { text: "", degraded: true }
@@ -289,7 +348,7 @@ const guidedDesignProvider: Provider<GuidedDesignRequest, GuidedDesignResponse> 
   async health(): Promise<HealthStatus> {
     return {
       healthy: true,
-      detail: `guided-design ready (${PHASE_COUNT} 阶段: ${DESIGN_PHASES.map((p) => p.title).join(" → ")})`,
+      detail: `guided-design ready (${PHASE_COUNT} 阶段: ${DESIGN_PHASES.map((p) => p.title).join(" → ")}; config/guided-design.yaml)`,
       checkedAt: new Date().toISOString(),
     };
   },

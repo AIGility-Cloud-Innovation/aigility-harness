@@ -1,0 +1,37 @@
+# 插件安装工作流 (plugin-install) 业务配置
+# ─────────────────────────────────────────────────────────────
+# 业务可改: 意图关键词与指引话术都在这里调整, 改完无需动代码。
+# 文件缺失 / 字段缺失 / 解析失败时, 回落到 src/plugin-install.ts 内置默认值。
+# {{key}} 为占位符, 由运行时填充: keyword/capability_id/package/py_count/
+# ts_count/py_names/ts_list。
+
+plugin_install:
+  # 意图关键词: 用户输入命中任一关键词即进入插件匹配
+  keywords: [rag, memory, workflow, TTS, STT, ASR, 聊天, 记忆, 检索, 工作流, 语音]
+
+  # 指引话术模板
+  guidance:
+    # 命中已接入的 Python 能力插件
+    found_python: |-
+      「{{keyword}}」能力已接入 ✅ — {{capability_id}} 已在 config/py-plugins.json 声明，无需额外安装。直接通过 Seam 调用即可（ctx.call({ id: "{{capability_id}}" })）。
+    found_python_path: py-plugins.json 声明式接入（已就绪）
+
+    # 命中已存在的 TS 原生插件包
+    found_ts: |-
+      「{{keyword}}」能力已存在 ✅ — 包 {{package}} 在 packages/ 下。若需新增同类插件：在 packages/ 新建 LayerPlugin，声明 provides/consumes 契约后注册进 bootstrap。
+    found_ts_path: TS 原生插件（packages/ 新建 LayerPlugin）
+
+    # 命中关键词但插件未接入
+    not_found: |-
+      「{{keyword}}」目前未接入。接入路径：
+      1. Python 能力插件 → 在 config/py-plugins.json 增加声明（参考现有 aigility-workflow / aigility-memory 条目）
+      2. TS 原生插件 → 在 packages/ 新建 LayerPlugin 并注册
+      已扫描到 {{py_count}} 个 Python 插件、{{ts_count}} 个 TS 包，见下方清单。
+    not_found_path: py-plugins.json 声明式 或 packages/ 新建 LayerPlugin
+
+    # 未命中任何关键词: 总览 + 引导
+    intro: |-
+      我可以帮你接入插件。当前已扫描：
+      - Python 能力插件 {{py_count}} 个（{{py_names}}）
+      - TS 包 {{ts_count}} 个（{{ts_list}}）
+      告诉我你想装什么（如 RAG / 记忆 / 工作流 / 语音），我给出具体接入步骤。

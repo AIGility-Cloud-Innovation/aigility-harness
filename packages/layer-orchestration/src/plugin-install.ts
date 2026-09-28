@@ -13,6 +13,8 @@
  *   - 将来可热切换: 同一能力 id 由 py-bridge 声明为
  *     aigility.workflow.WorkflowEngine 的 YAML 工作流
  *   - 本 provider 保持原子: 只做「扫描+校验+指引」
+ *   - 意图关键词与指引话术外置 config/plugin-install.yaml
+ *     (业务可改, 改完不用动代码; 文件缺失/解析失败回落内置默认值)
  */
 
 import {
@@ -31,8 +33,55 @@ import type {
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { renderTemplate, loadConfigSection } from "./prompts.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// ── 业务配置 (关键词 + 指引话术; config/plugin-install.yaml 可覆盖) ──
+
+const DEFAULT_KEYWORDS = ["rag", "memory", "workflow", "TTS", "STT", "ASR", "聊天", "记忆", "检索", "工作流", "语音"];
+
+const DEFAULT_GUIDANCE = {
+  found_python:
+    "「{{keyword}}」能力已接入 ✅ — {{capability_id}} 已在 config/py-plugins.json 声明，无需额外安装。直接通过 Seam 调用即可（ctx.call({ id: \"{{capability_id}}\" })）。",
+  found_python_path: "py-plugins.json 声明式接入（已就绪）",
+  found_ts:
+    "「{{keyword}}」能力已存在 ✅ — 包 {{package}} 在 packages/ 下。若需新增同类插件：在 packages/ 新建 LayerPlugin，声明 provides/consumes 契约后注册进 bootstrap。",
+  found_ts_path: "TS 原生插件（packages/ 新建 LayerPlugin）",
+  not_found: [
+    "「{{keyword}}」目前未接入。接入路径：",
+    "1. Python 能力插件 → 在 config/py-plugins.json 增加声明（参考现有 aigility-workflow / aigility-memory 条目）",
+    "2. TS 原生插件 → 在 packages/ 新建 LayerPlugin 并注册",
+    "已扫描到 {{py_count}} 个 Python 插件、{{ts_count}} 个 TS 包，见下方清单。",
+  ].join("\n"),
+  not_found_path: "py-plugins.json 声明式 或 packages/ 新建 LayerPlugin",
+  intro: [
+    "我可以帮你接入插件。当前已扫描：",
+    "- Python 能力插件 {{py_count}} 个（{{py_names}}）",
+    "- TS 包 {{ts_count}} 个（{{ts_list}}）",
+    "告诉我你想装什么（如 RAG / 记忆 / 工作流 / 语音），我给出具体接入步骤。",
+  ].join("\n"),
+};
+
+type GuidanceKey = keyof typeof DEFAULT_GUIDANCE;
+type Guidance = Record<GuidanceKey, string>;
+
+function loadInstallConfig(): { keywords: string[]; guidance: Guidance } {
+  const cfg = loadConfigSection<{ keywords?: string[]; guidance?: Partial<Guidance> }>(
+    "plugin-install.yaml",
+    "plugin_install",
+  );
+  return {
+    keywords:
+      Array.isArray(cfg?.keywords) && cfg!.keywords!.length > 0 &&
+      cfg!.keywords!.every((k) => typeof k === "string" && k.trim())
+        ? cfg!.keywords!
+        : DEFAULT_KEYWORDS,
+    guidance: { ...DEFAULT_GUIDANCE, ...(cfg?.guidance ?? {}) },
+  };
+}
+
+const INSTALL_CFG = loadInstallConfig();
 
 // ── 服务定义 ─────────────────────────────────────────────────────
 
@@ -114,7 +163,7 @@ function matchPlugin(userInput: string, pyPlugins: PyPluginEntry[], tsPackages: 
   kind?: "python" | "ts";
   id?: string;
 } {
-  const kw = ["rag", "memory", "workflow", "TTS", "STT", "ASR", "聊天", "记忆", "检索", "工作流", "语音"].find((k) =>
+  const kw = INSTALL_CFG.keywords.find((k) =>
     userInput.toLowerCase().includes(k.toLowerCase()),
   );
   if (!kw) return { found: false };
@@ -134,13 +183,14 @@ function matchPlugin(userInput: string, pyPlugins: PyPluginEntry[], tsPackages: 
   return { keyword: kw, found: false };
 }
 
-/** 生成指引文字 */
+/** 生成指引文字 (话术模板在 config/plugin-install.yaml, 占位符运行时填充) */
 function buildGuidance(
   match: ReturnType<typeof matchPlugin>,
   pyPlugins: PyPluginEntry[],
   tsPackages: string[],
   userInput: string,
 ): { result: string; suggested_path?: string; available: string[] } {
+  const g = INSTALL_CFG.guidance;
   const available = [
     ...pyPlugins.flatMap((p) => p.capabilities.map((c) => c.id)),
     ...tsPackages.map((p) => `packages/${p}`),
@@ -148,28 +198,33 @@ function buildGuidance(
 
   if (match.found && match.kind === "python" && match.id) {
     return {
-      result: `「${match.keyword}」能力已接入 ✅ — ${match.id} 已在 config/py-plugins.json 声明，无需额外安装。直接通过 Seam 调用即可（ctx.call({ id: "${match.id}" })）。`,
-      suggested_path: "py-plugins.json 声明式接入（已就绪）",
+      result: renderTemplate(g.found_python, { keyword: match.keyword ?? "", capability_id: match.id }),
+      suggested_path: g.found_python_path,
       available,
     };
   }
   if (match.found && match.kind === "ts" && match.id) {
     return {
-      result: `「${match.keyword}」能力已存在 ✅ — 包 ${match.id} 在 packages/ 下。若需新增同类插件：在 packages/ 新建 LayerPlugin，声明 provides/consumes 契约后注册进 bootstrap。`,
-      suggested_path: "TS 原生插件（packages/ 新建 LayerPlugin）",
+      result: renderTemplate(g.found_ts, { keyword: match.keyword ?? "", package: match.id }),
+      suggested_path: g.found_ts_path,
       available,
     };
   }
   if (match.keyword && !match.found) {
     return {
-      result: `「${match.keyword}」目前未接入。接入路径：\n1. Python 能力插件 → 在 config/py-plugins.json 增加声明（参考现有 aigility-workflow / aigility-memory 条目）\n2. TS 原生插件 → 在 packages/ 新建 LayerPlugin 并注册\n已扫描到 ${pyPlugins.length} 个 Python 插件、${tsPackages.length} 个 TS 包，见下方清单。`,
-      suggested_path: "py-plugins.json 声明式 或 packages/ 新建 LayerPlugin",
+      result: renderTemplate(g.not_found, { keyword: match.keyword, py_count: pyPlugins.length, ts_count: tsPackages.length }),
+      suggested_path: g.not_found_path,
       available,
     };
   }
 
   return {
-    result: `我可以帮你接入插件。当前已扫描：\n- Python 能力插件 ${pyPlugins.length} 个（${pyPlugins.map((p) => p.name).join("、") || "无"}）\n- TS 包 ${tsPackages.length} 个（${tsPackages.slice(0, 5).join("、")}${tsPackages.length > 5 ? "…" : ""}）\n告诉我你想装什么（如 RAG / 记忆 / 工作流 / 语音），我给出具体接入步骤。`,
+    result: renderTemplate(g.intro, {
+      py_count: pyPlugins.length,
+      py_names: pyPlugins.map((p) => p.name).join("、") || "无",
+      ts_count: tsPackages.length,
+      ts_list: `${tsPackages.slice(0, 5).join("、")}${tsPackages.length > 5 ? "…" : ""}`,
+    }),
     available,
   };
 }

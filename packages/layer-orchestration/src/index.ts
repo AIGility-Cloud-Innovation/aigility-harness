@@ -128,6 +128,28 @@ import {
 } from "./guided-design.js";
 export { guidedDesignService, guidedDesignProvider };
 
+// 通用 YAML 工作流驱动器 (数据面: 契约与 aigility WorkflowConfig 对齐,
+// 节点/条件函数由调用方注册; Python 侧同构件为 aigility.workflow.WorkflowBuilder)
+export {
+  parseWorkflowYaml,
+  loadWorkflowFile,
+  YamlWorkflow,
+} from "./workflow-driver.js";
+export type {
+  WorkflowDoc,
+  WorkflowNodeConfig,
+  WorkflowEdgeConfig,
+  WorkflowBranchConfig,
+  WorkflowConditionalEdgeConfig,
+  WorkflowFlowConfig,
+  WorkflowNodeFn,
+  WorkflowConditionFn,
+  WorkflowValidation,
+  WorkflowRunResult,
+} from "./workflow-driver.js";
+// 配置外置共用件 ({{占位符}} 渲染 + config/ 目录 YAML 加载)
+export { renderTemplate, loadConfigSection } from "./prompts.js";
+
 // 群聊→任务→工单→PR提醒 流水线（只管理不执行）
 export {
   taskPipelineService,
