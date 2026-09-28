@@ -39,7 +39,7 @@ export default function SettingsPage({ branding, setBranding, tenantId }: {
   }
 
   return (
-    <div className="space-y-5 max-w-4xl">
+    <div className="space-y-5 max-w-5xl mx-auto">
       <div>
         <h1 className="text-xl font-semibold text-slate-800">品牌与平台配置</h1>
         <p className="text-sm text-slate-500 mt-1">标品贴牌：品牌、主题、Logo 所见即所得 · 配置可导出迁移 · 私有化 / 一体机授权 · 租户管理</p>
