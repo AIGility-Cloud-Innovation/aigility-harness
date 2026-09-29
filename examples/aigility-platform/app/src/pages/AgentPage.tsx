@@ -228,7 +228,7 @@ export default function AgentPage({ skillList, showMock = true }: { skillList: S
           </div>
 
           {/* 上下文面板 */}
-          <div className="space-y-4">
+          <div className="space-y-4 max-h-[calc(100vh-6.5rem)] overflow-y-auto pr-1">
             <div className="bg-white rounded-xl border border-slate-200/80 p-5">
               <h4 className="text-sm font-medium text-slate-800 mb-3">当前数字员工</h4>
               <div className="rounded-lg border border-slate-100 bg-slate-50/60 p-3 space-y-1.5">
@@ -267,6 +267,10 @@ export default function AgentPage({ skillList, showMock = true }: { skillList: S
             </div>
             <div className="bg-white rounded-xl border border-slate-200/80 p-5">
               <h4 className="text-sm font-medium text-slate-800 mb-3">人在回路 · 三档协作</h4>
+              <div className="mb-3 rounded-lg bg-gradient-to-br from-slate-800 to-slate-900 p-4 text-white">
+                <div className="flex items-center gap-2 mb-2"><Plug size={14} className="text-blue-300" /><span className="text-xs font-medium">MCP 执行链路</span></div>
+                <p className="text-[11px] text-slate-300 leading-relaxed">对话 → TiMEM 记忆检索 → 规则匹配 → 客户系统 API → 生成结果 → 人审 → 沉淀记忆与规则</p>
+              </div>
               <div className="space-y-2.5">
                 {[
                   { l: '低风险 · 自动执行', d: '查数、汇总、生成草稿', c: 'bg-emerald-50 text-emerald-600 border-emerald-100' },
@@ -280,10 +284,6 @@ export default function AgentPage({ skillList, showMock = true }: { skillList: S
                 ))}
               </div>
               <p className="text-[11px] text-slate-400 mt-3 leading-relaxed">置信度低于阈值自动升级一档；审批轨迹沉淀为规则</p>
-            </div>
-            <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-5 text-white">
-              <div className="flex items-center gap-2 mb-2"><Plug size={15} className="text-blue-300" /><span className="text-sm font-medium">MCP 执行链路</span></div>
-              <p className="text-xs text-slate-300 leading-relaxed">对话 → TiMEM 记忆检索 → 规则匹配 → 客户系统 API（DCS / SCADA / CRM）→ 生成结果 → 人审 → 沉淀记忆与规则</p>
             </div>
           </div>
         </div>
