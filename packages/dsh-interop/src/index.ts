@@ -17,6 +17,42 @@ export { installedDshPackages, disabledToText } from "./installed.js";
 export type { InstalledDshPackage } from "./installed.js";
 export { dshAgentHeadless } from "./headless.js";
 export type { DshHeadlessOptions, DshHeadlessResult } from "./headless.js";
+export {
+  dshWorkflowRun,
+  writeWorkflowRunFiles,
+  buildWorkflowTask,
+  parseWorkflowReturnValue,
+} from "./workflow-run.js";
+export type {
+  DshWorkflowMeta,
+  DshWorkflowRunOptions,
+  DshWorkflowRunResult,
+  WorkflowRunFiles,
+} from "./workflow-run.js";
+export {
+  dshRunCli,
+  resolveDshBinJs,
+  TranscriptStore,
+  createDshSessionRelayExecute,
+  createDshSessionRelayProvider,
+  dshSessionRelayRef,
+  dshSessionRelayService,
+  RELAY_COMMANDS,
+  loadDotEnv,
+  loadRoleRegistry,
+  resolveRole,
+  buildRolePatchFile,
+} from "./session-relay.js";
+export type {
+  DshRunOptions,
+  DshRunResult,
+  TranscriptTurn,
+  RelayRequest,
+  RoleMcpServer,
+  RoleCapabilityConfig,
+  RoleRegistry,
+  DshSessionRelayOptions,
+} from "./session-relay.js";
 export { evaluateJsExpr, evaluateDeep } from "./js-expr.js";
 export type { JsExprEvalContext } from "./js-expr.js";
 export {
@@ -35,3 +71,13 @@ export type {
   ProfileRowResult,
   RowDependencyMeta,
 } from "./profile-composer.js";
+export {
+  createDshWorkflowRunner,
+  createDshWorkflowRunProvider,
+  dshWorkflowRunRef,
+  dshWorkflowRunService,
+  resolveWorkflowRuntime,
+} from "./workflow-service.js";
+export type {
+  DshWorkflowServiceOptions,
+} from "./workflow-service.js";

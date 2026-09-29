@@ -43,8 +43,9 @@ export interface DshHeadlessResult {
   durationMs: number;
 }
 
-/** 官方 CLI 的 bin.js 绝对路径（直接用 node 跑，跨平台无 .cmd shim 问题） */
-function dshBinJs(): string {
+/** 官方 CLI 的 bin.js 绝对路径（直接用 node 跑，跨平台无 .cmd shim 问题）。
+ *  导出供同族的 workflow-run 等入口复用同一套解析。 */
+export function dshBinJs(): string {
   const pkgPath = localRequire.resolve("@deepseek-ai/dsh/package.json");
   const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
     bin?: Record<string, string>;

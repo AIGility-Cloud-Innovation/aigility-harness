@@ -91,6 +91,7 @@ export {
   isTokenExpired,
   extractAuthCode,
   readTokenEnv,
+  resolveTokenStorePath,
   getFreshUserToken,
 } from "./feishu-api.js";
 export type { FeishuApiRequest, FeishuApiResponse } from "./feishu-api.js";

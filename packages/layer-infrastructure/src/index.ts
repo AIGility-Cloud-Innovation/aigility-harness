@@ -218,6 +218,8 @@ export {
   feishuIngressService,
   feishuIngressProvider,
   feishuTimemSupportRef,
+  messageText,
+  shouldPassiveCollect,
   manifest as feishuManifest,
 } from "./feishu-ingress.js";
 export type {

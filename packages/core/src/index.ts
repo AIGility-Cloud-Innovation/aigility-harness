@@ -96,6 +96,11 @@ export type {
   CapabilityMountResult,
   HarnessVersionInfo,
   HarnessInterop,
+  WorkflowMeta,
+  WorkflowRunRequest,
+  WorkflowRunOutcome,
+  WorkflowRunRuntime,
+  WorkflowRunner,
 } from "./harness-interop.js";
 
 // ── Bootstrap ─────────────────────────────────────────────────────

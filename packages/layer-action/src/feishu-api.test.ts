@@ -5,6 +5,7 @@ import {
   isTokenExpired,
   extractAuthCode,
   readTokenEnv,
+  resolveTokenStorePath,
 } from "./feishu-api.js";
 
 describe("buildFeishuUrl", () => {
@@ -58,13 +59,13 @@ describe("buildAuthorizeUrl", () => {
   it("默认参数生成标准授权链接（回调/scope 走约定默认，state 自动生成）", () => {
     const a = buildAuthorizeUrl({ appId: "cli_a123" });
     expect(a.redirectUri).toBe("http://localhost:18080/callback");
-    expect(a.scopes).toBe("task:task:read task:task:write");
+    expect(a.scopes).toBe("task:task:read task:task:write task:section:read task:section:write");
     expect(a.state).toMatch(/^[0-9a-f]{32}$/);
     expect(a.url).toBe(
       "https://accounts.feishu.cn/open-apis/authen/v1/authorize" +
         `?app_id=cli_a123` +
         `&redirect_uri=${encodeURIComponent("http://localhost:18080/callback")}` +
-        `&scope=${encodeURIComponent("task:task:read task:task:write")}` +
+        `&scope=${encodeURIComponent("task:task:read task:task:write task:section:read task:section:write")}` +
         `&state=${a.state}`,
     );
   });
@@ -105,10 +106,17 @@ describe("extractAuthCode", () => {
 });
 
 describe("readTokenEnv", () => {
-  it("缺省 token store 路径为 feishu/user_token.local.json", () => {
+  it("缺省/相对 token store 路径相对仓库根解析（不随 cwd 漂移）", () => {
     const saved = process.env.FEISHU_USER_TOKEN_STORE;
     delete process.env.FEISHU_USER_TOKEN_STORE;
-    expect(readTokenEnv().tokenStorePath).toBe("feishu/user_token.local.json");
+    const p = readTokenEnv().tokenStorePath;
+    // 解析后的绝对路径应落在仓库根 feishu/ 下（本测试文件位于 <root>/packages/layer-action/src）
+    expect(p).toMatch(/feishu[/\\]user_token\.local\.json$/);
+    expect(p.startsWith("/")).toBe(true);
     if (saved !== undefined) process.env.FEISHU_USER_TOKEN_STORE = saved;
+  });
+
+  it("绝对路径原样返回", () => {
+    expect(resolveTokenStorePath("/tmp/abs/token.json")).toBe("/tmp/abs/token.json");
   });
 });

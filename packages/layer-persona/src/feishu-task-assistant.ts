@@ -59,6 +59,12 @@ export type TaskIntent =
   | { kind: "dispatch-confirm"; ref: string }
   /** 派发取消：「取消派发 #N」（撤销 agentd 任务） */
   | { kind: "dispatch-cancel"; ref: string }
+  /** 安排执行者：「安排执行者 #N @张三」（P→D 前置条件） */
+  | { kind: "assign"; ref: string; executor: string }
+  /** 澄清归属确认：「任务归属 N @仓库」（把群内澄清队列的候选建成工单） */
+  | { kind: "pending-assign"; ref: string; repo: string }
+  /** 澄清归属放弃：「跳过任务 N」（丢弃澄清队列候选，不建单） */
+  | { kind: "pending-skip"; ref: string }
   | { kind: "overview" }
   | { kind: "help" };
 
@@ -152,6 +158,18 @@ export function parseTaskIntent(input: string): TaskIntent {
   }
 
   // ── Gitea 工单（先剥离 @仓库 片段再匹配触发词） ──
+  // 注意：安排执行者的 @姓名 必须在剥离前用原始文本匹配，
+  // 否则 extractRepoSpec 会把 @张三/@wang-wu 当 @仓库 片段吃掉
+  const am = text.match(/^(?:安排执行者|指派执行者|安排|指派)\s*[:：]?\s*#?(\d+)\s+@?([\p{Script=Han}\w·\-]{1,32})\s*$/u);
+  if (am) return { kind: "assign", ref: am[1], executor: am[2] };
+
+  // ── 澄清归属（原始文本匹配，@仓库 不能被 extractRepoSpec 提前吃掉） ──
+  // 触发：被动汇总判不动仓库归属时，群里会收到带编号的澄清问询
+  const pa = text.match(/^(?:任务归属|归属任务)\s*[:：]?\s*#?(\d+)(?:\s|[:：,，])+\s*@?([A-Za-z0-9._/-]{1,80})\s*$/u);
+  if (pa) return { kind: "pending-assign", ref: pa[1], repo: pa[2] };
+  const ps = text.match(/^(?:跳过任务|任务跳过)\s*[:：]?\s*#?(\d+)\s*$/u);
+  if (ps) return { kind: "pending-skip", ref: ps[1] };
+
   const stripped = extractRepoSpec(text);
   const repoSpec = stripped.repo;
   const body = stripped.text;
@@ -263,8 +281,16 @@ const HELP_TEXT = `我是「项目小助理」，负责协调你的飞书任务�
 
 📊 项目概览 —— 飞书待办 + 进行中工单一屏汇总
 
+👤 执行者安排 —— 「安排执行者 #工单号 @姓名」
+安排好执行者的任务才会进入执行队列（P → D）
+
+🧾 归属澄清 —— 自动汇总拿不准仓库归属时，会在群里列编号请本群确认
+• 任务归属 <编号> @仓库 —— 确认归属并建工单
+• 跳过任务 <编号> —— 丢弃该条，不建单
+
 例：「建任务 @video：修复登录页白屏 截止 2026-10-16」（飞书任务 + 工单双建）
-　　「建工单 @video：优化查询速度」（工单 + 飞书任务双建）`;
+　　「建工单 @video：优化查询速度」（工单 + 飞书任务双建）
+　　「安排执行者 #12 @张三」（指定执行者，任务才会开始流转执行）`;
 
 // ── Provider 实现：解析 → 委托编排层 → 回复信封 ──────────────────
 

@@ -96,6 +96,11 @@ export interface FeishuIngressRequest {
     }) => void;
     /** 只监听这些会话；空/未设 = 所有群 */
     chatIds?: string[];
+    /**
+     * 排除的发送者 open_id 列表（bot 自身/其他机器人）；命中则不收集。
+     * 防回声：多机器人同群时，机器人间消息互喂汇总缓冲会形成循环。
+     */
+    excludeSenderIds?: string[];
   };
 }
 
@@ -107,6 +112,24 @@ export interface FeishuIngressResponse {
   stop: () => Promise<void>;
   /** 主动发消息（供编排层做群播报，如任务汇总/PR 提醒） */
   send: (chatId: string, text: string) => Promise<void>;
+}
+
+/**
+ * passive 收集判定（导出供单测）：仅群聊、未 @bot、有文本、
+ * 会话在监听白名单（空=全部）、发送者不在排除列表（防机器人回声循环）。
+ */
+export function shouldPassiveCollect(
+  msg: NormalizedMessage,
+  passive?: FeishuIngressRequest["passive"],
+): boolean {
+  if (!passive?.enabled || msg.chatType !== "group" || msg.mentionedBot) return false;
+  const text = messageText(msg);
+  if (!text) return false;
+  const ids = passive.chatIds;
+  const chatOk = !ids || ids.length === 0 || ids.includes(msg.chatId);
+  const excluded = passive.excludeSenderIds ?? [];
+  const senderOk = !msg.senderId || !excluded.includes(msg.senderId);
+  return chatOk && senderOk;
 }
 
 // ── 服务/清单 ────────────────────────────────────────────────────
@@ -337,6 +360,13 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
       appSecret,
       transport: "websocket",
       source: "aigility-harness-feishu-ingress",
+      // PolicyGate 缺省 requireMention=true：免@群消息在 SDK 通道层就被以
+      // no_mention 丢弃，永远到不了下面的 message 处理器 → passive 静默收集
+      // 一次都不会触发（静默记录任务链路整体失效的根因）。
+      // 开启 passive 时必须放开 mention 门槛；@bot 指令路由由本层
+      // shouldProcessMessage/agentRoutes 自行判定，放权不影响指令链路。
+      // @所有人(mentionAll) 仍维持默认拦截，防全员消息刷屏误触发。
+      ...(request.passive?.enabled ? { policy: { requireMention: false } } : {}),
       // 长期治本：僵尸连接自愈
       // pingTimeout=秒级 liveness watchdog——超过窗口无入站消息判定死连接自动重连
       // （中间设备静默丢弃 WS 时 TCP 层不报错，此前只能靠人工重启）
@@ -350,29 +380,25 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
     activeUnsubscribe = channel.on({
       message: async (msg: NormalizedMessage) => {
         // 0. 监听模式：群聊未 @bot 的消息不回复，但按配置收集给编排层
+        const passive = request.passive;
         const text0 = messageText(msg);
         if (
-          request.passive?.enabled &&
-          msg.chatType === "group" &&
-          !msg.mentionedBot &&
-          text0 &&
+          passive !== undefined &&
+          shouldPassiveCollect(msg, passive) &&
           !deduper.isDuplicate(`passive:${msg.messageId}`)
         ) {
-          const ids = request.passive.chatIds;
-          if (!ids || ids.length === 0 || ids.includes(msg.chatId)) {
-            try {
-              console.log(`[feishu-ingress] passive collect: chat=${msg.chatId} sender=${msg.senderId} text="${text0.slice(0, 50)}"`);
-              request.passive.onCollect({
-                messageId: msg.messageId,
-                chatId: msg.chatId,
-                senderId: msg.senderId,
-                text: text0,
-                chatType: msg.chatType,
-                ts: Date.now(),
-              });
-            } catch (e) {
-              console.log(`[feishu-ingress] passive collect error: ${String(e)}`);
-            }
+          try {
+            console.log(`[feishu-ingress] passive collect: chat=${msg.chatId} sender=${msg.senderId} text="${text0.slice(0, 50)}"`);
+            passive.onCollect({
+              messageId: msg.messageId,
+              chatId: msg.chatId,
+              senderId: msg.senderId,
+              text: text0,
+              chatType: msg.chatType,
+              ts: Date.now(),
+            });
+          } catch (e) {
+            console.log(`[feishu-ingress] passive collect error: ${String(e)}`);
           }
           // 收集后继续走常规过滤：若不满足 @bot 触发条件则到此为止
         }

@@ -398,3 +398,82 @@ describe("feishuTaskAssistantProvider — 兜底防编造集成", () => {
     expect(req["temperature"]).toBe(0.2);
   });
 });
+
+// ── assign 意图：「安排执行者 #N @姓名」 ─────────────────────────────
+
+describe("parseTaskIntent — assign 安排执行者", () => {
+  it("标准形式（带 @）", async () => {
+    const { parseTaskIntent } = await import("./feishu-task-assistant.js");
+    expect(parseTaskIntent("安排执行者 #12 @张三")).toEqual({
+      kind: "assign",
+      ref: "12",
+      executor: "张三",
+    });
+  });
+
+  it("简写形式（不带 @、不带「执行者」）", async () => {
+    const { parseTaskIntent } = await import("./feishu-task-assistant.js");
+    expect(parseTaskIntent("安排 7 李四")).toEqual({ kind: "assign", ref: "7", executor: "李四" });
+  });
+
+  it("英文名与连字符", async () => {
+    const { parseTaskIntent } = await import("./feishu-task-assistant.js");
+    expect(parseTaskIntent("安排执行者 #3 @wang-wu")).toEqual({
+      kind: "assign",
+      ref: "3",
+      executor: "wang-wu",
+    });
+  });
+
+  it("缺执行者 → 不命中（落 help/兜底）", async () => {
+    const { parseTaskIntent } = await import("./feishu-task-assistant.js");
+    expect(parseTaskIntent("安排执行者 #12").kind).toBe("help");
+  });
+
+  it("不吞掉「确认派发 #N」", async () => {
+    const { parseTaskIntent } = await import("./feishu-task-assistant.js");
+    expect(parseTaskIntent("确认派发 #12")).toEqual({ kind: "dispatch-confirm", ref: "12" });
+  });
+});
+
+// ── 澄清归属意图（任务归属 N @仓库 / 跳过任务 N） ──────────────────
+
+describe("parseTaskIntent — 澄清归属", () => {
+  it("任务归属 N @短名 与 @组织/仓库 全名", () => {
+    expect(parseTaskIntent("任务归属 3 @video")).toEqual({
+      kind: "pending-assign",
+      ref: "3",
+      repo: "video",
+    });
+    expect(
+      parseTaskIntent("任务归属 12 @AIGility-Cloud-Innovation/nx-telecom-video-platform"),
+    ).toEqual({
+      kind: "pending-assign",
+      ref: "12",
+      repo: "AIGility-Cloud-Innovation/nx-telecom-video-platform",
+    });
+  });
+
+  it("带 # 与冒号变体、归属任务同义", () => {
+    expect(parseTaskIntent("归属任务 #4：opc")).toEqual({
+      kind: "pending-assign",
+      ref: "4",
+      repo: "opc",
+    });
+    expect(parseTaskIntent("任务归属 4, opc")).toEqual({
+      kind: "pending-assign",
+      ref: "4",
+      repo: "opc",
+    });
+  });
+
+  it("跳过任务 N（含 # 与语序变体）", () => {
+    expect(parseTaskIntent("跳过任务 5")).toEqual({ kind: "pending-skip", ref: "5" });
+    expect(parseTaskIntent("任务跳过 #5")).toEqual({ kind: "pending-skip", ref: "5" });
+  });
+
+  it("邮箱等 @ 片段不误触；普通句子落 help", () => {
+    expect(parseTaskIntent("任务归属 1 bob@example.com").kind).toBe("help");
+    expect(parseTaskIntent("这个任务的归属问题回头再说").kind).toBe("help");
+  });
+});

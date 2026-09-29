@@ -11,8 +11,9 @@
  * 凭证来源（与 feishu-ingress 共用同一组环境变量，零额外配置）：
  *   FEISHU_APP_ID / FEISHU_APP_SECRET   — 必填，应用凭证（两种身份都依赖）
  *   FEISHU_USER_TOKEN_STORE             — 可选，user token 落盘路径，
- *                                         默认 <cwd>/feishu/user_token.local.json
- *                                         （本地凭证仓，整个 feishu/ 已 gitignore）
+ *                                         默认 <repo-root>/feishu/user_token.local.json
+ *                                         （相对路径一律相对仓库根解析，不随 cwd 漂移；
+ *                                         本地凭证仓，整个 feishu/ 已 gitignore）
  *
  * 用户身份首次授权由本插件内置完成：buildAuthorizeUrl 生成授权链接 +
  * exchangeAuthCode 换 token 落盘；配套交互脚本 packages/layer-action/
@@ -33,8 +34,25 @@ import type {
   HealthStatus,
 } from "@aigility-harness/core";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
+
+/**
+ * 缺省 token 落盘路径以仓库根为基准解析（缺陷 #1234 修复）：
+ * 历史上缺省 "feishu/user_token.local.json" 是相对 cwd 的，而示例应用经
+ * pnpm --filter 启动时 cwd 在子包目录 → 每次扫描报 ENOENT。
+ * 相对路径（env 未设或缺省值）一律相对仓库根解析；绝对路径原样返回。
+ */
+const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
+/** 仓库根 = packages/layer-action/src → 上三级（与各示例 env.ts 约定一致） */
+const REPO_ROOT = resolve(MODULE_DIR, "../../..");
+
+export function resolveTokenStorePath(p: string): string {
+  return p && (p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p))
+    ? p
+    : resolve(REPO_ROOT, p);
+}
 
 // ── 能力契约 ─────────────────────────────────────────────────────
 
@@ -178,10 +196,11 @@ export function readTokenEnv(overrides?: FeishuApiCredentials): TokenEnv {
   return {
     appId: overrides?.appId ?? process.env.FEISHU_APP_ID ?? "",
     appSecret: overrides?.appSecret ?? process.env.FEISHU_APP_SECRET ?? "",
-    tokenStorePath:
+    tokenStorePath: resolveTokenStorePath(
       overrides?.tokenStorePath ??
-      process.env.FEISHU_USER_TOKEN_STORE ??
-      "feishu/user_token.local.json",
+        process.env.FEISHU_USER_TOKEN_STORE ??
+        "feishu/user_token.local.json",
+    ),
   };
 }
 

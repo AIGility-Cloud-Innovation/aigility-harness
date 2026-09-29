@@ -12,6 +12,9 @@
  *   effects                →   in-memory EffectStore  (via InMemoryEffectManager)
  *   carriers               →   plugin onLoad/onUnload (via DshCarrierManager)
  *   createContext          →   DshSeamContext
+ *   workflows              →   构造注入的 WorkflowRunner（家族中立契约，
+ *                              实现由家族 interop 装配方提供，见
+ *                              dsh-interop 的 createDshWorkflowRunner）
  *   init / shutdown        →   Cordis Context lifecycle (fiber.dispose)
  *   getMode / isReady      →   local state flags
  */
@@ -27,6 +30,7 @@ import type {
   KernelAdapter,
   KernelConfig,
   KernelInfo,
+  WorkflowRunner,
 } from "@aigility-harness/core";
 import type { SeamContext, SeamRegistry } from "@aigility-harness/core";
 import { err, ok } from "@aigility-harness/core";
@@ -58,17 +62,20 @@ export class DshKernelAdapter implements KernelAdapter {
   readonly carriers: DshCarrierManager;
   readonly events: CordisEventBus;
   readonly effects: InMemoryEffectManager;
+  /** 家族中立编排能力；未注入时为 undefined（调配方经 interop 包提供实现） */
+  readonly workflows: WorkflowRunner | undefined;
 
   private mode: RunMode = "prototype" as RunMode;
   private ready = false;
   private disposed = false;
 
-  constructor() {
+  constructor(opts?: { workflowRunner?: WorkflowRunner }) {
     this.ctx = new Context();
     this.effectStore = new EffectStore();
     this.registry = new CordisSeamRegistry(this.ctx);
     this.events = new CordisEventBus(this.ctx);
     this.effects = new InMemoryEffectManager(this.effectStore);
+    this.workflows = opts?.workflowRunner;
     this.carriers = new DshCarrierManager((sessionId, layer) =>
       this.createContext(sessionId, layer),
     );

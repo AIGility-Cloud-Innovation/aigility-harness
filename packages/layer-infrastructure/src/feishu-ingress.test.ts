@@ -122,3 +122,64 @@ describe("messageText — 行首 @mention 剥离", () => {
     expect(messageText(asMsg({ content: "我的任务", mentionedBot: false }))).toBe("我的任务");
   });
 });
+
+// ── shouldPassiveCollect — passive 静默收集判定（含防回声） ───────────
+
+describe("shouldPassiveCollect", () => {
+  const base = {
+    messageId: "om_1",
+    chatId: "oc_group",
+    chatType: "group",
+    senderId: "ou_human",
+    content: "记得把账单导出修一下",
+    mentionedBot: false,
+  };
+  const passive = { enabled: true, onCollect: () => {} };
+
+  it("群聊免@普通消息 → 收集", async () => {
+    const { shouldPassiveCollect } = await import("./feishu-ingress.js");
+    expect(shouldPassiveCollect(base as never, passive as never)).toBe(true);
+  });
+
+  it("@bot 消息 → 不收集（走常规指令链路）", async () => {
+    const { shouldPassiveCollect } = await import("./feishu-ingress.js");
+    expect(
+      shouldPassiveCollect({ ...base, mentionedBot: true } as never, passive as never),
+    ).toBe(false);
+  });
+
+  it("私聊消息 → 不收集", async () => {
+    const { shouldPassiveCollect } = await import("./feishu-ingress.js");
+    expect(shouldPassiveCollect({ ...base, chatType: "p2p" } as never, passive as never)).toBe(
+      false,
+    );
+  });
+
+  it("chatIds 白名单外 → 不收集", async () => {
+    const { shouldPassiveCollect } = await import("./feishu-ingress.js");
+    expect(
+      shouldPassiveCollect(base as never, { ...passive, chatIds: ["oc_other"] } as never),
+    ).toBe(false);
+  });
+
+  it("发送者在 excludeSenderIds（机器人 open_id）→ 不收集（防回声）", async () => {
+    const { shouldPassiveCollect } = await import("./feishu-ingress.js");
+    expect(
+      shouldPassiveCollect(base as never, {
+        ...passive,
+        excludeSenderIds: ["ou_bot_a"],
+      } as never),
+    ).toBe(true);
+    expect(
+      shouldPassiveCollect(
+        { ...base, senderId: "ou_bot_a" } as never,
+        { ...passive, excludeSenderIds: ["ou_bot_a"] } as never,
+      ),
+    ).toBe(false);
+  });
+
+  it("空文本 → 不收集", async () => {
+    const { shouldPassiveCollect } = await import("./feishu-ingress.js");
+    expect(shouldPassiveCollect({ ...base, content: "" } as never, passive as never)).toBe(false);
+  });
+});

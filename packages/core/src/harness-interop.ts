@@ -58,3 +58,49 @@ export interface HarnessInterop {
     opts?: { resolveFrom?: string },
   ): Promise<CapabilityMountResult>;
 }
+
+// ── WorkflowRunner（家族中立编排能力契约） ────────────────────────────
+//
+// 大规模多代理编排（脚本 fan-out 子代理）的家族中立入口。dsh 家族由
+// dsh-interop 的 dshWorkflowRun 实现（官方 dsh workflow 引擎）；上层与
+// kernel-* 只认此接口，harness 本身可替换。
+
+/** 编排脚本身份块（与模型侧 workflow 工具的 meta 参数同形）。 */
+export interface WorkflowMeta {
+  /** 短 kebab-case 工作流名 */
+  name: string;
+  /** 一句话描述 */
+  description: string;
+  whenToUse?: string;
+  phases?: Array<{ title: string; detail?: string }>;
+}
+
+export interface WorkflowRunRequest {
+  /** plain JavaScript 编排脚本（无 meta 导出；meta 单独传） */
+  script: string;
+  meta: WorkflowMeta;
+  /** 暴露给脚本的 args 全局（裸列表请包一层字段） */
+  args?: unknown;
+}
+
+export interface WorkflowRunOutcome {
+  ok: boolean;
+  /** 脚本最终 JSON 返回值；不可靠解析时缺省（原文在实现侧留存） */
+  result?: unknown;
+  /** 是否可靠提取到了 JSON 返回值 */
+  parsed: boolean;
+  error?: string;
+  durationMs: number;
+}
+
+/** 运行期参数由家族实现定义（dsh 家族：dshHome/apiKey/baseURL/model…）。 */
+export interface WorkflowRunRuntime {
+  [key: string]: unknown;
+}
+
+export interface WorkflowRunner {
+  runWorkflow(
+    request: WorkflowRunRequest,
+    runtime?: WorkflowRunRuntime,
+  ): Promise<WorkflowRunOutcome>;
+}

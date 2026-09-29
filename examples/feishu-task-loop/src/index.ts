@@ -41,6 +41,7 @@ import {
 } from "@aigility-harness/layer-infrastructure";
 import {
   collectMessage,
+  parseChatRepoMap,
   setNotifySend,
   setDispatchNotifySend,
   taskIssueSyncProvider,
@@ -123,6 +124,9 @@ async function main(): Promise<void> {
     .map((s) => s.trim())
     .filter(Boolean);
   const intervalMs = Number(process.env["TASK_PIPELINE_INTERVAL_MS"] ?? "600000");
+  // 群 → 候选仓库池（来源群 = 任务归属参考）：条目 `chatId=仓库1|仓库2` 逗号分隔，
+  // `org:组织名` 展开该组织全部可访问仓库；未映射的参与群用已映射池的并集
+  const chatRepoMap = parseChatRepoMap(process.env["TASK_CHAT_REPO_MAP"]);
   // 监听白名单：只收这些群的消息；空 = 收机器人所在的所有群
   const listenChatIds = (process.env["TASK_LISTEN_CHAT_IDS"] ?? "")
     .split(",")
@@ -139,6 +143,11 @@ async function main(): Promise<void> {
       passive: {
         enabled: true,
         chatIds: listenChatIds.length > 0 ? listenChatIds : undefined,
+        // 防回声：排除机器人自身（app open_id 可选配）及其他机器人
+        excludeSenderIds: (process.env["TASK_EXCLUDE_SENDER_IDS"] ?? "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
         onCollect: (m) => collectMessage(m),
       },
     },
@@ -151,10 +160,11 @@ async function main(): Promise<void> {
   // 群播报函数注入流水线（建单播报 / PR 提醒）
   setNotifySend(start.value.send);
 
-  // 4. 启动任务流水线（定时：汇总判定 → 去重建工单 → PR 提醒）
+  // 4. 启动任务流水线（定时：分群汇总判定 → 归属/澄清 → 去重建工单 → PR 提醒）
   const pipeline = await taskPipelineProvider.execute(
     {
       repos,
+      chatRepoMap,
       intervalMs,
       notifyChatId: notifyChatId || undefined,
     },
@@ -167,12 +177,21 @@ async function main(): Promise<void> {
 
   // 5. 启动状态队列扫描（P 加工 + D 派发 + 终态回写；与流水线同节奏）
   setDispatchNotifySend(start.value.send);
-  const tasklistName = process.env["FEISHU_TASKLIST_NAME"] ?? "TiMEM-AI";
+  // 任务归属涉及的 org → 各自的飞书任务清单（org 名 = 清单名），逐清单跑状态闸门。
+  // 显式配了 FEISHU_TASKLIST_NAME 则维持旧行为只扫一个清单。
+  const orgs = new Set<string>();
+  for (const r of repos) orgs.add(r.split("/")[0]);
+  for (const pool of Object.values(chatRepoMap)) {
+    for (const entry of pool) orgs.add(entry.startsWith("org:") ? entry.slice(4) : entry.split("/")[0]);
+  }
+  const tasklistNames = process.env["FEISHU_TASKLIST_NAME"]
+    ? [process.env["FEISHU_TASKLIST_NAME"]]
+    : [...orgs];
   let scanTimer: ReturnType<typeof setInterval> | null = null;
   const scanTick = async (): Promise<void> => {
     try {
       const r = await taskIssueSyncProvider.execute(
-        { mode: "scan", tasklistName, notifyChatId: notifyChatId || undefined },
+        { mode: "scan", tasklistNames, notifyChatId: notifyChatId || undefined },
         ctx,
       );
       if (r.ok && r.value?.response && r.value.response !== "（本轮无待处理任务）") {
@@ -184,11 +203,12 @@ async function main(): Promise<void> {
   };
   await scanTick();
   scanTimer = setInterval(() => void scanTick(), intervalMs);
-  console.log(`   状态队列: P 加工（去重+目标核对）→ D 派发（15min 闸门）→ 终态回写 (interval=${intervalMs}ms, tasklist=${tasklistName})`);
+  console.log(`   状态队列: P 加工（去重+目标核对）→ D 派发（15min 闸门）→ 终态回写 (interval=${intervalMs}ms, tasklists=${tasklistNames.join(",")})`);
   console.log(`\n✅ 飞书机器人已连接 (appId=${appId}) → ${persona}`);
   console.log("   飞书里 @项目小助理：「建任务：xxx」「我的任务」「完成 xxx」");
   console.log("   Gitea 工单：「建工单 @仓库：xxx」「工单列表」「关闭工单 #n」「项目概览」");
-  console.log(`   流水线: 监听汇总 → 建工单 → PR 提醒 (interval=${intervalMs}ms, repos=${repos.join(",")})`);
+  console.log("   群归属：「任务归属 编号 @仓库」确认澄清，「跳过任务 编号」丢弃");
+  console.log(`   流水线: 分群监听汇总 → 归属/澄清 → 建工单 → PR 提醒 (interval=${intervalMs}ms, repos=${repos.join(",")}, 映射群=${Object.keys(chatRepoMap).length})`);
   if (!notifyChatId) console.log("   ⚠️ 未配置 TASK_NOTIFY_CHAT_ID，播报与 PR 提醒已关闭");
 
   const stop = async () => {

@@ -9,7 +9,8 @@
   "dependencies": {
     "@aigility-harness/core": "workspace:*",
     "@aigility-harness/layer-infrastructure": "workspace:*",
-    "prototype-mode": "workspace:*"
+    "prototype-mode": "workspace:*",
+    "@aigility-harness/dsh-interop": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.19.0",
