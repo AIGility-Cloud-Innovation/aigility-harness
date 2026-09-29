@@ -54,6 +54,8 @@ import { aigilityAgentPlugin } from "./aigility-agent.js";
 import { siteImproverPlugin, SITE_IMPROVER_PERSONA_ID, SITE_IMPROVER_ROUTE, setTaskFiledHook } from "./site-improver.js";
 import { dshToolBridgePlugin } from "./dsh-tool.js";
 import { listSkills, upsertSkill, removeSkill, usageSnapshot, type AigilitySkillInput } from "./skill-registry.js";
+import { loadRoles, upsertRole, removeRole, setRoute, checkSkillPaths, listDshSkills, createDshSkill, attachSkillToRole, listMcpShelf, type RoleCapabilityConfig, type RoleMcpServer } from "./role-registry.js";
+import { listTweaks, addTweak, removeTweak, type SiteTweak } from "./site-tweaks.js";
 import type { DshToolBridgeResponse } from "./dsh-tool.js";
 import { planTask, WORKFLOW_DIR } from "./planner.js";
 import { existsSync as fileExists } from "node:fs";
@@ -546,6 +548,133 @@ async function main(): Promise<void> {
       const delMatch = path.match(/^\/api\/aigility\/skills\/([\w-]+)$/);
       if (delMatch && req.method === "DELETE") {
         json(res, 200, { ok: removeSkill(delMatch[1]) });
+        return;
+      }
+
+      // ── 角色能力注册表（DSH 渠道）：role → skills/MCP，写 roles.json 热生效 ──
+      if (path === "/api/aigility/roles" && req.method === "GET") {
+        const doc = loadRoles();
+        json(res, 200, { ...doc, missingSkills: checkSkillPaths(doc), registryFile: process.env.DSH_ROLE_REGISTRY ?? "examples/feishu-dsh/roles.json" });
+        return;
+      }
+      if (path === "/api/aigility/roles" && req.method === "POST") {
+        try {
+          const body = JSON.parse((await readBody(req)) || "{}") as {
+            id?: string; label?: string; skills?: string[]; mcpServers?: RoleMcpServer[];
+          };
+          if (!body.id?.trim()) {
+            json(res, 400, { error: "缺少角色 id" });
+            return;
+          }
+          const config = upsertRole(body.id.trim(), {
+            label: body.label,
+            skills: body.skills,
+            mcpServers: body.mcpServers,
+          });
+          console.log(`[角色能力] 角色「${body.id}」已保存 (skills=${config.skills?.length ?? 0}, mcp=${config.mcpServers?.length ?? 0}) → DSH 会话中继热生效`);
+          json(res, 200, { ok: true, id: body.id.trim(), config });
+        } catch (err) {
+          json(res, 400, { error: String((err as Error)?.message ?? err) });
+        }
+        return;
+      }
+      const roleDelMatch = path.match(/^\/api\/aigility\/roles\/([\w.-]{1,64})$/);
+      if (roleDelMatch && req.method === "DELETE") {
+        json(res, 200, { ok: removeRole(roleDelMatch[1]) });
+        return;
+      }
+      if (path === "/api/aigility/roles/routes" && req.method === "POST") {
+        try {
+          const body = JSON.parse((await readBody(req)) || "{}") as { chatKey?: string; roleId?: string };
+          if (!body.chatKey?.trim()) {
+            json(res, 400, { error: "缺少 chatKey（飞书 chatId/userId/appId）" });
+            return;
+          }
+          setRoute(body.chatKey.trim(), body.roleId?.trim() ?? "");
+          json(res, 200, { ok: true, routes: loadRoles().routes });
+        } catch (err) {
+          json(res, 400, { error: String((err as Error)?.message ?? err) });
+        }
+        return;
+      }
+
+      // DSH 技能货架：枚举 / 创建（工厂「同步为 DSH 技能」落点）/ 挂到角色
+      if (path === "/api/aigility/dsh-skills" && req.method === "GET") {
+        json(res, 200, { skillsRoot: loadRoles().skillsRoot ?? "", skills: listDshSkills() });
+        return;
+      }
+      if (path === "/api/aigility/dsh-skills" && req.method === "POST") {
+        try {
+          const body = JSON.parse((await readBody(req)) || "{}") as {
+            name?: string; description?: string; prompt?: string; attachRole?: string;
+          };
+          if (!body.name?.trim() || !body.description?.trim() || !body.prompt?.trim()) {
+            json(res, 400, { error: "创建 DSH 技能至少需要名称、描述与 Prompt" });
+            return;
+          }
+          const skill = createDshSkill({ name: body.name.trim(), description: body.description.trim(), prompt: body.prompt.trim() });
+          let attached: string | null = null;
+          if (body.attachRole?.trim()) {
+            attachSkillToRole(body.attachRole.trim(), skill.dir);
+            attached = body.attachRole.trim();
+          }
+          console.log(`[角色能力] DSH 技能「${skill.dir}」已创建${attached ? ` 并挂到角色 ${attached}` : ""} → 中继热生效`);
+          json(res, 200, { ok: true, skill, attached });
+        } catch (err) {
+          json(res, 400, { error: String((err as Error)?.message ?? err) });
+        }
+        return;
+      }
+      const attachMatch = path.match(/^\/api\/aigility\/roles\/([\w.-]{1,64})\/attach-skill$/);
+      if (attachMatch && req.method === "POST") {
+        try {
+          const body = JSON.parse((await readBody(req)) || "{}") as { skill?: string };
+          if (!body.skill?.trim()) {
+            json(res, 400, { error: "缺少 skill（技能目录名或绝对路径）" });
+            return;
+          }
+          const config = attachSkillToRole(attachMatch[1], body.skill.trim());
+          json(res, 200, { ok: true, config });
+        } catch (err) {
+          json(res, 400, { error: String((err as Error)?.message ?? err) });
+        }
+        return;
+      }
+
+      // MCP 货架：全角色 server 按 serverName 聚合（供角色页勾选复用）
+      if (path === "/api/aigility/mcp-shelf" && req.method === "GET") {
+        json(res, 200, { servers: listMcpShelf() });
+        return;
+      }
+
+      // ── 站点即时微调（改进专员 live_fix 的持久化与重放） ──
+      if (path === "/api/aigility/site-tweaks" && req.method === "GET") {
+        json(res, 200, { tweaks: listTweaks() });
+        return;
+      }
+      if (path === "/api/aigility/site-tweaks" && req.method === "POST") {
+        try {
+          const body = JSON.parse((await readBody(req)) || "{}") as Partial<SiteTweak> & { user_key?: string };
+          if (!body.selector?.trim() || !["text", "hide", "style"].includes(String(body.type))) {
+            json(res, 400, { error: "site-tweak 需要 selector 与合法 type（text|hide|style）" });
+            return;
+          }
+          const row = addTweak({
+            type: body.type as SiteTweak["type"],
+            selector: body.selector.trim(),
+            value: body.value,
+            reason: body.reason,
+            createdBy: body.user_key ?? "site-improver",
+          });
+          json(res, 200, { ok: true, tweak: row });
+        } catch (err) {
+          json(res, 400, { error: String((err as Error)?.message ?? err) });
+        }
+        return;
+      }
+      const tweakDelMatch = path.match(/^\/api\/aigility\/site-tweaks\/([\w-]+)$/);
+      if (tweakDelMatch && req.method === "DELETE") {
+        json(res, 200, { ok: removeTweak(tweakDelMatch[1]) });
         return;
       }
       if (path === "/api/aigility/capabilities" && req.method === "GET") {

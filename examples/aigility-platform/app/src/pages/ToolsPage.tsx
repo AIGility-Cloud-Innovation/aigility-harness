@@ -26,7 +26,7 @@ const groupIcon: Record<string, any> = { 'TiMEM 上下文能力': Hexagon, '客�
 
 const layerOrder = ['D1 底座基础层', 'D2 认知算力层', 'D3 行动执行层', 'D4 编排规划层', 'D5 角色人格层']
 
-export default function ToolsPage() {
+export default function ToolsPage({ showMock = true }: { showMock?: boolean }) {
   const [group, setGroup] = useState<(typeof groups)[number]>('全部')
   const [off, setOff] = useState<Set<string>>(new Set(allTools.filter(t => !t.enabled).map(t => t.key)))
   const [detail, setDetail] = useState<ToolItem | null>(null)
@@ -83,6 +83,8 @@ export default function ToolsPage() {
         </div>
       )}
 
+      {showMock ? (
+        <>
       <div className="flex gap-2 flex-wrap items-center">
         <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">以下为产品壳演示数据</span>
         {groups.map(g => (
@@ -107,6 +109,7 @@ export default function ToolsPage() {
                     <code className="text-sm font-semibold text-slate-800">{t.name}</code>
                     <div className="flex gap-1.5 mt-0.5">
                       <span className={`text-[10px] px-1.5 py-0.5 rounded ${t.group === 'TiMEM 上下文能力' ? 'bg-sky-50 text-sky-600' : t.group === '客户系统封装' ? 'bg-cyan-50 text-cyan-600' : 'bg-slate-100 text-slate-500'}`}>{t.category || t.group}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 border border-amber-100">模拟</span>
                     </div>
                   </div>
                 </div>
@@ -123,6 +126,12 @@ export default function ToolsPage() {
           )
         })}
       </div>
+      </>
+      ) : (
+        <div className="text-xs px-4 py-3 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100">
+          模拟数据已隐藏 —— 此处仅剩真实数据源：DSH MCP 工具总线与引擎能力总线（上方两块）。模拟工具货架可随时用顶栏「模拟数据」开关恢复。
+        </div>
+      )}
 
       {/* 配置抽屉 */}
       {detail && (

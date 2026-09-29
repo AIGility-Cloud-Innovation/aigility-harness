@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { studioSteps, studioSeed, models, knowledgeBases, mcpTools, pluginTools, agentCats, type StudioAgent } from '../mock/data'
 import FlowCanvas from '../components/FlowCanvas'
-import { publishSkill, deleteSkill, fetchRegistry } from '../lib/harness'
+import { publishSkill, deleteSkill, fetchRegistry, createDshSkill, fetchRoles } from '../lib/harness'
 import { Plus, Bot, ChevronLeft, ChevronRight, Save, Rocket, FlaskConical, Trash2, PenLine, CheckCircle2, Loader2, Circle, Store, SearchX, Loader } from 'lucide-react'
 
 const blank: Omit<StudioAgent, 'id' | 'status' | 'updatedAt'> = {
@@ -30,6 +30,11 @@ export default function StudioPage() {
   const [running, setRunning] = useState(false)
   const [runLog, setRunLog] = useState<{ text: string; done: boolean }[]>([])
   const timeouts = useRef<ReturnType<typeof setTimeout>[]>([])
+  // DSH 渠道同步（发布时一并注册为 DSH 技能，飞书 zcode 热生效）
+  const [dshSync, setDshSync] = useState(false)
+  const [dshRole, setDshRole] = useState('')
+  const [dshRoles, setDshRoles] = useState<string[]>([])
+  useEffect(() => { fetchRoles().then(r => setDshRoles(Object.keys(r.roles))).catch(() => {}) }, [])
 
   const refresh = () => {
     fetchRegistry().then(r => {
@@ -82,6 +87,19 @@ export default function StudioPage() {
         releaseNote: form.releaseNote,
       })
       setBanner(`「${skill.name}」发布成功（skill_id=${skill.id}，已注册 @persona/aigility-agent）—— 对话工作台与智能体市场立即可用`)
+      if (dshSync) {
+        try {
+          const r = await createDshSkill({
+            name: form.name,
+            description: form.description,
+            prompt: form.prompt,
+            attachRole: dshRole || undefined,
+          })
+          setBanner(b => `${b}；已同步 DSH 技能「${r.skill.dir}」${r.attached ? `并挂到角色 ${r.attached}` : ''}（飞书 zcode 热生效）`)
+        } catch (e) {
+          setPubError(`平台发布成功，但 DSH 同步失败：${e instanceof Error ? e.message : String(e)}`)
+        }
+      }
       setView('list'); setForm(blank); setStep(0); setEditId(null)
       refresh()
     } catch (e) {
@@ -293,6 +311,23 @@ export default function StudioPage() {
               <div className="rounded-xl bg-slate-50 border border-slate-100 p-4 text-xs text-slate-500 leading-relaxed">
                 发布流水线：保存草稿 → 试运行 → 发布。发布动作会<b className="text-slate-700">真注册</b>到服务端 skill-registry（data/aigility-skills.json），
                 并挂到 <code className="text-blue-600">@persona/aigility-agent</code> —— 对话工作台与智能体市场立即可用，记忆按 skill_id 隔离。
+              </div>
+              <div className="rounded-xl border border-sky-200 bg-sky-50/40 p-4 space-y-2.5">
+                <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                  <input type="checkbox" checked={dshSync} onChange={e => setDshSync(e.target.checked)} className="accent-sky-600" />
+                  同时注册为 <b>DSH 技能</b>（IM 渠道热生效）
+                </label>
+                {dshSync && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-slate-500">创建后挂到角色：</span>
+                    <select value={dshRole} onChange={e => setDshRole(e.target.value)}
+                      className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white">
+                      <option value="">（仅创建，不挂角色）</option>
+                      {dshRoles.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                    <span className="text-[11px] text-slate-400">将按当前名称/描述/Prompt 生成 skillsRoot/&lt;slug&gt;/SKILL.md</span>
+                  </div>
+                )}
               </div>
             </div>
           )}

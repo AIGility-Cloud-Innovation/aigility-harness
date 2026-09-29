@@ -65,6 +65,15 @@ export type TaskIntent =
   | { kind: "pending-assign"; ref: string; repo: string }
   /** 澄清归属放弃：「跳过任务 N」（丢弃澄清队列候选，不建单） */
   | { kind: "pending-skip"; ref: string }
+  /** 多行澄清归属：一条消息里逐行「任务归属 N @仓库 / 跳过任务 N」
+   *  （用户习惯把多条确认合并在一条消息发送，单行正则整串锚定匹配不到） */
+  | {
+      kind: "pending-batch";
+      items: Array<
+        | { action: "assign"; ref: string; repo: string }
+        | { action: "skip"; ref: string }
+      >;
+    }
   | { kind: "overview" }
   | { kind: "help" };
 
@@ -169,6 +178,33 @@ export function parseTaskIntent(input: string): TaskIntent {
   if (pa) return { kind: "pending-assign", ref: pa[1], repo: pa[2] };
   const ps = text.match(/^(?:跳过任务|任务跳过)\s*[:：]?\s*#?(\d+)\s*$/u);
   if (ps) return { kind: "pending-skip", ref: ps[1] };
+
+  // ── 多行澄清归属（同一消息逐行确认/跳过多条候选） ──
+  // 单行正则整串锚定，用户把多条确认合并成一条消息（逐行发送）时整串解析
+  // 失败会落 help——澄清闭环就断在这里（真实事故：两行「任务归属 N @仓库」
+  // 回成整段帮助文本，工单未建）。所有非空行都能解析为归属/跳过时按批处理，
+  // 混有其他内容则保持原语义落后续分支。
+  {
+    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (lines.length >= 2) {
+      const items: Extract<TaskIntent, { kind: "pending-batch" }>["items"] = [];
+      for (const line of lines) {
+        const a = line.match(/^(?:任务归属|归属任务)\s*[:：]?\s*#?(\d+)(?:\s|[:：,，])+\s*@?([A-Za-z0-9._/-]{1,80})\s*$/u);
+        if (a) {
+          items.push({ action: "assign", ref: a[1], repo: a[2] });
+          continue;
+        }
+        const s = line.match(/^(?:跳过任务|任务跳过)\s*[:：]?\s*#?(\d+)\s*$/u);
+        if (s) {
+          items.push({ action: "skip", ref: s[1] });
+          continue;
+        }
+        items.length = 0;
+        break;
+      }
+      if (items.length >= 2) return { kind: "pending-batch", items };
+    }
+  }
 
   const stripped = extractRepoSpec(text);
   const repoSpec = stripped.repo;

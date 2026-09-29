@@ -165,6 +165,156 @@ export async function deleteSkill(id: string): Promise<boolean> {
   return j.ok ?? false
 }
 
+// ── 真接口：角色能力注册表（DSH 渠道 role → skills/MCP, roles.json 热生效） ──
+
+export interface RoleMcpServer {
+  serverName: string
+  command?: string
+  args?: string[]
+  env?: Record<string, string>
+  cwd?: string
+  url?: string
+  headers?: Record<string, string>
+  failOnStartupError?: boolean
+}
+
+export interface RoleCapabilityConfig {
+  label?: string
+  skills?: string[]
+  mcpServers?: RoleMcpServer[]
+}
+
+export interface RolesPayload {
+  skillsRoot?: string
+  roles: Record<string, RoleCapabilityConfig>
+  routes: Record<string, string>
+  missingSkills?: Record<string, string[]>
+  registryFile?: string
+}
+
+export async function fetchRoles(): Promise<RolesPayload> {
+  return authJsonFetch<RolesPayload>('/api/aigility/roles')
+}
+
+export async function saveRole(
+  id: string,
+  config: { label?: string; skills?: string[]; mcpServers?: RoleMcpServer[] },
+): Promise<void> {
+  const j = await authJsonFetch<{ ok?: boolean; error?: string }>('/api/aigility/roles', {
+    method: 'POST',
+    body: JSON.stringify({ id, ...config }),
+  })
+  if (!j.ok) throw new Error(j.error ?? '保存失败')
+}
+
+export async function deleteRole(id: string): Promise<boolean> {
+  const j = await authJsonFetch<{ ok?: boolean }>(`/api/aigility/roles/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  return j.ok ?? false
+}
+
+export async function saveRoleRoute(chatKey: string, roleId: string): Promise<RolesPayload['routes']> {
+  const j = await authJsonFetch<{ ok?: boolean; routes?: RolesPayload['routes']; error?: string }>(
+    '/api/aigility/roles/routes',
+    { method: 'POST', body: JSON.stringify({ chatKey, roleId }) },
+  )
+  if (!j.ok) throw new Error(j.error ?? '路由保存失败')
+  return j.routes ?? {}
+}
+
+export interface DshSkillInfo {
+  dir: string
+  name: string
+  description: string
+  path: string
+}
+
+export async function fetchDshSkills(): Promise<{ skillsRoot: string; skills: DshSkillInfo[] }> {
+  return authJsonFetch<{ skillsRoot: string; skills: DshSkillInfo[] }>('/api/aigility/dsh-skills')
+}
+
+/** 工厂「同步为 DSH 技能」：写 skillsRoot/<slug>/SKILL.md，可同时挂到角色 */
+export async function createDshSkill(input: {
+  name: string
+  description: string
+  prompt: string
+  attachRole?: string
+}): Promise<{ skill: DshSkillInfo; attached: string | null }> {
+  const j = await authJsonFetch<{ ok?: boolean; skill?: DshSkillInfo; attached?: string | null; error?: string }>(
+    '/api/aigility/dsh-skills',
+    { method: 'POST', body: JSON.stringify(input) },
+  )
+  if (!j.skill) throw new Error(j.error ?? '创建失败')
+  return { skill: j.skill, attached: j.attached ?? null }
+}
+
+export async function attachSkillToRole(roleId: string, skill: string): Promise<void> {
+  const j = await authJsonFetch<{ ok?: boolean; error?: string }>(
+    `/api/aigility/roles/${encodeURIComponent(roleId)}/attach-skill`,
+    { method: 'POST', body: JSON.stringify({ skill }) },
+  )
+  if (!j.ok) throw new Error(j.error ?? '挂载失败')
+}
+
+export interface McpShelfItem extends RoleMcpServer {
+  usedBy: string[]
+}
+
+export async function fetchMcpShelf(): Promise<McpShelfItem[]> {
+  const j = await authJsonFetch<{ servers: McpShelfItem[] }>('/api/aigility/mcp-shelf')
+  return j.servers
+}
+
+// ── 站点即时微调（改进专员 live_fix 的持久化与重放） ──────────────
+
+export interface SiteTweak {
+  id: string
+  type: 'text' | 'hide' | 'style'
+  selector: string
+  value?: string
+  reason?: string
+  createdBy: string
+  createdAt: string
+}
+
+export async function fetchSiteTweaks(): Promise<SiteTweak[]> {
+  const j = await authJsonFetch<{ tweaks: SiteTweak[] }>('/api/aigility/site-tweaks')
+  return j.tweaks ?? []
+}
+
+export async function saveSiteTweak(t: { type: SiteTweak['type']; selector: string; value?: string; reason?: string; user_key?: string }): Promise<SiteTweak> {
+  const j = await authJsonFetch<{ ok?: boolean; tweak?: SiteTweak; error?: string }>('/api/aigility/site-tweaks', {
+    method: 'POST',
+    body: JSON.stringify(t),
+  })
+  if (!j.tweak) throw new Error(j.error ?? '保存失败')
+  return j.tweak
+}
+
+export async function deleteSiteTweak(id: string): Promise<boolean> {
+  const j = await authJsonFetch<{ ok?: boolean }>(`/api/aigility/site-tweaks/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  return j.ok ?? false
+}
+
+/**
+ * 把 tweaks 应用到当前 DOM（幂等：同一元素不重复改）。
+ * React 重渲染可能还原 text/style —— 需要在页面切换后重新调用。
+ */
+export function applySiteTweaks(tweaks: SiteTweak[]): number {
+  let applied = 0
+  for (const t of tweaks) {
+    try {
+      const el = document.querySelector(t.selector) as HTMLElement | null
+      if (!el || el.hasAttribute('data-site-tweak-applied')) continue
+      if (t.type === 'hide') el.style.display = 'none'
+      else if (t.type === 'text') el.textContent = t.value ?? ''
+      else if (t.type === 'style') el.style.cssText += `;${t.value ?? ''}`
+      el.setAttribute('data-site-tweak-applied', t.id)
+      applied++
+    } catch { /* 单条失效不拖垮其余 */ }
+  }
+  return applied
+}
+
 // ── 真接口：引擎能力总线 / 模型上游 / 运行指标 / TiMEM 记忆 ──────
 
 export interface CapabilityInfo {

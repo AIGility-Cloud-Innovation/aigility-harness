@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { chatScripts, mcpTools, type ChatScript, type Skill } from '../mock/data'
 import FlowCanvas from '../components/FlowCanvas'
 import { getCurrentUser } from '../lib/api'
-import { streamAigilityChat, fetchRegistry, type SkillInfo } from '../lib/harness'
-import { Bot, Send, Wrench, CheckCircle2, Clock, User, Sparkles, Plug, PlusCircle, ChevronRight, Loader2, ShieldCheck, Play, Bug, History, Rocket, Radio } from 'lucide-react'
+import { streamAigilityChat, fetchRegistry, fetchDshTools, type SkillInfo, type DshToolInfo } from '../lib/harness'
+import { Bot, Send, Wrench, CheckCircle2, Clock, User, Sparkles, Plug, PlugZap, PlusCircle, ChevronRight, Loader2, ShieldCheck, Play, Bug, History, Rocket, Radio } from 'lucide-react'
 
 interface Msg {
   role: 'user' | 'agent'
@@ -16,7 +16,7 @@ interface Msg {
   error?: boolean
 }
 
-export default function AgentPage({ skillList }: { skillList: Skill[] }) {
+export default function AgentPage({ skillList, showMock = true }: { skillList: Skill[]; showMock?: boolean }) {
   const [tab, setTab] = useState<'chat' | 'mcp' | 'skill'>('chat')
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [running, setRunning] = useState(false)
@@ -126,12 +126,14 @@ export default function AgentPage({ skillList }: { skillList: Skill[] }) {
                   <p className="text-sm text-slate-400 mt-1 mb-2">选择下方演示场景体验完整执行链路，或直接输入与数字员工真实对话</p>
                   <p className="text-[11px] text-slate-400 mb-6">真对话按所选数字员工装配人设并隔离记忆（TiMEM 召回 → LLM → 沉淀）</p>
                   <div className="grid gap-2 max-w-lg mx-auto">
-                    {chatScripts.map((s, i) => (
+                    {showMock ? chatScripts.map((s, i) => (
                       <button key={i} onClick={() => ask(s)} className="text-left text-sm px-4 py-3 rounded-xl border border-slate-200 hover:border-blue-300 hover:bg-blue-50/40 transition flex items-center justify-between gap-2">
                         <span className="text-slate-700">{s.question}</span>
                         <span className="text-xs text-blue-500 whitespace-nowrap flex items-center gap-1"><Sparkles size={12} />{s.skill}</span>
                       </button>
-                    ))}
+                    )) : (
+                      <p className="text-xs text-slate-400">模拟演示场景已隐藏 —— 直接在下方输入框与数字员工真实对话。</p>
+                    )}
                   </div>
                 </div>
               )}
@@ -287,11 +289,11 @@ export default function AgentPage({ skillList }: { skillList: Skill[] }) {
         </div>
       )}
 
-      {tab === 'mcp' && (
+      {tab === 'mcp' && (showMock ? (
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-slate-200/80 p-5 flex items-center justify-between flex-wrap gap-3">
             <div>
-              <h3 className="font-medium text-slate-800">MCP 工具总线</h3>
+              <h3 className="font-medium text-slate-800">MCP 工具总线 <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-400 align-middle">模拟数据</span></h3>
               <p className="text-xs text-slate-400 mt-1">太忆底层能力开箱即用；把客户系统 API 封装成 MCP 工具，数字员工即可调用</p>
             </div>
             <button className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-1.5"><PlusCircle size={15} />封装新 API 为 MCP 工具</button>
@@ -313,15 +315,15 @@ export default function AgentPage({ skillList }: { skillList: Skill[] }) {
             ))}
           </div>
         </div>
-      )}
+      ) : <RealMcpPanel />)}
 
-      {tab === 'skill' && <SkillPanel skillList={skillList} skills={skills} />}
+      {tab === 'skill' && <SkillPanel skillList={skillList} skills={skills} showMock={showMock} />}
       <style>{`@keyframes fadeSlide { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: none; } }`}</style>
     </div>
   )
 }
 
-function SkillPanel({ skillList, skills }: { skillList: Skill[]; skills: SkillInfo[] }) {
+function SkillPanel({ skillList, skills, showMock = true }: { skillList: Skill[]; skills: SkillInfo[]; showMock?: boolean }) {
   const [creating, setCreating] = useState(false)
   const [published, setPublished] = useState(false)
   const [name, setName] = useState('设备巡检管家')
@@ -329,9 +331,9 @@ function SkillPanel({ skillList, skills }: { skillList: Skill[]; skills: SkillIn
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <p className="text-sm text-slate-500">Skill = 提示词封装 + 图谱上下文 + MCP 工具组合 + 人在回路节点，可跨项目复用</p>
-        <button onClick={() => { setCreating(!creating); setPublished(false) }} className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-1.5">
+        {showMock && <button onClick={() => { setCreating(!creating); setPublished(false) }} className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-1.5">
           <PlusCircle size={15} />{creating ? '收起创建器' : '创建 Skill'}
-        </button>
+        </button>}
       </div>
 
       {creating && (
@@ -410,8 +412,7 @@ function SkillPanel({ skillList, skills }: { skillList: Skill[]; skills: SkillIn
             <div className="text-[11px] text-slate-400 pt-3 border-t border-slate-50">对话工作台输入区可直接切换 @{s.name}</div>
           </div>
         ))}
-        {skillList.map(s => (
-          <div key={s.id} className={`bg-white rounded-xl border p-5 hover:shadow-md transition ${s.id.startsWith('gen-') ? 'border-sky-300 ring-1 ring-sky-100' : 'border-slate-200/80'}`}>
+        {showMock && skillList.map(s => (          <div key={s.id} className={`bg-white rounded-xl border p-5 hover:shadow-md transition ${s.id.startsWith('gen-') ? 'border-sky-300 ring-1 ring-sky-100' : 'border-slate-200/80'}`}>
             <div className="flex items-start justify-between mb-2">
               <div className="font-medium text-slate-800">{s.name}</div>
               <span className={`text-xs px-2 py-0.5 rounded-full ${s.status === '已发布' ? 'bg-emerald-50 text-emerald-600' : s.status === '试运行' ? 'bg-amber-50 text-amber-600' : 'bg-slate-100 text-slate-500'}`}>{s.status}</span>
@@ -432,6 +433,46 @@ function SkillPanel({ skillList, skills }: { skillList: Skill[]; skills: SkillIn
         ))}
       </div>
       <style>{`@keyframes fadeSlide { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: none; } }`}</style>
+    </div>
+  )
+}
+
+/** 真实 MCP 工具（仅真实数据模式）：dsh-mcp-client → ctx.tools → @action/dsh-tool 桥 */
+function RealMcpPanel() {
+  const [payload, setPayload] = useState<{ ok: boolean; hostAlive: boolean; toolsMounted: boolean; tools?: DshToolInfo[]; error?: string } | null>(null)
+  const [loadError, setLoadError] = useState('')
+  useEffect(() => { fetchDshTools().then(setPayload).catch(e => setLoadError(e instanceof Error ? e.message : String(e))) }, [])
+  const line = !payload
+    ? (loadError || '加载中…')
+    : !payload.hostAlive
+      ? 'DSH 宿主未启动'
+      : !payload.toolsMounted
+        ? 'dsh-tools 未装载'
+        : `${payload.tools?.length ?? 0} 个工具已注册（mcp__<serverName>__<rawName>）`
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-xl border border-sky-200 ring-1 ring-sky-100/60 p-5">
+        <div className="flex items-center gap-2 flex-wrap">
+          <PlugZap size={14} className="text-sky-500" />
+          <h3 className="font-medium text-slate-800">DSH · MCP 工具总线</h3>
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-50 text-sky-600 border border-sky-100">真 · 仅真实数据</span>
+        </div>
+        <p className="text-xs text-slate-400 mt-1">{line}</p>
+        {payload?.error && <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mt-2">{payload.error}</div>}
+      </div>
+      <div className="grid md:grid-cols-2 gap-4">
+        {(payload?.tools ?? []).map(t => (
+          <div key={t.name} className="bg-white rounded-xl border border-sky-200/80 p-5">
+            <code className="text-sm font-semibold text-sky-700 break-all">{t.name}</code>
+            <p className="text-xs text-slate-500 leading-relaxed mt-1.5">{t.description || '（无描述）'}</p>
+          </div>
+        ))}
+      </div>
+      {(payload?.tools?.length ?? 0) === 0 && (
+        <div className="text-sm text-slate-400 px-4 py-8 text-center bg-white rounded-xl border border-dashed border-slate-200">
+          暂无已注册的真实 MCP 工具（可在 appbase dsh_plugins 启用 dsh-mcp-client，或在角色能力页给角色配 MCP）
+        </div>
+      )}
     </div>
   )
 }

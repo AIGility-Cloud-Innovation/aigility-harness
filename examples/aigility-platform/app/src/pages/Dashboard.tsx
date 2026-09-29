@@ -100,10 +100,11 @@ export default function Dashboard({ go, branding = defaultBranding }: { go: (p: 
       </div>
 
       {/* 架构说明 */}
-      <div className="grid md:grid-cols-3 gap-4">
+      <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-4">
         {[
           { title: '静态层 · TiMEM 让数据被理解', desc: 'ERP / CRM / MES / SCADA / DCS / OA 多表接入，字段再乱也归一到同一本体，构建企业知识图谱。', page: 'graph', c: 'from-blue-500 to-cyan-500' },
           { title: '动态层 · 智能体能干活', desc: '数字员工基于 MCP 调用 TiMEM 中间件与客户系统 API，智能体工厂编排长程任务，人在回路审批。', page: 'agent', c: 'from-sky-500 to-cyan-400' },
+          { title: '渠道层 · 智能体上飞书', desc: '在「角色能力」页给 IM 渠道的 AI 角色勾选 Skill 与 MCP 工具，保存即热生效，机器人即刻按新能力对话。', page: 'rolecaps', c: 'from-violet-500 to-purple-400' },
           { title: '自进化 · 越用越聪明', desc: '五层记忆流沉淀碎片→画像→预判，审批轨迹自动转规则，交付之后系统仍在持续增值。', page: 'space', c: 'from-emerald-500 to-teal-500' },
         ].map(b => (
           <div key={b.title} onClick={() => go(b.page)} className="bg-white rounded-xl border border-slate-200/80 p-5 cursor-pointer hover:shadow-md transition group">

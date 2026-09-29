@@ -1,15 +1,19 @@
 {
-  "_说明": "角色能力注册表（Phase 2 单一事实源）：网页端/管理页未来写这里即可热生效（每条消息重新读取）。skills 为 skillsRoot 下的技能目录名；mcpServers 每项对应一个 @deepseek-ai/dsh-mcp-client 实例（stdio: command/args/env/cwd，或 streamable-http: url/headers）。routes 把飞书 chatId/userId/appId 映射到角色，未命中走 default。",
-  "skillsRoot": "/home/johnny/AI/aigility-harness/examples/.dsh-home/skills",
+  "_说明": "角色能力注册表（单一事实源，模板可整体搬移）：平台配置页写这里，DSH 会话中继每条消息热读取。skills 为技能目录（相对路径以本文件所在目录为基准，也支持绝对路径）；mcpServers 每项对应一个 @deepseek-ai/dsh-mcp-client 实例（stdio: command/args/env/cwd，或 streamable-http: url/headers）。routes 把渠道身份（chatId/userId/appId）映射到角色，未命中走 default。",
+  "skillsRoot": "skills",
   "roles": {
     "default": {
       "label": "zcode 默认角色",
-      "skills": ["/home/johnny/AI/aigility-harness/examples/feishu-dsh/skills/phase2-skill"],
+      "skills": [
+        "phase2-skill"
+      ],
       "mcpServers": [
         {
           "serverName": "demo",
           "command": "node",
-          "args": ["/home/johnny/AI/aigility-harness/examples/feishu-dsh/mcp-test-server.mjs"]
+          "args": [
+            "/home/johnny/AI/aigility-harness/examples/feishu-dsh/mcp-test-server.mjs"
+          ]
         }
       ]
     },

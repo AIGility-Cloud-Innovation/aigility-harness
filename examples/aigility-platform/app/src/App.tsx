@@ -16,6 +16,8 @@ import TaskBoardPage from './pages/TaskBoardPage'
 import StudioPage from './pages/StudioPage'
 import ModelsPage from './pages/ModelsPage'
 import ToolsPage from './pages/ToolsPage'
+import RoleCapsPage from './pages/RoleCapsPage'
+import FloatingImprover from './components/FloatingImprover'
 import LoginGate from './components/LoginGate'
 import { apiMe, apiLogout, getToken, clearToken, type PlatformUser } from './lib/api'
 import {
@@ -42,6 +44,7 @@ const groupMeta: { cat: string; label: string }[] = [
 ]
 
 const systemNav = [
+  { id: 'rolecaps', label: '角色能力 · DSH', icon: Bot },
   { id: 'modules', label: '模块装配', icon: Blocks },
   { id: 'auth', label: '权限管理', icon: ShieldCheck },
   { id: 'settings', label: '平台配置', icon: Settings },
@@ -60,6 +63,9 @@ const loadLs = <T,>(key: string, fallback: T): T => {
 
 export default function App() {
   const [page, setPage] = useState('home')
+  // 「展示模拟数据」全局开关：关掉后各页只呈现真实接口数据（mock 货架隐藏）
+  const [showMock, setShowMock] = useState<boolean>(() => loadLs('showMock', true))
+  useEffect(() => { try { localStorage.setItem('showMock', JSON.stringify(showMock)) } catch { /* ignore */ } }, [showMock])
   const [skillList, setSkillList] = useState<Skill[]>(initialSkills)
   const [enabledModules, setEnabledModules] = useState<Set<string>>(
     new Set(moduleRegistry.filter(m => m.available).map(m => m.id))
@@ -166,13 +172,14 @@ export default function App() {
       case 'tasks': return <TaskBoardPage />
       case 'ingest': return <DataIngest go={setPage} />
       case 'graph': return <GraphPage go={setPage} />
-      case 'agent': return <AgentPage skillList={skillList} />
+      case 'agent': return <AgentPage skillList={showMock ? skillList : []} showMock={showMock} />
       case 'space': return <SpacePage />
       case 'process': return <ProcessPage onGenerateSkill={addSkill} go={setPage} generatedSkills={skillList.map(s => s.name)} />
       case 'market': return <MarketPage go={setPage} />
       case 'apps': return <AppCenterPage />
       case 'studio': return <StudioPage />
-      case 'tools': return <ToolsPage />
+      case 'tools': return <ToolsPage showMock={showMock} />
+      case 'rolecaps': return <RoleCapsPage />
       case 'models': return <ModelsPage />
       case 'ops': return <OpsPage />
       case 'modules': return <ModulePage enabled={enabledModules} toggle={toggleModule} />
@@ -292,6 +299,14 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-1.5 ml-auto">
+            {/* 展示模拟数据开关：关 = 各页只呈现真实接口数据 */}
+            <button onClick={() => setShowMock(v => !v)} title="切换后各页只在真实接口数据与模拟演示数据之间呈现"
+              className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg border transition ${showMock ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+              <span className={`w-8 h-[18px] rounded-full relative transition ${showMock ? 'bg-amber-400' : 'bg-emerald-500'}`}>
+                <span className={`absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow transition-all ${showMock ? 'left-[16px]' : 'left-[2px]'}`} />
+              </span>
+              {showMock ? '模拟数据：显示' : '仅真实数据'}
+            </button>
             <button className="w-9 h-9 rounded-lg hover:bg-white flex items-center justify-center text-slate-400 hover:text-slate-600" title="帮助中心"><CircleHelp size={17} /></button>
             {/* 通知 */}
             <div className="relative">
@@ -379,7 +394,8 @@ export default function App() {
           </div>
         )}
       </main>
-      <style>{`@keyframes fadeSlide { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: none; } } @keyframes slideIn { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }`}</style>
+      <FloatingImprover page={page} />
+      <style>{`@keyframes fadeSlide { from { opacity: 0; transform: translateY(4px);} to { transform: none; opacity: 1; } } @keyframes slideIn { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }`}</style>
     </div>
   )
 }

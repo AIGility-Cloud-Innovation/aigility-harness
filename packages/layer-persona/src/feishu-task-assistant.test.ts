@@ -476,4 +476,31 @@ describe("parseTaskIntent — 澄清归属", () => {
     expect(parseTaskIntent("任务归属 1 bob@example.com").kind).toBe("help");
     expect(parseTaskIntent("这个任务的归属问题回头再说").kind).toBe("help");
   });
+
+  it("多行归属确认合并一条消息 → pending-batch（真实事故回归）", () => {
+    expect(
+      parseTaskIntent("任务归属 1 @TiMEM-Space\n任务归属 2 @TiMEM-Space"),
+    ).toEqual({
+      kind: "pending-batch",
+      items: [
+        { action: "assign", ref: "1", repo: "TiMEM-Space" },
+        { action: "assign", ref: "2", repo: "TiMEM-Space" },
+      ],
+    });
+  });
+
+  it("多行混合归属与跳过 → pending-batch", () => {
+    expect(parseTaskIntent("任务归属 1 @video\n跳过任务 2")).toEqual({
+      kind: "pending-batch",
+      items: [
+        { action: "assign", ref: "1", repo: "video" },
+        { action: "skip", ref: "2" },
+      ],
+    });
+  });
+
+  it("多行混入非归属内容 → 不按批处理（保持原语义）", () => {
+    expect(parseTaskIntent("任务归属 1 @video\n你好").kind).toBe("help");
+    expect(parseTaskIntent("任务归属 1 @video").kind).toBe("pending-assign");
+  });
 });

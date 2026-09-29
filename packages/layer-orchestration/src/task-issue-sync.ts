@@ -98,6 +98,14 @@ export type TaskIntent =
   | { kind: "pending-assign"; ref: string; repo: string }
   /** 澄清归属放弃：「跳过任务 N」——丢弃澄清队列候选，不建单 */
   | { kind: "pending-skip"; ref: string }
+  /** 多行澄清归属：一条消息逐行「任务归属 N @仓库 / 跳过任务 N」（逐条落单） */
+  | {
+      kind: "pending-batch";
+      items: Array<
+        | { action: "assign"; ref: string; repo: string }
+        | { action: "skip"; ref: string }
+      >;
+    }
   | { kind: "overview" }
   | { kind: "help" };
 
@@ -1729,6 +1737,17 @@ const taskIssueSyncProvider: Provider<TaskIssueSyncRequest, TaskIssueSyncRespons
       response = await handlePendingAssign(ctx, intent.ref, intent.repo, sessionChatId);
     } else if (intent.kind === "pending-skip") {
       response = handlePendingSkip(intent.ref, sessionChatId);
+    } else if (intent.kind === "pending-batch") {
+      // 多行归属确认逐条落单；单条失败不阻断其余（结果逐条汇报）
+      const parts: string[] = [];
+      for (const item of intent.items) {
+        parts.push(
+          item.action === "assign"
+            ? await handlePendingAssign(ctx, item.ref, item.repo, sessionChatId)
+            : handlePendingSkip(item.ref, sessionChatId),
+        );
+      }
+      response = parts.join("\n\n");
     } else if (intent.kind === "task-need-repo" || intent.kind === "create" || intent.kind === "list" || intent.kind === "complete") {
       response = await handleTaskIntent(intent, ctx, sessionChatId);
     } else {

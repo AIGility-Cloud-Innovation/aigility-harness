@@ -69,13 +69,18 @@ export interface RoleRegistry {
   routes: Record<string, string>;
 }
 
-/** 读取角色注册表（文件不存在/损坏返回 null，由调用方降级为不注入） */
+/** 读取角色注册表（文件不存在/损坏返回 null，由调用方降级为不注入）。
+ *  模板化：相对的 skillsRoot 以注册表文件所在目录为基准解析，注册表可整体搬移。 */
 export function loadRoleRegistry(file: string): RoleRegistry | null {
   if (!existsSync(file)) return null;
   try {
     const raw = JSON.parse(readFileSync(file, "utf8")) as RoleRegistry;
     if (!raw || typeof raw !== "object" || !raw.roles) return null;
-    return { skillsRoot: raw.skillsRoot ?? "", roles: raw.roles, routes: raw.routes ?? {} };
+    const base = path.dirname(path.resolve(file));
+    const skillsRoot = raw.skillsRoot
+      ? (path.isAbsolute(raw.skillsRoot) ? raw.skillsRoot : path.resolve(base, raw.skillsRoot))
+      : path.resolve(base, "skills");
+    return { skillsRoot, roles: raw.roles, routes: raw.routes ?? {} };
   } catch (e) {
     console.warn("[role-registry] 读取失败, 本次不注入角色能力:", e);
     return null;
