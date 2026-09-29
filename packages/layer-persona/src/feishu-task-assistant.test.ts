@@ -388,13 +388,13 @@ describe("feishuTaskAssistantProvider — 兜底防编造集成", () => {
     if (r.ok) expect(r.value.response).toBe(pass);
   });
 
-  it("兜底模型默认 glm-5.3-flash、温度 0.2（可控性替换 qwen-turbo）", async () => {
+  it("兜底模型默认 sensenova-deepseek-v4-flash、温度 0.2（glm-5.3-flash 已下线）", async () => {
     const ctx = mockCtx({
       "@cognitive/llm-inference": () => ({ ok: true, value: { text: "好的，可以聊聊" } }),
     });
     await feishuTaskAssistantProvider.execute({ user_input: "随便聊聊" }, ctx);
     const { req } = (ctx.calls as unknown[])[0] as { req: Record<string, unknown> };
-    expect(req["model"]).toBe("glm-5.3-flash");
+    expect(req["model"]).toBe("sensenova-deepseek-v4-flash");
     expect(req["temperature"]).toBe(0.2);
   });
 });
