@@ -186,8 +186,15 @@ export interface DshRunOptions {
   extraEnv?: Record<string, string>;
   /** 追加的 patch overlay 文件（--patch 可重复，与用户补丁层叠加） */
   patchFiles?: string[];
-  /** 整体超时（默认 300s：agent 干活可能较久） */
+  /** 整体超时（默认 900s = 15 分钟，可用 DSH_RELAY_TIMEOUT_MS 覆盖：agent 干活可能较久） */
   timeoutMs?: number;
+}
+
+/** 默认 headless 超时：优先读环境变量 DSH_RELAY_TIMEOUT_MS（毫秒），缺省 15 分钟。 */
+function resolveDefaultTimeoutMs(): number {
+  const raw = process.env["DSH_RELAY_TIMEOUT_MS"];
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 900_000;
 }
 
 export interface DshRunResult {
@@ -232,7 +239,10 @@ export function dshRunCli(opts: DshRunOptions): Promise<DshRunResult> {
     );
     let out = "";
     let errText = "";
-    const timer = setTimeout(() => child.kill("SIGKILL"), opts.timeoutMs ?? 300_000);
+    const timer = setTimeout(
+      () => child.kill("SIGKILL"),
+      opts.timeoutMs ?? resolveDefaultTimeoutMs(),
+    );
     child.stdout.on("data", (d: Buffer) => { out += d.toString("utf8"); });
     child.stderr.on("data", (d: Buffer) => { errText += d.toString("utf8"); });
     child.on("close", (code) => {
@@ -335,7 +345,7 @@ export interface DshSessionRelayOptions {
   roleRegistryFile?: string;
   /** 角色 patch overlay 的输出目录（缺省与 transcriptFile 同目录） */
   patchDir?: string;
-  /** headless 整体超时 ms，默认 300s */
+  /** headless 整体超时 ms，默认 900s（15 分钟，可用 DSH_RELAY_TIMEOUT_MS 覆盖） */
   timeoutMs?: number;
 }
 

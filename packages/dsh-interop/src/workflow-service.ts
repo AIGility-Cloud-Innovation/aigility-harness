@@ -48,7 +48,10 @@ export interface DshWorkflowServiceOptions {
 /** 从装配配置 + 环境变量解析最终运行参数，返回缺配置项清单。 */
 export function resolveWorkflowRuntime(
   opts: DshWorkflowServiceOptions,
-): { missing: string[]; runtime: DshWorkflowRunOptions } {
+): {
+  missing: string[];
+  runtime: Omit<DshWorkflowRunOptions, "script" | "meta">;
+} {
   const missing: string[] = [];
   const dshHome = opts.dshHome ?? process.env.DSH_HOME;
   const apiKey = opts.apiKey ?? process.env.DEEPSEEK_API_KEY;
