@@ -56,6 +56,11 @@ import { dshToolBridgePlugin } from "./dsh-tool.js";
 import { listSkills, upsertSkill, removeSkill, usageSnapshot, type AigilitySkillInput } from "./skill-registry.js";
 import { loadRoles, upsertRole, removeRole, setRoute, checkSkillPaths, listDshSkills, createDshSkill, attachSkillToRole, listMcpShelf, type RoleCapabilityConfig, type RoleMcpServer } from "./role-registry.js";
 import { listTweaks, addTweak, removeTweak, type SiteTweak } from "./site-tweaks.js";
+import {
+  taskLoopStatus, startTaskLoop, stopTaskLoop, restartTaskLoop,
+  loadTaskLoopConfig, saveTaskLoopConfig, taskLoopLogs,
+  taskLoopConfigView, listFeishuChats,
+} from "./task-loop-manager.js";
 import type { DshToolBridgeResponse } from "./dsh-tool.js";
 import { planTask, WORKFLOW_DIR } from "./planner.js";
 import { existsSync as fileExists } from "node:fs";
@@ -883,6 +888,80 @@ async function main(): Promise<void> {
         } catch (err) {
           json(res, 200, { ok: false, error: String(err) });
         }
+        return;
+      }
+      // ── 项目小助理（feishu-task-loop）管理：启停 / 状态 / 配置 / 日志 ──
+      if (path === "/api/aigility/task-loop/status" && req.method === "GET") {
+        if (!requireUser(req, res)) return;
+        const url = new URL(req.url ?? "/", "http://x");
+        const tail = Number.parseInt(url.searchParams.get("tail") ?? "30", 10) || 30;
+        const s = taskLoopStatus(Math.min(200, Math.max(1, tail)));
+        json(res, 200, { ok: true, status: { ...s, config: taskLoopConfigView(s.config) } });
+        return;
+      }
+      if (path === "/api/aigility/task-loop/start" && req.method === "POST") {
+        if (!requireUser(req, res)) return;
+        try {
+          const r = await startTaskLoop();
+          json(res, r.ok ? 200 : 409, { ...r });
+        } catch (err) {
+          json(res, 500, { ok: false, error: String(err) });
+        }
+        return;
+      }
+      if (path === "/api/aigility/task-loop/stop" && req.method === "POST") {
+        if (!requireUser(req, res)) return;
+        try {
+          const r = await stopTaskLoop();
+          json(res, r.ok ? 200 : 500, { ...r });
+        } catch (err) {
+          json(res, 500, { ok: false, error: String(err) });
+        }
+        return;
+      }
+      if (path === "/api/aigility/task-loop/restart" && req.method === "POST") {
+        if (!requireUser(req, res)) return;
+        try {
+          const r = await restartTaskLoop();
+          json(res, r.ok ? 200 : 409, { ...r });
+        } catch (err) {
+          json(res, 500, { ok: false, error: String(err) });
+        }
+        return;
+      }
+      if (path === "/api/aigility/task-loop/config" && req.method === "GET") {
+        if (!requireUser(req, res)) return;
+        json(res, 200, { ok: true, config: taskLoopConfigView(loadTaskLoopConfig()) });
+        return;
+      }
+      if (path === "/api/aigility/task-loop/config" && req.method === "PUT") {
+        if (!requireUser(req, res)) return;
+        try {
+          const body = JSON.parse((await readBody(req)) || "{}");
+          const config = saveTaskLoopConfig(body);
+          json(res, 200, { ok: true, config, note: "配置已保存；运行中的进程不热加载，需重启后生效" });
+        } catch (err) {
+          json(res, 400, { ok: false, error: String(err) });
+        }
+        return;
+      }
+      if (path === "/api/aigility/task-loop/feishu/chats" && req.method === "POST") {
+        // 枚举机器人所在飞书群：凭证用请求体传入（未保存的新 Secret 可先行验证），否则用已保存配置
+        if (!requireUser(req, res)) return;
+        try {
+          const body = JSON.parse((await readBody(req)) || "{}") as { appId?: string; appSecret?: string };
+          const r = await listFeishuChats({ appId: body?.appId, appSecret: body?.appSecret });
+          json(res, r.ok ? 200 : 400, { ok: r.ok, chats: r.chats, error: r.error });
+        } catch (err) {
+          json(res, 500, { ok: false, chats: [], error: String(err) });
+        }
+        return;
+      }
+      if (path === "/api/aigility/task-loop/logs" && req.method === "GET") {
+        if (!requireUser(req, res)) return;
+        const url = new URL(req.url ?? "/", "http://x");
+        const tail = Number.parseInt(url.searchParams.get("tail") ?? "200", 10) || 200;
+        json(res, 200, { ok: true, ...taskLoopLogs(tail) });
         return;
       }
       json(res, 404, { error: "unknown aigility api" });
