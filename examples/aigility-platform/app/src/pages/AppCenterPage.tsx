@@ -1,22 +1,36 @@
 import { useEffect, useState } from 'react'
 import { centerApps, meetingDetail, type CenterApp } from '../mock/data'
 import { generateDoc, fetchReportTemplates, saveReportTemplate, deleteReportTemplate, type ReportTemplate, type DocBlock } from '../lib/harness'
-import { ArrowLeft, PlusCircle, CheckCircle2, Clock, Loader2, FileText, CalendarClock, BarChart3, Workflow, ClipboardList, Headset, FileBarChart, MessageSquareText, FolderOpen, Sparkles } from 'lucide-react'
+import { ArrowLeft, PlusCircle, CheckCircle2, Clock, Loader2, FileText, CalendarClock, BarChart3, Workflow, ClipboardList, Headset, FileBarChart, MessageSquareText, FolderOpen, Sparkles, Bot } from 'lucide-react'
 
 const appIcon: Record<string, any> = {
   'app-qa': MessageSquareText, 'app-doc': FolderOpen, 'app-meeting': CalendarClock, 'app-data': BarChart3,
   'app-flow': Workflow, 'app-task': ClipboardList, 'app-service': Headset, 'app-report': FileBarChart,
+  'app-task-loop': Bot,
 }
 const iconColor: Record<string, string> = {
   知识服务: 'bg-blue-50 text-blue-600', 办公效率: 'bg-emerald-50 text-emerald-600', 数据分析: 'bg-sky-50 text-sky-600',
   内容生成: 'bg-amber-50 text-amber-600', 流程辅助: 'bg-cyan-50 text-cyan-600', 客户服务: 'bg-rose-50 text-rose-600',
 }
 
-export default function AppCenterPage() {
+export default function AppCenterPage({ taskLoopEnabled, onToggleTaskLoop, openPage }: {
+  /** 「项目小助理」是否在导航栏显示（与 App.tsx enabledModules 联动，localStorage 持久化） */
+  taskLoopEnabled?: boolean
+  onToggleTaskLoop?: () => void
+  openPage?: (p: string) => void
+} = {}) {
   const [apps, setApps] = useState(centerApps)
   const [open, setOpen] = useState<CenterApp | null>(null)
 
-  const toggle = (id: string) => setApps(list => list.map(a => a.id === id ? { ...a, on: !a.on } : a))
+  // 「项目小助理」开关 = 导航栏显示开关，来自 App 级状态；其余应用仍为本地演示开关
+  useEffect(() => {
+    setApps(list => list.map(a => a.id === 'app-task-loop' ? { ...a, on: !!taskLoopEnabled } : a))
+  }, [taskLoopEnabled])
+
+  const toggle = (id: string) => {
+    if (id === 'app-task-loop') { onToggleTaskLoop?.(); return }
+    setApps(list => list.map(a => a.id === id ? { ...a, on: !a.on } : a))
+  }
 
   if (open?.id === 'app-meeting') return <MeetingApp back={() => setOpen(null)} />
   if (open?.id === 'app-report') return <ReportApp back={() => setOpen(null)} />
@@ -49,7 +63,7 @@ export default function AppCenterPage() {
               <p className="text-xs text-slate-400 leading-relaxed mt-1.5 mb-3 min-h-[32px]">{a.desc}</p>
               <div className="text-[11px] text-slate-400 mb-3">{a.users.toLocaleString()} 人在用 · 更新 {a.updated}</div>
               <div className="flex gap-2 pt-3 border-t border-slate-50">
-                <button disabled={!a.on} onClick={() => (a.detail || a.id === 'app-report') && setOpen(a)}
+                <button disabled={!a.on} onClick={() => a.id === 'app-task-loop' ? openPage?.('task-loop') : (a.detail || a.id === 'app-report') && setOpen(a)}
                   className={`flex-1 text-xs py-1.5 rounded-lg transition ${a.on ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}>打开</button>
                 <button disabled={!a.on} className={`flex-1 text-xs py-1.5 rounded-lg border transition ${a.on ? 'border-slate-200 text-slate-600 hover:bg-slate-50' : 'border-slate-100 text-slate-300 cursor-not-allowed'}`}>配置</button>
               </div>

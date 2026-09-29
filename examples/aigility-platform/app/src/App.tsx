@@ -17,6 +17,7 @@ import StudioPage from './pages/StudioPage'
 import ModelsPage from './pages/ModelsPage'
 import ToolsPage from './pages/ToolsPage'
 import RoleCapsPage from './pages/RoleCapsPage'
+import FeishuTaskLoopPage from './pages/FeishuTaskLoopPage'
 import FloatingImprover from './components/FloatingImprover'
 import LoginGate from './components/LoginGate'
 import { apiMe, apiLogout, getToken, clearToken, type PlatformUser } from './lib/api'
@@ -67,9 +68,18 @@ export default function App() {
   const [showMock, setShowMock] = useState<boolean>(() => loadLs('showMock', true))
   useEffect(() => { try { localStorage.setItem('showMock', JSON.stringify(showMock)) } catch { /* ignore */ } }, [showMock])
   const [skillList, setSkillList] = useState<Skill[]>(initialSkills)
+  // 模块装配默认集：全部可用模块默认开启，唯独「项目小助理」默认不在导航栏显示——
+  // 由「应用中心」的开关控制（同一 enabledModules 状态，localStorage 持久化）
   const [enabledModules, setEnabledModules] = useState<Set<string>>(
-    new Set(moduleRegistry.filter(m => m.available).map(m => m.id))
+    () => {
+      // 持久化格式是 JSON 数组（[...set]），恢复时必须重建 Set——
+      // 直接把解析结果当 Set 用会因 .has 不存在而在渲染期崩溃（白屏）
+      const stored = loadLs<unknown>('zy_modules_v1', null)
+      if (Array.isArray(stored)) return new Set(stored.filter((x): x is string => typeof x === 'string'))
+      return new Set(moduleRegistry.filter(m => m.available && m.id !== 'task-loop').map(m => m.id))
+    }
   )
+  useEffect(() => { try { localStorage.setItem('zy_modules_v1', JSON.stringify([...enabledModules])) } catch { /* ignore */ } }, [enabledModules])
   const [branding, setBranding] = useState<Branding>(() => ({ ...defaultBranding, ...loadLs('zy_branding_v2', defaultBranding) }))
   const [tenantId, setTenantId] = useState(() => loadLs('zy_tenant', 'standard'))
 
@@ -176,10 +186,11 @@ export default function App() {
       case 'space': return <SpacePage />
       case 'process': return <ProcessPage onGenerateSkill={addSkill} go={setPage} generatedSkills={skillList.map(s => s.name)} />
       case 'market': return <MarketPage go={setPage} />
-      case 'apps': return <AppCenterPage />
+      case 'apps': return <AppCenterPage taskLoopEnabled={enabledModules.has('task-loop')} onToggleTaskLoop={() => toggleModule('task-loop')} openPage={go} />
       case 'studio': return <StudioPage />
       case 'tools': return <ToolsPage showMock={showMock} />
       case 'rolecaps': return <RoleCapsPage />
+      case 'task-loop': return <FeishuTaskLoopPage />
       case 'models': return <ModelsPage />
       case 'ops': return <OpsPage />
       case 'modules': return <ModulePage enabled={enabledModules} toggle={toggleModule} />

@@ -635,3 +635,113 @@ export async function timemSearch(query: string, agentId?: string, limit = 5): P
   if (!j.ok) throw new Error(j.error ?? 'TiMEM 检索失败')
   return j.data?.results ?? []
 }
+
+// ── 项目小助理（feishu-task-loop）进程管理 ─────────────────────
+
+export type TaskLoopState = 'running' | 'stopped' | 'stale'
+
+export interface TaskLoopLockInfo {
+  exists: boolean
+  pid?: number
+  path: string
+  stale: boolean
+}
+
+export interface TaskLoopLogTail {
+  file: string
+  lines: string[]
+}
+
+export interface TaskLoopConfig {
+  llmModel?: string
+  pipelineIntervalMs?: number
+  autoDispatch?: boolean
+  notifyEnabled?: boolean
+  /** 飞书应用 App ID（覆盖仓库 .env） */
+  feishuAppId?: string
+  /** App Secret：读取只回 '******'（另有 feishuAppSecretMasked 回显）；PUT '******' 表示不修改 */
+  feishuAppSecret?: string
+  feishuAppSecretMasked?: string
+  /** 播报目标群（如「机器人群」）：配置后静默收集的汇总/澄清播报只发该群 */
+  notifyChatId?: string
+  notifyChatName?: string
+  featureFlags: Record<string, boolean>
+  env: Record<string, string>
+}
+
+export interface FeishuChatItem {
+  chatId: string
+  name: string
+}
+
+/** 枚举机器人所在飞书群（凭证用传入值，否则用已保存配置/.env），供选择「机器人群」 */
+export async function fetchFeishuChats(credentials?: { appId?: string; appSecret?: string }): Promise<{ ok: boolean; chats: FeishuChatItem[]; error?: string }> {
+  const j = await authJsonFetch<{ ok: boolean; chats: FeishuChatItem[]; error?: string }>(
+    '/api/aigility/task-loop/feishu/chats',
+    { method: 'POST', body: JSON.stringify(credentials ?? {}) },
+  )
+  return { ok: j.ok, chats: j.chats ?? [], error: j.error }
+}
+
+export interface TaskLoopStatus {
+  state: TaskLoopState
+  pid?: number
+  lock: TaskLoopLockInfo
+  managedByPlatform: boolean
+  logs: { stdout: TaskLoopLogTail; stderr: TaskLoopLogTail }
+  config: TaskLoopConfig
+}
+
+/** 项目小助理状态（含锁、日志尾部、配置回显） */
+export async function fetchTaskLoopStatus(tail = 30): Promise<TaskLoopStatus> {
+  const j = await authJsonFetch<{ ok: boolean; status: TaskLoopStatus }>(`/api/aigility/task-loop/status?tail=${tail}`)
+  return j.status
+}
+
+export interface TaskLoopOpResult {
+  ok: boolean
+  state?: TaskLoopState
+  pid?: number
+  message: string
+}
+
+/** 启动 feishu-task-loop（pnpm --filter feishu-task-loop start） */
+export async function startTaskLoop(): Promise<TaskLoopOpResult> {
+  const j = await authJsonFetch<TaskLoopOpResult>('/api/aigility/task-loop/start', { method: 'POST' })
+  return j
+}
+
+/** 停止：SIGTERM → 8s 超时 SIGKILL */
+export async function stopTaskLoop(): Promise<TaskLoopOpResult> {
+  const j = await authJsonFetch<TaskLoopOpResult>('/api/aigility/task-loop/stop', { method: 'POST' })
+  return j
+}
+
+/** 重启 = 停止（若在跑）→ 启动 */
+export async function restartTaskLoop(): Promise<TaskLoopOpResult> {
+  const j = await authJsonFetch<TaskLoopOpResult>('/api/aigility/task-loop/restart', { method: 'POST' })
+  return j
+}
+
+/** 读取项目小助理配置（data/task-loop.json） */
+export async function fetchTaskLoopConfig(): Promise<TaskLoopConfig> {
+  const j = await authJsonFetch<{ ok: boolean; config: TaskLoopConfig }>('/api/aigility/task-loop/config')
+  return j.config
+}
+
+/** 保存配置（注意：运行中进程不热加载，需重启生效） */
+export async function updateTaskLoopConfig(config: Partial<TaskLoopConfig>): Promise<TaskLoopConfig> {
+  const j = await authJsonFetch<{ ok: boolean; config: TaskLoopConfig }>(
+    '/api/aigility/task-loop/config',
+    { method: 'PUT', body: JSON.stringify(config) },
+  )
+  return j.config
+}
+
+/** 读取日志尾部（tail 上限 1000） */
+export async function fetchTaskLoopLogs(tail = 200): Promise<{ stdout: TaskLoopLogTail; stderr: TaskLoopLogTail }> {
+  const j = await authJsonFetch<{ ok: boolean; stdout: TaskLoopLogTail; stderr: TaskLoopLogTail }>(
+    `/api/aigility/task-loop/logs?tail=${tail}`,
+  )
+  return { stdout: j.stdout, stderr: j.stderr }
+}
