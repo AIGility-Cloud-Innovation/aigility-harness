@@ -59,7 +59,7 @@ import { listTweaks, addTweak, removeTweak, type SiteTweak } from "./site-tweaks
 import {
   taskLoopStatus, startTaskLoop, stopTaskLoop, restartTaskLoop,
   loadTaskLoopConfig, saveTaskLoopConfig, taskLoopLogs,
-  taskLoopConfigView, listFeishuChats,
+  taskLoopConfigView, listFeishuChats, fetchTaskLoopBoard,
 } from "./task-loop-manager.js";
 import type { DshToolBridgeResponse } from "./dsh-tool.js";
 import { planTask, WORKFLOW_DIR } from "./planner.js";
@@ -897,6 +897,17 @@ async function main(): Promise<void> {
         const tail = Number.parseInt(url.searchParams.get("tail") ?? "30", 10) || 30;
         const s = taskLoopStatus(Math.min(200, Math.max(1, tail)));
         json(res, 200, { ok: true, status: { ...s, config: taskLoopConfigView(s.config) } });
+        return;
+      }
+      if (path === "/api/aigility/task-loop/board" && req.method === "GET") {
+        // 任务看板（使用界面）：聚合仓库池内的 Gitea 工单（待派发/执行中/已完成）
+        if (!requireUser(req, res)) return;
+        try {
+          const board = await fetchTaskLoopBoard();
+          json(res, 200, { ok: true, ...board });
+        } catch (err) {
+          json(res, 200, { ok: false, repos: [], issues: [], errors: [String(err)] });
+        }
         return;
       }
       if (path === "/api/aigility/task-loop/start" && req.method === "POST") {

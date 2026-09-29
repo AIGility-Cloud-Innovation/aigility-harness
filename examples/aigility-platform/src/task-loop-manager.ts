@@ -15,8 +15,15 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync } from "node:fs";
+import { request as httpsRequest } from "node:https";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  buildGiteaUrl,
+  readGiteaEnv,
+  resolveHostIp,
+  loadGiteaToken,
+} from "@aigility-harness/layer-action";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 /** 仓库根（pnpm --filter 的工作目录） */
@@ -467,4 +474,149 @@ export async function restartTaskLoop(): Promise<StartResult & { stoppedFirst: S
 export function taskLoopLogs(tail = 200): { stdout: LogTail; stderr: LogTail } {
   const n = Math.max(1, Math.min(1000, Math.floor(tail) || 200));
   return { stdout: tailFile(STDOUT_LOG, n), stderr: tailFile(STDERR_LOG, n) };
+}
+
+// ── 任务看板（Gitea 工单 = 项目小助理落单的最终载体）────────────
+//
+// 使用界面（任务看板）的数据源：流水线「归属+执行者确认后建 Gitea 工单」，
+// 因此看板直接聚合 Gitea 的工单状态（待派发/执行中/已完成），复用
+// @action/gitea-api 固化的 DNS 绕行 + token 认证经验。
+
+/** Gitea GET JSON（lookup 回调固定公共 DNS 解析出的 IP，URL 保持域名） */
+async function giteaGet(
+  path: string,
+  query?: Record<string, string | number | boolean>,
+): Promise<{ status: number; data: unknown }> {
+  const env = readGiteaEnv();
+  const url = buildGiteaUrl(env.baseUrl, path, query);
+  const [token, ip] = await Promise.all([
+    loadGiteaToken(env),
+    resolveHostIp(new URL(url).hostname, env.dnsServer, env.fallbackIp),
+  ]);
+  const { status, text } = await new Promise<{ status: number; text: string }>((resolvePromise, reject) => {
+    const req = httpsRequest(
+      url,
+      {
+        method: "GET",
+        headers: { authorization: `token ${token}`, accept: "application/json" },
+        lookup: (_host, opts, cb) =>
+          opts?.all ? cb(null, [{ address: ip, family: 4 }]) : cb(null, ip, 4),
+        signal: AbortSignal.timeout(15_000),
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c) => chunks.push(c as Buffer));
+        res.on("end", () =>
+          resolvePromise({ status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString("utf8") }),
+        );
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+  let data: unknown = text;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    // 非 JSON 保留原文
+  }
+  return { status, data };
+}
+
+export interface BoardIssue {
+  repo: string;
+  number: number;
+  title: string;
+  state: "open" | "closed";
+  assignees: string[];
+  labels: string[];
+  htmlUrl: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskLoopBoard {
+  repos: string[];
+  issues: BoardIssue[];
+  errors: string[];
+}
+
+/** 与被管子进程同源的仓库池：TASK_REPOS + TASK_CHAT_REPO_MAP（org: 展开）；5 分钟缓存 */
+let repoPoolCache: { repos: string[]; expiresAt: number } | null = null;
+
+async function resolveBoardRepos(): Promise<string[]> {
+  if (repoPoolCache && Date.now() < repoPoolCache.expiresAt) return repoPoolCache.repos;
+  const repos = new Set<string>();
+  const orgs = new Set<string>();
+  for (const r of (readEnvValue("TASK_REPOS") ?? "TiMEM-AI/TiMEM-Space").split(",").map((s) => s.trim()).filter(Boolean)) {
+    repos.add(r);
+  }
+  for (const pair of (readEnvValue("TASK_CHAT_REPO_MAP") ?? "").split(",").map((s) => s.trim()).filter(Boolean)) {
+    const pool = pair.includes("=") ? pair.slice(pair.indexOf("=") + 1) : pair;
+    for (const entry of pool.split("|").map((s) => s.trim()).filter(Boolean)) {
+      if (entry.startsWith("org:")) orgs.add(entry.slice(4));
+      else repos.add(entry);
+    }
+  }
+  for (const org of orgs) {
+    try {
+      const r = await giteaGet(`/api/v1/orgs/${encodeURIComponent(org)}/repos`, { limit: 50 });
+      const list = Array.isArray(r.data) ? (r.data as Array<{ full_name?: string }>) : [];
+      for (const item of list) if (item.full_name) repos.add(item.full_name);
+    } catch {
+      // org 展开失败不阻塞看板（仓库池少几个仓库而已）
+    }
+  }
+  const out = [...repos];
+  repoPoolCache = { repos: out, expiresAt: Date.now() + 5 * 60_000 };
+  return out;
+}
+
+/** 聚合仓库池内全部工单（PR 排除；单仓库失败记入 errors 不阻塞其余仓库） */
+export async function fetchTaskLoopBoard(limitPerRepo = 50): Promise<TaskLoopBoard> {
+  const errors: string[] = [];
+  let repos: string[];
+  try {
+    repos = await resolveBoardRepos();
+  } catch (e) {
+    return { repos: [], issues: [], errors: [`仓库池解析失败（检查 GITEA_TOKEN / 网络）: ${(e as Error).message}`] };
+  }
+  const issues: BoardIssue[] = [];
+  await Promise.all(
+    repos.map(async (repo) => {
+      try {
+        const r = await giteaGet(`/api/v1/repos/${repo}/issues`, {
+          state: "all",
+          limit: Math.min(50, limitPerRepo),
+          type: "issues",
+        });
+        if (r.status !== 200 || !Array.isArray(r.data)) {
+          errors.push(`${repo}: HTTP ${r.status}`);
+          return;
+        }
+        for (const it of r.data as Array<Record<string, unknown>>) {
+          if (it.pull_request) continue; // PR 不进任务看板
+          issues.push({
+            repo,
+            number: Number(it.number),
+            title: String(it.title ?? ""),
+            state: it.state === "closed" ? "closed" : "open",
+            assignees: Array.isArray(it.assignees)
+              ? (it.assignees as Array<{ login?: string }>).map((a) => String(a.login ?? "")).filter(Boolean)
+              : [],
+            labels: Array.isArray(it.labels)
+              ? (it.labels as Array<{ name?: string }>).map((l) => String(l.name ?? "")).filter(Boolean)
+              : [],
+            htmlUrl: String(it.html_url ?? ""),
+            createdAt: String(it.created_at ?? ""),
+            updatedAt: String(it.updated_at ?? ""),
+          });
+        }
+      } catch (e) {
+        errors.push(`${repo}: ${(e as Error).message}`);
+      }
+    }),
+  );
+  issues.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+  return { repos, issues, errors: errors.slice(0, 6) };
 }
