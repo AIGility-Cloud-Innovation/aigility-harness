@@ -7,7 +7,8 @@
  *
  *   KernelAdapter member   →   Cordis primitive
  *   ─────────────────────────────────────────────
- *   registry               →   ctx.provide / ctx.get  (via CordisSeamRegistry)
+ *   registry               →   ctx.provide (publish only; resolve uses
+ *                              local indexes, see CordisSeamRegistry)
  *   events                 →   ctx.on / ctx.emit      (via CordisEventBus)
  *   effects                →   in-memory EffectStore  (via InMemoryEffectManager)
  *   carriers               →   plugin onLoad/onUnload (via DshCarrierManager)

@@ -1,13 +1,18 @@
 /**
- * CordisSeamRegistry — bridges the `SeamRegistry` contract to Cordis's
- * service registry (`ctx.provide` / `ctx.get`).
+ * CordisSeamRegistry — implements the `SeamRegistry` contract on top of
+ * local indexes, with Cordis used for observability only.
  *
  * Mapping:
- *  - Each registered Provider is published as a Cordis service under the
- *    composite key `seam:<serviceId>@<version>`, and also indexed by
- *    provider name for fast lookup and unregister.
- *  - `resolve(ref)` picks the highest-version provider whose service id
- *    matches and whose version satisfies the consumer's range.
+ *  - Each registered Provider is *published* to Cordis under the composite
+ *    key `seam:<serviceId>@<version>` (via `ctx.provide`) for observability.
+ *    NOTE: nothing ever reads it back with `ctx.get` — resolution below is
+ *    served entirely from the local `byName` / `byService` indexes.
+ *  - Providers are indexed locally by provider name, and by service id.
+ *  - `resolve(ref)` scans the local index: it picks the highest-version
+ *    provider whose service id matches and whose version satisfies the
+ *    consumer's range. (Cordis's exact-key lookup model cannot express
+ *    "iterate all versions of a service id", which is why resolution is
+ *    deliberately local rather than `ctx.get`-based.)
  *  - Registry events (registered/unregistered/rebound) are delivered to
  *    local subscribers; the adapter does not emit kernel-internal events.
  *
