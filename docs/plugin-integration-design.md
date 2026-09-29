@@ -371,31 +371,31 @@ type SystemEvent =
 ## 10. 实施计划
 
 ### Phase 0：Seam 接线补漏（0.5h，前置）
-- [ ] 给 `SeamContext` 加 `call(ref, request)` 方法
-- [ ] `InMemoryKernelAdapter` + `DshSeamContext` 各自实现（闭包捕获 registry）
-- [ ] 补测试：orchestration 层 stub 改为真调 cognitive，验证跨层调用跑通
+- [x] 给 `SeamContext` 加 `call(ref, request)` 方法
+- [x] `InMemoryKernelAdapter` + `DshSeamContext` 各自实现（闭包捕获 registry）
+- [x] 补测试：orchestration 层 stub 改为真调 cognitive，验证跨层调用跑通
 
 ### Phase 1：LiteLLM Provider（1-2h）
-- [ ] 新建 `packages/layer-cognitive/src/litellm-provider.ts`
-- [ ] 实现 `litellmProvider`：HTTP fetch → LiteLLM → 解析响应
-- [ ] `health()` 探活 `/health/liveliness`
-- [ ] 注册到 `packages/layer-cognitive/src/index.ts` 的 `getProviders()`
-- [ ] demo 验证 stub ↔ litellm 热切换
+- [x] 新建 `packages/layer-cognitive/src/litellm-provider.ts`
+- [x] 实现 `litellmProvider`：HTTP fetch → LiteLLM → 解析响应
+- [x] `health()` 探活 `/health/liveliness`
+- [x] 注册到 `packages/layer-cognitive/src/index.ts` 的 `getProviders()`
+- [x] demo 验证 stub ↔ litellm 热切换
 
 ### Phase 2：api-router 协议适配 Provider → Infrastructure（2-4h）
-- [ ] 新建 `packages/layer-infrastructure/src/protocol-types.ts`
-- [ ] 新建 `protocol-adapter-service.ts` + `protocol-adapter-provider.ts`（3 Provider）
-- [ ] 移植 4 个纯函数（Python → TS）
-- [ ] 集成到 `packages/layer-infrastructure/src/index.ts`
-- [ ] 翻译正确性测试（Anthropic body → OpenAI body 金标准对比）
-- [ ] 原 `proxy.py` + systemd service 保留
+- [x] 新建 `packages/layer-infrastructure/src/protocol-types.ts`
+- [x] 新建 `protocol-adapter-service.ts` + `protocol-adapter-provider.ts`（3 Provider）
+- [x] 移植 4 个纯函数（Python → TS）
+- [x] 集成到 `packages/layer-infrastructure/src/index.ts`
+- [x] 翻译正确性测试（Anthropic body → OpenAI body 金标准对比）
+- [x] 原 `proxy.py` + systemd service 保留
 
 ### Phase 3：端到端验证（1h）
-- [ ] e2e demo：HTTP ingress → protocol adapter → llm inference → 返回
-- [ ] 验证 traceId 全链路 + EventBus 事件完整性
+- [x] e2e demo：HTTP ingress → protocol adapter → llm inference → 返回
+- [x] 验证 traceId 全链路 + EventBus 事件完整性
 
 ### Phase 4（未来）：HTTP Ingress
-- [ ] 实现 `@infrastructure/http-ingress` Provider（NetworkService，监听端口）
+- [x] 实现 `@infrastructure/http-ingress` Provider（NetworkService，监听端口）
 - [ ] api-router systemd service 正式退役
 
 ## 11. 风险与开放问题
