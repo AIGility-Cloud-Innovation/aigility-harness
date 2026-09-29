@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
 import { centerApps, meetingDetail, type CenterApp } from '../mock/data'
-import { generateDoc, fetchReportTemplates, saveReportTemplate, deleteReportTemplate, type ReportTemplate, type DocBlock } from '../lib/harness'
+import {
+  generateDoc, fetchReportTemplates, saveReportTemplate, deleteReportTemplate,
+  fetchTaskLoopStatus, startTaskLoop, stopTaskLoop,
+  type ReportTemplate, type DocBlock, type TaskLoopOpResult,
+} from '../lib/harness'
 import { ArrowLeft, PlusCircle, CheckCircle2, Clock, Loader2, FileText, CalendarClock, BarChart3, Workflow, ClipboardList, Headset, FileBarChart, MessageSquareText, FolderOpen, Sparkles, Bot } from 'lucide-react'
 
 const appIcon: Record<string, any> = {
@@ -13,24 +17,50 @@ const iconColor: Record<string, string> = {
   内容生成: 'bg-amber-50 text-amber-600', 流程辅助: 'bg-cyan-50 text-cyan-600', 客户服务: 'bg-rose-50 text-rose-600',
 }
 
-export default function AppCenterPage({ taskLoopEnabled, onToggleTaskLoop, openPage }: {
-  /** 「项目小助理」是否在导航栏显示（与 App.tsx enabledModules 联动，localStorage 持久化） */
-  taskLoopEnabled?: boolean
-  onToggleTaskLoop?: () => void
+export default function AppCenterPage({ openPage }: {
+  /** 「打开」跳转站内页面（如项目小助理 → task-loop 任务看板） */
   openPage?: (p: string) => void
 } = {}) {
   const [apps, setApps] = useState(centerApps)
   const [open, setOpen] = useState<CenterApp | null>(null)
 
-  // 「项目小助理」开关 = 导航栏显示开关，来自 App 级状态；其余应用仍为本地演示开关
-  useEffect(() => {
-    setApps(list => list.map(a => a.id === 'app-task-loop' ? { ...a, on: !!taskLoopEnabled } : a))
-  }, [taskLoopEnabled])
+  // 「项目小助理」卡片开关 = 机器人进程启停（真）：状态读服务端真实运行态，
+  // 与「配置与运维」页的启动/停止按钮等价、双向同步；导航可见性不归它管
+  const [tlRunning, setTlRunning] = useState<boolean | null>(null) // null=查询中
+  const [tlBusy, setTlBusy] = useState(false)
+  const [tlNote, setTlNote] = useState('')
+  const [tlNoteErr, setTlNoteErr] = useState(false)
 
-  const toggle = (id: string) => {
-    if (id === 'app-task-loop') { onToggleTaskLoop?.(); return }
-    setApps(list => list.map(a => a.id === id ? { ...a, on: !a.on } : a))
+  useEffect(() => {
+    let alive = true
+    fetchTaskLoopStatus(1)
+      .then(s => { if (alive) setTlRunning(s.state === 'running') })
+      .catch(() => { if (alive) setTlRunning(false) })
+    return () => { alive = false }
+  }, [])
+
+  const applyTlResult = (r: TaskLoopOpResult) => {
+    setTlRunning(r.state === 'running')
+    setTlNote(r.message)
+    setTlNoteErr(!r.ok)
+    setTimeout(() => setTlNote(''), 6000)
   }
+
+  const toggleTaskLoopRun = async () => {
+    if (tlBusy) return
+    setTlBusy(true); setTlNote('')
+    try {
+      applyTlResult(tlRunning ? await stopTaskLoop() : await startTaskLoop())
+    } catch (e) {
+      setTlNote(String((e as Error).message ?? e)); setTlNoteErr(true)
+      fetchTaskLoopStatus(1).then(s => setTlRunning(s.state === 'running')).catch(() => {})
+    } finally {
+      setTlBusy(false)
+    }
+  }
+
+  // 其余应用的开关仍为货架演示状态；左侧导航是否显示模块由「模块装配」页单独控制
+  const toggle = (id: string) => setApps(list => list.map(a => a.id === id ? { ...a, on: !a.on } : a))
 
   if (open?.id === 'app-meeting') return <MeetingApp back={() => setOpen(null)} />
   if (open?.id === 'app-report') return <ReportApp back={() => setOpen(null)} />
@@ -48,24 +78,45 @@ export default function AppCenterPage({ taskLoopEnabled, onToggleTaskLoop, openP
       <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-4">
         {apps.map(a => {
           const Icon = appIcon[a.id] || FileText
+          const isTl = a.id === 'app-task-loop'
+          const tlPending = tlBusy || tlRunning === null
           return (
-            <div key={a.id} className={`bg-white rounded-xl border p-5 transition hover:shadow-md ${a.on ? 'border-slate-200/80' : 'border-dashed border-slate-200 opacity-75'}`}>
+            <div key={a.id} className={`bg-white rounded-xl border p-5 transition hover:shadow-md ${(isTl ? tlRunning : a.on) ? 'border-slate-200/80' : 'border-dashed border-slate-200 opacity-75'}`}>
               <div className="flex items-start justify-between mb-3">
                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${iconColor[a.cat] || 'bg-slate-50 text-slate-500'}`}><Icon size={19} /></div>
-                <button onClick={() => toggle(a.id)} className={`w-10 h-[22px] rounded-full transition relative ${a.on ? 'bg-blue-600' : 'bg-slate-200'}`}>
-                  <span className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-all ${a.on ? 'left-[22px]' : 'left-[3px]'}`} />
-                </button>
+                {isTl ? (
+                  <button onClick={toggleTaskLoopRun} disabled={tlPending}
+                    title={tlRunning ? '停用 = 停止机器人进程' : '启用 = 启动机器人进程'}
+                    className={`w-10 h-[22px] rounded-full transition relative ${tlRunning ? 'bg-blue-600' : 'bg-slate-200'} ${tlPending ? 'opacity-50 cursor-wait' : ''}`}>
+                    <span className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-all ${tlRunning ? 'left-[22px]' : 'left-[3px]'}`} />
+                  </button>
+                ) : (
+                  <button onClick={() => toggle(a.id)} className={`w-10 h-[22px] rounded-full transition relative ${a.on ? 'bg-blue-600' : 'bg-slate-200'}`}>
+                    <span className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-all ${a.on ? 'left-[22px]' : 'left-[3px]'}`} />
+                  </button>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <div className="font-medium text-slate-800 text-sm">{a.name}{a.id === 'app-report' && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 align-middle">真 · doc-worker</span>}</div>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${a.status === '已上线' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>{a.status}</span>
+                {isTl ? (
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${tlRunning ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500'} flex items-center gap-1`}>
+                    {tlPending && <Loader2 size={9} className="animate-spin" />}{tlRunning === null ? '查询中…' : tlRunning ? '机器人运行中' : '机器人已停止'}
+                  </span>
+                ) : (
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${a.status === '已上线' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>{a.status}</span>
+                )}
               </div>
               <p className="text-xs text-slate-400 leading-relaxed mt-1.5 mb-3 min-h-[32px]">{a.desc}</p>
               <div className="text-[11px] text-slate-400 mb-3">{a.users.toLocaleString()} 人在用 · 更新 {a.updated}</div>
+              {isTl && tlNote && (
+                <p className={`text-[11px] rounded-lg px-2.5 py-1.5 mb-3 ${tlNoteErr ? 'text-rose-600 bg-rose-50' : 'text-emerald-700 bg-emerald-50'}`}>{tlNote}</p>
+              )}
               <div className="flex gap-2 pt-3 border-t border-slate-50">
-                <button disabled={!a.on} onClick={() => a.id === 'app-task-loop' ? openPage?.('task-loop') : (a.detail || a.id === 'app-report') && setOpen(a)}
-                  className={`flex-1 text-xs py-1.5 rounded-lg transition ${a.on ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}>打开</button>
-                <button disabled={!a.on} className={`flex-1 text-xs py-1.5 rounded-lg border transition ${a.on ? 'border-slate-200 text-slate-600 hover:bg-slate-50' : 'border-slate-100 text-slate-300 cursor-not-allowed'}`}>配置</button>
+                <button disabled={!isTl && !a.on} onClick={() => isTl ? openPage?.('task-loop') : (a.detail || a.id === 'app-report') && setOpen(a)}
+                  className={`flex-1 text-xs py-1.5 rounded-lg transition ${(!isTl && !a.on) ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>打开</button>
+                <button disabled={!isTl && !a.on}
+                  onClick={() => isTl && openPage?.('task-loop-config')}
+                  className={`flex-1 text-xs py-1.5 rounded-lg border transition ${isTl || a.on ? 'border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-indigo-300 hover:text-indigo-600' : 'border-slate-100 text-slate-300 cursor-not-allowed'}`}>配置</button>
               </div>
             </div>
           )
