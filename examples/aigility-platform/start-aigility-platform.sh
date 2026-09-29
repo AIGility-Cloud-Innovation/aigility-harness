@@ -43,8 +43,13 @@ export AIGILITY_GATEWAY_PORT="${AIGILITY_GATEWAY_PORT:-1237}"
 command -v node >/dev/null 2>&1 || { echo "[ERROR] 未找到 node，请先安装 Node 20+"; exit 1; }
 command -v pnpm >/dev/null 2>&1 || { echo "[ERROR] 未找到 pnpm，请先安装 pnpm 9+（npm i -g pnpm）"; exit 1; }
 
-# ---------- PostgreSQL（复用 appbase-pg 容器，宿主 5433） ----------
-if command -v docker >/dev/null 2>&1; then
+# ---------- PostgreSQL ----------
+# 优先级：环境变量/仓库 .env 已设置的 APPBASE_PG_* > docker 容器 appbase-pg(5433) > 本机原生 PG(5432)
+# 本机（Linux 开发机）实际跑的是原生 PostgreSQL 17，账号库在 5432 的 appbase 库，
+# 与 examples/appbase/start-appbase.sh 同源（该脚本即以 5432 启动 AppBase）。
+if [[ -n "${APPBASE_PG_PORT:-}" ]]; then
+  echo "[INFO] 使用已有 PG 配置: ${APPBASE_PG_HOST:-127.0.0.1}:${APPBASE_PG_PORT}"
+elif command -v docker >/dev/null 2>&1; then
   if ! docker start appbase-pg >/dev/null 2>&1; then
     echo "[INFO] appbase-pg 容器不存在，正在创建..."
     docker run -d --name appbase-pg --restart unless-stopped \
@@ -54,9 +59,13 @@ if command -v docker >/dev/null 2>&1; then
   export APPBASE_PG_PASSWORD="${APPBASE_PG_PASSWORD:-appbase}"
   export APPBASE_PG_PORT="${APPBASE_PG_PORT:-5433}"
 else
-  echo "[WARN] 未安装 docker，假设本机 PG 已在 5433 运行"
-  export APPBASE_PG_PASSWORD="${APPBASE_PG_PASSWORD:-appbase}"
-  export APPBASE_PG_PORT="${APPBASE_PG_PORT:-5433}"
+  # 无 docker：假设本机原生 PG 已在运行（本机为 5432 的 postgresql-17，密码同 start-appbase.sh）
+  echo "[INFO] 未安装 docker，使用本机原生 PG (127.0.0.1:5432)"
+  export APPBASE_PG_HOST="${APPBASE_PG_HOST:-127.0.0.1}"
+  export APPBASE_PG_PORT="${APPBASE_PG_PORT:-5432}"
+  export APPBASE_PG_DATABASE="${APPBASE_PG_DATABASE:-appbase}"
+  export APPBASE_PG_USER="${APPBASE_PG_USER:-postgres}"
+  export APPBASE_PG_PASSWORD="${APPBASE_PG_PASSWORD:-hy010112}"
 fi
 
 # ---------- 依赖安装 ----------
