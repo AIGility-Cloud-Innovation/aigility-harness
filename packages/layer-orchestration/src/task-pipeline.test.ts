@@ -17,6 +17,8 @@ import {
   takePendingCandidate,
   dropPendingCandidate,
   clearPendingCandidates,
+  findPendingCandidateByNo,
+  feishuFirstEnabled,
 } from "./task-pipeline.js";
 
 describe("normalizeTitle / jaccard", () => {
@@ -268,5 +270,54 @@ describe("confident=false 候选闸门", () => {
     expect(out).toHaveLength(2);
     expect(out[0].confident).toBe(false);
     expect(out[1].confident).toBe(true);
+  });
+});
+
+// ── 飞书先行：开关 + 澄清候选携带任务 guid ──────────────────────────
+
+describe("feishuFirstEnabled — TASK_FEISHU_FIRST 开关", () => {
+  const saved = process.env["TASK_FEISHU_FIRST"];
+  const set = (v?: string) => {
+    if (v === undefined) delete process.env["TASK_FEISHU_FIRST"];
+    else process.env["TASK_FEISHU_FIRST"] = v;
+  };
+
+  it("未设置/1 → 默认开启（先建飞书任务，归属+执行者齐备再建工单）", () => {
+    set(undefined);
+    expect(feishuFirstEnabled()).toBe(true);
+    set("1");
+    expect(feishuFirstEnabled()).toBe(true);
+  });
+
+  it("0/false/off（大小写不敏感）→ 关闭（回到汇总即建工单旧链路）", () => {
+    for (const v of ["0", "false", "OFF", "False"]) {
+      set(v);
+      expect(feishuFirstEnabled()).toBe(false);
+    }
+  });
+
+  afterEach(() => {
+    if (saved === undefined) delete process.env["TASK_FEISHU_FIRST"];
+    else process.env["TASK_FEISHU_FIRST"] = saved;
+  });
+});
+
+describe("澄清候选 — 飞书任务 guid 携带与按编号跨群查", () => {
+  afterEach(() => clearPendingCandidates());
+
+  it("addPendingCandidate 记录 feishuTaskGuid；findPendingCandidateByNo 不限群可查且只看不取", () => {
+    const item = addPendingCandidate(
+      "oc_a",
+      { title: "修白屏", priority: "P1", feishuTaskGuid: "tg-42" },
+      ["AIGility/x"],
+    );
+    expect(item.feishuTaskGuid).toBe("tg-42");
+    // 不限群（执行者安排可在任意成员发起）；peek 校验 chatId 的行为不受影响
+    expect(findPendingCandidateByNo(item.no)?.feishuTaskGuid).toBe("tg-42");
+    expect(findPendingCandidateByNo(item.no)).toBeDefined();
+    expect(peekPendingCandidate("oc_b", item.no)).toBeUndefined();
+    // 只看不取：不消费队列
+    expect(peekPendingCandidate("oc_a", item.no)).toBeDefined();
+    expect(findPendingCandidateByNo(99999)).toBeUndefined();
   });
 });

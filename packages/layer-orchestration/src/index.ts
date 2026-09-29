@@ -161,6 +161,8 @@ export {
   parseCandidateTasks,
   parseChatRepoMap,
   buildJudgeMessages,
+  buildIssueBody,
+  quoteDiscussion,
   filterDuplicates,
   normalizeTitle,
   jaccard,

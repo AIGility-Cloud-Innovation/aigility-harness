@@ -49,10 +49,12 @@ import {
   addPendingCandidate,
   chatRepoMapFromEnv,
   dropPendingCandidate,
+  findPendingCandidateByNo,
   jaccard,
   llmInferenceRef,
   mappedChatPool,
   peekPendingCandidate,
+  quoteDiscussion,
   takePendingCandidate,
 } from "./task-pipeline.js";
 
@@ -138,12 +140,27 @@ export type TaskIssueSyncRequest =
       tasklistNames?: string[];
       /** 群通知目标会话；未设则只返回报告不播报 */
       notifyChatId?: string;
+    }
+  | {
+      /** 原语模式：飞书先行——建「计划中」飞书任务（不带 [repo#N] 前缀），挂 org 清单 P 分组。
+       *  task-pipeline 汇总后调用；归属+执行者齐备前不建 Gitea 工单。 */
+      mode: "create-planned";
+      /** 归属参考仓库（org/仓库；只用其 org 解析清单） */
+      repo: string;
+      /** 任务标题（原样，不加前缀） */
+      title: string;
+      /** 优先级（P0-P3，写进标题前缀） */
+      priority?: string;
+      /** 任务信息来源群 chatId（写入任务描述，plan-gate 提问/汇总可回溯） */
+      sourceChatId?: string;
     };
 
 export interface TaskIssueSyncResponse {
   /** 用户回复文本（intent 模式）或同步结果摘要（sync-issue 模式） */
   response: string;
   session_id?: string;
+  /** create-planned 模式：新建飞书任务 guid（pipeline 存进澄清候选，归属确认后改写用） */
+  taskGuid?: string;
 }
 
 export const taskIssueSyncService: ServiceDefinition<
@@ -503,6 +520,61 @@ async function syncIssueToTask(
   return { ok: true, detail: `已同步飞书任务并挂清单「${listName}」` };
 }
 
+/**
+ * 飞书先行：建「计划中」飞书任务（syncIssueToTask 的姊妹原语，飞书为先行主源）。
+ * 标题 `[优先级] 标题`（不带 [repo#N] 前缀——工单号要等归属+执行者齐备回填才有），
+ * 挂 org 清单（按 repo 的 org 解析，缺则自动创建）的「P 计划中」分组。
+ * 返回 guid：pipeline 存进澄清候选，归属确认后改写标题/挪分组（而非重建）。
+ */
+export async function createPlannedTask(
+  ctx: SeamContext,
+  opts: { repo: string; title: string; priority?: string; sourceChatId?: string },
+): Promise<{ ok: boolean; guid?: string; detail: string }> {
+  const listName = tasklistNameForRepo(opts.repo);
+  const list = await ensureTasklist(ctx, listName);
+  if (list.error || !list.guid) {
+    return { ok: false, detail: `清单「${listName}」不可用：${list.error}` };
+  }
+  const body: Record<string, unknown> = {
+    summary: opts.priority ? `[${opts.priority}] ${opts.title}` : opts.title,
+  };
+  const descParts: string[] = [];
+  if (opts.sourceChatId) descParts.push(`来源群：${opts.sourceChatId}`);
+  descParts.push("状态：待确认归属与执行者（两者齐备后自动创建 Gitea 工单）");
+  body.description = descParts.join("\n");
+  const tr = await callFeishuApi(ctx, {
+    method: "POST",
+    path: "/open-apis/task/v2/tasks",
+    query: { user_id_type: "open_id" },
+    identity: "user",
+    body,
+  });
+  if (!tr.ok || (tr.value?.code ?? -1) !== 0) {
+    return { ok: false, detail: `建任务失败：${tr.ok ? tr.value?.msg || `code=${tr.value?.code}` : tr.error}` };
+  }
+  const task = (tr.value?.data as { task?: TaskLike })?.task;
+  const taskGuid = task?.guid ?? task?.task_id;
+  if (!taskGuid) return { ok: false, detail: "建任务成功但未返回 guid，未挂清单" };
+  // 挂清单 + 「P 计划中」分组（一次 add_tasklist 带 section_guid；分组缺则自动建）
+  const sections = await ensureSections(ctx, list.guid);
+  const planGuid = sections.plan;
+  const ar = await callFeishuApi(ctx, {
+    method: "POST",
+    path: `/open-apis/task/v2/tasks/${taskGuid}/add_tasklist`,
+    query: { user_id_type: "open_id" },
+    identity: "user",
+    body: { tasklist_guid: list.guid, ...(planGuid ? { section_guid: planGuid } : {}) },
+  });
+  if (!ar.ok || (ar.value?.code ?? -1) !== 0) {
+    return {
+      ok: true,
+      guid: taskGuid,
+      detail: `任务已建但挂清单「${listName}」失败：${ar.ok ? ar.value?.msg || `code=${ar.value?.code}` : ar.error}`,
+    };
+  }
+  return { ok: true, guid: taskGuid, detail: `已建飞书任务并归入「${listName}」·${SECTION_NAMES.plan}` };
+}
+
 // ── 状态队列（飞书自定义分组 P/D/C/A = 状态主源；SDK 源码考证端点） ──
 
 /** 四状态分组名（清单内自定义分组；缺则自动创建） */
@@ -602,6 +674,12 @@ async function listSectionTasks(
 export function issueNumberFromTaskSummary(summary: string | undefined): number | undefined {
   const m = (summary ?? "").match(/\[([^\]#/]+)\/([^\]#]+)#(\d+)\]/);
   return m ? Number(m[3]) : undefined;
+}
+
+/** 飞书先行任务标题 [org/repo] 前缀（归属已确认标记）→ 仓库 full_name（解析不出 undefined） */
+export function repoFromPlannedSummary(summary: string | undefined): string | undefined {
+  const m = (summary ?? "").match(/^\[([^\]#/]+)\/([^\]#/]+)\]/);
+  return m ? `${m[1]}/${m[2]}` : undefined;
 }
 
 // ── 派发执行域（agentd UDS 客户端复用 agentd-client；delayMs 闸门在 agentd 侧） ──
@@ -980,34 +1058,7 @@ export async function runPlanGate(
       continue;
     }
 
-    // ⓪-a 先行任务回填工单：人工直接建的任务没有 #N → 自动建 Gitea 工单
-    // （以飞书任务为先行主源；工单+PR 是后续收尾完成的标识）
-    if (issueNo === undefined && !summary.includes("【待补充】")) {
-      const cleanTitle = summary.replace(/^【待安排执行者】/, "").trim();
-      const repo = giteaRepo();
-      const ir = await callGiteaApi(ctx, {
-        method: "POST",
-        path: issuesBaseFor(repo),
-        body: {
-          title: cleanTitle,
-          body: `> 来源：飞书任务（成员直接创建，由项目小助理回填工单）\n>\n> 飞书任务：${summary.slice(0, 80)}`,
-        },
-      });
-      if (ir.ok && is2xx(ir.value?.status ?? 0)) {
-        const issue = ir.value?.data as { number?: number; html_url?: string };
-        const sync = await syncIssueToTask(ctx, repo, issue);
-        reports.push(
-          sync.ok
-            ? `🔗 「${cleanTitle.slice(0, 40)}」已回填工单 ${repo}#${issue.number}（双建完成），可「安排执行者 #${issue.number} @姓名」。`
-            : `⚠️ 「${cleanTitle.slice(0, 40)}」工单 ${repo}#${issue.number} 已建但同步任务失败：${sync.detail}`,
-        );
-      } else {
-        reports.push(`⚠️ 「${cleanTitle.slice(0, 40)}」回填工单失败，下轮重试：${ir.ok ? `HTTP ${ir.value?.status}` : ir.error}`);
-      }
-      continue; // 本轮先完成回填，下轮再走执行者/核对闸门
-    }
-
-    // ⓪ 执行者闸门：未安排执行者的任务不进入执行（需群里「安排执行者 #N @姓名」）
+    // ⓪ 执行者闸门（先于回填建单）：未安排执行者的任务不进入执行（需群里「安排执行者」）
     if (!/执行者：\S+/.test(t.description ?? "")) {
       const tagged = `【待安排执行者】${summary.replace(/^【待安排执行者】/, "")}`;
       if (tagged !== summary) {
@@ -1020,8 +1071,56 @@ export async function runPlanGate(
           body: { update_fields: ["summary"], task: { summary: tagged } },
         }).catch(() => undefined);
       }
-      reports.push(`👤 「${summary.slice(0, 40)}」尚未安排执行者，留 P。群里回复「安排执行者 #${issueNo ?? "?"} @姓名」后自动进入执行。`);
+      reports.push(`👤 「${summary.slice(0, 40)}」尚未安排执行者，留 P。群里回复「安排执行者 ${issueNo !== undefined ? `#${issueNo}` : "编号"} @姓名」后自动进入执行。`);
       continue;
+    }
+
+    // ⓪-a 先行任务回填工单（归属+执行者齐备才建）：没有 #N 的 P 任务，标题带
+    // [org/repo] 前缀（归属已确认）→ 从标题解析仓库自动建 Gitea 工单并同步回写 #N；
+    // 缺前缀 = 归属未确认 → 打【待确认归属】留 P，等群里「任务归属」确认。
+    if (issueNo === undefined && !summary.includes("【待补充】")) {
+      const prefix = summary.match(/^\[([^\]]+)\]/);
+      if (!prefix) {
+        const tagged = `【待确认归属】${summary.replace(/^【待确认归属】/, "")}`;
+        if (tagged !== summary) {
+          await callFeishuApi(ctx, {
+            method: "PATCH",
+            path: `/open-apis/task/v2/tasks/${guid}`,
+            query: { user_id_type: "open_id" },
+            identity: "user",
+            body: { update_fields: ["summary"], task: { summary: tagged } },
+          }).catch(() => undefined);
+        }
+        reports.push(`🏷️ 「${summary.slice(0, 40)}」尚未确认归属，留 P。群里回复「任务归属 编号 @仓库」确认后自动创建工单。`);
+        continue;
+      }
+      // 前缀解析仓库：含 / 取 org/仓库；解析不出回退默认仓库并告警（不卡队列）
+      const parsedRepo = repoFromPlannedSummary(summary);
+      const repo = parsedRepo ?? giteaRepo();
+      if (!parsedRepo) {
+        reports.push(`⚠️ 「${summary.slice(0, 40)}」标题前缀解析不出仓库，回退默认仓库 ${repo} 回填工单。`);
+      }
+      const cleanTitle = summary.replace(/^【[^】]+】/, "").replace(/^\[[^\]]+\]\s*/, "").trim();
+      const ir = await callGiteaApi(ctx, {
+        method: "POST",
+        path: issuesBaseFor(repo),
+        body: {
+          title: cleanTitle,
+          body: `> 来源：飞书任务（归属+执行者已确认，由项目小助理回填工单）\n>\n> 飞书任务：${summary.slice(0, 80)}`,
+        },
+      });
+      if (ir.ok && is2xx(ir.value?.status ?? 0)) {
+        const issue = ir.value?.data as { number?: number; html_url?: string };
+        const sync = await syncIssueToTask(ctx, repo, issue);
+        reports.push(
+          sync.ok
+            ? `🔗 「${cleanTitle.slice(0, 40)}」已回填工单 ${repo}#${issue.number}（双建完成），可「确认派发 #${issue.number}」。`
+            : `⚠️ 「${cleanTitle.slice(0, 40)}」工单 ${repo}#${issue.number} 已建但同步任务失败：${sync.detail}`,
+        );
+      } else {
+        reports.push(`⚠️ 「${cleanTitle.slice(0, 40)}」回填工单失败，下轮重试：${ir.ok ? `HTTP ${ir.value?.status}` : ir.error}`);
+      }
+      continue; // 本轮先完成回填，下轮再走目标核对闸门
     }
 
     // needs-input 前缀 = 已提问等补充，跳过 LLM 重判（用户改描述后去掉前缀才重核）
@@ -1222,7 +1321,13 @@ async function handleDispatchCancel(ctx: SeamContext, ref: string): Promise<stri
 // 多候选池判不动的候选停在澄清队列（task-pipeline push，群播报编号），
 // 只能在识别它的群里认领（takePendingCandidate 校验 chatId，防跨群误领）。
 
-/** 「任务归属 N @仓库」：澄清候选 → 建工单（与自动汇总同款查重/双建，来源群=本群） */
+/**
+ * 「任务归属 N @仓库」（飞书先行）：不再建工单——把候选携带的飞书任务标题改写为
+ * `[repo] 原标题`（归属已确认标记，plan-gate 回填建单的依据），并确保任务挂在
+ * 目标 org 清单的「P 计划中」分组（org 相同则原地，add_tasklist 幂等）。
+ * 候选保留在队列（标记 assignedRepo），后续「安排执行者 N @姓名」仍按编号定位。
+ * 无 guid 的旧候选（历史遗留）回落原「建工单+双建」行为。
+ */
 async function handlePendingAssign(
   ctx: SeamContext,
   ref: string,
@@ -1241,6 +1346,51 @@ async function handlePendingAssign(
     const repos = await candidateRepos(ctx);
     return `❌ 仓库「${repoInput}」解析失败，请用 @组织/仓库 全名重试，如：任务归属 ${no} @${repos[0] ?? "组织/仓库"}`;
   }
+
+  // 飞书先行：候选带飞书任务 guid → 改标题 + 挪目标 org 清单 P 分组（不建工单）
+  if (item.feishuTaskGuid) {
+    if (item.assignedRepo === repo) {
+      return `⏭️ 待归属任务 #${no} 已确认归属 ${repo}，无需重复确认。`;
+    }
+    const guid = item.feishuTaskGuid;
+    const clean = item.title.replace(/^\[[^\]]+\]\s*/, "").trim();
+    const pr = await callFeishuApi(ctx, {
+      method: "PATCH",
+      path: `/open-apis/task/v2/tasks/${guid}`,
+      query: { user_id_type: "open_id" },
+      identity: "user",
+      // 飞书 v2 更新接口要求 update_fields 声明 + task 包装（否则 99992402）
+      body: { update_fields: ["summary"], task: { summary: `[${repo}] ${clean}` } },
+    });
+    if (!pr.ok || (pr.value?.code ?? -1) !== 0) {
+      return `❌ 归属确认失败（改写任务标题）：${pr.ok ? pr.value?.msg : pr.error}`;
+    }
+    // 挂到目标 org 清单的「P 计划中」分组；同 org 原地时 add_tasklist 失败按幂等忽略
+    const listName = tasklistNameForRepo(repo);
+    const list = await ensureTasklist(ctx, listName);
+    let sectionNote = "";
+    if (!list.error && list.guid) {
+      const sections = await ensureSections(ctx, list.guid);
+      if (sections.plan) {
+        const ar = await callFeishuApi(ctx, {
+          method: "POST",
+          path: `/open-apis/task/v2/tasks/${guid}/add_tasklist`,
+          query: { user_id_type: "open_id" },
+          identity: "user",
+          body: { tasklist_guid: list.guid, section_guid: sections.plan },
+        });
+        if (ar.ok && (ar.value?.code ?? -1) === 0) sectionNote = `，已归入「${listName}」·${SECTION_NAMES.plan}`;
+      }
+    }
+    // 候选保留（回填 assignedRepo）：「安排执行者 N」仍按编号定位任务
+    item.assignedRepo = repo;
+    return [
+      `✅ 待归属任务 #${no} 已确认归属 ${repo}：${clean}${sectionNote}`,
+      `请回复「安排执行者 ${no} @姓名」指定执行者；归属+执行者齐备后自动创建 Gitea 工单。`,
+    ].join("\n");
+  }
+
+  // 旧链路回落（无 guid 的历史候选）：建工单 + 双建（与自动汇总旧行为一致）
   takePendingCandidate(sessionChatId, no); // 仓库解析成功才消费
 
   // 建单前查重（与 issue-create 同款；撞名则只清队列不重复建）
@@ -1254,7 +1404,10 @@ async function handlePendingAssign(
     path: issuesBaseFor(repo),
     body: {
       title: `[${item.priority}] ${item.title}`,
-      body: `> 来源：飞书群聊自动汇总（${item.collectedAt}，群内澄清归属）\n>\n> 判定依据：${item.reason ?? "LLM 判定为待执行任务"}\n> 来源群：${sessionChatId}\n\n由 @orchestration/task-pipeline 自动创建，请负责人认领。`,
+      body:
+        `> 来源：飞书群聊自动汇总（${item.collectedAt}，群内澄清归属）\n>\n> 判定依据：${item.reason ?? "LLM 判定为待执行任务"}\n> 来源群：${sessionChatId}\n` +
+        (quoteDiscussion(item.texts, item.sources) ? `\n${quoteDiscussion(item.texts, item.sources)}\n` : "\n") +
+        `\n由 @orchestration/task-pipeline 自动创建，请负责人认领。`,
     },
   });
   if (!r.ok || !is2xx(r.value?.status ?? 0)) {
@@ -1284,18 +1437,38 @@ function handlePendingSkip(ref: string, sessionChatId?: string): string {
 }
 
 /**
- * 安排执行者：「安排执行者 #N @张三」。
- * 双写：飞书任务描述追加「执行者：X」（P→D 闸门的判定依据）+
- * Gitea 工单评论留痕。任务在哪个清单由工单号归属的 org 决定（与双建一致）。
+ * 安排执行者：「安排执行者 #N @张三」。定位优先级：
+ *   ① 纯数字且澄清队列有该编号候选（飞书先行，建单前）→ 按候选的飞书任务 guid 定位；
+ *   ② ref 本身是任务 guid → 直接定位；
+ *   ③ 回落工单号路径（双建任务 [repo#N] 反查，既有行为保留）。
+ * 双写：飞书任务描述追加「执行者：X」（P→D 闸门与回填建单的判定依据）+
+ * Gitea 工单评论留痕（仅建单后路径，未建单无工单可评）。
  */
 async function handleAssignExecutor(ctx: SeamContext, ref: string, executor: string): Promise<string> {
-  const num = ref.trim().match(/^#?(\d+)$/);
-  if (!num) return "用法：安排执行者 #工单号 @执行者姓名";
-  const issueNo = Number(num[1]);
+  const raw = ref.trim();
+  const num = raw.match(/^#?(\d+)$/);
   const name = executor.replace(/^@/, "").trim();
+  if (!raw) return "用法：安排执行者 #工单号(或任务编号/任务guid) @执行者姓名";
   if (!name) return "❌ 请带上执行者姓名，如：安排执行者 #12 @张三";
 
-  // 全量任务列表按 [repo#N] 反查目标任务（含其所在清单信息）
+  // ① 建单前：编号命中澄清队列候选（带飞书任务 guid）→ 按 guid 定位
+  let guidFilter: string | undefined;
+  let pendingNo: number | undefined;
+  let issueNo: number | undefined;
+  if (num) {
+    const pending = findPendingCandidateByNo(Number(num[1]));
+    if (pending?.feishuTaskGuid) {
+      guidFilter = pending.feishuTaskGuid;
+      pendingNo = pending.no;
+    } else {
+      issueNo = Number(num[1]);
+    }
+  } else {
+    // ② ref 本身当作飞书任务 guid
+    guidFilter = raw;
+  }
+
+  // 全量任务列表定位目标任务
   const fr = await callFeishuApi(ctx, {
     method: "GET",
     path: "/open-apis/task/v2/tasks",
@@ -1306,17 +1479,21 @@ async function handleAssignExecutor(ctx: SeamContext, ref: string, executor: str
     return `❌ 任务查询失败：${fr.ok ? fr.value?.msg : fr.error}`;
   }
   const items = (fr.value?.data as { items?: Array<{ guid?: string; task_id?: string; summary?: string; description?: string }> })?.items ?? [];
-  const target = items.find((t) => issueNumberFromTaskSummary(t.summary ?? "") === issueNo);
+  const target = guidFilter
+    ? items.find((t) => (t.guid ?? t.task_id) === guidFilter)
+    : items.find((t) => issueNumberFromTaskSummary(t.summary ?? "") === issueNo);
   if (!target?.guid && !target?.task_id) {
-    return `没有找到工单 #${issueNo} 对应的飞书任务（可能尚未双建）。`;
+    return pendingNo !== undefined
+      ? `没有找到澄清任务 #${pendingNo} 对应的飞书任务。`
+      : `没有找到工单 #${issueNo} 对应的飞书任务（可能尚未双建）。`;
   }
   const guid = (target.guid ?? target.task_id) as string;
   const marker = `执行者：${name}`;
   if ((target.description ?? "").includes(marker)) {
-    return `⏭️ 工单 #${issueNo} 的执行者已是「${name}」，无需重复安排。`;
+    return `⏭️ ${pendingNo !== undefined ? `澄清任务 #${pendingNo}` : `工单 #${issueNo}`} 的执行者已是「${name}」，无需重复安排。`;
   }
 
-  // ① 飞书任务描述追加执行者（P→D plan-gate 闸门依据）
+  // 飞书任务描述追加执行者（plan-gate 闸门依据）
   const desc = (target.description ?? "").trimEnd();
   const pr = await callFeishuApi(ctx, {
     method: "PATCH",
@@ -1330,10 +1507,10 @@ async function handleAssignExecutor(ctx: SeamContext, ref: string, executor: str
     return `❌ 记录执行者失败（任务侧）：${pr.ok ? pr.value?.msg : pr.error}`;
   }
 
-  // ② Gitea 工单评论留痕（失败不阻断：任务侧已记录）
+  // 建单后路径：Gitea 工单评论留痕（失败不阻断：任务侧已记录）
   const repoMatch = (target.summary ?? "").match(/^\[([^\]#/]+)\/([^\]#]+)#\d+\]/);
   let giteaNote = "";
-  if (repoMatch) {
+  if (repoMatch && issueNo !== undefined) {
     const cr = await callGiteaApi(ctx, {
       method: "POST",
       path: `${issuesBaseFor(`${repoMatch[1]}/${repoMatch[2]}`)}/${issueNo}/comments`,
@@ -1342,7 +1519,9 @@ async function handleAssignExecutor(ctx: SeamContext, ref: string, executor: str
     if (!cr.ok || !is2xx(cr.value?.status ?? 0)) giteaNote = `（工单评论失败：${cr.ok ? `HTTP ${cr.value?.status}` : cr.error}）`;
   }
 
-  return `👤 工单 #${issueNo} 已安排执行者「${name}」${giteaNote}。任务将在下轮目标核对通过后进入「${SECTION_NAMES.doing}」执行队列。`;
+  return pendingNo !== undefined
+    ? `👤 澄清任务 #${pendingNo} 已安排执行者「${name}」。请再回复「任务归属 ${pendingNo} @仓库」确认归属；两者齐备后自动创建 Gitea 工单。`
+    : `👤 工单 #${issueNo} 已安排执行者「${name}」${giteaNote}。任务将在下轮目标核对通过后进入「${SECTION_NAMES.doing}」执行队列。`;
 }
 
 // ── 意图处理（自 persona 迁入；建单/建任务接入双建同步） ──────────
@@ -1695,6 +1874,20 @@ const taskIssueSyncProvider: Provider<TaskIssueSyncRequest, TaskIssueSyncRespons
       const sync = await syncIssueToTask(ctx, request.repo, request.issue, request.sourceChatId);
       return ok({
         response: sync.ok ? `📋 ${sync.detail}` : `⚠️ 飞书同步未完成：${sync.detail}`,
+      });
+    }
+
+    if (request.mode === "create-planned") {
+      // 原语模式：飞书先行——建「计划中」任务挂 org 清单 P 分组（带 guid 回传 pipeline）
+      const created = await createPlannedTask(ctx, {
+        repo: request.repo,
+        title: request.title,
+        priority: request.priority,
+        sourceChatId: request.sourceChatId,
+      });
+      return ok({
+        response: created.ok ? `📋 ${created.detail}` : `⚠️ 计划任务创建未完成：${created.detail}`,
+        ...(created.guid ? { taskGuid: created.guid } : {}),
       });
     }
 

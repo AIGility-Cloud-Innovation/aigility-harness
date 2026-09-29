@@ -5,7 +5,9 @@
  *   1. 取出监听缓冲里的群聊消息（D1 feishu-ingress passive 模式喂入）
  *   2. 调 @cognitive/llm-inference 判定：哪些是待执行任务（标题/优先级/仓库）
  *   3. 与 Gitea 各仓库 open 工单 + 飞书任务查重（词集 Jaccard 相似度）
- *   4. 新任务 → 建 Gitea 工单（标题前缀 [P0-P3]，正文带来源）→ 群播报
+ *   4. 新任务 → 飞书先行（默认）：先建飞书任务挂 org 清单「P 计划中」，
+ *      归属+执行者齐备后由 plan-gate 回填建 Gitea 工单（TASK_FEISHU_FIRST=0
+ *      回到旧链路：汇总即建工单，标题前缀 [P0-P3]）→ 群播报
  *   5. 轮询各仓库 open PR → 发现新 PR → 群提醒真人合并
  *
  * 只管理，不执行：本服务不写代码，执行由 codex 系工人/真人完成。
@@ -192,6 +194,8 @@ export interface CandidateTask {
   /** 多候选仓库池时 LLM 的归属置信标注（单仓池不需要；缺省视为 true） */
   confident?: boolean;
   reason?: string;
+  /** 候选依据的原始消息编号（对应判定输入的 [1..n]），用于把话题上下文回填进工单正文 */
+  sources?: number[];
 }
 
 /** 从 LLM 文本响应中解析 JSON 数组（容忍 ```json 包裹与前后闲话） */
@@ -209,10 +213,46 @@ export function parseCandidateTasks(text: string): CandidateTask[] {
         repo: typeof o.repo === "string" && o.repo ? o.repo : undefined,
         confident: typeof o.confident === "boolean" ? o.confident : undefined,
         reason: typeof o.reason === "string" ? o.reason : undefined,
+        sources: Array.isArray(o.sources)
+          ? o.sources.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0)
+          : undefined,
       }));
   } catch {
     return [];
   }
+}
+
+/**
+ * 生成「原始讨论」引用块：引用 LLM 标注的原始消息（sources 编号）原文，
+ * 无 sources 时退化为全部消息（截 5 条），保证工单自带讨论上下文而非空壳。
+ */
+export function quoteDiscussion(texts: string[] | undefined, sources: number[] | undefined): string {
+  if (!texts || texts.length === 0) return "";
+  const idx = sources && sources.length > 0
+    ? sources.map((n) => n - 1).filter((i) => i >= 0 && i < texts.length)
+    : texts.map((_, i) => i);
+  const quoted = idx.slice(0, 5).map((i) => `> ${texts[i].replace(/\n/g, "\n> ")}`.slice(0, 500));
+  return quoted.length > 0 ? `## 原始讨论\n\n${quoted.join("\n>\n")}\n` : "";
+}
+
+/**
+ * 组装带话题上下文的工单正文（自动汇总直落建单用）。
+ */
+export function buildIssueBody(
+  reason: string | undefined,
+  texts: string[] | undefined,
+  sources: number[] | undefined,
+  chatId: string,
+): string {
+  const discussion = quoteDiscussion(texts, sources);
+  return (
+    `> 来源：飞书群聊自动汇总（${new Date().toISOString()}）\n` +
+    `>\n` +
+    `> 判定依据：${reason ?? "LLM 判定为待执行任务"}\n` +
+    `> 来源群：${chatId === "*" ? "未知" : chatId}\n` +
+    (discussion ? `\n${discussion}\n` : "\n") +
+    `\n由 @orchestration/task-pipeline 自动创建，请负责人认领。`
+  );
 }
 
 /** 判定 prompt（system + user 消息体） */
@@ -226,7 +266,7 @@ export function buildJudgeMessages(
       content:
         `你是研发团队的群聊任务整理员。给定一批群聊消息，判断哪些包含"需要开发的任务/需求/bug"。\n` +
         `只输出一个纯 JSON 数组，禁止输出任何其他文字、解释或 markdown 代码块。\n` +
-        `数组每项格式：{"title":"任务标题(简洁动宾短语)","priority":"P0|P1|P2|P3","repo":"归属仓库","confident":true,"reason":"一句话依据"}\n` +
+        `数组每项格式：{"title":"任务标题(简洁动宾短语)","priority":"P0|P1|P2|P3","repo":"归属仓库","confident":true,"reason":"一句话依据","sources":[1,3]}\n` +
         `准入标准（必须同时满足才输出）：\n` +
         `- 有明确的行动诉求：要求修改/新增/修复/排查某个具体对象，或报告了具体 bug/异常\n` +
         `- 有可指派的产出：做完后能被验证（页面行为、接口结果、文档产出等）\n` +
@@ -236,7 +276,7 @@ export function buildJudgeMessages(
         `- 纯讨论/征求意见/闲聊/寒暄，无人提出行动要求\n` +
         `- 通知/转发/会议纪要，其中没有具体待办\n` +
         `其余规则：\n` +
-        `- 同一主题的多条消息合并为一项\n` +
+        `- 同一主题的多条消息合并为一项，sources 填该主题涉及的全部消息编号\n` +
         `- P0=线上事故, P1=紧急重要, P2=一般需求, P3=低优\n` +
         `- 输出示例：[{"title":"修复登录页白屏","priority":"P1","repo":"${repos[0] ?? "TiMEM-AI/TiMEM-Space"}","confident":true,"reason":"明确报告了线上bug"}]\n` +
         `repo 字段只能从以下列表中原样选择：${repos.join(", ")}\n` +
@@ -394,9 +434,17 @@ export interface PendingTaskCandidate {
   title: string;
   priority: CandidateTask["priority"];
   reason?: string;
+  /** 候选依据的原始消息编号（建单正文回填话题上下文用） */
+  sources?: number[];
+  /** 识别时的原始消息文本（与判定输入 [1..n] 同序；澄清归属建单时引用） */
+  texts?: string[];
   /** 识别时的候选仓库池（澄清消息展示） */
   pool: string[];
   collectedAt: string;
+  /** 飞书先行模式：识别时已建的飞书任务 guid（归属确认后改写标题/挪分组，而非重建） */
+  feishuTaskGuid?: string;
+  /** 已确认的归属仓库（full_name；飞书先行模式下「任务归属」确认后回填） */
+  assignedRepo?: string;
 }
 
 const pendingCandidates = new Map<number, PendingTaskCandidate>();
@@ -406,8 +454,16 @@ const PENDING_LIMIT = 50;
 /** 候选进澄清队列（超限淘汰最老项；编号全局递增） */
 export function addPendingCandidate(
   chatId: string,
-  c: { title: string; priority: CandidateTask["priority"]; reason?: string },
+  c: {
+    title: string;
+    priority: CandidateTask["priority"];
+    reason?: string;
+    sources?: number[];
+    /** 飞书先行模式：识别时已建的飞书任务 guid */
+    feishuTaskGuid?: string;
+  },
   pool: string[],
+  texts?: string[],
 ): PendingTaskCandidate {
   while (pendingCandidates.size >= PENDING_LIMIT) {
     const oldest = pendingCandidates.keys().next().value;
@@ -420,8 +476,11 @@ export function addPendingCandidate(
     title: c.title,
     priority: c.priority,
     reason: c.reason,
+    sources: c.sources,
+    texts: texts ? [...texts] : undefined,
     pool: [...pool],
     collectedAt: new Date().toISOString(),
+    feishuTaskGuid: c.feishuTaskGuid,
   };
   pendingCandidates.set(item.no, item);
   return item;
@@ -442,6 +501,22 @@ export function takePendingCandidate(chatId: string, no: number): PendingTaskCan
 
 export function dropPendingCandidate(chatId: string, no: number): boolean {
   return takePendingCandidate(chatId, no) !== undefined;
+}
+
+/**
+ * 不限群按编号查候选（只看不取）：飞书先行模式下「安排执行者 N」可能发生在
+ * 归属确认之前（此时编号=澄清队列编号），执行者安排需要按候选上的飞书任务
+ * guid 定位任务；不校验 chatId（执行者安排可在群内任意成员发起）。
+ */
+export function findPendingCandidateByNo(no: number): PendingTaskCandidate | undefined {
+  return pendingCandidates.get(no);
+}
+
+/** 飞书先行开关：env TASK_FEISHU_FIRST 显式为 0/false/off 时回到旧「汇总即建工单」链路；
+ *  默认开启——汇总先建飞书任务入「P 计划中」，归属+执行者齐备后由 plan-gate 回填工单。 */
+export function feishuFirstEnabled(): boolean {
+  const v = (process.env["TASK_FEISHU_FIRST"] ?? "").toLowerCase();
+  return !(v === "0" || v === "false" || v === "off");
 }
 
 /** 仅供测试：清空澄清队列与仓库列表缓存 */
@@ -563,6 +638,8 @@ export const taskPipelineProvider: Provider<TaskPipelineRequest, TaskPipelineRes
               chatId: string;
               pool: string[];
               candidates: CandidateTask[];
+              /** 与 candidates 编号对应的原始消息文本（[1..n] 同序），供建单正文回填话题上下文 */
+              texts: string[];
             }
             const judged: Judged[] = [];
             const requeue: CollectedMessage[] = [];
@@ -588,6 +665,7 @@ export const taskPipelineProvider: Provider<TaskPipelineRequest, TaskPipelineRes
                 chatId,
                 pool,
                 candidates: parseCandidateTasks(llm.value.text).filter((c) => c.confident !== false),
+                texts,
               });
             }
             if (requeue.length > 0) {
@@ -618,30 +696,65 @@ export const taskPipelineProvider: Provider<TaskPipelineRequest, TaskPipelineRes
                 }
               }
 
-              // ── 3. 归属分派 + 建工单：单仓池直落；多仓池须 LLM 命中候选且置信，
-              //      判不动进群内澄清（宁问不猜——静默落 repos[0] 曾是串单根因） ──
+              // ── 3. 归属分派 + 落库：飞书先行模式（默认）先建飞书任务挂 org 清单
+              //      「P 计划中」，归属+执行者齐备后由 plan-gate 回填建工单；
+              //      TASK_FEISHU_FIRST=0 回到旧「汇总即建工单」链路（保留兼容）──
+              const feishuFirst = feishuFirstEnabled();
               const scoped = judged.flatMap((j) =>
-                j.candidates.map((c) => ({ c, chatId: j.chatId, pool: j.pool })),
+                j.candidates.map((c) => ({ c, chatId: j.chatId, pool: j.pool, texts: j.texts })),
               );
               const kept = new Set(filterDuplicates(scoped.map((s) => s.c), existingTitles, threshold));
               const created: Array<{ chatId: string; line: string }> = [];
               const clarify: Array<{ chatId: string; item: PendingTaskCandidate }> = [];
               let dupCount = 0;
-              for (const { c, chatId, pool } of scoped) {
+              for (const { c, chatId, pool, texts } of scoped) {
                 if (!kept.has(c)) {
                   dupCount++;
                   continue;
                 }
                 const repo = assignRepoForPool(c, pool);
+                if (feishuFirst) {
+                  // 飞书先行：先建飞书任务（不带 [repo#N] 前缀），挂 org 清单 P 分组。
+                  // 单仓池命中 → 该仓库 org；判不动 → 池首/兜底 repos[0] 的 org，
+                  // 同时进澄清队列携带任务 guid（归属确认后改写标题而非重建）。
+                  const orgRepo = repo ?? pool[0] ?? repos[0];
+                  let taskGuid: string | undefined;
+                  try {
+                    const sr = (await ctx.call(taskIssueSyncRef, {
+                      mode: "create-planned",
+                      repo: orgRepo,
+                      title: c.title,
+                      priority: c.priority,
+                      sourceChatId: chatId === "*" ? undefined : chatId,
+                    })) as { ok?: boolean; value?: { response?: string; taskGuid?: string }; error?: string };
+                    taskGuid = sr.ok ? sr.value?.taskGuid : undefined;
+                    console.log(
+                      `[task-pipeline] 飞书先行建任务 [${c.priority}] ${c.title}: ${
+                        sr.ok ? (sr.value?.response ?? "ok") : (sr.error ?? "failed")
+                      }`,
+                    );
+                  } catch (e) {
+                    console.error(`[task-pipeline] 飞书先行建任务异常(不阻断): ${String((e as Error)?.message ?? e)}`);
+                  }
+                  if (repo) {
+                    created.push({ chatId, line: `${orgRepo} 清单 [${c.priority}] ${c.title}` });
+                  } else {
+                    clarify.push({
+                      chatId,
+                      item: addPendingCandidate(chatId, { ...c, feishuTaskGuid: taskGuid }, pool, texts),
+                    });
+                  }
+                  continue;
+                }
                 if (!repo) {
-                  clarify.push({ chatId, item: addPendingCandidate(chatId, c, pool) });
+                  clarify.push({ chatId, item: addPendingCandidate(chatId, c, pool, texts) });
                   continue;
                 }
                 const r = await callGitea(ctx, {
                   action: "create_issue",
                   repo,
                   title: `[${c.priority}] ${c.title}`,
-                  body: `> 来源：飞书群聊自动汇总（${new Date().toISOString()}）\n>\n> 判定依据：${c.reason ?? "LLM 判定为待执行任务"}\n> 来源群：${chatId === "*" ? "未知" : chatId}\n\n由 @orchestration/task-pipeline 自动创建，请负责人认领。`,
+                  body: buildIssueBody(c.reason, texts, c.sources, chatId),
                 });
                 if (r && typeof r.data === "object" && r.data !== null) {
                   const issue = r.data as { number?: number; html_url?: string };
@@ -667,7 +780,7 @@ export const taskPipelineProvider: Provider<TaskPipelineRequest, TaskPipelineRes
                 }
               }
 
-              // ── 4. 群播报：哪里聊的就在哪里通告/澄清（P→D 闸门的前置条件） ──
+              // ── 4. 群播报：哪里聊的就在哪里通告/澄清（归属+执行者确认是 P→D 前置） ──
               const createdLines = new Map<string, string[]>();
               for (const { chatId, line } of created) {
                 const list = createdLines.get(chatId) ?? [];
@@ -675,11 +788,16 @@ export const taskPipelineProvider: Provider<TaskPipelineRequest, TaskPipelineRes
                 createdLines.set(chatId, list);
               }
               for (const [chatId, lines] of createdLines) {
-                const summaryMsg =
-                  `🆕 群聊汇总：从本群近期的讨论里整理出 ${lines.length} 条任务，已建工单：\n` +
-                  lines.map((s) => `• ${s}`).join("\n") +
-                  `\n\n请回复「安排执行者 #工单号 @姓名」指定执行者；安排好执行者的任务才会进入执行队列。`;
-                const target = chatId === "*" ? request.notifyChatId : chatId;
+                const summaryMsg = feishuFirst
+                  ? `🆕 群聊汇总：从本群近期的讨论里整理出 ${lines.length} 条任务，已建飞书任务并归入对应清单「P 计划中」：\n` +
+                    lines.map((s) => `• ${s}`).join("\n") +
+                    `\n\n请回复「任务归属 编号 @仓库」确认归属、「安排执行者 编号 @姓名」确认执行者；两者齐备后自动创建 Gitea 工单。`
+                  : `🆕 群聊汇总：从本群近期的讨论里整理出 ${lines.length} 条任务，已建工单：\n` +
+                    lines.map((s) => `• ${s}`).join("\n") +
+                    `\n\n请回复「安排执行者 #工单号 @姓名」指定执行者；安排好执行者的任务才会进入执行队列。`;
+                // 播报目标：配置了 notifyChatId（如「机器人群」）则所有播报只发该群，
+                // 不再回源群（静默收集的结论统一在一个群里呈现）；未配置保持旧行为
+                const target = request.notifyChatId || (chatId === "*" ? undefined : chatId);
                 if (target) await notify(ctx, target, notifySend, summaryMsg);
               }
               const clarifyByChat = new Map<string, Array<{ chatId: string; item: PendingTaskCandidate }>>();
@@ -690,14 +808,23 @@ export const taskPipelineProvider: Provider<TaskPipelineRequest, TaskPipelineRes
               }
               for (const [chatId, items] of clarifyByChat) {
                 const poolNames = [...new Set(items.flatMap((x) => x.item.pool))].join(" / ");
-                const msg =
-                  `❓ 群聊汇总识别到 ${items.length} 条疑似任务，但归属仓库拿不准（候选：${poolNames}）：\n` +
-                  items.map((x) => `${x.item.no}. [${x.item.priority}] ${x.item.title}`).join("\n") +
-                  `\n\n回复「任务归属 编号 @仓库名」创建工单，回复「跳过任务 编号」丢弃。`;
-                const target = chatId === "*" ? request.notifyChatId : chatId;
+                const msg = feishuFirst
+                  ? `❓ 群聊汇总识别到 ${items.length} 条疑似任务，归属仓库拿不准（候选：${poolNames}），已先归入「P 计划中」：\n` +
+                    items.map((x) => `${x.item.no}. [${x.item.priority}] ${x.item.title}`).join("\n") +
+                    `\n\n回复「任务归属 编号 @仓库」确认归属、「安排执行者 编号 @姓名」确认执行者；两者齐备后自动创建 Gitea 工单。回复「跳过任务 编号」丢弃。`
+                  : `❓ 群聊汇总识别到 ${items.length} 条疑似任务，但归属仓库拿不准（候选：${poolNames}）：\n` +
+                    items.map((x) => `${x.item.no}. [${x.item.priority}] ${x.item.title}`).join("\n") +
+                    `\n\n回复「任务归属 编号 @仓库名」创建工单，回复「跳过任务 编号」丢弃。`;
+                const target = request.notifyChatId || (chatId === "*" ? undefined : chatId);
                 if (target) await notify(ctx, target, notifySend, msg);
               }
-              if (created.length > 0 || clarify.length > 0) {
+              if (feishuFirst) {
+                if (created.length > 0 || clarify.length > 0) {
+                  console.log(`[task-pipeline] 飞书先行：新建计划任务 ${created.length + clarify.length} 条（其中待澄清归属 ${clarify.length} 条），重复跳过 ${dupCount} 条`);
+                } else {
+                  console.log(`[task-pipeline] 判定 ${scoped.length} 条候选，全部与现有任务/工单重复`);
+                }
+              } else if (created.length > 0 || clarify.length > 0) {
                 console.log(`[task-pipeline] 新建工单 ${created.length} 条，进澄清 ${clarify.length} 条，重复跳过 ${dupCount} 条`);
               } else {
                 console.log(`[task-pipeline] 判定 ${scoped.length} 条候选，全部与现有任务/工单重复`);

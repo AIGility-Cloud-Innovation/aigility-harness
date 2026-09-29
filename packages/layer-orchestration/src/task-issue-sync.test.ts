@@ -315,3 +315,211 @@ describe("scan 多清单路由", () => {
     expect(sectionsGet).toBe(2);
   });
 });
+
+// ── 飞书先行链路：create-planned 原语 + 归属确认改标题 + 回填建单闸门 ──
+
+import { repoFromPlannedSummary } from "./task-issue-sync.js";
+
+describe("repoFromPlannedSummary — 飞书先行标题前缀解析", () => {
+  it("从 [org/repo] 前缀解析仓库；双建标题(#N)与无前缀不解析", () => {
+    expect(repoFromPlannedSummary("[AIGility/x] 修白屏")).toBe("AIGility/x");
+    expect(repoFromPlannedSummary("[P1] 修白屏")).toBeUndefined();
+    expect(repoFromPlannedSummary("[AIGility/x#7] 修白屏")).toBeUndefined();
+    expect(repoFromPlannedSummary(undefined)).toBeUndefined();
+  });
+});
+
+describe("create-planned 原语 — 飞书先行建计划任务", () => {
+  it("建任务（[P1] 标题、无 [repo#N] 前缀）并挂 org 清单 P 分组，回传 guid", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const ctx = mockCtx((id, req) => {
+      const path = String((req as { path?: string }).path);
+      const method = String((req as { method?: string }).method);
+      if (!id.includes("feishu")) return { ok: true, value: { status: 200, data: [] } };
+      if (path.endsWith("/tasklists") && method === "GET") return { ok: true, value: { code: 0, data: { items: [{ guid: "tl-9", name: "PlannedOrg" }] } } };
+      if (path.endsWith("/sections") && method === "GET") {
+        return { ok: true, value: { code: 0, data: { items: [{ guid: "s-p", name: "P 计划中" }, { guid: "s-d", name: "D 执行中" }, { guid: "s-c", name: "C 待测试" }, { guid: "s-a", name: "A 待修复" }] } } };
+      }
+      if (path === "/open-apis/task/v2/tasks" && method === "POST") {
+        bodies.push(req as Record<string, unknown>);
+        return { ok: true, value: { code: 0, data: { task: { guid: "tg-9" } } } };
+      }
+      if (path.includes("/add_tasklist")) {
+        bodies.push(req as Record<string, unknown>);
+        return { ok: true, value: { code: 0, data: {} } };
+      }
+      return { ok: true, value: { code: 0, data: {} } };
+    });
+    const r = await taskIssueSyncProvider.execute(
+      { mode: "create-planned", repo: "PlannedOrg/x", title: "修白屏", priority: "P1", sourceChatId: "oc_a" },
+      ctx,
+    );
+    if (!r.ok) throw new Error("execute failed");
+    expect(r.value.taskGuid).toBe("tg-9");
+    expect(r.value.response).toContain("P 计划中");
+    const createBody = (bodies.find((b) => (b as { body?: { summary?: string } }).body?.summary) as { body?: { summary?: string; description?: string } }).body;
+    expect(createBody.summary).toBe("[P1] 修白屏");
+    expect(createBody.summary).not.toContain("#");
+    expect(createBody.description).toContain("来源群：oc_a");
+    const attachBody = (bodies.find((b) => (b as { body?: { tasklist_guid?: string } }).body?.tasklist_guid) as { body?: { tasklist_guid?: string; section_guid?: string } }).body;
+    expect(attachBody.tasklist_guid).toBe("tl-9");
+    expect(attachBody.section_guid).toBe("s-p");
+  });
+});
+
+describe("澄清归属（飞书先行）— 改标题不建工单", () => {
+  afterEach(() => clearPendingCandidates());
+
+  it("候选带任务 guid：改写标题为 [repo] 原标题 + 挂目标清单 P 分组，不调 Gitea 建单，候选保留", async () => {
+    const item = addPendingCandidate("oc_a", { title: "修白屏", priority: "P1", feishuTaskGuid: "tg-1" }, ["AIGility/x", "AIGility/y"]);
+    const calls: string[] = [];
+    const ctx = mockCtx((id, req) => {
+      const path = String((req as { path?: string }).path);
+      const method = String((req as { method?: string }).method);
+      if (id.includes("gitea")) {
+        calls.push(`gitea ${method} ${path}`);
+        return { ok: true, value: { status: 200, data: [] } };
+      }
+      if (path === `/open-apis/task/v2/tasks/tg-1` && method === "PATCH") {
+        calls.push(`patch ${JSON.stringify((req as { body?: { task?: { summary?: string } } }).body?.task)}`);
+        return { ok: true, value: { code: 0, data: {} } };
+      }
+      if (path.endsWith("/tasklists") && method === "GET") return { ok: true, value: { code: 0, data: { items: [{ guid: "tl-x", name: "AIGility" }] } } };
+      if (path.endsWith("/sections") && method === "GET") {
+        return { ok: true, value: { code: 0, data: { items: [{ guid: "s-p", name: "P 计划中" }, { guid: "s-d", name: "D 执行中" }, { guid: "s-c", name: "C 待测试" }, { guid: "s-a", name: "A 待修复" }] } } };
+      }
+      if (path.includes("/add_tasklist")) {
+        calls.push("add_tasklist");
+        return { ok: true, value: { code: 0, data: {} } };
+      }
+      return { ok: true, value: { code: 0, data: {} } };
+    });
+    const r = await taskIssueSyncProvider.execute(
+      { mode: "intent", intent: { kind: "pending-assign", ref: String(item.no), repo: "AIGility/y" }, session_id: "oc_a" },
+      ctx,
+    );
+    if (!r.ok) throw new Error("execute failed");
+    expect(r.value.response).toContain("已确认归属 AIGility/y");
+    expect(r.value.response).toContain("安排执行者");
+    expect(calls.some((c) => c.startsWith("gitea POST"))).toBe(false); // 不建工单
+    expect(calls.some((c) => c.includes('"[AIGility/y] 修白屏"'))).toBe(true);
+    expect(calls).toContain("add_tasklist");
+    // 候选保留（回填 assignedRepo），供「安排执行者 N」按编号定位
+    expect(peekPendingCandidate("oc_a", item.no)).toBeDefined();
+  });
+
+  it("重复确认同一仓库 → 幂等提示", async () => {
+    const item = addPendingCandidate("oc_a", { title: "t", priority: "P1", feishuTaskGuid: "tg-2" }, ["AIGility/x"]);
+    item.assignedRepo = "AIGility/x";
+    const ctx = mockCtx(() => {
+      throw new Error("不应发起任何 API 调用");
+    });
+    const r = await taskIssueSyncProvider.execute(
+      { mode: "intent", intent: { kind: "pending-assign", ref: String(item.no), repo: "AIGility/x" }, session_id: "oc_a" },
+      ctx,
+    );
+    if (!r.ok) throw new Error("execute failed");
+    expect(r.value.response).toContain("无需重复确认");
+  });
+});
+
+describe("安排执行者（飞书先行）— 按澄清编号定位", () => {
+  afterEach(() => clearPendingCandidates());
+
+  it("编号命中候选 → 按任务 guid 写描述「执行者：X」，不评论工单", async () => {
+    const item = addPendingCandidate("oc_a", { title: "修白屏", priority: "P1", feishuTaskGuid: "tg-3" }, ["AIGility/x"]);
+    const calls: string[] = [];
+    const ctx = mockCtx((id, req) => {
+      const path = String((req as { path?: string }).path);
+      const method = String((req as { method?: string }).method);
+      if (id.includes("gitea")) {
+        calls.push(`gitea ${method} ${path}`);
+        return { ok: true, value: { status: 200, data: [] } };
+      }
+      if (path === "/open-apis/task/v2/tasks" && method === "GET") {
+        return { ok: true, value: { code: 0, data: { items: [{ guid: "tg-3", summary: "[P1] 修白屏", description: "" }] } } };
+      }
+      if (path === "/open-apis/task/v2/tasks/tg-3" && method === "PATCH") {
+        calls.push(`patch ${JSON.stringify((req as { body?: { task?: { description?: string } } }).body?.task?.description)}`);
+        return { ok: true, value: { code: 0, data: {} } };
+      }
+      return { ok: true, value: { code: 0, data: {} } };
+    });
+    const r = await taskIssueSyncProvider.execute(
+      { mode: "intent", intent: { kind: "assign", ref: String(item.no), executor: "@张三" } },
+      ctx,
+    );
+    if (!r.ok) throw new Error("execute failed");
+    expect(r.value.response).toContain(`澄清任务 #${item.no}`);
+    expect(r.value.response).toContain("张三");
+    expect(calls.some((c) => c.includes("执行者：张三"))).toBe(true);
+    expect(calls.some((c) => c.startsWith("gitea POST"))).toBe(false); // 未建单不评论工单
+  });
+});
+
+describe("plan-gate 顺序（飞书先行）— 先执行者闸门，后回填建单", () => {
+  /** 构造 P 分组只有一条任务的 scan mock；记录关键调用 */
+  function planGateCtx(task: { summary: string; description?: string }, log: string[]) {
+    return mockCtx((id, req) => {
+      const path = String((req as { path?: string }).path);
+      const method = String((req as { method?: string }).method);
+      if (id.includes("llm")) return { ok: true, value: { text: '{"ready":true}' } };
+      if (id.includes("gitea")) {
+        if (method === "POST" && path.endsWith("/issues")) {
+          log.push(`create-issue:${JSON.stringify((req as { body?: { title?: string } }).body?.title)}`);
+          return { ok: true, value: { status: 201, data: { number: 7, html_url: "https://g/x/7" } } };
+        }
+        return { ok: true, value: { status: 200, data: [] } };
+      }
+      if (path.endsWith("/sections") && method === "GET") {
+        return { ok: true, value: { code: 0, data: { items: [{ guid: "s-p", name: "P 计划中" }, { guid: "s-d", name: "D 执行中" }, { guid: "s-c", name: "C 待测试" }, { guid: "s-a", name: "A 待修复" }] } } };
+      }
+      if (path === `/open-apis/task/v2/sections/s-p/tasks` && method === "GET") {
+        return { ok: true, value: { code: 0, data: { items: [{ guid: "tg-p", summary: task.summary, description: task.description }] } } };
+      }
+      if (path.startsWith("/open-apis/task/v2/tasks/tg-p") && method === "PATCH") {
+        log.push(`patch:${JSON.stringify((req as { body?: { task?: { summary?: string } } }).body?.task?.summary)}`);
+        return { ok: true, value: { code: 0, data: {} } };
+      }
+      if (path === "/open-apis/task/v2/tasks" && method === "POST") {
+        return { ok: true, value: { code: 0, data: { task: { guid: "tg-new" } } } };
+      }
+      if (path.includes("/add_tasklist")) return { ok: true, value: { code: 0, data: {} } };
+      return { ok: true, value: { code: 0, data: {} } };
+    });
+  }
+
+  it("缺执行者 → 打【待安排执行者】，不建工单（归属齐备也不建）", async () => {
+    const log: string[] = [];
+    const r = await taskIssueSyncProvider.execute(
+      { mode: "scan", tasklistGuid: "tl-pg1" },
+      planGateCtx({ summary: "[AIGility/x] 修白屏" }, log),
+    );
+    if (!r.ok) throw new Error("execute failed");
+    expect(r.value.response).toContain("尚未安排执行者");
+    expect(log.some((l) => l.startsWith("create-issue"))).toBe(false);
+    expect(log.some((l) => l.includes("【待安排执行者】"))).toBe(true);
+  });
+
+  it("有执行者但缺 [repo] 前缀 → 打【待确认归属】，不建工单", async () => {
+    const log: string[] = [];
+    const r = await taskIssueSyncProvider.execute(
+      { mode: "scan", tasklistGuid: "tl-pg2" },
+      planGateCtx({ summary: "修白屏", description: "执行者：张三" }, log),
+    );
+    if (!r.ok) throw new Error("execute failed");
+    expect(r.value.response).toContain("尚未确认归属");
+    expect(log.some((l) => l.startsWith("create-issue"))).toBe(false);
+  });
+
+  it("执行者+归属齐备（[org/repo] 前缀）→ 从标题解析仓库回填建工单", async () => {
+    const log: string[] = [];
+    const r = await taskIssueSyncProvider.execute(
+      { mode: "scan", tasklistGuid: "tl-pg3" },
+      planGateCtx({ summary: "[AIGility/y] 修白屏", description: "执行者：李四" }, log),
+    );
+    if (!r.ok) throw new Error("execute failed");
+    expect(r.value.response).toContain("已回填工单 AIGility/y#7");
+    expect(log).toContain('create-issue:"修白屏"');
+  });
+});
