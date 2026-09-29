@@ -565,7 +565,7 @@ export const moduleRegistry: ModuleDef[] = [
   { id: 'tools', name: '工具插件', page: 'tools', category: '平台能力', desc: 'TiMEM 中间件能力 + 客户系统 MCP 封装 + 通用插件，统一工具总线', available: true },
   { id: 'models', name: '模型管理', page: 'models', category: '平台能力', desc: '多模型接入与路由：语言/代码/视觉/向量/重排序，私有推理可计量', available: true },
   { id: 'ops', name: '运营驾驶舱', page: 'ops', category: '平台能力', desc: '调用量、Token、成功率、知识库命中率与今日任务一屏总览', available: true },
-  { id: 'task-loop', name: '项目小助理', page: 'task-loop', category: '平台能力', desc: '飞书任务机器人管理：启停/配置/日志', available: true },
+  { id: 'task-loop', name: '项目小助理', page: 'task-loop', category: '平台能力', desc: '飞书任务闭环看板：任务派发跟踪 / 配置运维 / 运行日志', available: true },
   // 订阅模块
   { id: 'monitor', name: '监控预警', page: '', category: '订阅模块', desc: '实时点位监控、异常预警、止损联动', available: false, badge: '可订阅' },
   { id: 'report', name: '报表大屏', page: '', category: '订阅模块', desc: '领导驾驶舱、经营分析可视化大屏', available: false, badge: '可订阅' },
@@ -669,8 +669,8 @@ export const centerApps: CenterApp[] = [
   { id: 'app-task', name: '任务督办应用', cat: '办公效率', desc: '任务看板、新建任务、状态切换与到期提醒的一体化督办工具', users: 416, updated: '08-21', status: '灰度中', on: false },
   { id: 'app-service', name: '客服工作台', cat: '客户服务', desc: '会话分流、智能应答、人工接管与服务质检的完整客服闭环', users: 1053, updated: '08-20', status: '已上线', on: true },
   { id: 'app-report', name: '报告中心', cat: '内容生成', desc: '报告模板库、生成记录、批量下载与定时生成配置', users: 576, updated: '08-19', status: '已上线', on: true },
-  // 项目小助理：默认不在导航栏显示，在应用中心开启后才出现在左侧导航（App.tsx 以 enabledModules 联动）
-  { id: 'app-task-loop', name: '项目小助理', cat: '办公效率', desc: '飞书任务机器人管理：启停控制、功能开关、LLM 配置与运行日志', users: 0, updated: '09-29', status: '已上线', on: false, detail: true },
+  // 项目小助理：卡片开关 = 机器人进程启停（真，读运行状态）；导航可见性由「模块装配」页/配置页控制
+  { id: 'app-task-loop', name: '项目小助理', cat: '办公效率', desc: '飞书任务闭环：任务看板跟踪派发，配置凭证、功能开关与运行日志。卡片开关即机器人启停', users: 0, updated: '09-29', status: '已上线', on: false, detail: true },
 ]
 
 export const meetingDetail = {

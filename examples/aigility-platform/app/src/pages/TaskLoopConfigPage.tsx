@@ -1,8 +1,9 @@
 /**
- * FeishuTaskLoopPage — 项目小助理（feishu-task-loop）管理
+ * TaskLoopConfigPage — 项目小助理（feishu-task-loop）· 配置与运维（配置界面）
  *
- * 飞书「项目小助理」机器人的运维页：
+ * 与使用界面（任务看板 TaskLoopBoardPage）分离，本页只管运维：
  *   - 状态卡：running/stopped/stale 徽标 + pid + 锁路径，启动/停止/重启（带确认）
+ *   - 飞书接入卡：App ID / Secret / 播报群（页面配置优先于仓库 .env）
  *   - 配置卡：LLM 兜底模型、流水线轮询间隔、自动派发/通知开关（保存后需重启生效）
  *   - 功能开关：featureFlags 动态 key-value 开关（可新增/删除行）
  *   - 日志卡：stdout/stderr Tab 切换，10s 轮询（可暂停）
@@ -15,7 +16,7 @@ import {
   type TaskLoopLogTail, type FeishuChatItem,
 } from '../lib/harness'
 import {
-  Play, Square, RotateCw, Save, Plus, Trash2, Pause, Bot, RefreshCw, KeyRound, MessageSquareShare,
+  Play, Square, RotateCw, Save, Plus, Trash2, Pause, RefreshCw, KeyRound, MessageSquareShare, ArrowLeft, Settings2,
 } from 'lucide-react'
 
 const COMMON_MODELS = ['sensenova-deepseek-v4-flash', 'qwen-plus', 'qwen-turbo', 'sensenova-glm-5.2']
@@ -29,7 +30,13 @@ const stateMeta: Record<TaskLoopState, { label: string; cls: string; dot: string
 interface FlagRow { key: string; value: boolean }
 interface EnvRow { key: string; value: string }
 
-export default function FeishuTaskLoopPage() {
+export default function TaskLoopConfigPage({ go, navVisible = true, onToggleNav }: {
+  go?: (p: string) => void
+  /** 是否显示在左侧导航（与 App.tsx enabledModules /「模块装配」页同一状态） */
+  navVisible?: boolean
+  /** 切换左侧导航显示 */
+  onToggleNav?: () => void
+}) {
   const [status, setStatus] = useState<TaskLoopStatus | null>(null)
   const [banner, setBanner] = useState('')
   const [error, setError] = useState('')
@@ -147,9 +154,15 @@ export default function FeishuTaskLoopPage() {
   return (
     <div className="space-y-5">
       {/* 页头 */}
-      <div>
-        <h1 className="text-xl font-semibold text-slate-800 flex items-center gap-2"><Bot size={22} className="text-indigo-500" />项目小助理 · 飞书任务机器人</h1>
-        <p className="text-sm text-slate-500 mt-1">管理 feishu-task-loop 进程：启停控制、功能开关与配置、运行日志</p>
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-xl font-semibold text-slate-800 flex items-center gap-2"><Settings2 size={22} className="text-indigo-500" />项目小助理 · 配置与运维</h1>
+          <p className="text-sm text-slate-500 mt-1">机器人启停、飞书接入凭证、功能开关与运行日志 —— 任务进展请看「任务看板」</p>
+        </div>
+        <button onClick={() => go?.('task-loop')}
+          className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:border-indigo-300 hover:text-indigo-600 flex items-center gap-1.5">
+          <ArrowLeft size={13} />返回任务看板
+        </button>
       </div>
 
       {banner && <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm rounded-lg px-4 py-2.5">{banner}</div>}
@@ -183,6 +196,18 @@ export default function FeishuTaskLoopPage() {
           </div>
         </div>
         <div className="mt-3 text-xs text-slate-400 font-mono">锁文件：{status?.lock.path ?? '/tmp/aigility-feishu-task-loop.lock'}{status?.lock.stale ? ' · stale（pid 已死，启动时自愈接管）' : ''}</div>
+
+        {/* 左侧导航显示开关（与「模块装配」页同一状态；应用中心的启用开关与此无关） */}
+        <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <div className="text-sm text-slate-700">在左侧导航栏显示「项目小助理」</div>
+            <p className="text-[11px] text-slate-400 mt-0.5">只控制导航可见性，不影响机器人运行；与「模块装配」页是同一个开关</p>
+          </div>
+          <button onClick={() => onToggleNav?.()}
+            className={`w-11 h-[24px] rounded-full transition relative shrink-0 ${navVisible ? 'bg-blue-600' : 'bg-slate-200'}`}>
+            <span className={`absolute top-[4px] w-4 h-4 rounded-full bg-white shadow transition-all ${navVisible ? 'left-[23px]' : 'left-[4px]'}`} />
+          </button>
+        </div>
 
         {confirmOp && (
           <div className="mt-4 bg-amber-50 border border-amber-200 rounded-lg p-4">

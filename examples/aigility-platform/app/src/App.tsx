@@ -17,7 +17,8 @@ import StudioPage from './pages/StudioPage'
 import ModelsPage from './pages/ModelsPage'
 import ToolsPage from './pages/ToolsPage'
 import RoleCapsPage from './pages/RoleCapsPage'
-import FeishuTaskLoopPage from './pages/FeishuTaskLoopPage'
+import TaskLoopBoardPage from './pages/TaskLoopBoardPage'
+import TaskLoopConfigPage from './pages/TaskLoopConfigPage'
 import FloatingImprover from './components/FloatingImprover'
 import LoginGate from './components/LoginGate'
 import { apiMe, apiLogout, getToken, clearToken, type PlatformUser } from './lib/api'
@@ -35,7 +36,7 @@ import {
 const moduleIcon: Record<string, any> = {
   workspace: Briefcase, agent: Bot, market: Store, apps: LayoutGrid, studio: Factory, tasks: ListChecks,
   ingest: Database, graph: Network, space: BrainCircuit, process: GitBranch,
-  tools: Wrench, models: Cpu, ops: Gauge,
+  tools: Wrench, models: Cpu, ops: Gauge, 'task-loop': Bot,
 }
 
 const groupMeta: { cat: string; label: string }[] = [
@@ -68,15 +69,15 @@ export default function App() {
   const [showMock, setShowMock] = useState<boolean>(() => loadLs('showMock', true))
   useEffect(() => { try { localStorage.setItem('showMock', JSON.stringify(showMock)) } catch { /* ignore */ } }, [showMock])
   const [skillList, setSkillList] = useState<Skill[]>(initialSkills)
-  // 模块装配默认集：全部可用模块默认开启，唯独「项目小助理」默认不在导航栏显示——
-  // 由「应用中心」的开关控制（同一 enabledModules 状态，localStorage 持久化）
+  // 模块装配默认集：全部可用模块默认开启。左侧导航是否显示某模块统一由
+  // 「模块装配」页控制（enabledModules, localStorage 持久化）——与应用中心的应用开关无关
   const [enabledModules, setEnabledModules] = useState<Set<string>>(
     () => {
       // 持久化格式是 JSON 数组（[...set]），恢复时必须重建 Set——
       // 直接把解析结果当 Set 用会因 .has 不存在而在渲染期崩溃（白屏）
       const stored = loadLs<unknown>('zy_modules_v1', null)
       if (Array.isArray(stored)) return new Set(stored.filter((x): x is string => typeof x === 'string'))
-      return new Set(moduleRegistry.filter(m => m.available && m.id !== 'task-loop').map(m => m.id))
+      return new Set(moduleRegistry.filter(m => m.available).map(m => m.id))
     }
   )
   useEffect(() => { try { localStorage.setItem('zy_modules_v1', JSON.stringify([...enabledModules])) } catch { /* ignore */ } }, [enabledModules])
@@ -186,11 +187,12 @@ export default function App() {
       case 'space': return <SpacePage />
       case 'process': return <ProcessPage onGenerateSkill={addSkill} go={setPage} generatedSkills={skillList.map(s => s.name)} />
       case 'market': return <MarketPage go={setPage} />
-      case 'apps': return <AppCenterPage taskLoopEnabled={enabledModules.has('task-loop')} onToggleTaskLoop={() => toggleModule('task-loop')} openPage={go} />
+      case 'apps': return <AppCenterPage openPage={go} />
       case 'studio': return <StudioPage />
       case 'tools': return <ToolsPage showMock={showMock} />
       case 'rolecaps': return <RoleCapsPage />
-      case 'task-loop': return <FeishuTaskLoopPage />
+      case 'task-loop': return <TaskLoopBoardPage go={go} />
+      case 'task-loop-config': return <TaskLoopConfigPage go={go} navVisible={enabledModules.has('task-loop')} onToggleNav={() => toggleModule('task-loop')} />
       case 'models': return <ModelsPage />
       case 'ops': return <OpsPage />
       case 'modules': return <ModulePage enabled={enabledModules} toggle={toggleModule} />

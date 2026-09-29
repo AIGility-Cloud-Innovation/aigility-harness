@@ -745,3 +745,29 @@ export async function fetchTaskLoopLogs(tail = 200): Promise<{ stdout: TaskLoopL
   )
   return { stdout: j.stdout, stderr: j.stderr }
 }
+
+// ── 项目小助理 · 任务看板（使用界面）────────────────────────────
+
+export interface TaskLoopBoardIssue {
+  repo: string
+  number: number
+  title: string
+  state: 'open' | 'closed'
+  assignees: string[]
+  labels: string[]
+  htmlUrl: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** 任务看板数据：聚合仓库池内的 Gitea 工单（归属确认后由流水线落单） */
+export async function fetchTaskLoopBoard(): Promise<{
+  ok: boolean
+  repos: string[]
+  issues: TaskLoopBoardIssue[]
+  errors?: string[]
+}> {
+  return authJsonFetch<{ ok: boolean; repos: string[]; issues: TaskLoopBoardIssue[]; errors?: string[] }>(
+    '/api/aigility/task-loop/board',
+  )
+}
