@@ -138,3 +138,21 @@ cd examples/feishu-task-loop && ./node_modules/.bin/tsx src/index.ts
 交互验证：飞书群里 `@项目小助理 建任务：xxx` / `查列表`；
 静默记录：在群里发一条不带 @ 的任务描述，等下一 tick（或缩短
 `TASK_PIPELINE_INTERVAL_MS` 验证）。
+
+## 五、平台托管入口（aigility-platform，2026-09-29 起）
+
+日常运维不必再手工敲命令，aigility-platform（:1236）提供可视化托管：
+
+- **任务看板**（左侧导航「项目小助理」）：Gitea 工单三列看板
+  （待派发 / 执行中 / 已完成），数据源 `GET /api/aigility/task-loop/board`
+  （仓库池 = `TASK_REPOS` ∪ `TASK_CHAT_REPO_MAP` org 展开，复用
+  `@action/gitea-api` 的 DNS 绕行 + token 认证）——飞书任务落单后的
+  跟踪不再需要登 Gitea 网页逐仓库翻。
+- **配置与运维**（看板页右上角入口）：启停/重启（单实例锁探活 +
+  僵锁自愈，等价于手工清锁重启）、飞书凭证/播报群可视化配置
+  （写 `data/task-loop.json`，start 时注入子进程 env，改后需重启生效）、
+  featureFlags 与 stdout/stderr 日志 tail。
+- **应用中心卡片开关** = 机器人进程真实启停，与配置页按钮双向同步。
+- 注意：左侧导航是否显示本模块由「模块装配」/配置页的「在左侧导航栏
+  显示」开关控制，与应用中心开关无关；手工启动（上面的 tsx 直启方式）
+  与平台托管启动共存时以单实例锁为准（先到先得，后启动方直接退出）。

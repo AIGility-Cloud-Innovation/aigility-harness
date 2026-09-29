@@ -25,7 +25,7 @@ pnpm example:aigility
 | 登录/注册/会话 | `POST :1236/app/auth/login\|register\|logout` | AppBase users 表 scrypt + HMAC token + 登录限流 |
 | 数字员工对话 | `POST :1237/api/aigility-chat` | → `@persona/aigility-agent`（工厂技能 + 平台管家） |
 | 引擎原生角色 | `POST :1237/api/aigility/p/<key>/chat` | → `@persona/<key>`（市场页「已接入」区逐个开路由） |
-| 封装 API | `:1236/api/aigility/*` | registry/skills/capabilities/llm/metrics/timem，全部校验 AppBase 会话 |
+| 封装 API | `:1236/api/aigility/*` | registry/skills/capabilities/llm/metrics/timem/task-loop，全部校验 AppBase 会话 |
 
 > 依赖 AppBase PG（缺省 `127.0.0.1:5433/appbase`，`APPBASE_PG_*` 可覆盖；本机原生 PG 用 5432，
 > 参考 `examples/appbase/start-appbase.sh`）。首次启动自动建表 + 播种演示账号：
@@ -73,6 +73,15 @@ MCP 工具总线（真, DSH 家族通道）：
 
 市场/工作台里的「官方模板库」「12 类智能体」「数据接入→图谱」「租户/权限/计费」等仍为 Mock 演示数据（`app/src/mock/data.ts`），用于产品形态展示，接真节奏见下。
 
+## 项目小助理任务闭环（真 · 托管 feishu-task-loop）
+
+「项目小助理」是飞书侧的任务管理机器人（`examples/feishu-task-loop`，独立子进程，单实例锁守护），平台负责托管与可视化：
+
+- **使用界面 = 任务看板**（左侧导航「项目小助理」→ `TaskLoopBoardPage`）：把 Gitea 工单聚合成三列看板——待派发（open·无执行人）/ 执行中（open·有执行人）/ 已完成（closed），按仓库筛选、30s 自动刷新可暂停，点卡片直达工单。数据源 `GET /api/aigility/task-loop/board`：仓库池 = `TASK_REPOS` ∪ `TASK_CHAT_REPO_MAP`（`org:` 前缀经 `/orgs/{org}/repos` 展开，缓存 5min），复用 `@action/gitea-api` 固化的公共 DNS 绕行 + token 认证，排除 PR，单仓库失败不阻塞其余。
+- **配置与运维**（看板页右上角入口 → `TaskLoopConfigPage`）：机器人启动/停止/重启（锁探活 + 僵锁自愈，管理页启动的实例标记「本平台托管」）、飞书接入凭证（页面配置优先于仓库 .env，Secret 只回掩码）、播报群可视化选取、LLM 兜底模型 / 轮询间隔 / featureFlags / 自定义 env（保存后需重启生效）、stdout/stderr 日志 tail。
+- **控制权约定**：左侧导航是否显示「项目小助理」由**模块装配页或配置页**的开关控制（同一 `enabledModules` 状态），与应用中心无关；**机器人进程启停**在配置页按钮与**应用中心卡片开关**（真实启停，状态实时查服务端，双向同步）；应用中心其余应用开关仍为货架演示态。
+- **闭环链路**：飞书群消息静默汇总 → 识别任务建飞书任务（规划中）→ 「任务归属 / 安排执行者」确认 → 落单 Gitea 工单（进看板）→ 完成后状态回写飞书。机器人本体架构与运行细节见 `docs/feishu-task-loop-architecture-review.md`。
+
 ## 页面 ↔ 五域引擎对照（逐模块终版）
 
 原则：五域引擎已有的资源一律真对接；引擎未实现的保持产品壳演示并明确标注「暂不对接」。
@@ -91,10 +100,13 @@ MCP 工具总线（真, DSH 家族通道）：
 | 工作台积分余额卡 | **真**：credit 账户余额（预检/实扣随对话自动生效） | D1 `@infrastructure/credit`（PgCreditStore） |
 | 权限管理·平台成员/审计日志 | **真**：成员清单 + 登录/操作留痕 | AppBase users×app_members + audit_log |
 | 应用中心·报告中心 | **真**：结构化块 → docx 下载 | D3 `@action/doc-worker` |
+| 项目小助理·任务看板（TaskLoopBoardPage） | **真**：Gitea 工单三列看板（待派发/执行中/已完成）+ 仓库筛选 + 运行徽标 | `GET /api/aigility/task-loop/board` → git.aigility.cloud v1 API（DNS 绕行 + token，仓库池 TASK_REPOS ∪ TASK_CHAT_REPO_MAP） |
+| 项目小助理·配置与运维（TaskLoopConfigPage） | **真**：机器人启停/重启（spawn + 锁探活 + 僵锁自愈）、配置落盘、日志 tail、飞书群枚举、导航显示开关 | task-loop-manager 子进程管理（`pnpm --filter feishu-task-loop start`）+ `data/task-loop.json` |
+| 应用中心·项目小助理卡 | **真**：卡片开关 = 机器人进程启停（实时查状态），打开/配置直达看板与运维页 | 同上（与配置页双向同步） |
 | 工作台 今日任务/消息/待办审批 | 演示 · **暂不对接** | 引擎无任务/通知/审批服务（待立项） |
-| 应用中心 其余 7 个场景应用 | 演示 · **暂不对接** | 引擎无对应场景服务（会议转写需 TTS/STT 模型资产） |
+| 应用中心 其余 7 个场景应用 | 演示 · **暂不对接**（开关为货架演示态，不持久化） | 引擎无对应场景服务（会议转写需 TTS/STT 模型资产） |
 | 数据接入 / 知识图谱 / 流程与组织 | 演示 · **暂不对接**（页面已标注） | 引擎无字段理解/本体映射/图谱存储服务（TiMEM 知识库服务待接入） |
-| 模块装配 / 权限矩阵 / 租户授权 | 演示 · **暂不对接** | 产品级开关；引擎无 RBAC/License 服务（autoHotSwap 热插拔可作后续底座） |
+| 模块装配 / 权限矩阵 / 租户授权 | 演示 · **暂不对接**（模块装配的导航可见性开关为真：enabledModules 持久化于 localStorage，实时控制左侧导航） | 产品级开关；引擎无 RBAC/License 服务（autoHotSwap 热插拔可作后续底座） |
 
 ## 目录结构
 
@@ -113,6 +125,7 @@ aigility-platform/
 │   ├── aigility-agent.ts  # @persona/aigility-agent：工厂技能的对话入口（skill_id → system prompt）
 │   ├── dsh-tool.ts        # @action/dsh-tool：DSH ctx.tools → Seam 桥（MCP 工具的 list/call）
 │   ├── skill-registry.ts  # 已发布技能持久化 + 对话用量计数
+│   ├── task-loop-manager.ts # 项目小助理子进程管理（启停/锁/配置/日志）+ Gitea 看板数据聚合
 │   └── defaults.ts        # LLM 上游按环境自动选择（先于 layer-* 求值）
 └── data/              # 运行时数据（gitignore, 除 .gitkeep）
 ```
