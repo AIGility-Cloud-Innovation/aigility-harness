@@ -163,3 +163,93 @@ workflow:
     expect(r.errors[0]).toContain("环路");
   });
 });
+
+describe("节点 enabled 开关", () => {
+  const GATED_YAML = `
+workflow:
+  name: gated
+  entry_point: a
+  nodes:
+    a: { type: function_node, function_ref: fnA }
+    gate: { type: function_node, function_ref: fnGate, enabled: false }
+    c: { type: function_node, function_ref: fnC }
+  flow:
+    edges:
+      - { from: a, to: gate }
+      - { from: gate, to: c }
+      - { from: c, to: __end__ }
+`;
+
+  it("enabled: false 旁路不执行, 沿边直通, 记入 skipped", async () => {
+    const wf = new YamlWorkflow<St>(parseWorkflowYaml(GATED_YAML));
+    wf.registerNode("fnA", () => ({ executor: "a" }));
+    wf.registerNode("fnGate", () => ({ executor: "不应执行" }));
+    wf.registerNode("fnC", (s) => ({ done: `c:${s.executor}` }));
+    const r = await wf.run({ task: "t" });
+    expect(r.ok).toBe(true);
+    expect(r.path).toEqual(["a", "c"]);
+    expect(r.skipped).toEqual(["gate"]);
+    expect(r.state.executor).toBe("a");
+    expect(r.state.done).toBe("c:a");
+  });
+
+  it("禁用节点无需注册实现, validate 不再报未注册", () => {
+    const wf = new YamlWorkflow<St>(parseWorkflowYaml(GATED_YAML));
+    wf.registerNode("fnA", () => {});
+    wf.registerNode("fnC", () => {});
+    const v = wf.validate();
+    expect(v.errors).toEqual([]);
+    expect(v.warnings.some((w) => w.includes("gate"))).toBe(false);
+  });
+
+  it("entry_point 禁用同样旁路", async () => {
+    // a/gate 都不注册实现、依次禁用 → 直通 c; c 有实现, 正常收束
+    const doc = parseWorkflowYaml(GATED_YAML);
+    doc.nodes["a"].enabled = false;
+    const wf2 = new YamlWorkflow<St>(doc);
+    wf2.registerNode("fnC", () => ({ done: "c" }));
+    const r = await wf2.run({ task: "t" });
+    expect(r.ok).toBe(true);
+    expect(r.skipped).toEqual(["a", "gate"]);
+    expect(r.path).toEqual(["c"]);
+  });
+
+  it("禁用节点无普通出边 → 视为终点 + validate warning", async () => {
+    const wf = new YamlWorkflow<St>(parseWorkflowYaml(`
+workflow:
+  name: disabled-end
+  entry_point: a
+  nodes:
+    a: { type: function_node, function_ref: fnA }
+    off: { type: function_node, function_ref: fnOff, enabled: false }
+  flow:
+    edges:
+      - { from: a, to: off }
+      - { from: off, to: __end__ }
+`));
+    wf.registerNode("fnA", () => ({ executor: "a" }));
+    const v = wf.validate();
+    expect(v.warnings.some((w) => w.includes("off"))).toBe(false); // 有 __end__ 出边, 不警告
+    const r = await wf.run({ task: "t" });
+    expect(r.ok).toBe(true);
+    expect(r.path).toEqual(["a"]);
+    expect(r.skipped).toEqual(["off"]);
+
+    const wf2 = new YamlWorkflow<St>(parseWorkflowYaml(`
+workflow:
+  name: disabled-sink
+  entry_point: a
+  nodes:
+    a: { type: function_node, function_ref: fnA }
+    off: { type: function_node, function_ref: fnOff, enabled: false }
+  flow:
+    edges:
+      - { from: a, to: off }
+`));
+    wf2.registerNode("fnA", () => ({ executor: "a" }));
+    expect(wf2.validate().warnings.some((w) => w.includes("视为终点"))).toBe(true);
+    const r2 = await wf2.run({ task: "t" });
+    expect(r2.ok).toBe(true);
+    expect(r2.skipped).toEqual(["off"]);
+  });
+});

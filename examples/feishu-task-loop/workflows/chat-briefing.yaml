@@ -1,0 +1,76 @@
+# 项目小助理 · 群聊整理工作流（数据面编排）
+# ─────────────────────────────────────────────────────────────────
+# 本文件即功能开关面板: 每次触发前重新读取, 改完存盘即生效, 无需重启。
+#
+# 节点链: 监听缓冲一批消息 → 按来源群分桶 LLM 判定 → 与工单/任务查重
+#         → (建飞书任务) → (建 Gitea 工单) → 组装播报 → 发机器人群
+#
+# 控制方式: 把节点改成 enabled: false 即旁路该功能(图结构不动)。
+#   - create_task / create_issue 都禁用 = 「只整理发摘要、不建任务不建工单」
+#     (2026-09-30 决策: 现阶段 digest-only, 两个建单节点已禁用)
+#   - 要恢复飞书先行: create_task 改 enabled: true (建任务后群里确认
+#     归属+执行者, 由状态队列回填建 Gitea 工单)
+#   - 要恢复旧「汇总即建工单」: 启用 create_issue、禁用 create_task
+#
+# 节点函数体由 feishu-task-loop 装配层注册, 不进 YAML —— 与
+# executor-dispatch.yaml 的「数据面/执行面」分界一致。
+
+workflow:
+  name: chat-briefing
+  description: 监听群消息批处理 — 判定 → 查重 → (建单*) → 摘要播报到机器人群
+  entry_point: collect
+
+  nodes:
+    collect:
+      type: function_node
+      function_ref: collect_batch
+      description: 取监听缓冲一批消息（触发时机由执行面静默窗口/兜底定时负责）
+      output_keys: ["batch"]
+
+    summarize:
+      type: function_node
+      function_ref: summarize_per_chat
+      description: 按来源群分桶调 LLM 判定疑似任务（跨群绝不混判）
+      output_keys: ["judged"]
+
+    dedupe:
+      type: function_node
+      function_ref: dedupe_candidates
+      description: 与 Gitea open 工单 + 飞书任务查重（bigram Jaccard，只读）
+      output_keys: ["scoped"]
+
+    create_task:
+      type: function_node
+      function_ref: create_planned_tasks
+      enabled: false   # ← 现阶段禁用：不建飞书任务
+      description: "飞书先行：建「P 计划中」任务，归属拿不准进澄清队列"
+      output_keys: ["created"]
+
+    create_issue:
+      type: function_node
+      function_ref: create_gitea_issues
+      enabled: false   # ← 现阶段禁用：不建 Gitea 工单
+      description: "旧链路：直接建 Gitea 工单（处理前面节点剩下的候选）"
+      output_keys: ["created"]
+
+    digest:
+      type: function_node
+      function_ref: build_digest
+      description: 组装播报文案（有建单结果按建单措辞；建单全禁用 = 纯摘要）
+      output_keys: ["messages"]
+
+    notify:
+      type: function_node
+      function_ref: broadcast_digest
+      description: 播报到 TASK_NOTIFY_CHAT_ID（机器人群）；未配置则回来源群
+      output_keys: []
+
+  flow:
+    edges:
+      - { from: collect, to: summarize }
+      - { from: summarize, to: dedupe }
+      - { from: dedupe, to: create_task }
+      - { from: create_task, to: create_issue }
+      - { from: create_issue, to: digest }
+      - { from: digest, to: notify }
+      - { from: notify, to: __end__ }

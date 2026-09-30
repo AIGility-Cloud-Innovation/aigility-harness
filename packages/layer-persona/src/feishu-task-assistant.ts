@@ -17,6 +17,8 @@
  *         | 查工单 [@仓库] <#n|关键字> | 关闭工单/重开工单 [@仓库] <#n|关键字>
  *         | 评论工单 [@仓库] <#n> <内容>
  *   协调：项目概览 —— 飞书待办 + 进行中工单一屏汇总
+ *   汇总（@orchestration/project-briefing）：我的任务=人视角全景（工单/PR/任务/记忆）
+ *         | 项目进展 [名称] —— 项目四源进展 | 反馈：<内容> —— 沉淀进 timem
  *   其他：LLM 自然语言兜底回复（TASK_ASSISTANT_LLM_FALLBACK=0 关闭；失败回退帮助文本；输出过防编造过滤）
  */
 
@@ -42,10 +44,10 @@ import type {
  * 不跨包 import（层间解耦惯例，运行时仅 JSON 透传）——两侧字段须同步改。
  */
 export type TaskIntent =
-  | { kind: "create"; title: string; dueDate?: string; repo?: string; description?: string }
+  | { kind: "create"; title: string; dueDate?: string; repo?: string; description?: string; executor?: string }
   | { kind: "list" }
   | { kind: "complete"; keyword: string }
-  | { kind: "issue-create"; repo: string; title: string; body?: string }
+  | { kind: "issue-create"; repo: string; title: string; body?: string; executor?: string }
   | { kind: "issue-list"; repo?: string }
   | { kind: "issue-show"; repo?: string; ref: string }
   | { kind: "issue-close"; repo?: string; ref: string }
@@ -61,25 +63,39 @@ export type TaskIntent =
   | { kind: "dispatch-cancel"; ref: string }
   /** 安排执行者：「安排执行者 #N @张三」（P→D 前置条件） */
   | { kind: "assign"; ref: string; executor: string }
-  /** 澄清归属确认：「任务归属 N @仓库」（把群内澄清队列的候选建成工单） */
+  /** 澄清归属确认：「任务归属 N 仓库/项目简称」（摘要核验/澄清队列落单；简称经项目登记表解析） */
   | { kind: "pending-assign"; ref: string; repo: string }
   /** 澄清归属放弃：「跳过任务 N」（丢弃澄清队列候选，不建单） */
   | { kind: "pending-skip"; ref: string }
-  /** 多行澄清归属：一条消息里逐行「任务归属 N @仓库 / 跳过任务 N」
+  /** 摘要核验确认：「确认 N」——认可 LLM 判断（项目/执行人齐备即记录） */
+  | { kind: "confirm-pending"; ref: string }
+  /** 多行澄清归属：一条消息里逐行「任务归属 N 仓库 / 安排执行者 N 姓名 / 确认 N / 跳过任务 N」
    *  （用户习惯把多条确认合并在一条消息发送，单行正则整串锚定匹配不到） */
   | {
       kind: "pending-batch";
       items: Array<
         | { action: "assign"; ref: string; repo: string }
         | { action: "skip"; ref: string }
+        | { action: "confirm"; ref: string }
+        | { action: "assign-executor"; ref: string; executor: string }
       >;
     }
   | { kind: "overview" }
-  | { kind: "help" };
+  | { kind: "help" }
+  /** 项目进展：多源汇总某项目（飞书/任务清单/Gitea/运维日志/timem）——走 @orchestration/project-briefing */
+  | { kind: "project-status"; project?: string }
+  /** 反馈写入：用户给小助理的反馈沉淀进 timem——走 @orchestration/project-briefing */
+  | { kind: "feedback"; text: string };
 
 /** 消费编排层项目小助理业务域（双建同步单一真相） */
 export const taskIssueSyncRef: CapabilityRef = {
   id: "@orchestration/task-issue-sync",
+  versionRange: "^1.0.0",
+};
+
+/** 消费编排层多源汇总（我的任务/项目进展/反馈写入） */
+export const projectBriefingRef: CapabilityRef = {
+  id: "@orchestration/project-briefing",
   versionRange: "^1.0.0",
 };
 
@@ -100,6 +116,10 @@ export interface FeishuTaskAssistantRequest {
   session_id?: string;
   /** 聊天类型: p2p | group */
   chat_type?: string;
+  /** 群聊中是否 @了机器人；免@群消息走「仅指令」模式（未命中意图保持静默，不兜底不帮助） */
+  mentioned_bot?: boolean;
+  /** 引用回复的消息 id（引用摘要回复时可省略条目编号，由编排层反查） */
+  root_id?: string;
 }
 
 export interface FeishuTaskAssistantResponse {
@@ -115,10 +135,10 @@ export const feishuTaskAssistantService: ServiceDefinition<
   FeishuTaskAssistantResponse
 > = {
   id: "@persona/feishu-task-assistant",
-  version: "1.4.0",
+  version: "1.5.0",
   layer: LayerId.Persona,
   description:
-    "项目小助理：交互形象（正则意图解析 + LLM 兜底回复），业务委托 @orchestration/task-issue-sync（双建同步）",
+    "项目小助理：交互形象（正则意图解析 + LLM 兜底回复），任务/工单业务委托 @orchestration/task-issue-sync（双建同步），我的任务/项目进展/反馈委托 @orchestration/project-briefing（多源汇总）",
 };
 
 // ── 意图解析（导出供单测；类型/语义与编排层 TaskIntent 对齐） ─────
@@ -161,6 +181,17 @@ function issueIntentFrom(
 export function parseTaskIntent(input: string): TaskIntent {
   const text = input.trim();
 
+  // 建单时顺带指派执行人：「建工单 @仓库：标题 安排给 徐彬程」→ 标题剥掉后缀。
+  // 仅当整句以建任务/建工单开头才尝试，避免普通聊天里「…让张三」误触发。
+  const em = text.match(/(?:^|\s)(?:安排给|交给|派给|指派给|让)\s*@?([\p{Script=Han}\w·\-]{1,32})\s*$/u);
+  if (em && /^(?:建任务|创建任务|建工单|创建工单)/.test(text)) {
+    const intent = parseTaskIntent(text.slice(0, em.index).trim());
+    if (intent.kind === "create" || intent.kind === "issue-create") {
+      return { ...intent, executor: em[1] };
+    }
+    return intent;
+  }
+
   // ── 协调：项目概览 ──
   if (/^(?:项目概览|项目状态|整体概览|概览)$/.test(text)) {
     return { kind: "overview" };
@@ -172,24 +203,28 @@ export function parseTaskIntent(input: string): TaskIntent {
   const am = text.match(/^(?:安排执行者|指派执行者|安排|指派)\s*[:：]?\s*#?(\d+)\s+@?([\p{Script=Han}\w·\-]{1,32})\s*$/u);
   if (am) return { kind: "assign", ref: am[1], executor: am[2] };
 
-  // ── 澄清归属（原始文本匹配，@仓库 不能被 extractRepoSpec 提前吃掉） ──
-  // 触发：被动汇总判不动仓库归属时，群里会收到带编号的澄清问询
-  const pa = text.match(/^(?:任务归属|归属任务)\s*[:：]?\s*#?(\d+)(?:\s|[:：,，])+\s*@?([A-Za-z0-9._/-]{1,80})\s*$/u);
+  // ── 澄清归属（原始文本匹配，@仓库/项目简称 不能被 extractRepoSpec 提前吃掉） ──
+  // 触发：摘要核验与被动澄清问询。仓库支持 组织/仓库 全名或项目简称（如 太忆/nx），
+  // 简称的登记表解析在编排层（resolveRepoOrAsk），这里只放宽词表
+  const pa = text.match(/^(?:任务归属|归属任务)\s*[:：]?\s*#?(\d+)(?:\s|[:：,，])+\s*@?([\p{Script=Han}\w·\-/]{1,80})\s*$/u);
   if (pa) return { kind: "pending-assign", ref: pa[1], repo: pa[2] };
   const ps = text.match(/^(?:跳过任务|任务跳过)\s*[:：]?\s*#?(\d+)\s*$/u);
   if (ps) return { kind: "pending-skip", ref: ps[1] };
+  // 摘要核验确认（「确认 1」；「确认派发 #N」是另一意图，带「派发」二字不会命中这里）
+  const pc = text.match(/^(?:确认|确认任务|没问题)\s*[:：]?\s*#?(\d+)\s*$/u);
+  if (pc) return { kind: "confirm-pending", ref: pc[1] };
 
-  // ── 多行澄清归属（同一消息逐行确认/跳过多条候选） ──
-  // 单行正则整串锚定，用户把多条确认合并成一条消息（逐行发送）时整串解析
-  // 失败会落 help——澄清闭环就断在这里（真实事故：两行「任务归属 N @仓库」
-  // 回成整段帮助文本，工单未建）。所有非空行都能解析为归属/跳过时按批处理，
+  // ── 多行核验（同一消息逐行 确认/归属/执行者/跳过多条候选） ──
+  // 单行正则整串锚定，用户把多条回复合并成一条消息（逐行发送）时整串解析
+  // 失败会落 help——核验闭环就断在这里（真实事故：两行「任务归属 N @仓库」
+  // 回成整段帮助文本，工单未建）。所有非空行都能解析为核验动作时按批处理，
   // 混有其他内容则保持原语义落后续分支。
   {
     const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     if (lines.length >= 2) {
       const items: Extract<TaskIntent, { kind: "pending-batch" }>["items"] = [];
       for (const line of lines) {
-        const a = line.match(/^(?:任务归属|归属任务)\s*[:：]?\s*#?(\d+)(?:\s|[:：,，])+\s*@?([A-Za-z0-9._/-]{1,80})\s*$/u);
+        const a = line.match(/^(?:任务归属|归属任务)\s*[:：]?\s*#?(\d+)(?:\s|[:：,，])+\s*@?([\p{Script=Han}\w·\-/]{1,80})\s*$/u);
         if (a) {
           items.push({ action: "assign", ref: a[1], repo: a[2] });
           continue;
@@ -197,6 +232,73 @@ export function parseTaskIntent(input: string): TaskIntent {
         const s = line.match(/^(?:跳过任务|任务跳过)\s*[:：]?\s*#?(\d+)\s*$/u);
         if (s) {
           items.push({ action: "skip", ref: s[1] });
+          continue;
+        }
+        const c = line.match(/^(?:确认|确认任务|没问题)\s*[:：]?\s*#?(\d+)\s*$/u);
+        if (c) {
+          items.push({ action: "confirm", ref: c[1] });
+          continue;
+        }
+        const e = line.match(/^(?:安排执行者|指派执行者|安排|指派)\s*[:：]?\s*#?(\d+)\s+@?([\p{Script=Han}\w·\-]{1,32})\s*$/u);
+        if (e) {
+          items.push({ action: "assign-executor", ref: e[1], executor: e[2] });
+          continue;
+        }
+        items.length = 0;
+        break;
+      }
+      if (items.length >= 2) return { kind: "pending-batch", items };
+    }
+  }
+
+  // ── 无编号指令 / 一行多指令（引用摘要回复时用户常省略编号、把多条连写） ──
+  // 编号缺省时意图带 ref=""，编排层用 root_id（被引用的摘要）反查条目；
+  // 反查不到会反问而不是落帮助文本。
+  {
+    // 无编号单指令（整串锚定）
+    const amN = text.match(/^(?:安排执行者|指派执行者|安排|指派)\s*[:：]?\s*@?([\p{Script=Han}\w·\-]{1,32})$/u);
+    if (amN) return { kind: "assign", ref: "", executor: amN[1] };
+    const paN = text.match(/^(?:任务归属|归属任务)\s*[:：]?\s*@?([\p{Script=Han}\w·\-/]{1,80})$/u);
+    if (paN) return { kind: "pending-assign", ref: "", repo: paN[1] };
+    if (/^(?:确认|没问题)$/.test(text)) return { kind: "confirm-pending", ref: "" };
+    if (/^(?:跳过任务|任务跳过)$/.test(text)) return { kind: "pending-skip", ref: "" };
+
+    // 一行多指令：按核验指令关键词切分，逐段按单指令解析；全部命中才按批处理
+    const chunks = text
+      .split(/(?=任务归属|归属任务|安排执行者|指派执行者|跳过任务|任务跳过|确认(?!派发)|没问题)/)
+      .map((c) => c.trim())
+      .filter(Boolean);
+    if (chunks.length >= 2) {
+      const items: Extract<TaskIntent, { kind: "pending-batch" }>["items"] = [];
+      for (const chunk of chunks) {
+        const a = chunk.match(/^(?:任务归属|归属任务)\s*[:：]?\s*#?(\d+)(?:\s|[:：,，])+\s*@?([\p{Script=Han}\w·\-/]{1,80})$/u)
+          ?? chunk.match(/^(?:任务归属|归属任务)\s*[:：]?\s*@?([\p{Script=Han}\w·\-/]{1,80})$/u);
+        if (a) {
+          items.push(
+            a.length === 3
+              ? { action: "assign", ref: a[1], repo: a[2] }
+              : { action: "assign", ref: "", repo: a[1] },
+          );
+          continue;
+        }
+        const e = chunk.match(/^(?:安排执行者|指派执行者|安排|指派)\s*[:：]?\s*#?(\d+)\s+@?([\p{Script=Han}\w·\-]{1,32})$/u)
+          ?? chunk.match(/^(?:安排执行者|指派执行者|安排|指派)\s*[:：]?\s*@?([\p{Script=Han}\w·\-]{1,32})$/u);
+        if (e) {
+          items.push(
+            e.length === 3
+              ? { action: "assign-executor", ref: e[1], executor: e[2] }
+              : { action: "assign-executor", ref: "", executor: e[1] },
+          );
+          continue;
+        }
+        const c = chunk.match(/^(?:确认|没问题)\s*[:：]?\s*#?(\d+)?$/u);
+        if (c) {
+          items.push({ action: "confirm", ref: c[1] ?? "" });
+          continue;
+        }
+        const sk = chunk.match(/^(?:跳过任务|任务跳过)\s*[:：]?\s*#?(\d+)?$/u);
+        if (sk) {
+          items.push({ action: "skip", ref: sk[1] ?? "" });
           continue;
         }
         items.length = 0;
@@ -285,8 +387,27 @@ export function parseTaskIntent(input: string): TaskIntent {
     }
   }
 
-  if (/^(我的任务|任务列表|列出任务|查任务|看看任务)/.test(text)) {
+  if (/^(我的任务|我的安排|任务安排|工作安排|最近做什么|我在做什么|任务列表|列出任务|查任务|看看任务)/.test(text)) {
     return { kind: "list" };
+  }
+
+  // ── 项目进展（多源汇总，委托 @orchestration/project-briefing） ──
+  m = text.match(/^(?:项目进展|进展汇报?)\s*[:：]?\s*(.*)$/);
+  if (m) {
+    const project = m[1].trim();
+    return project ? { kind: "project-status", project } : { kind: "project-status" };
+  }
+
+  // ── 反馈写入（沉淀进 timem，委托 @orchestration/project-briefing） ──
+  // 先整体匹配再剥引导标点：[\s\S]+ 会经回溯把冒号本身当内容，必须在代码里二次清洗
+  m = text.match(/^(?:反馈|意见反馈|提个反馈)\s*[:：,，]?\s*([\s\S]+)$/);
+  if (m) {
+    const t = m[1].trim().replace(/^[:：,，]\s*/, "");
+    if (t) return { kind: "feedback", text: t };
+  }
+  m = text.match(/^建议[:：]\s*([\s\S]+)$/);
+  if (m && m[1].trim()) {
+    return { kind: "feedback", text: m[1].trim() };
   }
 
   m = text.match(/^(?:完成任务|完成了|做完|完结|完成)\s*[:：]?\s*(.+)$/);
@@ -309,24 +430,30 @@ const HELP_TEXT = `我是「项目小助理」，负责协调你的飞书任务�
 • @仓库：@组织/仓库 或 @仓库短名（如 @video）
 
 🔍 查询/操作
-• 我的任务 —— 查看待办任务
+• 我的任务 —— 你的任务安排全景（待办工单 + 我的 PR + 飞书任务 + 相关记忆）
 • 完成 <关键字> —— 完结匹配的飞书任务
 • 工单列表 [@仓库] / 查工单 [@仓库] <#编号或关键字>
 • 关闭工单 [@仓库] <#编号或关键字> / 重开工单 [@仓库] <#编号>
 • 评论工单 [@仓库] <#编号> <内容>
 
 📊 项目概览 —— 飞书待办 + 进行中工单一屏汇总
+📈 项目进展 [名称] —— 项目横跨飞书/任务清单/Gitea/运维日志的进展
+
+💬 反馈：<想说的> —— 记进你的长期记忆，作为以后安排任务的参考
 
 👤 执行者安排 —— 「安排执行者 #工单号 @姓名」
 安排好执行者的任务才会进入执行队列（P → D）
 
 🧾 归属澄清 —— 自动汇总拿不准仓库归属时，会在群里列编号请本群确认
-• 任务归属 <编号> @仓库 —— 确认归属并建工单
+• 任务归属 <编号> 仓库/项目简称 —— 确认归属（简称如 太忆/nx/电信平台）
+• 安排执行者 <编号> 姓名 —— 记录执行人（别名如 hongbin/宏斌）
+• 确认 <编号> —— 认可摘要的判断（项目+执行人齐备即记录）
 • 跳过任务 <编号> —— 丢弃该条，不建单
+以上指令可多行合并在一条消息里逐条发送
 
 例：「建任务 @video：修复登录页白屏 截止 2026-10-16」（飞书任务 + 工单双建）
-　　「建工单 @video：优化查询速度」（工单 + 飞书任务双建）
-　　「安排执行者 #12 @张三」（指定执行者，任务才会开始流转执行）`;
+　　「我的任务」（跨来源看自己的安排）
+　　「反馈：周三例会改到上午十点」（记进长期记忆）`;
 
 // ── Provider 实现：解析 → 委托编排层 → 回复信封 ──────────────────
 
@@ -344,14 +471,21 @@ function fallbackModel(): string {
 
 /**
  * 兜底防编造后置过滤（导出供单测）：兜底能力没有任何工具，不可能执行过任何
- * 操作——回复中出现「已/刚刚/为您…创建/完成/…」或具体编号（#\d+）即构造性为假
- * （#1234 事件：prompt 明令禁止仍被无视）。命中即整条丢弃，把「不编造操作」
- * 从模型自觉变成代码保证。误伤的最坏后果是回退帮助文本，方向安全。
+ * 操作。拦「已然声称」——已/已经/刚刚 + 操作动词，或 为你/帮你 + 动词带完成态
+ * （了/好/过），以及具体编号（#\d+；#1234 事件：prompt 明令禁止仍被无视）。
+ * 提议/引导句不过滤（「需要我帮你建个工单吗？请发…」——动词后跟「个」等非完成态），
+ * 历史版本此处误杀正常提议（退化帮助文本），2026-09-30 拆分已然/未然。
+ * 命中即整条丢弃回帮助文本；误伤的最坏后果是回退帮助文本，方向安全。
  */
 export function isFabricatedReply(text: string): boolean {
-  return /#\d+|(?:已(?!知)|刚刚|为您|帮你|帮您)[^。；！？\n]{0,12}(?:创建|建立|建好|建了|建|执行|完成|处理|派发|关闭|重开|评论|更新)/.test(
-    text,
-  );
+  if (/#\d+/.test(text)) return true;
+  const VERBS = "(?:创建|建立|建好|建了|建|执行|完成|处理|派发|关闭|重开|评论|更新)";
+  // 已然声称第一式：已/已经/刚刚 + 动词（「已创建」「刚刚处理」自身即完成态）
+  if (new RegExp(`(?:已(?!知)(?:经)?|刚刚|刚)[^。；！？\\n]{0,12}${VERBS}`).test(text)) return true;
+  // 已然声称第二式：为你/帮你 + 动词 + 完成态后缀（「帮你建好了」）；
+  // 提议句「帮你建个…」动词后非完成态，不命中
+  if (new RegExp(`(?:为您|为你|帮你|帮您|替你|替您)[^。；！？\\n]{0,12}${VERBS}[了好过]`).test(text)) return true;
+  return false;
 }
 
 /**
@@ -372,8 +506,8 @@ async function generateFallbackReply(
           content:
             "你是飞书群里的「项目小助理」，一个真实、好打交道的协作同事，负责管理飞书任务与 Gitea 工单（git.aigility.cloud）：建任务/工单（须 @仓库）、查列表、关闭/重开/评论、项目概览、任务派发确认（「确认派发 #N」/「取消派发 #N」）。\n" +
             "【对话方式】像正常群聊同事一样说话：先理解对方到底想干什么（包括纠正、补充、确认、闲聊、情绪），再决定怎么回。可用口语化中文，2-4 句为主，不堆砌格式。\n" +
-            "【场景应对】① 用户在纠正或补充之前的信息（如「项目错了」「是 XX 仓库的」）：先接住纠正（「收到，是我认错了仓库」），再确认正确信息，最后引导补一条正确指令（如「可以再发一次：建工单 @正确的仓库：<标题>」）。② 用户描述了一个需求但没带 @仓库：给出「你想要的应该是：建工单 @某仓库：<标题>」，并主动问一句仓库归属（不知道就别猜）。③ 闲聊/感谢/吐槽：简短自然回应即可，不强行导流到指令。④ 问「你能干什么」：用一两句话概括职责，别把整张指令清单倒出来，对方要细节再给。\n" +
-            "【硬约束】你没有连接任何系统、没有任何工具，永远不可能替用户执行操作：严禁声称已创建/已执行/已完成任何任务或工单，严禁给出具体的任务或工单编号（#数字 也不行）；不确定时引导用户用指令表达。不要输出 markdown 标题或代码块。",
+            "【场景应对】① 用户在纠正或补充之前的信息（如「项目错了」「是 XX 仓库的」）：先接住纠正（「收到，是我认错了仓库」），再确认正确信息，最后引导补一条正确指令（如「可以再发一次：建工单 @正确的仓库：<标题>」）。② 用户描述了一个需求但没带 @仓库：给出「你想要的应该是：建工单 @某仓库：<标题>」，并主动问一句仓库归属（不知道就别猜）。③ 闲聊/感谢/吐槽：简短自然回应即可，不强行导流到指令。④ 问「你能干什么」：用一两句话概括职责，别把整张指令清单倒出来，对方要细节再给。⑤ 用户报告缺陷/进展或转发讨论片段（内容常为多人对话）：先接住内容、用一两句确认理解（能看出像待办的点就点出来）；如实告知「这段已进入我的自动汇总，稍后会同步到机器人群」；对方想立刻立条目时引导「建任务：<标题>」（工单则「建工单 @仓库：<标题>」），缺仓库就问一句。\n" +
+            "【硬约束】你没有连接任何系统、没有任何工具，永远不可能替用户执行操作：严禁声称已创建/已执行/已完成任何任务或工单，严禁给出具体的任务或工单编号（#数字 也不行）；提议时用「可以发『建任务：<标题>』」这类引导句式，不要说「我帮你建/我来建」（那是你做不到的事）；不确定时引导用户用指令表达。不要输出 markdown 标题或代码块。",
         },
         { role: "user", content: userText },
       ],
@@ -414,17 +548,65 @@ export const feishuTaskAssistantProvider: Provider<
   ): Promise<Result<FeishuTaskAssistantResponse>> {
     const intent = parseTaskIntent(request.user_input ?? "");
     let response: string;
+    // 免@群消息（摘要播报群的指令回复）走「仅指令」模式：正则未命中时保持
+    // 静默（不 LLM 兜底不帮助文本），避免群聊闲聊被回复刷屏
+    const commandOnly =
+      request.chat_type === "group" && request.mentioned_bot === false;
 
     if (intent.kind === "help") {
-      // 正则未命中（含显式问「帮助」，均落 help 意图）：LLM 自然语言兜底
-      // （输出过防编造过滤，失败/关闭回退帮助文本）
-      response = await generateFallbackReply(request.user_input ?? "", ctx);
+      if (commandOnly) {
+        return ok({ response: "", agent_name: AGENT_NAME, session_id: ctx.sessionId, trace_id: ctx.traceId });
+      }
+      const rawText = request.user_input ?? "";
+      // 近乎命中（明显想说核验指令但格式没对上）→ 针对性短提示，绝不甩全文帮助
+      if (/^(?:安排执行者|指派执行者|任务归属|归属任务|跳过任务|确认\s*#?\d)/.test(rawText.trim())) {
+        response =
+          "指令没认出来。核验格式：确认 <#编号> ｜ 任务归属 <#编号> 项目简称 ｜ 安排执行者 <#编号> 姓名。 " +
+          "引用单条摘要回复时编号可省略；多条指令可分行或直接连写。";
+      } else {
+        // 正则未命中（含显式问「帮助」，均落 help 意图）：LLM 自然语言兜底
+        // （输出过防编造过滤，失败/关闭回退帮助文本）
+        response = await generateFallbackReply(rawText, ctx);
+      }
+    } else if (intent.kind === "list") {
+      // 「我的任务」升级为人视角全景汇总（工单 + PR + 飞书任务 + timem 记忆）；
+      // briefing 不可用/失败时回落编排层的飞书任务列表（不比改动前差）
+      let briefed = "";
+      try {
+        const b = (await ctx.call(projectBriefingRef, {
+          mode: "person-brief",
+          user_id: request.user_id,
+        })) as { ok?: boolean; value?: { response?: string }; error?: string };
+        if (b?.ok && b.value?.response) briefed = b.value.response;
+      } catch (e) {
+        console.error(`[feishu-task-assistant] person-brief 失败，回落任务列表: ${String(e)}`);
+      }
+      response = briefed;
+      if (!briefed) {
+        const r = (await ctx.call(
+          taskIssueSyncRef,
+          { mode: "intent", intent, session_id: request.session_id, root_id: request.root_id },
+        )) as { ok: boolean; value?: { response?: string }; error?: string };
+        response = r.ok && r.value?.response ? r.value.response : `❌ 业务处理失败：${r.error ?? "编排层无响应"}`;
+      }
+    } else if (intent.kind === "project-status" || intent.kind === "feedback") {
+      // 项目进展 / 反馈写入：多源汇总与记忆沉淀（@orchestration/project-briefing）
+      const b = (await ctx.call(
+        projectBriefingRef,
+        intent.kind === "project-status"
+          ? { mode: "project-brief", project: intent.project }
+          : { mode: "feedback", text: intent.text, user_id: request.user_id },
+      )) as { ok?: boolean; value?: { response?: string }; error?: string };
+      response =
+        b?.ok && b.value?.response
+          ? b.value.response
+          : `❌ 处理失败：${b?.error ?? "编排层无响应"}`;
     } else {
       // 业务全部委托编排层（含概览；need-repo 反问也在编排层做——
       // 需要实时拉可访问仓库列表）
       const r = (await ctx.call(
         taskIssueSyncRef,
-        { mode: "intent", intent, session_id: request.session_id },
+        { mode: "intent", intent, session_id: request.session_id, root_id: request.root_id },
       )) as { ok: boolean; value?: { response?: string }; error?: string };
       response =
         r.ok && r.value?.response
@@ -455,9 +637,9 @@ export const manifest: PluginManifest = {
   name: "@persona/feishu-task-assistant",
   layer: LayerId.Persona,
   description:
-    "角色人格层：「项目小助理」交互形象（意图解析+帮助+兜底防编造过滤），业务下沉 @orchestration/task-issue-sync（任务/工单双建同步）",
-  version: "1.4.0",
+    "角色人格层：「项目小助理」交互形象（意图解析+帮助+兜底防编造过滤），任务/工单业务下沉 @orchestration/task-issue-sync（双建同步），我的任务/项目进展/反馈走 @orchestration/project-briefing（多源汇总+timem 沉淀）",
+  version: "1.5.0",
   provides: [feishuTaskAssistantService],
-  consumes: [taskIssueSyncRef, llmInferenceRefForPersona],
+  consumes: [taskIssueSyncRef, projectBriefingRef, llmInferenceRefForPersona],
   preferredCarrier: CarrierKind.Thread,
 };

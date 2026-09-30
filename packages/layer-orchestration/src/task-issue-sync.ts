@@ -53,10 +53,17 @@ import {
   jaccard,
   llmInferenceRef,
   mappedChatPool,
+  pendingNosForRootMessage,
   peekPendingCandidate,
   quoteDiscussion,
   takePendingCandidate,
 } from "./task-pipeline.js";
+// 项目简称解析（config/project-registry.json 的 aliases）与人员别名解析
+// （config/timem-team-registry.json）——「任务归属 1 太忆」「安排执行者 1 hongbin」
+import { getProjectRegistry, resolveProjectRef, projectRepoScope } from "./project-registry.js";
+import { getIdentityRegistry, resolveMemberByName } from "./identity-registry.js";
+// 项目小助理事件快照：建单/完成等显著变化 → 防抖后写入 timem（briefing-events 内部节流）
+import { notifyRepoActivity } from "./briefing-events.js";
 
 // ── 消费引用 ─────────────────────────────────────────────────────
 
@@ -75,10 +82,10 @@ export const giteaApiRef: CapabilityRef = {
 // ── 意图词汇表（persona 解析产出、本服务消费；类型随服务契约走编排层） ──
 
 export type TaskIntent =
-  | { kind: "create"; title: string; dueDate?: string; repo?: string; description?: string }
+  | { kind: "create"; title: string; dueDate?: string; repo?: string; description?: string; executor?: string }
   | { kind: "list" }
   | { kind: "complete"; keyword: string }
-  | { kind: "issue-create"; repo: string; title: string; body?: string }
+  | { kind: "issue-create"; repo: string; title: string; body?: string; executor?: string }
   | { kind: "issue-list"; repo?: string }
   | { kind: "issue-show"; repo?: string; ref: string }
   | { kind: "issue-close"; repo?: string; ref: string }
@@ -95,17 +102,22 @@ export type TaskIntent =
   /** 安排执行者：「安排执行者 #N @张三」→ 任务描述记执行者 + 工单评论；
    *  P→D 闸门要求：有执行者的任务才会被 plan-gate 自动流转到 D */
   | { kind: "assign"; ref: string; executor: string }
-  /** 澄清归属确认：「任务归属 N @仓库」——把群内澄清队列的候选建成工单
-   *  （来源群候选池判不动时进队列，群里回复本指令落单；只能在该群内认领） */
+  /** 澄清归属确认：「任务归属 N 仓库/项目简称」——核验摘要判断或落澄清候选。
+   *  摘要统一播报到机器人群后，回复可能来自机器人群或私聊，认领按编号全局定位
+   *  （不再限定来源群）；简称经项目登记表解析，解析失败反问。 */
   | { kind: "pending-assign"; ref: string; repo: string }
   /** 澄清归属放弃：「跳过任务 N」——丢弃澄清队列候选，不建单 */
   | { kind: "pending-skip"; ref: string }
-  /** 多行澄清归属：一条消息逐行「任务归属 N @仓库 / 跳过任务 N」（逐条落单） */
+  /** 摘要核验确认：「确认 N」——认可 LLM 判断（项目/执行人），digest-only 下仅记录 */
+  | { kind: "confirm-pending"; ref: string }
+  /** 多行澄清归属：一条消息逐行「任务归属 N 仓库 / 安排执行者 N 姓名 / 确认 N / 跳过任务 N」（逐条落单） */
   | {
       kind: "pending-batch";
       items: Array<
         | { action: "assign"; ref: string; repo: string }
         | { action: "skip"; ref: string }
+        | { action: "confirm"; ref: string }
+        | { action: "assign-executor"; ref: string; executor: string }
       >;
     }
   | { kind: "overview" }
@@ -119,6 +131,8 @@ export type TaskIssueSyncRequest =
       mode: "intent";
       intent: TaskIntent;
       session_id?: string;
+      /** 引用回复的消息 id（摘要核验指令省略编号时反查条目用） */
+      root_id?: string;
     }
   | {
       /** 原语模式：给 task-pipeline 等调用方复用「工单→飞书任务」单向同步 */
@@ -357,12 +371,66 @@ async function resolveRepoInput(
   input: string,
 ): Promise<string | undefined> {
   if (input.includes("/")) return input;
+  // 项目简称优先：登记表别名/名称（太忆、电信平台…）→ 项目 → 仓库范围；
+  // 单仓库项目直接定仓，多仓库/组织级项目走后续仓库名匹配
+  const ref = resolveProjectRef(getProjectRegistry(), input);
+  if (ref.project) {
+    const scope = projectRepoScope(ref.project);
+    if (scope.repos.length === 1 && scope.orgs.length === 0) return scope.repos[0];
+  }
   const repos = await candidateRepos(ctx);
   const kw = input.toLowerCase();
   const exact = repos.filter((r) => r.toLowerCase().split("/")[1] === kw);
   if (exact.length === 1) return exact[0];
   const fuzzy = repos.filter((r) => r.toLowerCase().split("/")[1].includes(kw));
   return fuzzy.length === 1 ? fuzzy[0] : undefined;
+}
+
+/** 项目简称解析摘要（反问用）：「太忆 → TiMEM 平台（4 仓库）」一行一个 */
+function projectAliasHints(): string[] {
+  const file = getProjectRegistry();
+  return file.projects.map((p) => {
+    const scope = projectRepoScope(p);
+    const n = scope.repos.length + scope.orgs.length;
+    return `• ${p.name}（简称：${(p.aliases ?? []).join(" / ") || "无"}，${n} 个仓库）`;
+  });
+}
+
+/**
+ * 归属输入解析：项目简称（登记表）→ 模糊命中多个项目时返回歧义候选；
+ * 单项目多仓库时返回该项目仓库列表让用户挑。repo 命中则直接返回。
+ */
+async function resolveRepoOrAsk(
+  ctx: SeamContext,
+  input: string,
+): Promise<{ repo?: string; ask?: string }> {
+  const file = getProjectRegistry();
+  const ref = resolveProjectRef(file, input);
+  if (ref.project) {
+    const scope = projectRepoScope(ref.project);
+    if (scope.repos.length === 1 && scope.orgs.length === 0) return { repo: scope.repos[0] };
+    if (scope.repos.length > 1) {
+      return {
+        ask:
+          `「${input}」对应项目「${ref.project.name}」覆盖 ${scope.repos.length} 个仓库，请用全名指明：\n` +
+          scope.repos.map((r) => `• ${r}`).join("\n"),
+      };
+    }
+  } else if (ref.ambiguous && ref.ambiguous.length > 1) {
+    return {
+      ask:
+        `「${input}」命中多个项目，请指明是哪个：\n` +
+        ref.ambiguous.map((p) => `• ${p.name}（简称：${(p.aliases ?? []).join(" / ")}）`).join("\n"),
+    };
+  }
+  const repo = await resolveRepoInput(ctx, input);
+  if (repo) return { repo };
+  return {
+    ask:
+      `❌ 「${input}」解析不出项目/仓库。可用项目简称：\n` +
+      projectAliasHints().join("\n") +
+      `\n或用 组织/仓库 全名重试。`,
+  };
 }
 
 /** 查询单条工单：ref 为编号时直取详情，关键字时列表匹配（返回 undefined=未找到） */
@@ -479,6 +547,7 @@ async function syncIssueToTask(
   repo: string,
   issue: { number?: number; title?: string; html_url?: string },
   sourceChatId?: string,
+  executor?: string,
 ): Promise<{ ok: boolean; detail: string }> {
   const listName = tasklistNameForRepo(repo);
   const list = await ensureTasklist(ctx, listName);
@@ -489,6 +558,8 @@ async function syncIssueToTask(
   const descParts: string[] = [];
   if (issue.html_url) descParts.push(`工单链接：${issue.html_url}`);
   if (sourceChatId) descParts.push(`来源群：${sourceChatId}`);
+  // 执行者是 plan-gate 的 P→D 闸门依据（/执行者：\S+/）
+  if (executor) descParts.push(`执行者：${executor}`);
   if (descParts.length > 0) body.description = descParts.join("\n");
   const tr = await callFeishuApi(ctx, {
     method: "POST",
@@ -990,14 +1061,15 @@ export async function syncCompletionFromGitea(
     }).catch(() => undefined);
     const msg = `🏁 「${t.summary.replace(/^\[[^\]]+\]\s*/, "").slice(0, 40)}」对应工单 #${issueNo} 已关闭${mergedPr ? `（PR ${mergedPr} 已合并）` : ""}，任务已挪「${SECTION_NAMES.check}」待测试。`;
     reports.push(msg);
+    notifyRepoActivity(repo, `工单 #${issueNo} 关闭${mergedPr ? "（PR 已合并）" : ""}`);
     await dispatchNotify(opts.notifyChatId, msg);
   }
   return reports;
 }
 
 /** 群通知注入（装配层 set；与 task-pipeline.setNotifySend 同款约定） */
-let dispatchNotifySend: ((chatId: string, text: string) => Promise<void>) | undefined;
-export function setDispatchNotifySend(fn: ((chatId: string, text: string) => Promise<void>) | undefined): void {
+let dispatchNotifySend: ((chatId: string, text: string) => Promise<string | void>) | undefined;
+export function setDispatchNotifySend(fn: ((chatId: string, text: string) => Promise<string | void>) | undefined): void {
   dispatchNotifySend = fn;
 }
 
@@ -1328,24 +1400,61 @@ async function handleDispatchCancel(ctx: SeamContext, ref: string): Promise<stri
  * 候选保留在队列（标记 assignedRepo），后续「安排执行者 N @姓名」仍按编号定位。
  * 无 guid 的旧候选（历史遗留）回落原「建工单+双建」行为。
  */
+/**
+ * 核验指令的条目定位：优先显式编号；ref 为空（引用摘要回复省略编号）时用
+ * root_id（被引用的摘要消息）反查——唯一存活条目直接用，多条/零条则反问。
+ */
+function resolvePendingRef(
+  ref: string,
+  rootId?: string,
+): { no?: number; item?: ReturnType<typeof findPendingCandidateByNo>; ask?: string } {
+  const num = ref.trim().match(/^#?(\d+)$/);
+  if (num) {
+    const no = Number(num[1]);
+    const item = findPendingCandidateByNo(no);
+    return item ? { no, item } : { ask: `没有找到待核验任务 #${no}（可能已处理、已跳过或已过期）。` };
+  }
+  const alive = pendingNosForRootMessage(rootId)
+    .map((n) => findPendingCandidateByNo(n))
+    .filter((x): x is NonNullable<typeof x> => Boolean(x));
+  if (alive.length === 1) return { no: alive[0].no, item: alive[0] };
+  if (alive.length > 1) {
+    return {
+      ask:
+        `引用的摘要里有 ${alive.length} 条待核验条目，请带上编号：\n` +
+        alive.map((i) => `• #${i.no} [${i.priority}] ${i.title}`).join("\n"),
+    };
+  }
+  return { ask: "缺编号：请带上条目编号（如「确认 #12」），或引用单条摘要回复。" };
+}
+
 async function handlePendingAssign(
   ctx: SeamContext,
   ref: string,
   repoInput: string,
   sessionChatId?: string,
+  rootId?: string,
 ): Promise<string> {
-  const num = ref.trim().match(/^#?(\d+)$/);
-  if (!num) return "用法：任务归属 编号 @仓库";
-  const no = Number(num[1]);
+  const located = resolvePendingRef(ref, rootId);
+  if (located.ask || !located.item) return located.ask ?? "用法：任务归属 编号 仓库/项目简称";
+  const no = located.no as number;
+  const item = located.item;
   if (!sessionChatId) return "❌ 需要在识别到该任务的群里回复（私聊缺少群上下文）。";
-  const item = peekPendingCandidate(sessionChatId, no);
-  if (!item) return `没有找到本群待归属任务 #${no}（可能已处理、已跳过或已过期）。`;
-  const repo = await resolveRepoInput(ctx, repoInput);
-  if (!repo) {
-    // 解析失败保留队列项可重试；给出全名示例
-    const repos = await candidateRepos(ctx);
-    return `❌ 仓库「${repoInput}」解析失败，请用 @组织/仓库 全名重试，如：任务归属 ${no} @${repos[0] ?? "组织/仓库"}`;
+  const resolved = await resolveRepoOrAsk(ctx, repoInput);
+  if (!resolved.repo) return resolved.ask ?? "❌ 仓库解析失败";
+
+  // 摘要核验（digest-only 记录模式）：仅记录归属，不建单不建任务——
+  // 建单由工作流 YAML 的建单节点负责，现阶段全部禁用
+  if (item.fromDigest && !item.feishuTaskGuid) {
+    item.assignedRepo = resolved.repo;
+    const executor = item.executor ?? item.suggestedExecutor;
+    return (
+      `✅ 已记录 #${no}「${item.title}」归属 ${resolved.repo}${executor ? ` · 执行人 ${executor}` : ""}（现阶段仅记录，不建任务/工单）` +
+      (executor ? `\n对了就回复「确认 ${no}」完成核验。` : `\n再回复「安排执行者 ${no} 姓名」补执行人，或「确认 ${no}」完成核验。`)
+    );
   }
+
+  const repo = resolved.repo;
 
   // 飞书先行：候选带飞书任务 guid → 改标题 + 挪目标 org 清单 P 分组（不建工单）
   if (item.feishuTaskGuid) {
@@ -1415,6 +1524,7 @@ async function handlePendingAssign(
   }
   const created = r.value?.data as IssueLike;
   const sync = await syncIssueToTask(ctx, repo, created ?? { title: item.title }, sessionChatId);
+  notifyRepoActivity(repo, `澄清归属建工单 ${repo}#${created?.number ?? "?"}`);
   return [
     `✅ 已建工单 ${repo} #${created?.number}：${item.title}`,
     created?.html_url ?? "",
@@ -1425,15 +1535,42 @@ async function handlePendingAssign(
     .join("\n");
 }
 
-/** 「跳过任务 N」：丢弃澄清候选，不建单 */
-function handlePendingSkip(ref: string, sessionChatId?: string): string {
-  const num = ref.trim().match(/^#?(\d+)$/);
-  if (!num) return "用法：跳过任务 编号";
-  if (!sessionChatId) return "❌ 需要在识别到该任务的群里回复（私聊缺少群上下文）。";
-  const dropped = dropPendingCandidate(sessionChatId, Number(num[1]));
-  return dropped
-    ? `🚮 已丢弃待归属任务 #${num[1]}，不会建单。`
-    : `没有找到本群待归属任务 #${num[1]}。`;
+/** 「跳过任务 N」：丢弃澄清候选，不建单（认领放宽：机器人群/私聊回复均可） */
+function handlePendingSkip(ref: string, sessionChatId?: string, rootId?: string): string {
+  const located = resolvePendingRef(ref, rootId);
+  if (located.ask || !located.item) return located.ask ?? "用法：跳过任务 编号";
+  const item = located.item;
+  takePendingCandidate(item.chatId, item.no);
+  return `🚮 已丢弃 #${item.no}「${item.title}」，不会建单。`;
+}
+
+/**
+ * 「确认 N」：核验摘要条目的 LLM 判断（项目/执行人）。
+ * 两者齐备 → 消费队列项并记录；缺项 → 反问补哪一项（不消费，可继续补）。
+ * digest-only 阶段仅记录，不建任务/工单（建单由工作流建单节点负责）。
+ */
+function handlePendingConfirm(ref: string, sessionChatId?: string, rootId?: string): string {
+  const located = resolvePendingRef(ref, rootId);
+  if (located.ask || !located.item) return located.ask ?? "用法：确认 编号";
+  const item = located.item;
+  const no = item.no;
+  // 低置信归属（私聊/并集池猜测）不算已定项目，确认时要求人工明确
+  const repo = item.assignedRepo ?? (item.repoUncertain ? undefined : item.suggestedRepo);
+  const executor = item.executor ?? item.suggestedExecutor;
+  if (!repo || !executor) {
+    const missing = [repo ? undefined : "项目", executor ? undefined : "执行人"]
+      .filter(Boolean)
+      .join("和");
+    return (
+      `❓ #${no}「${item.title}」还差${missing}：` +
+      [repo ? undefined : `「任务归属 ${no} 项目简称」`, executor ? undefined : `「安排执行者 ${no} 姓名」`]
+        .filter(Boolean)
+        .join("、") +
+      ` 补齐后再确认。`
+    );
+  }
+  takePendingCandidate(item.chatId, no);
+  return `✅ #${no}「${item.title}」已核验：项目 ${repo} · 执行人 ${executor}（现阶段仅记录，不建任务/工单）。`;
 }
 
 /**
@@ -1444,12 +1581,74 @@ function handlePendingSkip(ref: string, sessionChatId?: string): string {
  * 双写：飞书任务描述追加「执行者：X」（P→D 闸门与回填建单的判定依据）+
  * Gitea 工单评论留痕（仅建单后路径，未建单无工单可评）。
  */
-async function handleAssignExecutor(ctx: SeamContext, ref: string, executor: string): Promise<string> {
+/** 摘要条目（digest-only）执行者记录：仅写回候选，不动飞书任务/工单 */
+function recordDigestExecutor(
+  item: NonNullable<ReturnType<typeof findPendingCandidateByNo>>,
+  executorName: string,
+): string {
+  item.executor = executorName;
+  const repo = item.assignedRepo ?? item.suggestedRepo;
+  return (
+    `✅ 已记录 #${item.no}「${item.title}」执行人 ${executorName}${repo ? ` · 项目 ${repo}` : ""}（现阶段仅记录，不建任务/工单）\n` +
+    `对了就回复「确认 ${item.no}」完成核验。`
+  );
+}
+
+/**
+ * 执行者姓名解析（人员登记表别名）：命中返回规范名；登记表非空但没命中/歧义
+ * 返回反问文案（不写任何数据）。登记表为空保持旧行为原样使用。
+ */
+function resolveExecutorName(name: string): string | false {
+  const reg = getIdentityRegistry();
+  const members = (reg.members ?? []).filter((m) => m.name);
+  if (members.length === 0) return name;
+  const m = resolveMemberByName(reg, name);
+  if (m.kind === "exact") return m.member.name;
+  if (m.kind === "ambiguous") {
+    console.error(
+      `❓ 「${name}」命中多个成员：${m.candidates.map((c) => c.name).join(" / ")}，请用登记名重试。`,
+    );
+    return false;
+  }
+  console.error(
+    `❌ 人员登记表里没有「${name}」。已登记成员：${members.map((c) => c.name).join("、")}；也可用其中任何别名（如中文名/花名/拼音）。`,
+  );
+  return false;
+}
+
+async function handleAssignExecutor(
+  ctx: SeamContext,
+  ref: string,
+  executor: string,
+  rootId?: string,
+): Promise<string> {
   const raw = ref.trim();
   const num = raw.match(/^#?(\d+)$/);
   const name = executor.replace(/^@/, "").trim();
-  if (!raw) return "用法：安排执行者 #工单号(或任务编号/任务guid) @执行者姓名";
   if (!name) return "❌ 请带上执行者姓名，如：安排执行者 #12 @张三";
+
+  // 人员别名 → 登记表规范名（hongbin → shahongbin；中文名/花名/拼音同表）。
+  // 登记表非空且解析不到 → 反问列出成员（不写任何数据）；歧义同样反问。
+  const resolvedName = resolveExecutorName(name);
+  if (resolvedName === false) {
+    const members = (getIdentityRegistry().members ?? []).filter((m) => m.name);
+    return (
+      `❌ 执行者「${name}」解析失败。已登记成员：${members.map((c) => c.name).join("、")}；` +
+      `也可用其中任何别名（如中文名/花名/拼音）。`
+    );
+  }
+  const executorName = resolvedName;
+
+  // ref 为空（引用摘要回复省略编号）→ root 反查摘要条目；编号/guid 路径不变
+  if (!raw) {
+    const located = resolvePendingRef("", rootId);
+    if (located.ask || !located.item) return located.ask ?? "用法：安排执行者 #编号 姓名";
+    const item = located.item;
+    if (!item.fromDigest || item.feishuTaskGuid) {
+      return "❌ 引用的摘要条目不能这样安排执行者，请带上 #编号或任务 guid。";
+    }
+    return recordDigestExecutor(item, executorName);
+  }
 
   // ① 建单前：编号命中澄清队列候选（带飞书任务 guid）→ 按 guid 定位
   let guidFilter: string | undefined;
@@ -1457,6 +1656,10 @@ async function handleAssignExecutor(ctx: SeamContext, ref: string, executor: str
   let issueNo: number | undefined;
   if (num) {
     const pending = findPendingCandidateByNo(Number(num[1]));
+    // 摘要核验（digest-only 记录模式）：仅记录执行人，不动飞书任务/工单
+    if (pending?.fromDigest && !pending.feishuTaskGuid) {
+      return recordDigestExecutor(pending, executorName);
+    }
     if (pending?.feishuTaskGuid) {
       guidFilter = pending.feishuTaskGuid;
       pendingNo = pending.no;
@@ -1488,9 +1691,9 @@ async function handleAssignExecutor(ctx: SeamContext, ref: string, executor: str
       : `没有找到工单 #${issueNo} 对应的飞书任务（可能尚未双建）。`;
   }
   const guid = (target.guid ?? target.task_id) as string;
-  const marker = `执行者：${name}`;
+  const marker = `执行者：${executorName}`;
   if ((target.description ?? "").includes(marker)) {
-    return `⏭️ ${pendingNo !== undefined ? `澄清任务 #${pendingNo}` : `工单 #${issueNo}`} 的执行者已是「${name}」，无需重复安排。`;
+    return `⏭️ ${pendingNo !== undefined ? `澄清任务 #${pendingNo}` : `工单 #${issueNo}`} 的执行者已是「${executorName}」，无需重复安排。`;
   }
 
   // 飞书任务描述追加执行者（plan-gate 闸门依据）
@@ -1514,14 +1717,14 @@ async function handleAssignExecutor(ctx: SeamContext, ref: string, executor: str
     const cr = await callGiteaApi(ctx, {
       method: "POST",
       path: `${issuesBaseFor(`${repoMatch[1]}/${repoMatch[2]}`)}/${issueNo}/comments`,
-      body: { body: `执行者安排：**${name}**（由项目小助理记录）` },
+      body: { body: `执行者安排：**${executorName}**（由项目小助理记录）` },
     });
     if (!cr.ok || !is2xx(cr.value?.status ?? 0)) giteaNote = `（工单评论失败：${cr.ok ? `HTTP ${cr.value?.status}` : cr.error}）`;
   }
 
   return pendingNo !== undefined
-    ? `👤 澄清任务 #${pendingNo} 已安排执行者「${name}」。请再回复「任务归属 ${pendingNo} @仓库」确认归属；两者齐备后自动创建 Gitea 工单。`
-    : `👤 工单 #${issueNo} 已安排执行者「${name}」${giteaNote}。任务将在下轮目标核对通过后进入「${SECTION_NAMES.doing}」执行队列。`;
+    ? `👤 澄清任务 #${pendingNo} 已安排执行者「${executorName}」。请再回复「任务归属 ${pendingNo} 仓库/项目简称」确认归属；两者齐备后自动创建 Gitea 工单。`
+    : `👤 工单 #${issueNo} 已安排执行者「${executorName}」${giteaNote}。任务将在下轮目标核对通过后进入「${SECTION_NAMES.doing}」执行队列。`;
 }
 
 // ── 意图处理（自 persona 迁入；建单/建任务接入双建同步） ──────────
@@ -1569,12 +1772,22 @@ async function handleIssueIntent(
       return `❌ 建工单失败：${r.ok ? `HTTP ${r.value?.status}` : r.error}`;
     }
     const created = r.value?.data as IssueLike;
+    // 建单时顺带指派执行人（「… 安排给 徐彬程」已由 persona 剥离标题）：
+    // 登记表命中用规范名，未命中按原样记录并在回执提示
+    let executorName: string | undefined;
+    let executorNote = "";
+    if (intent.executor) {
+      const resolved = resolveExecutorName(intent.executor);
+      executorName = typeof resolved === "string" ? resolved : intent.executor;
+      if (typeof resolved !== "string") executorNote = `\n⚠️ 执行者「${intent.executor}」不在人员登记表，已按原样记录。`;
+    }
     // ── C 方案双向同步：工单建成功 → 飞书任务挂 org 清单（部分失败不回滚） ──
-    const sync = await syncIssueToTask(ctx, repo, created ?? { title: intent.title }, sessionChatId);
+    const sync = await syncIssueToTask(ctx, repo, created ?? { title: intent.title }, sessionChatId, executorName);
     const syncLine = sync.ok ? `📋 ${sync.detail}` : `⚠️ 飞书同步未完成：${sync.detail}`;
+    notifyRepoActivity(repo, `新建工单 ${repo}#${created?.number ?? "?"}`);
     return `✅ 已建工单 ${giteaRepo(repo)} #${created?.number}：${created?.title ?? intent.title}${
       intent.body ? "（含正文）" : ""
-    }\n${created?.html_url ?? ""}\n${syncLine}`.trimEnd();
+    }${executorName ? `\n👤 执行人：${executorName}` : ""}\n${created?.html_url ?? ""}\n${syncLine}${executorNote}`.trimEnd();
   }
 
   if (intent.kind === "issue-list") {
@@ -1725,8 +1938,16 @@ async function handleTaskIntent(
     const dup = await findIssue(ctx, repo, intent.title);
     if (dup.error) return `❌ 建任务前查重失败：${dup.error}`;
 
+    let executorName: string | undefined;
+    let executorNote = "";
+    if (intent.executor) {
+      const resolved = resolveExecutorName(intent.executor);
+      executorName = typeof resolved === "string" ? resolved : intent.executor;
+      if (typeof resolved !== "string") executorNote = `\n⚠️ 执行者「${intent.executor}」不在人员登记表，已按原样记录。`;
+    }
     const body: Record<string, unknown> = { summary: intent.title };
-    if (intent.description) body.description = intent.description;
+    const descLines = [intent.description, executorName ? `执行者：${executorName}` : ""].filter(Boolean);
+    if (descLines.length > 0) body.description = descLines.join("\n");
     if (intent.dueDate) {
       body.due = { is_all_day: true, date: `${intent.dueDate}T00:00:00+08:00` };
     }
@@ -1772,11 +1993,11 @@ async function handleTaskIntent(
     }
     const issue = ir.value?.data as IssueLike;
     // 工单建成功 → 顺手把飞书任务挂 org 清单（幂等补挂，失败不阻塞回执）
-    const sync = await syncIssueToTask(ctx, repo, issue ?? {}, sessionChatId);
+    const sync = await syncIssueToTask(ctx, repo, issue ?? {}, sessionChatId, executorName);
     const syncLine = sync.ok ? `📋 ${sync.detail}` : `⚠️ ${sync.detail}`;
-    return `${taskLine}\n🎫 已同步建工单 ${repo} #${issue?.number}：${issue?.title ?? intent.title}\n${
+    return `${taskLine}${executorName ? `\n👤 执行人：${executorName}` : ""}\n🎫 已同步建工单 ${repo} #${issue?.number}：${issue?.title ?? intent.title}\n${
       issue?.html_url ?? ""
-    }\n${syncLine}`.trimEnd();
+    }\n${syncLine}${executorNote}`.trimEnd();
   }
 
   if (intent.kind === "list") {
@@ -1926,19 +2147,25 @@ const taskIssueSyncProvider: Provider<TaskIssueSyncRequest, TaskIssueSyncRespons
       response = await handleDispatchCancel(ctx, intent.ref);
     } else if (intent.kind === "assign") {
       response = await handleAssignExecutor(ctx, intent.ref, intent.executor);
+    } else if (intent.kind === "confirm-pending") {
+      response = handlePendingConfirm(intent.ref, sessionChatId, request.root_id);
     } else if (intent.kind === "pending-assign") {
-      response = await handlePendingAssign(ctx, intent.ref, intent.repo, sessionChatId);
+      response = await handlePendingAssign(ctx, intent.ref, intent.repo, sessionChatId, request.root_id);
     } else if (intent.kind === "pending-skip") {
-      response = handlePendingSkip(intent.ref, sessionChatId);
+      response = handlePendingSkip(intent.ref, sessionChatId, request.root_id);
     } else if (intent.kind === "pending-batch") {
-      // 多行归属确认逐条落单；单条失败不阻断其余（结果逐条汇报）
+      // 多行/连写核验逐条落单；单条失败不阻断其余（结果逐条汇报）
       const parts: string[] = [];
       for (const item of intent.items) {
-        parts.push(
-          item.action === "assign"
-            ? await handlePendingAssign(ctx, item.ref, item.repo, sessionChatId)
-            : handlePendingSkip(item.ref, sessionChatId),
-        );
+        if (item.action === "assign") {
+          parts.push(await handlePendingAssign(ctx, item.ref, item.repo, sessionChatId, request.root_id));
+        } else if (item.action === "confirm") {
+          parts.push(handlePendingConfirm(item.ref, sessionChatId, request.root_id));
+        } else if (item.action === "assign-executor") {
+          parts.push(await handleAssignExecutor(ctx, item.ref, item.executor, request.root_id));
+        } else {
+          parts.push(handlePendingSkip(item.ref, sessionChatId, request.root_id));
+        }
       }
       response = parts.join("\n\n");
     } else if (intent.kind === "task-need-repo" || intent.kind === "create" || intent.kind === "list" || intent.kind === "complete") {

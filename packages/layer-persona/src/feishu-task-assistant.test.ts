@@ -49,6 +49,12 @@ describe("parseTaskIntent — 飞书任务意图", () => {
     }
   });
 
+  it("我的任务新触发词：安排类问法", () => {
+    for (const text of ["我的安排", "任务安排", "工作安排", "最近做什么", "我在做什么"]) {
+      expect(parseTaskIntent(text)).toEqual({ kind: "list" });
+    }
+  });
+
   it("完成 <关键字>", () => {
     expect(parseTaskIntent("完成 周报")).toEqual({ kind: "complete", keyword: "周报" });
     expect(parseTaskIntent("完成了 周报")).toEqual({ kind: "complete", keyword: "周报" });
@@ -273,7 +279,27 @@ describe("feishuTaskAssistantProvider — LLM 兜底", () => {
     expect(messages[1]).toEqual({ role: "user", content: "嗨" });
   });
 
-  it("指令意图不受影响：仍走编排层，零 LLM 调用", async () => {
+  it("「我的任务」→ briefing 人视角汇总（briefing 可用时）", async () => {
+    const ctx = mockCtx({
+      "@orchestration/project-briefing": () => ({
+        ok: true,
+        value: { response: "📋 你的任务安排全景" },
+      }),
+    });
+    const r = await feishuTaskAssistantProvider.execute(
+      { user_input: "我的任务", user_id: "ou_test" },
+      ctx,
+    );
+    expect(r.ok).toBe(true);
+    expect(ctx.calls.length).toBe(1);
+    expect((ctx.calls as unknown[])[0]).toMatchObject({
+      id: "@orchestration/project-briefing",
+      req: { mode: "person-brief", user_id: "ou_test" },
+    });
+    if (r.ok) expect(r.value.response).toContain("任务安排全景");
+  });
+
+  it("「我的任务」briefing 不可用 → 回落编排层任务列表（不比改动前差）", async () => {
     const ctx = mockCtx({
       "@orchestration/task-issue-sync": () => ({
         ok: true,
@@ -285,11 +311,38 @@ describe("feishuTaskAssistantProvider — LLM 兜底", () => {
       ctx,
     );
     expect(r.ok).toBe(true);
-    expect(ctx.calls.length).toBe(1);
-    expect((ctx.calls as unknown[])[0]).toMatchObject({
-      id: "@orchestration/task-issue-sync",
-    });
+    expect(ctx.calls.length).toBe(2);
+    expect((ctx.calls as unknown[])[0]).toMatchObject({ id: "@orchestration/project-briefing" });
+    expect((ctx.calls as unknown[])[1]).toMatchObject({ id: "@orchestration/task-issue-sync" });
     if (r.ok) expect(r.value.response).toBe("已建任务");
+  });
+
+  it("「项目进展」与「反馈」→ briefing 对应模式", async () => {
+    const ctx = mockCtx({
+      "@orchestration/project-briefing": (req) => {
+        const mode = (req as { mode?: string }).mode;
+        if (mode === "project-brief") return { ok: true, value: { response: "📊 TiMEM 平台进展" } };
+        return { ok: true, value: { response: "✅ 反馈已记入" } };
+      },
+    });
+    const p = await feishuTaskAssistantProvider.execute({ user_input: "项目进展 timem" }, ctx);
+    expect(p.ok).toBe(true);
+    expect((ctx.calls as unknown[])[0]).toMatchObject({
+      id: "@orchestration/project-briefing",
+      req: { mode: "project-brief", project: "timem" },
+    });
+    if (p.ok) expect(p.value.response).toContain("进展");
+
+    const f = await feishuTaskAssistantProvider.execute(
+      { user_input: "反馈：周三例会改到上午", user_id: "ou_test" },
+      ctx,
+    );
+    expect(f.ok).toBe(true);
+    expect((ctx.calls as unknown[])[1]).toMatchObject({
+      id: "@orchestration/project-briefing",
+      req: { mode: "feedback", text: "周三例会改到上午", user_id: "ou_test" },
+    });
+    if (f.ok) expect(f.value.response).toContain("反馈已记入");
   });
 });
 
@@ -351,6 +404,23 @@ describe("isFabricatedReply — 兜底防编造后置过滤", () => {
     expect(isFabricatedReply("我会帮你同步到 Gitea，但需要你先用指令表达")).toBe(false);
     expect(isFabricatedReply("已知不能直接处理截图，请把报错文字贴出来")).toBe(false);
   });
+
+  it("不命中：提议/引导句式（2026-09-30 误杀修复——已然/未然拆分）", async () => {
+    const { isFabricatedReply } = await import("./feishu-task-assistant.js");
+    expect(
+      isFabricatedReply(
+        "收到，hongbin 的修改还没合并确实需要跟进一下。需要我帮你建个工单跟踪这件事吗？如果要的话，发我「建工单 @仓库：标题」就行，顺便告诉我这个改动的仓库是哪个？",
+      ),
+    ).toBe(false);
+    expect(isFabricatedReply("可以发「建任务：修复登录页白屏」立个条目")).toBe(false);
+  });
+
+  it("命中：受益者句式的完成态声称（帮你…建了/好）", async () => {
+    const { isFabricatedReply } = await import("./feishu-task-assistant.js");
+    expect(isFabricatedReply("我帮你建好了")).toBe(true);
+    expect(isFabricatedReply("已为你创建工单")).toBe(true);
+    expect(isFabricatedReply("帮你更新了清单")).toBe(true);
+  });
 });
 
 describe("feishuTaskAssistantProvider — 兜底防编造集成", () => {
@@ -396,6 +466,31 @@ describe("feishuTaskAssistantProvider — 兜底防编造集成", () => {
     const { req } = (ctx.calls as unknown[])[0] as { req: Record<string, unknown> };
     expect(req["model"]).toBe("sensenova-deepseek-v4-flash");
     expect(req["temperature"]).toBe(0.2);
+  });
+
+  it("免@群消息仅指令模式：未命中意图 → 空回复静默，不调 LLM 兜底", async () => {
+    const ctx = mockCtx({
+      "@cognitive/llm-inference": () => ({ ok: true, value: { text: "不该被调用" } }),
+    });
+    const r = await feishuTaskAssistantProvider.execute(
+      { user_input: "大家下午好", chat_type: "group", mentioned_bot: false },
+      ctx,
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.response).toBe("");
+    expect(ctx.calls.length).toBe(0);
+  });
+
+  it("免@群消息命中指令 → 正常执行（走编排层）", async () => {
+    const ctx = mockCtx({
+      "@orchestration/task-issue-sync": () => ({ ok: true, value: { response: "✅ 已记录 #1" } }),
+    });
+    const r = await feishuTaskAssistantProvider.execute(
+      { user_input: "确认 1", chat_type: "group", mentioned_bot: false, session_id: "oc_x" },
+      ctx,
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.response).toContain("已记录 #1");
   });
 });
 
@@ -472,6 +567,40 @@ describe("parseTaskIntent — 澄清归属", () => {
     expect(parseTaskIntent("任务跳过 #5")).toEqual({ kind: "pending-skip", ref: "5" });
   });
 
+  it("任务归属 N 项目简称（中文别名）→ pending-assign（解析在编排层）", () => {
+    expect(parseTaskIntent("任务归属 1 太忆")).toEqual({
+      kind: "pending-assign",
+      ref: "1",
+      repo: "太忆",
+    });
+    expect(parseTaskIntent("任务归属 2 nx-telecom")).toEqual({
+      kind: "pending-assign",
+      ref: "2",
+      repo: "nx-telecom",
+    });
+  });
+
+  it("确认 N → confirm-pending；不吞「确认派发 N」", () => {
+    expect(parseTaskIntent("确认 1")).toEqual({ kind: "confirm-pending", ref: "1" });
+    expect(parseTaskIntent("没问题 #2")).toEqual({ kind: "confirm-pending", ref: "2" });
+    expect(parseTaskIntent("确认派发 1").kind).toBe("dispatch-confirm");
+    expect(parseTaskIntent("确认了吗").kind).toBe("help");
+  });
+
+  it("多行核验合并：确认/归属/执行者/跳过 混合 → pending-batch", () => {
+    expect(
+      parseTaskIntent("确认 1\n任务归属 2 太忆\n安排执行者 3 hongbin\n跳过任务 4"),
+    ).toEqual({
+      kind: "pending-batch",
+      items: [
+        { action: "confirm", ref: "1" },
+        { action: "assign", ref: "2", repo: "太忆" },
+        { action: "assign-executor", ref: "3", executor: "hongbin" },
+        { action: "skip", ref: "4" },
+      ],
+    });
+  });
+
   it("邮箱等 @ 片段不误触；普通句子落 help", () => {
     expect(parseTaskIntent("任务归属 1 bob@example.com").kind).toBe("help");
     expect(parseTaskIntent("这个任务的归属问题回头再说").kind).toBe("help");
@@ -502,5 +631,103 @@ describe("parseTaskIntent — 澄清归属", () => {
   it("多行混入非归属内容 → 不按批处理（保持原语义）", () => {
     expect(parseTaskIntent("任务归属 1 @video\n你好").kind).toBe("help");
     expect(parseTaskIntent("任务归属 1 @video").kind).toBe("pending-assign");
+  });
+});
+
+// ── 项目进展 / 反馈（委托 @orchestration/project-briefing） ──────────
+
+describe("parseTaskIntent — 项目进展与反馈", () => {
+  it("项目进展（无名称 / 带名称）", () => {
+    expect(parseTaskIntent("项目进展")).toEqual({ kind: "project-status" });
+    expect(parseTaskIntent("项目进展：timem")).toEqual({ kind: "project-status", project: "timem" });
+    expect(parseTaskIntent("进展汇报 nx")).toEqual({ kind: "project-status", project: "nx" });
+  });
+
+  it("反馈（多种引导词与标点）", () => {
+    expect(parseTaskIntent("反馈：周三例会改到上午")).toEqual({ kind: "feedback", text: "周三例会改到上午" });
+    expect(parseTaskIntent("反馈 周三例会改到上午")).toEqual({ kind: "feedback", text: "周三例会改到上午" });
+    expect(parseTaskIntent("意见反馈，界面不错")).toEqual({ kind: "feedback", text: "界面不错" });
+    expect(parseTaskIntent("建议:把日报提前到九点")).toEqual({ kind: "feedback", text: "把日报提前到九点" });
+  });
+
+  it("裸「建议」不触发反馈（避免把任务建议误当反馈）", () => {
+    expect(parseTaskIntent("建议加个导出功能").kind).toBe("help");
+  });
+
+  it("空反馈不触发", () => {
+    expect(parseTaskIntent("反馈：").kind).toBe("help");
+  });
+});
+
+// ── 无编号指令 / 一行多指令（引用摘要回复场景） ─────────────────────
+
+describe("parseTaskIntent — 无编号与连写核验", () => {
+  it("无编号单指令 → ref 空串（编排层用 root_id 反查）", () => {
+    expect(parseTaskIntent("任务归属 TiMEM-AI/timem-platform-backend")).toEqual({
+      kind: "pending-assign",
+      ref: "",
+      repo: "TiMEM-AI/timem-platform-backend",
+    });
+    expect(parseTaskIntent("安排执行者 徐彬程")).toEqual({
+      kind: "assign",
+      ref: "",
+      executor: "徐彬程",
+    });
+    expect(parseTaskIntent("确认")).toEqual({ kind: "confirm-pending", ref: "" });
+  });
+
+  it("一行连写两条指令 → pending-batch（真实场景回归：徐彬程 事件）", () => {
+    expect(
+      parseTaskIntent("安排执行者 xubincheng 任务归属 TiMEM-AI/timem-platform-backend"),
+    ).toEqual({
+      kind: "pending-batch",
+      items: [
+        { action: "assign-executor", ref: "", executor: "xubincheng" },
+        { action: "assign", ref: "", repo: "TiMEM-AI/timem-platform-backend" },
+      ],
+    });
+  });
+
+  it("带编号与无编号混写一行也能切分", () => {
+    expect(parseTaskIntent("确认 #5 任务归属 太忆")).toEqual({
+      kind: "pending-batch",
+      items: [
+        { action: "confirm", ref: "5" },
+        { action: "assign", ref: "", repo: "太忆" },
+      ],
+    });
+  });
+
+  it("普通句子含「确认」不误切（保持原语义）", () => {
+    expect(parseTaskIntent("我确认一下明天开会时间").kind).toBe("help");
+  });
+});
+
+// ── 建单顺带指派：「… 安排给 徐彬程」→ 标题剥离 + executor ──────────
+
+describe("parseTaskIntent — 建单顺带指派执行人", () => {
+  it("建工单标题剥掉「安排给 X」并带 executor", () => {
+    const intent = parseTaskIntent(
+      "建工单 @timem-platform：账单导出功能需要修复 安排给徐彬程",
+    );
+    expect(intent.kind).toBe("issue-create");
+    if (intent.kind === "issue-create") {
+      expect(intent.title).toBe("账单导出功能需要修复");
+      expect(intent.executor).toBe("徐彬程");
+      expect(intent.repo).toBe("timem-platform");
+    }
+  });
+
+  it("建任务同样支持（交给/让 变体）", () => {
+    const intent = parseTaskIntent("建任务 @video：修白屏 交给 wang-wu");
+    expect(intent.kind).toBe("create");
+    if (intent.kind === "create") {
+      expect(intent.title).toBe("修白屏");
+      expect(intent.executor).toBe("wang-wu");
+    }
+  });
+
+  it("普通聊天里的「让张三」不误触发（非建单开头）", () => {
+    expect(parseTaskIntent("这个 bug 让张三看看吧").kind).toBe("help");
   });
 });

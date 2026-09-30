@@ -34,6 +34,10 @@ import {
   taskIssueSyncService,
   taskIssueSyncProvider,
 } from "./task-issue-sync.js";
+import {
+  projectBriefingService,
+  projectBriefingProvider,
+} from "./project-briefing.js";
 export { timemProjectTaskService, timemProjectTaskProvider, enableTimemProjectTask };
 export type {
   TimemProjectTaskRequest,
@@ -69,6 +73,86 @@ export type {
   IssueLike,
   SectionKey,
 } from "./task-issue-sync.js";
+
+// 项目小助理多源汇总 + 两张对齐登记表 + 事件钩子（2026-09-30 数据对齐与记忆沉淀）
+export {
+  projectBriefingService,
+  projectBriefingProvider,
+  createProjectBriefingProvider,
+  startBriefingDigestScheduler,
+  briefingAgentId,
+  collectRepos,
+  collectOrgTasks,
+  collectLogs,
+  expandOrgRepos,
+  issuesForUser,
+  pullsForUser,
+  tasksForUser,
+  renderPersonBrief,
+  renderProjectBrief,
+  buildProjectDigestText,
+  buildMemberDigestText,
+} from "./project-briefing.js";
+export type {
+  ProjectBriefingRequest,
+  ProjectBriefingResponse,
+  BriefingDeps,
+  BriefingDigestScheduler,
+  IssueLite,
+  PullLite,
+  TaskLite,
+  LogSnapshot,
+  RepoSnapshot,
+} from "./project-briefing.js";
+export {
+  getIdentityRegistry,
+  identityRegistryPath,
+  identityMembers,
+  findMemberByFeishuOpenId,
+  findMemberByWecomUserId,
+  findMemberByWebEmail,
+  findMemberByGiteaUsername,
+  findMemberByTimemUserId,
+  resolveMemberByName,
+  canonicalTimemUserId,
+  bindIdentityAxis,
+  unbindIdentityAxis,
+  findMemberByAxis,
+  axisIds,
+  persistIdentityRegistry,
+  scoreIdentityCandidates,
+  normalizeMember,
+} from "./identity-registry.js";
+export type {
+  IdentityMember,
+  IdentityRegistryFile,
+  IdentityAxis,
+  MatchSource,
+  IdentityCandidate,
+  ScoredCandidate,
+} from "./identity-registry.js";
+export { findRepoConfigFile } from "./registry-util.js";
+export {
+  getProjectRegistry,
+  projectRegistryPath,
+  findProjectByChatId,
+  findProjectByRepo,
+  resolveProjectRef,
+  projectRepoScope,
+  projectMemoryUserKey,
+  registryOrgs,
+} from "./project-registry.js";
+export type {
+  ProjectEntry,
+  ProjectRegistryFile,
+  ProjectLogSource,
+} from "./project-registry.js";
+export {
+  setBriefingActivitySink,
+  notifyRepoActivity,
+  notifyProjectActivity,
+  ACTIVITY_THROTTLE_MS,
+} from "./briefing-events.js";
 
 // agentd UDS 客户端原语（编排层共享，派发域与 timem-project-task 共用）
 export {
@@ -455,7 +539,7 @@ export const manifest: PluginManifest = {
   layer: LayerId.Orchestration,
   description: "编排规划层：任务规划占位 + 工作流引擎(流内记忆节点) + 插件安装工作流 + Codex 编码代理，消费认知层 LLM 与行动域 TiMEM 记忆",
   version: "0.3.0",
-  provides: [taskPlanningService, workflowEngineService, pluginInstallService, guidedDesignService, taskPipelineService, taskIssueSyncService],
+  provides: [taskPlanningService, workflowEngineService, pluginInstallService, guidedDesignService, taskPipelineService, taskIssueSyncService, projectBriefingService],
   consumes: [llmInferenceRef, workflowRunRef, { id: "@action/timem-memory", versionRange: "^1.0.0" }, { id: "@action/timem-memory-write", versionRange: "^1.0.0" }],
   preferredCarrier: CarrierKind.Thread,
   dependsOn: ["@cognitive/llm-inference", "@action/tool-execution"],
@@ -474,7 +558,7 @@ export const plugin: LayerPlugin = {
     return ok(undefined);
   },
   getProviders(): Provider[] {
-    return [taskPlanningProvider, workflowEngineProvider, pluginInstallProvider, guidedDesignProvider, taskPipelineProvider, taskIssueSyncProvider];
+    return [taskPlanningProvider, workflowEngineProvider, pluginInstallProvider, guidedDesignProvider, taskPipelineProvider, taskIssueSyncProvider, projectBriefingProvider];
   },
   getState(): PluginState {
     return pluginState;

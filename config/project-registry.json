@@ -1,0 +1,49 @@
+{
+  "$schema": "./project-registry.schema.md",
+  "version": 1,
+  "updated_at": "2026-09-30T00:00:00.000Z",
+  "notes": [
+    "本文件是「项目对齐」登记表 (single source of truth)：同一个项目在飞书群 / 飞书任务清单 / Gitea 仓库 / 运维日志中是同一个项目。",
+    "gitea_repos 用 org/仓库 full_name；gitea_orgs 表示整组织（briefing 时经 /orgs/{org}/repos 展开）。",
+    "feishu_chat_ids 是项目群 chatId（来源：仓库根 .env TASK_CHAT_REPO_MAP，2026-09-30 迁入）。",
+    "飞书任务清单不单独登记：沿用既有约定「一个 Gitea 组织 = 一个清单」（tasklistNameForRepo），任务标题 [org/repo#N] 前缀反查仓库归属。",
+    "log_sources 指向 log-monitor 守护进程的监控项 {host, p, s}（p=项目键，s=服务名）。",
+    "hire_web 目前只有运维日志、无 gitea/群，暂缓立项（2026-09-30 决策）。"
+  ],
+  "projects": [
+    {
+      "project_id": "nx-telecom",
+      "name": "NX 电信 OPC 平台",
+      "aliases": ["nx", "nx-telecom", "电信平台", "视频平台"],
+      "gitea_repos": [
+        "AIGility-Cloud-Innovation/nx-telecom-opc-platform",
+        "AIGility-Cloud-Innovation/nx-telecom-video-platform"
+      ],
+      "feishu_chat_ids": ["oc_83f3a273653e42eb44633b28f8db1391"],
+      "log_sources": []
+    },
+    {
+      "project_id": "timem-platform",
+      "name": "TiMEM 平台",
+      "aliases": ["timem", "太忆", "太忆平台"],
+      "gitea_repos": [
+        "TiMEM-AI/timem-platform-backend",
+        "TiMEM-AI/timem_frontend",
+        "TiMEM-AI/timem_console_frontend",
+        "TiMEM-AI/TiMEM-Space"
+      ],
+      "feishu_chat_ids": ["oc_50ad2634989246067471f7251b9853a8"],
+      "log_sources": [
+        { "host": "http://140.143.155.105:19434", "p": "timem-space_main", "s": "app" }
+      ]
+    },
+    {
+      "project_id": "timem-ai-org",
+      "name": "TiMEM-AI 组织全景",
+      "aliases": ["组织全景", "全部项目"],
+      "gitea_orgs": ["TiMEM-AI"],
+      "feishu_chat_ids": ["oc_4cb8ba33aa96ae5c40a24267c0188cf1"],
+      "log_sources": []
+    }
+  ]
+}

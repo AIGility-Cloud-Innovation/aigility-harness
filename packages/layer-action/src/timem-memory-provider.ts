@@ -30,6 +30,8 @@ export interface TimemMemorySearchRequest {
   user_id?: string | number;
   /** Agent 标识 (区分不同 agent) */
   agent_id?: string;
+  /** 域标签 (如项目 id; 项目小助理按项目聚合记忆时使用) */
+  domain?: string;
   /** 返回条数 */
   limit?: number;
 }
@@ -60,6 +62,8 @@ export interface TimemMemoryWriteRequest {
   user_id?: string | number;
   /** Agent 标识 */
   agent_id?: string;
+  /** 域标签 (如项目 id) */
+  domain?: string;
   /** 目标层 (默认 L2) */
   layer?: number;
 }
@@ -103,6 +107,7 @@ export function createTimemMemoryProvider(
         const data = await client.searchMemory({
           user_id: request.user_id ?? "anonymous",
           agent_id: request.agent_id,
+          domain: request.domain,
           query: request.query,
           limit: request.limit ?? 5,
         });
@@ -156,6 +161,7 @@ export function createTimemMemoryWriteProvider(
         const data = await client.addMemory({
           user_id: request.user_id ?? "anonymous",
           agent_id: request.agent_id,
+          domain: request.domain,
           content: request.content,
           layer: request.layer ?? 1,
         });

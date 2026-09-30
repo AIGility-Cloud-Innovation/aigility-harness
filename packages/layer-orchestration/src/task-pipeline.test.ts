@@ -1,4 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { writeFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   normalizeTitle,
   jaccard,
@@ -19,7 +22,10 @@ import {
   clearPendingCandidates,
   findPendingCandidateByNo,
   feishuFirstEnabled,
+  taskPipelineProvider,
+  setNotifySend,
 } from "./task-pipeline.js";
+import type { SeamContext } from "@aigility-harness/core";
 
 describe("normalizeTitle / jaccard", () => {
   it("归一化去标点压空白", () => {
@@ -319,5 +325,155 @@ describe("澄清候选 — 飞书任务 guid 携带与按编号跨群查", () =>
     // 只看不取：不消费队列
     expect(peekPendingCandidate("oc_a", item.no)).toBeDefined();
     expect(findPendingCandidateByNo(99999)).toBeUndefined();
+  });
+});
+
+// ── 工作流化 Provider：digest-only 与内置飞书先行两条路径 ─────────
+
+const DIGEST_ONLY_YAML = `
+workflow:
+  name: chat-briefing-digest-only
+  entry_point: collect
+  nodes:
+    collect: { type: function_node, function_ref: collect_batch }
+    summarize: { type: function_node, function_ref: summarize_per_chat }
+    dedupe: { type: function_node, function_ref: dedupe_candidates }
+    create_task: { type: function_node, function_ref: create_planned_tasks, enabled: false }
+    create_issue: { type: function_node, function_ref: create_gitea_issues, enabled: false }
+    digest: { type: function_node, function_ref: build_digest }
+    notify: { type: function_node, function_ref: broadcast_digest }
+  flow:
+    edges:
+      - { from: collect, to: summarize }
+      - { from: summarize, to: dedupe }
+      - { from: dedupe, to: create_task }
+      - { from: create_task, to: create_issue }
+      - { from: create_issue, to: digest }
+      - { from: digest, to: notify }
+      - { from: notify, to: __end__ }
+`;
+
+/** 按 capability id 路由的 stub ctx：LLM 判定一条候选，Gitea/飞书空响应 */
+function stubCtx(): SeamContext {
+  const calls: Array<{ id: string; req: Record<string, unknown> }> = [];
+  const ctx = {
+    call: async (ref: { id: string }, req: Record<string, unknown>) => {
+      calls.push({ id: ref.id, req });
+      switch (ref.id) {
+        case "@cognitive/llm-inference":
+          return {
+            ok: true,
+            value: {
+              text: '[{"title":"修复登录页白屏","priority":"P1","repo":"TiMEM-AI/TiMEM-Space","confident":true,"reason":"明确报告了线上bug"}]',
+            },
+          };
+        case "@action/gitea-api":
+          return { ok: true, value: { status: 200, data: [] } };
+        case "@action/feishu-api":
+          return { ok: false, error: "stub: 未配置" };
+        case "@orchestration/task-issue-sync":
+          return { ok: true, value: { response: "ok", taskGuid: "tg-stub" } };
+        default:
+          return { ok: false, error: `stub: 未实现 ${ref.id}` };
+      }
+    },
+    calls,
+  };
+  return ctx as unknown as SeamContext & { calls: typeof calls };
+}
+
+/** 等待 runOnStart 的异步 tick 跑完 */
+const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 60));
+
+describe("taskPipelineProvider — 数据面工作流", () => {
+  const sent: Array<{ chatId: string; text: string }> = [];
+  const realFeishuFirst = process.env["TASK_FEISHU_FIRST"];
+
+  setNotifySend(async (chatId, text) => {
+    sent.push({ chatId, text });
+  });
+
+  afterEach(() => {
+    clearBuffer();
+    clearPendingCandidates();
+    sent.length = 0;
+    if (realFeishuFirst === undefined) delete process.env["TASK_FEISHU_FIRST"];
+    else process.env["TASK_FEISHU_FIRST"] = realFeishuFirst;
+  });
+
+  it("workflowFile 建单节点 enabled: false → digest-only：只播报摘要不建单", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "tp-"));
+    const file = join(dir, "chat-briefing.yaml");
+    writeFileSync(file, DIGEST_ONLY_YAML, "utf-8");
+
+    collectMessage({
+      messageId: "m1",
+      chatId: "oc_src",
+      senderId: "ou_u",
+      text: "登录页白屏了， urgent 修一下",
+      ts: Date.now(),
+      chatType: "p2p",
+    });
+    const ctx = stubCtx();
+    const r = await taskPipelineProvider.execute(
+      { repos: ["TiMEM-AI/TiMEM-Space"], notifyChatId: "oc_robot", workflowFile: file },
+      ctx,
+    );
+    expect(r.ok).toBe(true);
+    await settle();
+    r.value!.stop();
+
+    expect(ctx.calls.map((c) => c.id)).not.toContain("@orchestration/task-issue-sync");
+    expect(sent.length).toBe(1);
+    expect(sent[0].chatId).toBe("oc_robot");
+    expect(sent[0].text).toContain("修复登录页白屏");
+    // 摘要带 LLM 判断（项目/执行人）+ 来源措辞 + 核验指引；
+    // 私聊来源候选池是全项目并集 → 归属按低置信展示（❓ 待定（疑似 …））
+    expect(sent[0].text).toContain("从私聊汇报里");
+    expect(sent[0].text).toContain("项目：❓ 待定（疑似 TiMEM-AI/TiMEM-Space）");
+    expect(sent[0].text).toContain("执行人：❓ 待定");
+    expect(sent[0].text).toContain("现阶段仅记录");
+    // 摘要条目入澄清队列（digest-only 记录模式），等「确认 N/任务归属 N/安排执行者 N」
+    // （编号是模块级自增的，从摘要文本反查本条的真实编号）
+    const noMatch = sent[0].text.match(/^#(\d+) \[P1\]/m);
+    expect(noMatch).toBeDefined();
+    const pending = noMatch ? findPendingCandidateByNo(Number(noMatch[1])) : undefined;
+    expect(pending?.fromDigest).toBe(true);
+    expect(pending?.suggestedRepo).toBe("TiMEM-AI/TiMEM-Space");
+  });
+
+  it("内置默认（TASK_FEISHU_FIRST 缺省开）→ 飞书先行建任务播报", async () => {
+    delete process.env["TASK_FEISHU_FIRST"];
+    collectMessage({ messageId: "m2", chatId: "oc_src", senderId: "ou_u", text: "登录页白屏了，修一下", ts: Date.now() });
+    const ctx = stubCtx();
+    const r = await taskPipelineProvider.execute(
+      { repos: ["TiMEM-AI/TiMEM-Space"], notifyChatId: "oc_robot" },
+      ctx,
+    );
+    expect(r.ok).toBe(true);
+    await settle();
+    r.value!.stop();
+
+    expect(ctx.calls.some((c) => c.id === "@orchestration/task-issue-sync" && c.req.mode === "create-planned")).toBe(true);
+    expect(sent.length).toBe(1);
+    expect(sent[0].text).toContain("已建飞书任务");
+    expect(sent[0].text).toContain("P 计划中");
+  });
+
+  it("YAML 校验失败 → 本轮跳过（不崩不误发）", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "tp-"));
+    const file = join(dir, "bad.yaml");
+    writeFileSync(file, "workflow:\n  name: bad\n  entry_point: ghost\n  nodes: {}\n", "utf-8");
+    collectMessage({ messageId: "m3", chatId: "oc_src", senderId: "ou_u", text: "随便聊聊", ts: Date.now() });
+    const ctx = stubCtx();
+    const r = await taskPipelineProvider.execute(
+      { repos: ["TiMEM-AI/TiMEM-Space"], notifyChatId: "oc_robot", workflowFile: file },
+      ctx,
+    );
+    expect(r.ok).toBe(true);
+    await settle();
+    r.value!.stop();
+    expect(sent.length).toBe(0);
+    expect(ctx.calls.some((c) => c.id === "@cognitive/llm-inference")).toBe(false);
   });
 });

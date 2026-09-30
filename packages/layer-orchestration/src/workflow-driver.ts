@@ -23,6 +23,12 @@ import yaml from "js-yaml";
 export interface WorkflowNodeConfig {
   type?: string;
   description?: string;
+  /**
+   * 节点开关 (TS 驱动器扩展, Python 侧忽略未知字段): false = 跳过执行、
+   * 沿普通出边直通 (旁路)。用于「编辑 YAML 控制功能」——如暂不建单就把
+   * create_issue 节点设 enabled: false, 图结构不动。缺省视为启用。
+   */
+  enabled?: boolean;
   /** llm_node: 内联提示词 (Python 侧 _make_llm_node 同名兼容) */
   system_prompt?: string;
   /** llm_node: 提示词引用, 格式 module.prompt_name 或直接文本 */
@@ -86,6 +92,8 @@ export interface WorkflowRunResult<S> {
   ok: boolean;
   /** 实际走过的节点 ID (不含 __end__) */
   path: string[];
+  /** 因 enabled: false 被旁路的节点 ID */
+  skipped: string[];
   /** 走完后 (或出错时) 的最终 state */
   state: S;
   errors: string[];
@@ -164,6 +172,13 @@ export class YamlWorkflow<S = Record<string, unknown>> {
       errors.push(`entry_point「${this.doc.entry_point}」不在 nodes 中`);
     }
     for (const [id, cfg] of Object.entries(this.doc.nodes)) {
+      if (cfg.enabled === false) {
+        // 禁用节点不需要实现; 但必须能旁路——没有普通出边时禁用即等于终点
+        if (!this.normalOut.has(id)) {
+          warnings.push(`节点「${id}」enabled: false 且无普通出边, 禁用时将视为终点`);
+        }
+        continue;
+      }
       const fnKey = (cfg.function_ref as string | undefined) ?? id;
       if (!this.nodeFns.has(fnKey) && !this.nodeFns.has(id)) {
         warnings.push(`节点「${id}」未注册实现 (function_ref=${String(cfg.function_ref ?? id)})`);
@@ -205,6 +220,7 @@ export class YamlWorkflow<S = Record<string, unknown>> {
       if (p && typeof p === "object") Object.assign(state as object, p);
     };
     const path: string[] = [];
+    const skipped: string[] = [];
     const errors: string[] = [];
 
     let current = this.doc.entry_point;
@@ -212,24 +228,33 @@ export class YamlWorkflow<S = Record<string, unknown>> {
       const cfg = this.doc.nodes[current];
       if (!cfg) {
         errors.push(`节点「${current}」未在 YAML 中声明`);
-        return { ok: false, path, state, errors };
+        return { ok: false, path, skipped, state, errors };
+      }
+      // enabled: false = 旁路: 不执行、不要求已注册实现, 沿普通出边直通;
+      // 无普通出边时视为终点 (validate 有对应 warning 提示)
+      if (cfg.enabled === false) {
+        skipped.push(current);
+        const next = this.normalOut.get(current);
+        if (!next || next === END) return { ok: true, path, skipped, state, errors };
+        current = next;
+        continue;
       }
       const fn = this.resolveNodeFn(current, cfg);
       if (!fn) {
         errors.push(`节点「${current}」没有可执行实现 (未注册)`);
-        return { ok: false, path, state, errors };
+        return { ok: false, path, skipped, state, errors };
       }
       path.push(current);
       try {
         patch(await fn(state, cfg));
       } catch (e) {
         errors.push(`节点「${current}」执行失败: ${String((e as Error)?.message ?? e)}`);
-        return { ok: false, path, state, errors };
+        return { ok: false, path, skipped, state, errors };
       }
 
       const next = this.normalOut.get(current);
       if (next) {
-        if (next === END) return { ok: true, path, state, errors };
+        if (next === END) return { ok: true, path, skipped, state, errors };
         current = next;
         continue;
       }
@@ -238,28 +263,28 @@ export class YamlWorkflow<S = Record<string, unknown>> {
         const condFn = this.conditionFns.get(cond.condition);
         if (!condFn) {
           errors.push(`条件函数「${cond.condition}」未注册`);
-          return { ok: false, path, state, errors };
+          return { ok: false, path, skipped, state, errors };
         }
         let key: string;
         try {
           key = String(await condFn(state));
         } catch (e) {
           errors.push(`条件函数「${cond.condition}」执行失败: ${String((e as Error)?.message ?? e)}`);
-          return { ok: false, path, state, errors };
+          return { ok: false, path, skipped, state, errors };
         }
         const branch = cond.branches.find((b) => b.condition === key);
         if (!branch) {
           errors.push(`条件边「${current}」分支未命中: 条件函数返回「${key}」, 可选分支 [${cond.branches.map((b) => b.condition).join(", ")}]`);
-          return { ok: false, path, state, errors };
+          return { ok: false, path, skipped, state, errors };
         }
-        if (branch.to === END) return { ok: true, path, state, errors };
+        if (branch.to === END) return { ok: true, path, skipped, state, errors };
         current = branch.to;
         continue;
       }
       // 无出边: 汇点, 视为正常结束 (对齐 LangGraph 中孤立终点节点的直觉)
-      return { ok: true, path, state, errors };
+      return { ok: true, path, skipped, state, errors };
     }
     errors.push(`超过最大步数 ${maxSteps}, 疑似环路 (path=${path.join("→")})`);
-    return { ok: false, path, state, errors };
+    return { ok: false, path, skipped, state, errors };
   }
 }

@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import {
-  acquireSingletonLock,
-  holderAlive,
-} from "./singleton.js";
+  acquireBotLock,
+  botHolderAlive,
+} from "@aigility-harness/layer-infrastructure";
 
 function tmpLock(): string {
   return `/tmp/aigility-test-lock-${process.pid}-${Math.random().toString(36).slice(2)}`;
@@ -24,7 +24,12 @@ function deadPid(): number {
   return r.pid as number;
 }
 
-describe("singleton lock", () => {
+/** 本包机器人锁的获取入口（实现已泛化到 layer-infrastructure/bot-singleton，此处按真实参数组合回归） */
+function acquireSingletonLock(lockPath = "/tmp/aigility-feishu-task-loop.lock") {
+  return acquireBotLock("feishu-task-loop", { lockPath, cwdMarker: "feishu-task-loop" });
+}
+
+describe("singleton lock（共享实现 · feishu-task-loop 参数组合）", () => {
   it("acquire 成功：锁文件写入本进程 PID", () => {
     const path = tmpLock();
     const lock = acquireSingletonLock(path);
@@ -59,7 +64,7 @@ describe("singleton lock", () => {
   it("僵锁自愈：持有者已死 → 自动接管", () => {
     const path = tmpLock();
     const pid = deadPid();
-    expect(holderAlive(pid)).toBe(false);
+    expect(botHolderAlive(pid, "feishu-task-loop")).toBe(false);
     writeFileSync(path, String(pid));
     const lock = acquireSingletonLock(path);
     expect(lock).not.toBeNull();

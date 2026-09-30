@@ -9,11 +9,14 @@
  *     → D3 @action/gitea-api（git.aigility.cloud 工单，公共 DNS 绕行 + token 认证）
  *     → 回复（占位消息原地编辑）
  *
- * 任务流水线（飞书先行，TASK_FEISHU_FIRST=1 默认开启）：
- *   群聊汇总识别出任务 → 先建飞书任务(规划中：org 清单「P 计划中」分组)
- *     → 群内确认归属（「任务归属 编号 @仓库」改写任务标题 [repo] 前缀）
- *     → 确认执行者（「安排执行者 编号 @姓名」写任务描述）
- *     → 归属+执行者齐备后由 plan-gate 回填创建 Gitea 工单（syncIssueToTask 回写 #N）
+ * 任务流水线（数据面工作流化）：
+ *   监听缓冲一批消息 → YAML 工作流执行（examples/feishu-task-loop/workflows/
+ *   chat-briefing.yaml，每次触发前重读，改文件即生效）：
+ *     collect → summarize(分群 LLM 判定) → dedupe(查重)
+ *       → create_task(建飞书任务, enabled 开关) → create_issue(建工单, enabled 开关)
+ *       → digest(组装播报) → notify(发 TASK_NOTIFY_CHAT_ID「机器人群」)
+ *   现阶段（2026-09-30）两个建单节点 enabled: false = 只整理发摘要，不建任务/工单。
+ *   状态队列扫描（P 加工→D 派发→建工单回填）用 TASK_STATE_SCAN=0 整体停用。
  *
  * 定位：项目小助理只【管理协调】飞书任务与 Gitea 工单，不执行任务的具体工作。
  *
@@ -52,14 +55,13 @@ import {
   setDispatchNotifySend,
   taskIssueSyncProvider,
   taskPipelineProvider,
+  projectBriefingProvider,
+  startBriefingDigestScheduler,
+  setBriefingActivitySink,
 } from "@aigility-harness/layer-orchestration";
 import { loadEnv, REPO_ROOT } from "./env.js";
 import { isAbsolute, resolve as resolvePath } from "node:path";
-import {
-  acquireSingletonLock,
-  defaultLockPath,
-  type SingletonLock,
-} from "./singleton.js";
+import { acquireBotLock, botLockPath, type BotSingletonLock } from "@aigility-harness/layer-infrastructure";
 
 /** 网关机器人 AppID → 任务管理人格 */
 const FEISHU_AGENT_ROUTES: Record<string, string> = {
@@ -70,15 +72,19 @@ async function main(): Promise<void> {
   console.log("=== 飞书任务管理闭环（项目小助理）===\n");
 
   // 单实例守护：确保同一时刻只有一个运行实例连接飞书（防多实例抢事件）
-  const lock: SingletonLock | null = acquireSingletonLock();
+  // （实现已泛化为 layer-infrastructure 共享 bot-singleton；TASK_LOOP_LOCK_PATH 环境变量仍可覆盖锁路径）
+  const lock: BotSingletonLock | null = acquireBotLock("feishu-task-loop", {
+    lockPath: process.env["TASK_LOOP_LOCK_PATH"],
+  });
+  const lockPath = process.env["TASK_LOOP_LOCK_PATH"] ?? botLockPath("feishu-task-loop");
   if (!lock) {
     console.error(
-      `❌ 已有运行中的实例（锁: ${defaultLockPath()}），拒绝重复启动。\n` +
+      `❌ 已有运行中的实例（锁: ${lockPath}），拒绝重复启动。\n` +
         `   如确认无实例仍在运行，删除锁文件后重试。`,
     );
     process.exit(1);
   }
-  console.log(`🔒 单实例锁已持有: ${defaultLockPath()} (pid=${process.pid})`);
+  console.log(`🔒 单实例锁已持有: ${lockPath} (pid=${process.pid})`);
 
   loadEnv();
   // 相对路径的 token store 以仓库根为基准（pnpm --filter 的 cwd 在子包目录）
@@ -123,7 +129,7 @@ async function main(): Promise<void> {
   // 2. @action/feishu-api 已由 action 插件在 bootstrap 时注册进 registry（ctx.call 按服务 id 解析）
 
   // 3. 启动飞书入口 → @persona/feishu-task-assistant（@bot 交互）
-  //    同时开 passive 监听：群聊免@消息喂给任务流水线做汇总
+  //    同时开 passive 监听：群聊免@消息（+可选私聊，TASK_LISTEN_P2P）喂给任务流水线做汇总
   const notifyChatId = process.env["TASK_NOTIFY_CHAT_ID"] ?? "";
   const repos = (process.env["TASK_REPOS"] ?? "TiMEM-AI/TiMEM-Space")
     .split(",")
@@ -146,6 +152,8 @@ async function main(): Promise<void> {
       appSecret,
       agentRoutes: FEISHU_AGENT_ROUTES,
       perceptionId: persona,
+      // 摘要播报群（机器人群）免@指令：回复「确认 N」等核验指令不用 @机器人
+      mentionExemptChatIds: notifyChatId ? [notifyChatId] : undefined,
       passive: {
         enabled: true,
         chatIds: listenChatIds.length > 0 ? listenChatIds : undefined,
@@ -154,6 +162,11 @@ async function main(): Promise<void> {
           .split(",")
           .map((s) => s.trim())
           .filter(Boolean),
+        // 私聊收集（TASK_LISTEN_P2P=1 开启）：私聊报缺陷也进汇总缓冲 →
+        // 机器人群摘要；私聊同时仍走指令交互链路（两路并行不冲突）
+        collectP2p: !["0", "false", "off"].includes(
+          (process.env["TASK_LISTEN_P2P"] ?? "1").toLowerCase(),
+        ),
         onCollect: (m) => collectMessage(m),
       },
     },
@@ -167,12 +180,21 @@ async function main(): Promise<void> {
   setNotifySend(start.value.send);
 
   // 4. 启动任务流水线（定时：分群汇总判定 → 归属/澄清 → 去重建工单 → PR 提醒）
+  // 数据面工作流：一批消息的处理过程与功能开关（建单节点 enabled）都在 YAML 里，
+  // 每次触发前重新读取——编辑 workflows/chat-briefing.yaml 即改功能，无需重启
+  const workflowEnv = process.env["TASK_WORKFLOW_FILE"];
+  const workflowFile = workflowEnv
+    ? isAbsolute(workflowEnv)
+      ? workflowEnv
+      : resolvePath(REPO_ROOT, workflowEnv)
+    : resolvePath(REPO_ROOT, "examples/feishu-task-loop/workflows/chat-briefing.yaml");
   const pipeline = await taskPipelineProvider.execute(
     {
       repos,
       chatRepoMap,
       intervalMs,
       notifyChatId: notifyChatId || undefined,
+      workflowFile,
     },
     ctx,
   );
@@ -182,7 +204,13 @@ async function main(): Promise<void> {
   }
 
   // 5. 启动状态队列扫描（P 加工 + D 派发 + 终态回写；与流水线同节奏）
+  //    TASK_STATE_SCAN=0 整体停用：现阶段 digest-only 不建工单，同时避免
+  //    存量 P 任务被补齐归属+执行者后由 plan-gate 自动创建 Gitea 工单
   setDispatchNotifySend(start.value.send);
+  let scanTimer: ReturnType<typeof setInterval> | null = null;
+  if (["0", "false", "off"].includes((process.env["TASK_STATE_SCAN"] ?? "").toLowerCase())) {
+    console.log("   状态队列: 已停用 (TASK_STATE_SCAN=0，现阶段不派发/不回填建工单)");
+  } else {
   // 任务归属涉及的 org → 各自的飞书任务清单（org 名 = 清单名），逐清单跑状态闸门。
   // 显式配了 FEISHU_TASKLIST_NAME 则维持旧行为只扫一个清单。
   const orgs = new Set<string>();
@@ -193,7 +221,6 @@ async function main(): Promise<void> {
   const tasklistNames = process.env["FEISHU_TASKLIST_NAME"]
     ? [process.env["FEISHU_TASKLIST_NAME"]]
     : [...orgs];
-  let scanTimer: ReturnType<typeof setInterval> | null = null;
   const scanTick = async (): Promise<void> => {
     try {
       const r = await taskIssueSyncProvider.execute(
@@ -210,16 +237,38 @@ async function main(): Promise<void> {
   await scanTick();
   scanTimer = setInterval(() => void scanTick(), intervalMs);
   console.log(`   状态队列: P 加工（去重+目标核对）→ D 派发（15min 闸门）→ 终态回写 (interval=${intervalMs}ms, tasklists=${tasklistNames.join(",")})`);
+  }
+
+  // 6. 记忆沉淀（timem）：每日定时快照 + 事件补充（建单/工单关闭等显著变化防抖写入）
+  //    身份/项目对齐来自 config/ 两张登记表（平台「身份对齐」页可在线维护，自动生效）
+  const briefingCtx = kernel.createContext("feishu-task-loop", LayerId.Orchestration);
+  setBriefingActivitySink((projectKey, hint) => {
+    void projectBriefingProvider
+      .execute({ mode: "write-digest", trigger: "event", project: projectKey, note: hint }, briefingCtx)
+      .then((r) => {
+        if (r.ok) console.log(`[briefing] 事件快照: ${(r.value?.response ?? "").split("\n")[0]}`);
+        else console.error(`[briefing] 事件快照失败: ${r.error}`);
+      })
+      .catch((e) => console.error(`[briefing] 事件快照异常: ${String(e)}`));
+  });
+  const digestScheduler = startBriefingDigestScheduler({
+    ctx: briefingCtx,
+    execute: (req, c) => projectBriefingProvider.execute(req, c),
+  });
+  console.log("   记忆沉淀: 每日定时快照 + 事件补充 → timem（BRIEFING_DIGEST_TIME 可改触发时刻）");
+
   console.log(`\n✅ 飞书机器人已连接 (appId=${appId}) → ${persona}`);
   console.log("   飞书里 @项目小助理：「建任务：xxx」「我的任务」「完成 xxx」");
   console.log("   Gitea 工单：「建工单 @仓库：xxx」「工单列表」「关闭工单 #n」「项目概览」");
   console.log("   群归属：「任务归属 编号 @仓库」确认澄清，「跳过任务 编号」丢弃");
-  console.log(`   流水线: 分群监听汇总 → 归属/澄清 → 建工单 → PR 提醒 (interval=${intervalMs}ms, repos=${repos.join(",")}, 映射群=${Object.keys(chatRepoMap).length})`);
+  console.log(`   流水线: 监听群 → 数据面工作流(workflows/chat-briefing.yaml, 节点 enabled 即功能开关) → 播报${notifyChatId ? "机器人群" : "回来源群"} (interval=${intervalMs}ms, repos=${repos.join(",")}, 映射群=${Object.keys(chatRepoMap).length}${["0", "false", "off"].includes((process.env["TASK_LISTEN_P2P"] ?? "1").toLowerCase()) ? "" : ", 私聊收集=开"})`);
   if (!notifyChatId) console.log("   ⚠️ 未配置 TASK_NOTIFY_CHAT_ID，播报与 PR 提醒已关闭");
 
   const stop = async () => {
     pipeline.value.stop();
     if (scanTimer) clearInterval(scanTimer);
+    digestScheduler?.stop();
+    setBriefingActivitySink(undefined);
     await start.value.stop();
     await shutdown(kernel, scheduler);
     lock.release(); // 释放单实例锁（kill -9 无法走这里，由下次启动僵锁自愈接管）

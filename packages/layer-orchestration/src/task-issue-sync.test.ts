@@ -163,12 +163,17 @@ import {
 describe("澄清归属意图路由", () => {
   afterEach(() => clearPendingCandidates());
 
-  it("私聊（无 session_id）拒绝认领", async () => {
+  it("私聊（无 session_id）拒绝认领（条目存在时才轮到会话校验）", async () => {
+    const item = addPendingCandidate(
+      "oc_a",
+      { title: "t", priority: "P1", fromDigest: true, suggestedRepo: "org/r1" },
+      ["org/r1"],
+    );
     const ctx = mockCtx(() => {
       throw new Error("不应发起任何 API 调用");
     });
     const r = await taskIssueSyncProvider.execute(
-      { mode: "intent", intent: { kind: "pending-assign", ref: "1", repo: "video" } },
+      { mode: "intent", intent: { kind: "pending-assign", ref: String(item.no), repo: "org/r1" } },
       ctx,
     );
     if (!r.ok) throw new Error("execute failed");
@@ -184,21 +189,29 @@ describe("澄清归属意图路由", () => {
       ctx,
     );
     if (!r.ok) throw new Error("execute failed");
-    expect(r.value.response).toContain("没有找到本群待归属任务 #9");
+    expect(r.value.response).toContain("没有找到待核验任务 #9");
   });
 
-  it("只能在识别它的群里认领：B 群认领 A 群候选 → 没有找到", async () => {
-    const item = addPendingCandidate("oc_a", { title: "t", priority: "P1" }, ["org/r1"]);
+  it("认领放宽：异群回复可认领；摘要条目（fromDigest）走记录模式不建单", async () => {
+    const item = addPendingCandidate(
+      "oc_a",
+      { title: "修白屏", priority: "P1", fromDigest: true, suggestedRepo: "org/r1" },
+      ["org/r1"],
+    );
     const ctx = mockCtx(() => {
-      throw new Error("不应发起任何 API 调用");
+      throw new Error("不应发起任何 API 调用（记录模式零调用）");
     });
     const r = await taskIssueSyncProvider.execute(
       { mode: "intent", intent: { kind: "pending-assign", ref: String(item.no), repo: "org/r1" }, session_id: "oc_b" },
       ctx,
     );
     if (!r.ok) throw new Error("execute failed");
-    expect(r.value.response).toContain("没有找到本群待归属任务");
-    expect(peekPendingCandidate("oc_a", item.no)).toBeDefined();
+    expect(r.value.response).toContain("已记录");
+    expect(r.value.response).toContain("org/r1");
+    // 记录模式保留队列项（等「确认 N」核验），归属写回候选
+    const kept = peekPendingCandidate("oc_a", item.no);
+    expect(kept).toBeDefined();
+    expect(kept?.assignedRepo).toBe("org/r1");
   });
 
   it("仓库短名解析失败 → 保留队列项可重试", async () => {
@@ -212,7 +225,7 @@ describe("澄清归属意图路由", () => {
       ctx,
     );
     if (!r.ok) throw new Error("execute failed");
-    expect(r.value.response).toContain("解析失败");
+    expect(r.value.response).toContain("解析不出项目/仓库");
     expect(peekPendingCandidate("oc_a", item.no)).toBeDefined();
   });
 
@@ -247,7 +260,7 @@ describe("澄清归属意图路由", () => {
     expect(peekPendingCandidate("oc_a", item.no)).toBeUndefined();
   });
 
-  it("跳过任务 N：跨群不误删，本群丢弃", async () => {
+  it("跳过任务 N：认领放宽，异群回复也能丢弃（摘要统一播机器人群）", async () => {
     const item = addPendingCandidate("oc_a", { title: "t", priority: "P1" }, ["org/r1"]);
     const ctx = mockCtx(() => {
       throw new Error("不应发起任何 API 调用");
@@ -257,13 +270,7 @@ describe("澄清归属意图路由", () => {
       ctx,
     );
     if (!r1.ok) throw new Error("execute failed");
-    expect(r1.value.response).toContain("没有找到");
-    const r2 = await taskIssueSyncProvider.execute(
-      { mode: "intent", intent: { kind: "pending-skip", ref: String(item.no) }, session_id: "oc_a" },
-      ctx,
-    );
-    if (!r2.ok) throw new Error("execute failed");
-    expect(r2.value.response).toContain("已丢弃");
+    expect(r1.value.response).toContain("已丢弃");
     expect(peekPendingCandidate("oc_a", item.no)).toBeUndefined();
   });
 });
@@ -427,6 +434,14 @@ describe("安排执行者（飞书先行）— 按澄清编号定位", () => {
   afterEach(() => clearPendingCandidates());
 
   it("编号命中候选 → 按任务 guid 写描述「执行者：X」，不评论工单", async () => {
+    // 隔离真实人员登记表（测试机 config/ 里有真成员，会让「张三」被别名反问拦截）
+    const { writeFileSync, mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const emptyReg = join(mkdtempSync(join(tmpdir(), "reg-")), "team.json");
+    writeFileSync(emptyReg, JSON.stringify({ version: 2, members: [] }), "utf-8");
+    const savedReg = process.env.TEAM_IDENTITY_REGISTRY;
+    process.env.TEAM_IDENTITY_REGISTRY = emptyReg;
     const item = addPendingCandidate("oc_a", { title: "修白屏", priority: "P1", feishuTaskGuid: "tg-3" }, ["AIGility/x"]);
     const calls: string[] = [];
     const ctx = mockCtx((id, req) => {
@@ -454,6 +469,8 @@ describe("安排执行者（飞书先行）— 按澄清编号定位", () => {
     expect(r.value.response).toContain("张三");
     expect(calls.some((c) => c.includes("执行者：张三"))).toBe(true);
     expect(calls.some((c) => c.startsWith("gitea POST"))).toBe(false); // 未建单不评论工单
+    if (savedReg === undefined) delete process.env.TEAM_IDENTITY_REGISTRY;
+    else process.env.TEAM_IDENTITY_REGISTRY = savedReg;
   });
 });
 

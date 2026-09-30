@@ -238,6 +238,7 @@ class EnvTimemClient implements TimemMemoryClientLike {
         query: req.query,
         user_id: req.user_id ?? "anonymous",
         agent_id: req.agent_id,
+        domain: req.domain,
         limit: req.limit ?? 5,
       });
     } catch (primaryErr) {
@@ -248,6 +249,7 @@ class EnvTimemClient implements TimemMemoryClientLike {
         body: JSON.stringify({
           user_id: req.user_id,
           agent_id: req.agent_id,
+          domain: req.domain,
           query_text: req.query,
           limit: req.limit ?? 5,
         }),
