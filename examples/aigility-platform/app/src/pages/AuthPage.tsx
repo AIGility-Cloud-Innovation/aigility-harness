@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { roles, rolePermissions, users, moduleRegistry } from '../mock/data'
 import { ShieldCheck, Users, KeyRound, PlusCircle, Radio } from 'lucide-react'
-import { fetchTeam, fetchAudit, type TeamMember, type AuditEntry } from '../lib/harness'
+import { fetchTeam, fetchAudit, fetchNavPrefs, saveModuleNav, type TeamMember, type AuditEntry, type NavPref } from '../lib/harness'
 
 const systemModules = [
   ...moduleRegistry.map(m => ({ id: m.id, name: m.name })),
@@ -19,7 +19,7 @@ const permStyle: Record<string, string> = {
 const permLabel: Record<string, string> = { manage: '管理', use: '使用', view: '只读', '': '—' }
 const permOrder = ['', 'view', 'use', 'manage']
 
-export default function AuthPage() {
+export default function AuthPage({ viewerIsAdmin = false }: { /** 当前登录者是否管理员（决定能否调整成员导航布局） */ viewerIsAdmin?: boolean } = {}) {
   const [perms, setPerms] = useState(rolePermissions)
   const [role, setRole] = useState('r-admin')
 
@@ -37,7 +37,7 @@ export default function AuthPage() {
       </div>
 
       {/* 平台成员（真）+ 审计日志（真） */}
-      <RealTeamAudit />
+      <RealTeamAudit viewerIsAdmin={viewerIsAdmin} />
 
       {/* 角色卡片 */}
       <div className="flex items-center gap-2">
@@ -137,14 +137,49 @@ export default function AuthPage() {
 
 // ── 平台成员（真）+ 审计日志（真）：AppBase users × app_members + audit_log ──
 
-function RealTeamAudit() {
+function RealTeamAudit({ viewerIsAdmin }: { viewerIsAdmin: boolean }) {
   const [members, setMembers] = useState<TeamMember[]>([])
   const [audit, setAudit] = useState<AuditEntry[]>([])
+  const [navPrefs, setNavPrefs] = useState<NavPref[]>([])
+  const [navErr, setNavErr] = useState('')
+  const [navBusy, setNavBusy] = useState('')
+
+  const loadNavPrefs = () => {
+    if (!viewerIsAdmin) return
+    fetchNavPrefs().then(p => { setNavPrefs(p); setNavErr('') }).catch(e => setNavErr(String((e as Error).message ?? e)))
+  }
 
   useEffect(() => {
     fetchTeam().then(setMembers).catch(() => {})
     fetchAudit().then(setAudit).catch(() => {})
-  }, [])
+    loadNavPrefs()
+  }, [viewerIsAdmin])
+
+  /** 管理员代成员切换某模块的导航可见性（乐观更新 + 失败回读） */
+  const toggleMemberNav = async (pref: NavPref, moduleId: string) => {
+    const nextHidden = !pref.navHidden[moduleId]
+    const key = `${pref.userId}:${moduleId}`
+    setNavBusy(key)
+    setNavPrefs(ps => ps.map(p => p.userId === pref.userId
+      ? { ...p, navHidden: { ...p.navHidden, [moduleId]: nextHidden } } : p))
+    try {
+      await saveModuleNav(moduleId, nextHidden, pref.userId)
+    } catch (e) {
+      setNavErr(String((e as Error).message ?? e))
+      loadNavPrefs()
+    } finally {
+      setNavBusy('')
+    }
+  }
+
+  /** 成员偏好里出现过的模块 id（合并默认隐藏集，去重后固定顺序） */
+  const navModuleIds = (() => {
+    const ids: string[] = []
+    for (const p of navPrefs) for (const id of Object.keys(p.navHidden)) if (!ids.includes(id)) ids.push(id)
+    if (!ids.includes('team-memory')) ids.push('team-memory')
+    if (!ids.includes('log-monitor')) ids.push('log-monitor')
+    return ids
+  })()
 
   return (
     <div className="grid lg:grid-cols-2 gap-4">
@@ -166,6 +201,38 @@ function RealTeamAudit() {
           ))}
           {members.length === 0 && <div className="text-xs text-slate-400">加载中…</div>}
         </div>
+        {/* 导航布局管理（管理员限定）：逐成员切换各模块「是否隐藏于导航」，服务端落库 + 审计留痕 */}
+        {viewerIsAdmin && (
+          <div className="mt-3 pt-3 border-t border-slate-100">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-medium text-slate-600">成员导航布局（管理员可代为调整）</span>
+              <span className="text-[10px] text-slate-400">普通用户不可自行修改布局</span>
+            </div>
+            {navErr && <div className="text-[11px] text-amber-600 mb-1.5">{navErr}</div>}
+            <div className="space-y-1.5 max-h-56 overflow-y-auto">
+              {navPrefs.map(p => (
+                <div key={p.userId} className="flex items-center gap-2 text-xs rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2 flex-wrap">
+                  <span className="text-slate-700 truncate max-w-45 shrink-0" title={p.email}>{p.email}</span>
+                  {p.isAdmin && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 shrink-0">管理员</span>}
+                  <span className="ml-auto flex items-center gap-1 flex-wrap">
+                    {navModuleIds.map(id => {
+                      const hidden = !!p.navHidden[id]
+                      const busy = navBusy === `${p.userId}:${id}`
+                      return (
+                        <button key={id} disabled={busy} onClick={() => toggleMemberNav(p, id)}
+                          title={hidden ? '点击固定到导航（代该成员）' : '点击从导航移除（代该成员）'}
+                          className={`px-1.5 py-0.5 rounded-full border text-[10px] transition ${hidden ? 'border-slate-200 text-slate-400 hover:border-blue-200 hover:text-blue-500' : 'border-blue-200 bg-blue-50 text-blue-600'} ${busy ? 'opacity-50 cursor-wait' : ''}`}>
+                          {id}
+                        </button>
+                      )
+                    })}
+                  </span>
+                </div>
+              ))}
+              {navPrefs.length === 0 && !navErr && <div className="text-xs text-slate-400">加载中…</div>}
+            </div>
+          </div>
+        )}
       </div>
       <div className="bg-white rounded-xl border border-emerald-200 ring-1 ring-emerald-100/60 p-5">
         <div className="flex items-center gap-2 mb-3">

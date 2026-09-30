@@ -455,6 +455,7 @@ export async function fetchAudit(): Promise<AuditEntry[]> {
 }
 
 export interface TeamMember {
+  userId: string
   email: string
   isAdmin: boolean
   createdAt?: string
@@ -770,4 +771,530 @@ export async function fetchTaskLoopBoard(): Promise<{
   return authJsonFetch<{ ok: boolean; repos: string[]; issues: TaskLoopBoardIssue[]; errors?: string[] }>(
     '/api/aigility/task-loop/board',
   )
+}
+
+// ── 团队记忆总结（team-memory-console 收编）────────────────────
+
+export type TeamMemoryJobKind = 'report' | 'morning'
+export type TeamMemoryRunStatus = 'ok' | 'failed' | 'timeout' | 'running'
+
+export interface TeamMemoryRun {
+  kind: TeamMemoryJobKind
+  startedAt: string
+  finishedAt?: string
+  status: TeamMemoryRunStatus
+  exitCode?: number
+  trigger: 'manual' | 'schedule'
+  error?: string
+  outputTail?: string
+}
+
+export interface TeamMemoryLogTail {
+  file: string
+  lines: string[]
+}
+
+export interface TeamMemoryConfig {
+  enabled: boolean
+  dailyReportTime: string
+  morningReportTime: string
+  timemApiKey?: string
+  timemApiKeyMasked?: string
+  timemBaseUrl?: string
+  feishuAppId?: string
+  feishuAppSecret?: string
+  feishuAppSecretMasked?: string
+  reportChatId?: string
+  reportChatName?: string
+  litellmUrl?: string
+  litellmKey?: string
+  litellmKeyMasked?: string
+  summaryModel?: string
+  env: Record<string, string>
+}
+
+export interface TeamMemoryStatus {
+  schedulerRunning: boolean
+  enabled: boolean
+  lastTickAt: string | null
+  nextRun: { kind: TeamMemoryJobKind; at: string } | null
+  runs: TeamMemoryRun[]
+  config: TeamMemoryConfig
+  logs: { stdout: TeamMemoryLogTail; stderr: TeamMemoryLogTail }
+}
+
+export async function fetchTeamMemoryStatus(tail = 30): Promise<TeamMemoryStatus> {
+  const j = await authJsonFetch<{ ok: boolean; status: TeamMemoryStatus }>(`/api/aigility/team-memory/status?tail=${tail}`)
+  return j.status
+}
+
+export async function fetchTeamMemoryConfig(): Promise<TeamMemoryConfig> {
+  const j = await authJsonFetch<{ ok: boolean; config: TeamMemoryConfig }>('/api/aigility/team-memory/config')
+  return j.config
+}
+
+/** 保存配置（掩码/留空 = 不修改已保存 Secret；调度时刻保存即生效） */
+export async function updateTeamMemoryConfig(config: Partial<TeamMemoryConfig>): Promise<TeamMemoryConfig> {
+  const j = await authJsonFetch<{ ok: boolean; config: TeamMemoryConfig }>(
+    '/api/aigility/team-memory/config',
+    { method: 'PUT', body: JSON.stringify(config) },
+  )
+  return j.config
+}
+
+/** 立即生成并推送一次日报/晨报（同步等待，最长 5 分钟） */
+export async function runTeamMemoryJob(kind: TeamMemoryJobKind): Promise<{
+  ok: boolean
+  status: TeamMemoryRunStatus
+  message: string
+  exitCode?: number
+  stdoutTail: string
+  stderrTail: string
+}> {
+  return authJsonFetch('/api/aigility/team-memory/run', { method: 'POST', body: JSON.stringify({ kind }) })
+}
+
+export async function fetchTeamMemoryLogs(tail = 200): Promise<{ stdout: TeamMemoryLogTail; stderr: TeamMemoryLogTail }> {
+  const j = await authJsonFetch<{ ok: boolean; stdout: TeamMemoryLogTail; stderr: TeamMemoryLogTail }>(
+    `/api/aigility/team-memory/logs?tail=${tail}`,
+  )
+  return { stdout: j.stdout, stderr: j.stderr }
+}
+
+export async function fetchTeamMemoryChats(credentials?: { appId: string; appSecret: string }): Promise<{
+  ok: boolean
+  chats: FeishuChatItem[]
+  error?: string
+}> {
+  return authJsonFetch<{ ok: boolean; chats: FeishuChatItem[]; error?: string }>(
+    '/api/aigility/team-memory/feishu/chats',
+    { method: 'POST', body: JSON.stringify(credentials ?? {}) },
+  )
+}
+
+// ── 模块装配（真 · app_modules/app_module_presets，装配底座）────────────
+
+export interface ModulePresetInfo {
+  id: string
+  name: string
+  enabledIds: string[]
+  createdBy?: string
+  createdAt?: string
+}
+
+export interface ModulesPayload {
+  ok: boolean
+  /** 模块 id → 是否装配（服务端合并缺省与 DB 覆盖） */
+  state: Record<string, boolean>
+  presets: ModulePresetInfo[]
+  /** 模块 id → 是否隐藏于导航（per-user · user_module_nav，多端一致） */
+  navHidden?: Record<string, boolean>
+}
+
+/** 装配状态与预设清单（登录后拉取，替代 localStorage 单机持久化） */
+export async function fetchModules(): Promise<ModulesPayload> {
+  return authJsonFetch<ModulesPayload>('/api/aigility/modules')
+}
+
+/** 模块开关（服务端校验 core/available，写 audit_log） */
+export async function saveModuleState(id: string, enabled: boolean): Promise<void> {
+  await authJsonFetch(`/api/aigility/modules/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ enabled }),
+  })
+}
+
+/**
+ * 导航可见偏好落库（多端一致；返回服务端合并后的隐藏集）。
+ * 权限：仅管理员可写（普通用户 403 —— 布局现阶段由管理员统一配置）。
+ * userId 缺省 = 操作自己的偏好；管理员传他人 userId 可代为调整。
+ */
+export async function saveModuleNav(id: string, hidden: boolean, userId?: string): Promise<Record<string, boolean>> {
+  const j = await authJsonFetch<{ ok: boolean; navHidden?: Record<string, boolean>; error?: string }>(
+    `/api/aigility/modules/${encodeURIComponent(id)}/nav`,
+    { method: 'PUT', body: JSON.stringify({ hidden, ...(userId ? { userId } : {}) }) },
+  )
+  if (!j.ok) throw new Error(j.error ?? '保存导航偏好失败')
+  return j.navHidden ?? {}
+}
+
+export interface NavPref {
+  userId: string
+  email: string
+  isAdmin: boolean
+  /** 模块 id → 是否隐藏于导航 */
+  navHidden: Record<string, boolean>
+}
+
+/** 管理员视图：全部成员的导航偏好（非管理员 403） */
+export async function fetchNavPrefs(): Promise<NavPref[]> {
+  const j = await authJsonFetch<{ ok: boolean; prefs?: NavPref[]; error?: string }>('/api/aigility/nav-prefs')
+  if (!j.ok) throw new Error(j.error ?? '仅管理员可查看成员导航偏好')
+  return j.prefs ?? []
+}
+
+export async function saveModulePreset(name: string, enabledIds: string[]): Promise<ModulePresetInfo> {
+  const j = await authJsonFetch<{ ok: boolean; preset: ModulePresetInfo; error?: string }>('/api/aigility/modules/presets', {
+    method: 'POST',
+    body: JSON.stringify({ name, enabledIds }),
+  })
+  if (!j.preset) throw new Error(j.error ?? '保存预设失败')
+  return j.preset
+}
+
+/** 套用预设 = 完整工作台形态替换，返回新装配状态 */
+export async function applyModulePreset(id: string): Promise<Record<string, boolean>> {
+  const j = await authJsonFetch<{ ok: boolean; state: Record<string, boolean> }>(
+    `/api/aigility/modules/presets/${encodeURIComponent(id)}/apply`,
+    { method: 'POST' },
+  )
+  return j.state
+}
+
+export async function deleteModulePreset(id: string): Promise<void> {
+  await authJsonFetch(`/api/aigility/modules/presets/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+// ── 工具插件安装（真 · dsh_plugins 注册表 + dsh-host 热装卸）────────────
+
+export interface InstalledPlugin {
+  name: string
+  package: string
+  exportName: string
+  description: string
+  enabled: boolean
+  config: Record<string, unknown>
+  createdAt?: string
+  /** 运行态：装载时间 / 错误信息 */
+  runtime: { at?: string; error?: string }
+}
+
+export async function fetchInstalledPlugins(): Promise<InstalledPlugin[]> {
+  const j = await authJsonFetch<{ ok: boolean; plugins: InstalledPlugin[] }>('/api/aigility/plugins')
+  return j.plugins ?? []
+}
+
+/** 安装插件（MCP server 即一条 dsh-mcp-client 行：package=@deepseek-ai/dsh-mcp-client, config={transport,serverName,command,args}） */
+export async function installPlugin(input: {
+  name: string
+  package: string
+  exportName?: string
+  description?: string
+  config?: Record<string, unknown>
+  enable?: boolean
+}): Promise<{ loaded: boolean; error?: string }> {
+  const j = await authJsonFetch<{ ok: boolean; loaded: boolean; error?: string }>('/api/aigility/plugins', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+  return { loaded: j.loaded ?? false, error: j.error }
+}
+
+export async function togglePlugin(name: string, enabled: boolean): Promise<{ loaded: boolean; error?: string }> {
+  const j = await authJsonFetch<{ ok: boolean; loaded: boolean; error?: string }>(
+    `/api/aigility/plugins/${encodeURIComponent(name)}`,
+    { method: 'PUT', body: JSON.stringify({ enabled }) },
+  )
+  return { loaded: j.loaded ?? false, error: j.error }
+}
+
+export async function uninstallPlugin(name: string): Promise<void> {
+  await authJsonFetch(`/api/aigility/plugins/${encodeURIComponent(name)}`, { method: 'DELETE' })
+}
+
+// ── 日志监察员（log-monitor 收编）──────────────────────────────
+
+export type LogMonitorState = 'running' | 'stopped'
+
+export interface LogMonitorAuto {
+  id?: string
+  host: string
+  p: string
+  s?: string
+  n?: number
+  interval?: number
+  on?: boolean
+  checking?: boolean
+  lastAt?: number
+  lastErr?: string
+}
+
+export interface LogMonitorDaemonStatus {
+  pid: number
+  startedAt: number
+  checkCount: number
+  time: number
+  autos: LogMonitorAuto[]
+  errs: { t: string; src: string; line: string }[]
+}
+
+export interface LogMonitorDaemonConfig {
+  webhook: string
+  keywords: string
+  autos: LogMonitorAuto[]
+}
+
+export interface LogMonitorStatus {
+  state: LogMonitorState
+  port: number
+  managedByPlatform: boolean
+  daemon: LogMonitorDaemonStatus | null
+  config: LogMonitorDaemonConfig | null
+  error?: string
+}
+
+export async function fetchLogMonitorStatus(errs = 20): Promise<LogMonitorStatus> {
+  const j = await authJsonFetch<{ ok: boolean; status: LogMonitorStatus }>(`/api/aigility/log-monitor/status?errs=${errs}`)
+  return j.status
+}
+
+/** 下发配置到运行中的 daemon（即时生效；daemon 落盘持久化） */
+export async function updateLogMonitorConfig(cfg: Partial<LogMonitorDaemonConfig>): Promise<LogMonitorDaemonConfig> {
+  const j = await authJsonFetch<{ ok: boolean; config: LogMonitorDaemonConfig }>('/api/aigility/log-monitor/config', {
+    method: 'PUT',
+    body: JSON.stringify(cfg),
+  })
+  return j.config
+}
+
+export type LogMonitorOp = 'start' | 'stop' | 'restart'
+
+export async function operateLogMonitor(
+  op: LogMonitorOp,
+): Promise<{ ok: boolean; state?: LogMonitorState; pid?: number; message: string }> {
+  return authJsonFetch(`/api/aigility/log-monitor/${op}`, { method: 'POST' })
+}
+
+export interface LogMonitorLogTail {
+  file: string
+  lines: string[]
+}
+
+export async function fetchLogMonitorLogs(tail = 200): Promise<{ stdout: LogMonitorLogTail; stderr: LogMonitorLogTail }> {
+  const j = await authJsonFetch<{ ok: boolean; stdout: LogMonitorLogTail; stderr: LogMonitorLogTail }>(
+    `/api/aigility/log-monitor/logs?tail=${tail}`,
+  )
+  return { stdout: j.stdout, stderr: j.stderr }
+}
+
+// ── 社区插件发现（npm registry 检索 dsh-plugin 生态）────────────
+
+export interface DiscoverPluginItem {
+  name: string
+  version: string
+  description: string
+  date: string
+  repo: string
+  npm: string
+  keywords: string[]
+}
+
+export async function discoverPlugins(q = 'dsh-plugin'): Promise<{ ok: boolean; items: DiscoverPluginItem[]; error?: string }> {
+  return authJsonFetch(`/api/aigility/plugins/discover?q=${encodeURIComponent(q)}`)
+}
+
+// ── 身份对齐（花名册自动匹配 + 审查）────────────────────────
+
+export type IdentityAxisView = 'feishu' | 'wecom' | 'gitea' | 'web' | 'timem'
+export type IdentityMatchSource = 'manual' | 'auto'
+
+export interface IdentityMemberView {
+  member_id: string
+  name: string
+  aliases: string[]
+  timem_user_ids: string[]
+  feishu_open_ids: string[]
+  gitea_usernames: string[]
+  wecom_user_ids: string[]
+  web_emails: string[]
+  match_source?: Partial<Record<IdentityAxisView, IdentityMatchSource>>
+  role?: string
+}
+
+export interface IdentityCandidateView {
+  id: string
+  name?: string
+  source: 'gitea' | 'feishu'
+  org?: string
+}
+
+export interface IdentitySuggestionView {
+  member_id: string
+  axis: 'feishu' | 'gitea'
+  id: string
+  name?: string
+  score: number
+  reason: string
+}
+
+export interface IdentityOverview {
+  ok: boolean
+  members: IdentityMemberView[]
+  candidates: IdentityCandidateView[]
+  suggestions: IdentitySuggestionView[]
+  feishu_error?: string
+  orgs: string[]
+}
+
+export interface IdentityAutoMatchResult {
+  ok: boolean
+  bound: Array<{ member_id: string; name: string; axis: 'feishu' | 'gitea'; id: string; score: number; reason: string }>
+  suggestions: IdentitySuggestionView[]
+  feishu_error?: string
+}
+
+export function fetchIdentityOverview(): Promise<IdentityOverview> {
+  return authJsonFetch<IdentityOverview>('/api/aigility/identity/overview')
+}
+
+export function runIdentityAutoMatch(): Promise<IdentityAutoMatchResult> {
+  return authJsonFetch<IdentityAutoMatchResult>('/api/aigility/identity/auto-match', { method: 'POST' })
+}
+
+export function identityBind(body: {
+  memberId: string
+  axis: IdentityAxisView
+  id: string
+  op: 'bind' | 'unbind' | 'confirm'
+}): Promise<{ ok: boolean; error?: string }> {
+  return authJsonFetch<{ ok: boolean; error?: string }>('/api/aigility/identity/bind', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+// ── 通道与角色（角色 manifest v2 · 声明面）──────────────────────
+
+export interface ChannelAppBindingView {
+  app: string
+  chats?: string[]
+  mention_only?: boolean
+}
+
+export interface RoleManifestView {
+  role_id: string
+  identity: { name: string; signature?: string; capability_ref?: string }
+  sources: { channels?: Array<{ platform: 'feishu' | 'wecom'; apps: ChannelAppBindingView[] }>; data?: string[] }
+  actions: { tools?: string[]; workflows?: string[]; engine?: string }
+  outbound: { reply?: 'same-channel'; push?: string[] }
+  memory: { agent_id: string }
+}
+
+export interface ChannelPlanApp {
+  platform: 'feishu' | 'wecom'
+  appId: string
+  agentRoutes: Record<string, string>
+  perceptionId: string
+  roleIds: string[]
+  memoryAgentIds: string[]
+}
+
+export interface ChannelPlan {
+  mode: string
+  apps: ChannelPlanApp[]
+  issues: string[]
+  webOnlyRoleIds: string[]
+}
+
+export async function fetchRoleManifests(): Promise<RoleManifestView[]> {
+  const j = await authJsonFetch<{ ok: boolean; file: { roles: RoleManifestView[] } }>('/api/aigility/role-manifests')
+  return j.file?.roles ?? []
+}
+
+/** 保存角色声明（服务端校验前置：agent_id=role_id 等；不合格拒写） */
+export async function saveRoleManifest(m: RoleManifestView): Promise<void> {
+  const j = await authJsonFetch<{ ok: boolean; error?: string }>('/api/aigility/role-manifests', {
+    method: 'POST',
+    body: JSON.stringify(m),
+  })
+  if (!j.ok) throw new Error(j.error ?? '保存失败')
+}
+
+export async function removeRoleManifest(roleId: string): Promise<void> {
+  const j = await authJsonFetch<{ ok: boolean; error?: string }>(`/api/aigility/role-manifests/${encodeURIComponent(roleId)}`, { method: 'DELETE' })
+  if (!j.ok) throw new Error(j.error ?? '删除失败')
+}
+
+// ── 模型池（真 · 网关 /v1/models 代理）与工作流清单（D4 编排委托）──
+
+/** 平台可用模型池（网关上游模型列表；不可达时返回空 + 说明） */
+export async function fetchLlmModels(): Promise<{ ok: boolean; models: string[]; error?: string }> {
+  return authJsonFetch('/api/aigility/llm/models')
+}
+
+export interface WorkflowInfo { id: string; name: string; source: string }
+
+/** 数据面工作流清单（executor-dispatch + Plan 拆解产物） */
+export async function fetchWorkflows(): Promise<WorkflowInfo[]> {
+  const j = await authJsonFetch<{ ok: boolean; workflows: WorkflowInfo[] }>('/api/aigility/workflows')
+  return j.workflows ?? []
+}
+
+// ── 编排管理（真 · 数据面工作流 YAML）────────────────────────
+
+export interface FlowInfo { id: string; name: string; source: string; builtin: boolean }
+
+export async function fetchFlows(): Promise<FlowInfo[]> {
+  const j = await authJsonFetch<{ ok: boolean; flows: FlowInfo[] }>('/api/aigility/flows')
+  return j.flows ?? []
+}
+
+export async function fetchFlowYaml(id: string): Promise<string> {
+  const j = await authJsonFetch<{ ok: boolean; yaml: string }>(`/api/aigility/flows/${encodeURIComponent(id)}`)
+  return j.yaml
+}
+
+/** 保存工作流 YAML（服务端结构校验, 非法拒绝写盘） */
+export async function saveFlowYaml(id: string, yaml: string): Promise<void> {
+  const j = await authJsonFetch<{ ok: boolean; error?: string }>(`/api/aigility/flows/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ yaml }),
+  })
+  if (!j.ok) throw new Error(j.error ?? '保存失败')
+}
+
+// ── 角色包（roles/ 目录 · role-kit：工厂的可移植角色单元）─────────
+
+export interface RolePackageCommand { pattern: string; action: string; summary?: string }
+
+export interface RolePackageSchedule { name: string; trigger: string; action: string; summary?: string; enabled?: boolean }
+
+export interface RolePackageManifest {
+  role_id: string
+  identity: { name: string; signature?: string; capability_ref?: string }
+  sources: { channels?: Array<{ platform: 'feishu' | 'wecom'; apps: ChannelAppBindingView[] }>; data?: string[] }
+  actions: {
+    tools?: string[]
+    workflows?: string[]
+    commands?: RolePackageCommand[]
+    schedules?: RolePackageSchedule[]
+    engine?: string
+  }
+  outbound: { reply?: 'same-channel'; push?: string[] }
+  memory: { agent_id: string; legacy_agent_ids?: string[] }
+}
+
+export interface RolePackageInfo {
+  id: string
+  layer: 'public' | 'site'
+  dir: string
+  name: string
+  description: string
+  prompt: string
+  manifest: RolePackageManifest
+  issues: string[]
+}
+
+export function fetchRolePackages(): Promise<RolePackageInfo[]> {
+  return authJsonFetch<{ ok: boolean; packages: RolePackageInfo[] }>('/api/aigility/role-packages')
+    .then((j) => j.packages ?? [])
+}
+
+/** 保存角色包（服务端校验 role_id 不变 + memory.agent_id=role_id；原子写回包目录） */
+export async function saveRolePackage(id: string, body: { manifest: RolePackageManifest; prompt?: string }): Promise<void> {
+  const j = await authJsonFetch<{ ok: boolean; error?: string }>(`/api/aigility/role-packages/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  })
+  if (!j.ok) throw new Error(j.error ?? '保存失败')
 }

@@ -16,27 +16,32 @@ import TaskBoardPage from './pages/TaskBoardPage'
 import StudioPage from './pages/StudioPage'
 import ModelsPage from './pages/ModelsPage'
 import ToolsPage from './pages/ToolsPage'
-import RoleCapsPage from './pages/RoleCapsPage'
 import TaskLoopBoardPage from './pages/TaskLoopBoardPage'
 import TaskLoopConfigPage from './pages/TaskLoopConfigPage'
+import TeamMemoryPage from './pages/TeamMemoryPage'
+import OrchestrationPage from './pages/OrchestrationPage'
+import IdentityPage from './pages/IdentityPage'
+import LogMonitorPage from './pages/LogMonitorPage'
 import FloatingImprover from './components/FloatingImprover'
 import LoginGate from './components/LoginGate'
 import { apiMe, apiLogout, getToken, clearToken, type PlatformUser } from './lib/api'
+import { fetchModules, saveModuleNav, saveModuleState } from './lib/harness'
 import {
   skills as initialSkills, moduleRegistry, tenants, defaultBranding, wsMessages,
   marketAgents, centerApps, knowledgeBases, pluginTools, mcpTools, models,
   type Skill, type Branding,
 } from './mock/data'
 import {
-  LayoutDashboard, Database, Network, Bot, BrainCircuit, GitBranch, Settings, Blocks, ShieldCheck, Zap, ListChecks,
+  LayoutDashboard, Database, Network, Bot, BrainCircuit, GitBranch, Settings, Blocks, ShieldCheck, Zap, ListChecks, ListTree,
   Store, LayoutGrid, Gauge, Briefcase, Factory, Cpu, Wrench, Search, Bell, ChevronDown, Hexagon,
-  CheckCircle2, User, LogOut, Building2, CircleHelp,
+  CheckCircle2, User, LogOut, Building2, CircleHelp, BookOpenCheck, ScanSearch, UserCheck,
 } from 'lucide-react'
 
 const moduleIcon: Record<string, any> = {
-  workspace: Briefcase, agent: Bot, market: Store, apps: LayoutGrid, studio: Factory, tasks: ListChecks,
+  workspace: Briefcase, agent: Bot, market: Store, apps: LayoutGrid, studio: Factory, tasks: ListChecks, orchestration: ListTree,
   ingest: Database, graph: Network, space: BrainCircuit, process: GitBranch,
-  tools: Wrench, models: Cpu, ops: Gauge, 'task-loop': Bot,
+  tools: Wrench, models: Cpu, ops: Gauge, 'task-loop': Bot, 'team-memory': BookOpenCheck, 'log-monitor': ScanSearch,
+  identity: UserCheck,
 }
 
 const groupMeta: { cat: string; label: string }[] = [
@@ -46,7 +51,6 @@ const groupMeta: { cat: string; label: string }[] = [
 ]
 
 const systemNav = [
-  { id: 'rolecaps', label: '角色能力 · DSH', icon: Bot },
   { id: 'modules', label: '模块装配', icon: Blocks },
   { id: 'auth', label: '权限管理', icon: ShieldCheck },
   { id: 'settings', label: '平台配置', icon: Settings },
@@ -69,18 +73,39 @@ export default function App() {
   const [showMock, setShowMock] = useState<boolean>(() => loadLs('showMock', true))
   useEffect(() => { try { localStorage.setItem('showMock', JSON.stringify(showMock)) } catch { /* ignore */ } }, [showMock])
   const [skillList, setSkillList] = useState<Skill[]>(initialSkills)
-  // 模块装配默认集：全部可用模块默认开启。左侧导航是否显示某模块统一由
-  // 「模块装配」页控制（enabledModules, localStorage 持久化）——与应用中心的应用开关无关
+  // 模块装配默认集：全部可用模块默认开启，登录后由 /api/aigility/modules 服务端状态覆盖
+  // （app_modules PG 表持久化, 变更入 audit_log）。localStorage 仅作服务不可达时的离线缓存。
+  // 持久化格式是 JSON 数组（[...set]），恢复时必须重建 Set——
+  // 直接把解析结果当 Set 用会因 .has 不存在而在渲染期崩溃（白屏）
   const [enabledModules, setEnabledModules] = useState<Set<string>>(
     () => {
-      // 持久化格式是 JSON 数组（[...set]），恢复时必须重建 Set——
-      // 直接把解析结果当 Set 用会因 .has 不存在而在渲染期崩溃（白屏）
       const stored = loadLs<unknown>('zy_modules_v1', null)
       if (Array.isArray(stored)) return new Set(stored.filter((x): x is string => typeof x === 'string'))
       return new Set(moduleRegistry.filter(m => m.available).map(m => m.id))
     }
   )
   useEffect(() => { try { localStorage.setItem('zy_modules_v1', JSON.stringify([...enabledModules])) } catch { /* ignore */ } }, [enabledModules])
+  // 「是否固定到左侧导航」是独立于装配的用户偏好：模块装配了 ≠ 必须占导航位。
+  // 默认仅「团队记忆总结 / 日志监察员」两个工具类模块不进导航（从应用中心进入）。
+  // 持久化以服务端 user_module_nav 为准（多端一致）；localStorage 仅作未登录/离线缓存。
+  const [navHidden, setNavHidden] = useState<Set<string>>(
+    () => {
+      const stored = loadLs<unknown>('zy_nav_hidden_v1', null)
+      if (Array.isArray(stored)) return new Set(stored.filter((x): x is string => typeof x === 'string'))
+      return new Set(['team-memory', 'log-monitor'])
+    }
+  )
+  useEffect(() => { try { localStorage.setItem('zy_nav_hidden_v1', JSON.stringify([...navHidden])) } catch { /* ignore */ } }, [navHidden])
+  const applyNavHidden = (map: Record<string, boolean>) =>
+    setNavHidden(new Set(Object.entries(map).filter(([, v]) => v).map(([k]) => k)))
+  const toggleNav = (id: string) => {
+    const nextHidden = !navHidden.has(id)
+    // 乐观更新 + 服务端持久化（user_module_nav 落库，换浏览器/设备同样生效）
+    setNavHidden(s => { const n = new Set(s); if (nextHidden) n.add(id); else n.delete(id); return n })
+    saveModuleNav(id, nextHidden)
+      .then(applyNavHidden)
+      .catch(() => { setNavHidden(s => { const p = new Set(s); if (nextHidden) p.delete(id); else p.add(id); return p }) })
+  }
   const [branding, setBranding] = useState<Branding>(() => ({ ...defaultBranding, ...loadLs('zy_branding_v2', defaultBranding) }))
   const [tenantId, setTenantId] = useState(() => loadLs('zy_tenant', 'standard'))
 
@@ -98,6 +123,21 @@ export default function App() {
     return () => window.removeEventListener('aigility-unauth', onUnauth)
   }, [])
   const logout = () => { void apiLogout(); setUser(null) }
+
+  // 权限约定（RBAC 模块就绪前）：导航布局由管理员统一配置，普通用户只读（开关置灰不可点）。
+  const navEditable = !!user?.isAdmin
+  const toggleNavIfAllowed = (id: string) => { if (navEditable) toggleNav(id) }
+
+  // 登录后以服务端装配状态 + 导航偏好为准（预设/其他端改动即时对齐；失败保留本地缓存）
+  useEffect(() => {
+    if (!user) return
+    fetchModules()
+      .then(({ state, navHidden }) => {
+        setEnabledModules(new Set(Object.entries(state).filter(([, v]) => v).map(([k]) => k)))
+        if (navHidden) applyNavHidden(navHidden)
+      })
+      .catch(() => { /* PG/服务不可达: 保留 localStorage 装配与导航偏好 */ })
+  }, [user])
 
   // 顶部工具条状态
   const [searchOpen, setSearchOpen] = useState(false)
@@ -127,7 +167,19 @@ export default function App() {
   }
 
   const toggleModule = (id: string) =>
-    setEnabledModules(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+    setEnabledModules(s => {
+      const n = new Set(s)
+      const next = !n.has(id)
+      if (next) n.add(id); else n.delete(id)
+      // 乐观更新 + 服务端持久化（core/available 服务端拒写会回滚本地状态）
+      void saveModuleState(id, next).catch(() => {
+        setEnabledModules(prev => { const p = new Set(prev); if (next) p.delete(id); else p.add(id); return p })
+      })
+      return n
+    })
+  /** 预设套用后整体替换装配状态（ModulePage 回调） */
+  const applyFullState = (state: Record<string, boolean>) =>
+    setEnabledModules(new Set(Object.entries(state).filter(([, v]) => v).map(([k]) => k)))
 
   const addSkill = (nodeName: string) => {
     setSkillList(list => list.some(s => s.name === nodeName) ? list : [{
@@ -145,6 +197,8 @@ export default function App() {
   }
 
   const activeModules = moduleRegistry.filter(m => m.available && enabledModules.has(m.id))
+  // 左侧导航（含移动端顶栏）只显示「已装配且未被用户隐藏」的模块；被隐藏的仍可从应用中心进入
+  const navModules = activeModules.filter(m => !navHidden.has(m.id))
   const moduleDisabled = moduleRegistry.some(m => m.page === page && !enabledModules.has(m.id))
   const unread = msgs.filter(m => !m.read).length
 
@@ -187,16 +241,21 @@ export default function App() {
       case 'space': return <SpacePage />
       case 'process': return <ProcessPage onGenerateSkill={addSkill} go={setPage} generatedSkills={skillList.map(s => s.name)} />
       case 'market': return <MarketPage go={setPage} />
-      case 'apps': return <AppCenterPage openPage={go} />
+      case 'apps': return <AppCenterPage openPage={go} navHidden={navHidden} onToggleNav={toggleNavIfAllowed} navEditable={navEditable} />
       case 'studio': return <StudioPage />
       case 'tools': return <ToolsPage showMock={showMock} />
-      case 'rolecaps': return <RoleCapsPage />
+      case 'rolecaps': return <StudioPage /> // 角色能力已并入智能体工厂的编辑界面
       case 'task-loop': return <TaskLoopBoardPage go={go} />
-      case 'task-loop-config': return <TaskLoopConfigPage go={go} navVisible={enabledModules.has('task-loop')} onToggleNav={() => toggleModule('task-loop')} />
+      case 'task-loop-config': return <TaskLoopConfigPage go={go} navVisible={enabledModules.has('task-loop')} onToggleNav={() => toggleModule('task-loop')} navEditable={navEditable} />
+      case 'team-memory': return <TeamMemoryPage navVisible={!navHidden.has('team-memory')} onToggleNav={() => toggleNavIfAllowed('team-memory')} navEditable={navEditable} />
+      case 'orchestration': return <OrchestrationPage />
+      case 'channels': return <StudioPage /> // 通道与角色已退役：每角色配置在工厂编辑界面
+      case 'identity': return <IdentityPage />
+      case 'log-monitor': return <LogMonitorPage navVisible={!navHidden.has('log-monitor')} onToggleNav={() => toggleNavIfAllowed('log-monitor')} navEditable={navEditable} />
       case 'models': return <ModelsPage />
       case 'ops': return <OpsPage />
-      case 'modules': return <ModulePage enabled={enabledModules} toggle={toggleModule} />
-      case 'auth': return <AuthPage />
+      case 'modules': return <ModulePage enabled={enabledModules} toggle={toggleModule} applyFullState={applyFullState} navHidden={navHidden} onToggleNav={toggleNavIfAllowed} navEditable={navEditable} />
+      case 'auth': return <AuthPage viewerIsAdmin={navEditable} />
       case 'settings': return <SettingsPage branding={branding} setBranding={setBranding} tenantId={tenantId} />
       default: return <Dashboard go={setPage} branding={branding} />
     }
@@ -233,7 +292,7 @@ export default function App() {
           <span className="text-sm font-semibold text-slate-800">{branding.platformName}</span>
         </div>
         <div className="flex gap-1 px-3 pb-2 overflow-x-auto">
-          {[{ id: 'home', label: '首页' }, ...activeModules.map(m => ({ id: m.page, label: m.name })), ...systemNav].map(n => (
+          {[{ id: 'home', label: '首页' }, ...navModules.map(m => ({ id: m.page ?? m.id, label: m.name })), ...systemNav].map(n => (
             <button key={n.id} onClick={() => setPage(n.id)}
               className={`whitespace-nowrap text-xs px-3 py-1.5 rounded-full ${page === n.id ? 'text-white' : 'bg-slate-100 text-slate-600'}`}
               style={page === n.id ? { background: branding.primary } : undefined}>{n.label}</button>
@@ -253,12 +312,12 @@ export default function App() {
         <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
           <NavBtn n={{ id: 'home', label: '首页', icon: LayoutDashboard }} />
           {groupMeta.map(g => {
-            const items = activeModules.filter(m => m.category === g.cat)
+            const items = navModules.filter(m => m.category === g.cat)
             if (!items.length) return null
             return (
               <div key={g.cat}>
                 <div className="pt-3 pb-1 px-3 text-[10px] font-medium text-slate-300 tracking-wider">{g.label}</div>
-                {items.map(m => <NavBtn key={m.id} n={{ id: m.page, label: m.name, icon: moduleIcon[m.id] || Blocks }} />)}
+                {items.map(m => <NavBtn key={m.id} n={{ id: m.page ?? m.id, label: m.name, icon: moduleIcon[m.id] || Blocks }} />)}
               </div>
             )
           })}

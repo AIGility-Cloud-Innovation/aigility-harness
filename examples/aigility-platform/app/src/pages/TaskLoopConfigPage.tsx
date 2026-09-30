@@ -30,12 +30,14 @@ const stateMeta: Record<TaskLoopState, { label: string; cls: string; dot: string
 interface FlagRow { key: string; value: boolean }
 interface EnvRow { key: string; value: string }
 
-export default function TaskLoopConfigPage({ go, navVisible = true, onToggleNav }: {
+export default function TaskLoopConfigPage({ go, navVisible = true, onToggleNav, navEditable = true }: {
   go?: (p: string) => void
   /** 是否显示在左侧导航（与 App.tsx enabledModules /「模块装配」页同一状态） */
   navVisible?: boolean
   /** 切换左侧导航显示 */
   onToggleNav?: () => void
+  /** 导航布局编辑权限（现阶段仅管理员可改，普通用户只读） */
+  navEditable?: boolean
 }) {
   const [status, setStatus] = useState<TaskLoopStatus | null>(null)
   const [banner, setBanner] = useState('')
@@ -203,8 +205,9 @@ export default function TaskLoopConfigPage({ go, navVisible = true, onToggleNav 
             <div className="text-sm text-slate-700">在左侧导航栏显示「项目小助理」</div>
             <p className="text-[11px] text-slate-400 mt-0.5">只控制导航可见性，不影响机器人运行；与「模块装配」页是同一个开关</p>
           </div>
-          <button onClick={() => onToggleNav?.()}
-            className={`w-11 h-[24px] rounded-full transition relative shrink-0 ${navVisible ? 'bg-blue-600' : 'bg-slate-200'}`}>
+          <button onClick={() => onToggleNav?.()} disabled={!navEditable}
+            title={navEditable ? '切换左侧导航显示' : '导航布局由管理员统一配置'}
+            className={`w-11 h-[24px] rounded-full transition relative shrink-0 ${navVisible ? 'bg-blue-600' : 'bg-slate-200'} ${!navEditable ? 'opacity-50 cursor-not-allowed' : ''}`}>
             <span className={`absolute top-[4px] w-4 h-4 rounded-full bg-white shadow transition-all ${navVisible ? 'left-[23px]' : 'left-[4px]'}`} />
           </button>
         </div>

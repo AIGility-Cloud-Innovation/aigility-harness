@@ -25,13 +25,13 @@ pnpm example:aigility
 | 登录/注册/会话 | `POST :1236/app/auth/login\|register\|logout` | AppBase users 表 scrypt + HMAC token + 登录限流 |
 | 数字员工对话 | `POST :1237/api/aigility-chat` | → `@persona/aigility-agent`（工厂技能 + 平台管家） |
 | 引擎原生角色 | `POST :1237/api/aigility/p/<key>/chat` | → `@persona/<key>`（市场页「已接入」区逐个开路由） |
-| 封装 API | `:1236/api/aigility/*` | registry/skills/capabilities/llm/metrics/timem/task-loop，全部校验 AppBase 会话 |
+| 封装 API | `:1236/api/aigility/*` | registry/skills/capabilities/llm/metrics/timem/task-loop/modules/presets/plugins，全部校验 AppBase 会话 |
 
 > 依赖 AppBase PG（缺省 `127.0.0.1:5433/appbase`，`APPBASE_PG_*` 可覆盖；本机原生 PG 用 5432，
 > 参考 `examples/appbase/start-appbase.sh`）。首次启动自动建表 + 播种演示账号：
 > `admin@aigility.local/admin123`（库非空时不抢管理员）· `fde@aigility.local/fde123` · `demo@aigility.local/demo123`。
 
-## 三条真链路（其余页面为产品壳演示）
+## 三条真链路（其余板块见对照表）
 
 ```
 智能体工厂「发布」（真注册）
@@ -90,11 +90,11 @@ MCP 工具总线（真, DSH 家族通道）：
 |---|---|---|
 | 登录鉴权（LoginGate/全站门禁/退出） | **真** | AppBase users 表（scrypt+HMAC token+限流）· platform.ts 零新造 |
 | 数字员工对话（AgentPage） | **真**（user_key=登录邮箱 → 计量/积分按用户归集） | D1 http-ingress → D5 aigility-agent → D4 workflow-engine → D2 llm-inference |
-| 智能体工厂（StudioPage） | **真**：发布 = skill-registry 注册 | 示例本地 LayerPlugin `@persona/aigility-agent` |
+| 智能体工厂（StudioPage） | **真**：单页五分区（人设 D5 / 模型 D2 / 能力 D3 / 编排 D4 / 通道与发布 D1）+ 左侧粘性目录——模型偏好请求级透传（网关模型池）、编排委托（manifest 声明）、通道声明进发布分区；假配置（模型假下拉/知识库 mock/试运行假日志/草稿）已删除 | 示例本地 LayerPlugin `@persona/aigility-agent` |
 | 智能体市场（MarketPage） | **真**：引擎原生角色区（自动枚举）+ 工厂发布区 | D5 layer-persona 注册表 + 网关逐 persona 路由 |
-| 工具插件（ToolsPage） | **真**：能力总线（46 Provider）+ MCP 总线（13 工具直调）；插件开关 Mock | 内核插件枚举 + DSH `dsh-mcp-client` → `@action/dsh-tool` 桥 |
+| 工具插件（ToolsPage） | **真**：能力总线（46 Provider）+ MCP 总线（13 工具直调）+ **已安装插件区块**（安装/启停/卸载 = `dsh_plugins` 注册表 + dsh-host 热装卸免重启, 关键件保护, 变更入审计）；演示工具货架 Mock | 内核插件枚举 + DSH `dsh_plugins` + `dsh-mcp-client` → `@action/dsh-tool` 桥 |
 | 模型管理（ModelsPage） | **真**：当前推理上游；模型矩阵 Mock | D2 llm-inference 生效配置（litellm/bigmodel） |
-| 运营驾驶舱（OpsPage） | **真**：实时指标 + LLM 调用/Token 计量；趋势图 Mock | 内存计数 + D1 token-metering summary |
+| 运营驾驶舱（OpsPage） | **真**：实时指标 + 调用/Token 计量与趋势（usage byDay） | 内存计数 + D1 token-metering summary |
 | TiMEM 空间（SpacePage） | **真**：连接状态 + 记忆检索；记忆流/规则/知识库列表 Mock | Seam → `@action/timem-memory`（引擎无知识库/规则服务） |
 | 工作台 Token 用量卡 | **真**：按日 Token/调用（随对话实时产生） | D1 token-metering（D2 每次推理自动上报） |
 | 工作台积分余额卡 | **真**：credit 账户余额（预检/实扣随对话自动生效） | D1 `@infrastructure/credit`（PgCreditStore） |
@@ -103,10 +103,26 @@ MCP 工具总线（真, DSH 家族通道）：
 | 项目小助理·任务看板（TaskLoopBoardPage） | **真**：Gitea 工单三列看板（待派发/执行中/已完成）+ 仓库筛选 + 运行徽标 | `GET /api/aigility/task-loop/board` → git.aigility.cloud v1 API（DNS 绕行 + token，仓库池 TASK_REPOS ∪ TASK_CHAT_REPO_MAP） |
 | 项目小助理·配置与运维（TaskLoopConfigPage） | **真**：机器人启停/重启（spawn + 锁探活 + 僵锁自愈）、配置落盘、日志 tail、飞书群枚举、导航显示开关 | task-loop-manager 子进程管理（`pnpm --filter feishu-task-loop start`）+ `data/task-loop.json` |
 | 应用中心·项目小助理卡 | **真**：卡片开关 = 机器人进程启停（实时查状态），打开/配置直达看板与运维页 | 同上（与配置页双向同步） |
-| 工作台 今日任务/消息/待办审批 | 演示 · **暂不对接** | 引擎无任务/通知/审批服务（待立项） |
+| 团队记忆总结（TeamMemoryPage） | **真**：日报/晨报调度开关与时刻配置、TiMEM/飞书/LLM 凭证页面配置（Secret 只回掩码）、推送群可视化选取、一键立即生成（同步等待 ≤5min）、运行历史与日志 tail | team-memory-manager 进程内调度（spawn `pnpm --filter team-memory-console cli report|morning --send`，页面配置翻译为子进程 env 且优先于仓库 .env）+ `data/team-memory.json` / `team-memory-runs.json` |
+| 任务板（TaskBoardPage） | **真**：任务全生命周期（建/派发/流转/产出下载），running 时 15s 条件轮询 | PG `task` 表 CAS 流转 + 执行器路由 YAML 派发 |
+| 角色能力（已并入智能体工厂「角色能力 · IM」视图） | **真**：角色路由/技能货架/MCP 货架读写热生效 + missingSkills 体检；rolecaps 旧路由重定向至工厂 | `examples/feishu-dsh/roles.json`（role-registry） |
+| 改进专员（FloatingImprover 悬浮） | **真**：对话式改站（sitefix 围栏 → DOM 即改 + 持久化重放） | site-improver persona + `data/site-tweaks.json` |
+| 工作台 任务板/待办审批/消息 | **半真**：任务板 + 待办审批真（task 表派发与产出审）；消息卡演示 | PG `task` 表 + 执行器派发；引擎无通知服务 |
 | 应用中心 其余 7 个场景应用 | 演示 · **暂不对接**（开关为货架演示态，不持久化） | 引擎无对应场景服务（会议转写需 TTS/STT 模型资产） |
 | 数据接入 / 知识图谱 / 流程与组织 | 演示 · **暂不对接**（页面已标注） | 引擎无字段理解/本体映射/图谱存储服务（TiMEM 知识库服务待接入） |
-| 模块装配 / 权限矩阵 / 租户授权 | 演示 · **暂不对接**（模块装配的导航可见性开关为真：enabledModules 持久化于 localStorage，实时控制左侧导航） | 产品级开关；引擎无 RBAC/License 服务（autoHotSwap 热插拔可作后续底座） |
+| 通道与角色（已退役 2026-09-30） | 每角色通道/能力/编排配置并入智能体工厂编辑界面；路由映射与系统角色 API 保留（roles.json 热生效不变），`/channels` 重定向工厂 | — |
+| 编排管理（OrchestrationPage） | **真**：数据面工作流 YAML 图形化（gyzy_platform 画布机制收编：三栏布局/节点拖拽/SVG 条件连线/循环回边/属性面板/缩放）——llm_node 的 system_prompt 与节点描述可编辑保存，服务端结构校验前置 + `flow.save` 审计；节点/连线的增删随引擎节点注册机制开放（v2） | `workflows/executor-dispatch.yaml` + `data/workflows/*.yaml`（YamlWorkflow 校验） |
+| 模块装配（ModulePage） | **真**（装配底座 Phase 0, manifest 迁入 `app/src/modules/registry.ts`）：装配状态入 `app_modules` 表（登录后全端一致, localStorage 仅离线缓存）、开关写审计、工作台预设保存/套用/删除（`app_module_presets`）、core/available 服务端拒写；订阅类目仍为演示 | `docs/platform-module-plugin-design.md`；权限矩阵/租户授权仍演示（引擎无 RBAC/License 服务） |
+
+## 插件与应用安装（装配台）
+
+「装什么插件就变成什么工作台」——三类可安装单元：
+
+- **工具插件**：工具插件中心「已安装插件」区块，填一条 MCP server 启动命令（或选「DSH 插件包」填 npm 包名）即完成安装（`dsh_plugins` 注册表 + dsh-host 热装载，免重启），变更入审计；「社区插件发现」区块实时检索 npm dsh-plugin 生态（GitHub topic 自动收录），点「填入安装」预填表单，装前看 repo、锁版本；
+- **应用（模块/预设）**：模块装配页开关 PG 持久化（全端一致、入审计），「保存为预设 → 套用」= 给一类客户一键切换整台工作台；
+- **智能体（技能）**：工厂发布即注册、立即可对话（早已闭环）。
+
+体系设计与开源工具映射见 `docs/插件与应用安装体系设计.md`；报警分析工作台（baojing-qa）= 首个完整安装清单实例（`docs/baojing-qa-拼装设计.md`）。
 
 ## 目录结构
 
@@ -147,26 +163,19 @@ aigility-platform/
 
 ## 执行器路由（数据面编排 · YAML）
 
-任务板非人工任务的派发路由声明在 `workflows/executor-dispatch.yaml`（节点 + 条件边，契约与 aigility `WorkflowConfig` 对齐）——路由表可版本化、可人审：改路由 / 改执行器提示词动 YAML，不动代码。服务启动时经 `@aigility-harness/layer-orchestration` 的 `YamlWorkflow` 驱动器加载并校验（校验失败时任务派发显式 failed，服务不崩、日志指路），按任务 `executor` 字段沿条件边分流到 content / docx / workflow（PDCA 拆解）/ human 四个执行器节点。扩展新执行器（如 code / mcp）：YAML 加节点与分支 + `src/index.ts` 注册对应闭包即可，路由零改动。
+任务板非人工任务的派发路由声明在 `workflows/executor-dispatch.yaml`（节点 + 条件边，契约与 aigility `WorkflowConfig` 对齐）——路由表可版本化、可人审：改路由 / 改执行器提示词动 YAML，不动代码。服务启动时经 `@aigility-harness/layer-orchestration` 的 `YamlWorkflow` 驱动器加载并校验（校验失败时任务派发显式 failed，服务不崩、日志指路），按任务 `executor` 字段沿条件边分流到 content / docx / workflow（PDCA 拆解）/ code（编码代理）/ human 五个执行器节点。扩展新执行器（如 mcp）：YAML 加节点与分支 + `src/index.ts` 注册对应闭包即可，路由零改动。
 
-边界（对应 AI 治理路线图的编排分类）：YAML 只声明「节点 + 条件边」的数据面；Seam 调用、SQLite 状态流转等执行面逻辑留在节点函数体内，通过注册注入——与 timem-project-task 三段式「不该改编」同理。
+边界（对应 AI 治理路线图的编排分类）：YAML 只声明「节点 + 条件边」的数据面；Seam 调用、PG `task` 表状态流转等执行面逻辑留在节点函数体内，通过注册注入——与 timem-project-task 三段式「不该改编」同理。
 
-## 工作流执行通道（workflow 执行器 · 待 SDK 落地即通）
+## 工作流执行通道（workflow 执行器 · 已接通）
 
-任务板执行器 `workflow`（复杂任务自动拆解）：Plan 阶段 LLM 拆解为子任务 DAG → 生成 aigility workflow YAML（`data/workflows/<taskId>.yaml`，复用 layer-orchestration consolidation 纯函数）→ 人审 YAML → 批准后经 py-bridge 执行。
+任务板执行器 `workflow`（复杂任务自动拆解）：Plan 阶段 LLM 拆解为子任务 DAG → 生成 aigility workflow YAML（`data/workflows/<taskId>.yaml`，复用 layer-orchestration consolidation 纯函数）→ 人审 YAML → 批准后经 py-bridge 执行（Do 段）。
 
-SDK 侧 `aigility.workflow.runtime.run_yaml_workflow(config_path, **state)` 落地后，在 `config/py-plugins.json` 的 aigility-workflow 插件 capabilities 追加即通（其余零改动）：
+Do 段执行能力（2026-09-29 接通）：SDK 侧 `aigility.workflow.runtime.run_yaml_workflow(config_path, **state)` 已随 aigility 2.1.0 落地；平台装配 `@aigility-harness/py-bridge` 并装载**平台专用声明** `config/py-plugins-aigility-platform.json`（capability `@orchestration/workflow-runtime` → `run_yaml_workflow`，无 init/method 纯函数式）。已验证：llm_node 链 LLM 降级回退 + litellm 真实推理 + worker JSON-RPC 协议三层全通。
 
-```json
-{
-  "id": "@orchestration/workflow-runtime",
-  "layer": "orchestration",
-  "function": "aigility.workflow.runtime.run_yaml_workflow",
-  "env": { "LITELLM_URL": "http://127.0.0.1:48724", "LITELLM_KEY": "sk-1234", "LLM_MODEL": "qwen2.5:7b" }
-}
-```
+为什么不用共享 `config/py-plugins.json`：共享文件里的 Python 版 `@orchestration/workflow-engine`（wecom 系工作流）与本平台对话链路的 TS workflow-engine 同 id——Seam resolve 取先注册者，且 autoHotSwap 健康切换可能改绑，装载共享文件会劫持对话编排。平台专用文件只含 `workflow-runtime`，零 id 冲突。
 
-注意：py-bridge 任一 capability 初始化失败会拖垮插件 onLoad（服务无法启动）——runtime.py 未落地前**不要**提前加该声明；未声明时批准执行会优雅失败并提示指引。
+注意：py-bridge 任一 capability 初始化失败会拖垮插件 onLoad（服务无法启动）——更换 `pythonExecutable`/`workDir` 指向的 venv 前，先 CLI 验证 `run_yaml_workflow` 可跑。
 
 ## LLM 上游说明
 

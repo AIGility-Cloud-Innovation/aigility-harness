@@ -5,21 +5,27 @@ import {
   fetchTaskLoopStatus, startTaskLoop, stopTaskLoop,
   type ReportTemplate, type DocBlock, type TaskLoopOpResult,
 } from '../lib/harness'
-import { ArrowLeft, PlusCircle, CheckCircle2, Clock, Loader2, FileText, CalendarClock, BarChart3, Workflow, ClipboardList, Headset, FileBarChart, MessageSquareText, FolderOpen, Sparkles, Bot } from 'lucide-react'
+import { ArrowLeft, PlusCircle, CheckCircle2, Clock, Loader2, FileText, CalendarClock, BarChart3, Workflow, ClipboardList, Headset, FileBarChart, MessageSquareText, FolderOpen, Sparkles, Bot, BookOpenCheck, ScanSearch } from 'lucide-react'
 
 const appIcon: Record<string, any> = {
   'app-qa': MessageSquareText, 'app-doc': FolderOpen, 'app-meeting': CalendarClock, 'app-data': BarChart3,
   'app-flow': Workflow, 'app-task': ClipboardList, 'app-service': Headset, 'app-report': FileBarChart,
-  'app-task-loop': Bot,
+  'app-task-loop': Bot, 'app-team-memory': BookOpenCheck, 'app-log-monitor': ScanSearch,
 }
 const iconColor: Record<string, string> = {
   知识服务: 'bg-blue-50 text-blue-600', 办公效率: 'bg-emerald-50 text-emerald-600', 数据分析: 'bg-sky-50 text-sky-600',
   内容生成: 'bg-amber-50 text-amber-600', 流程辅助: 'bg-cyan-50 text-cyan-600', 客户服务: 'bg-rose-50 text-rose-600',
 }
 
-export default function AppCenterPage({ openPage }: {
+export default function AppCenterPage({ openPage, navHidden, onToggleNav, navEditable = true }: {
   /** 「打开」跳转站内页面（如项目小助理 → task-loop 任务看板） */
   openPage?: (p: string) => void
+  /** 被用户从左侧导航隐藏的模块 id 集合（团队记忆总结 / 日志监察员等默认隐藏） */
+  navHidden?: Set<string>
+  /** 切换某模块「固定到左侧导航」 */
+  onToggleNav?: (id: string) => void
+  /** 导航布局编辑权限（现阶段仅管理员可改，普通用户只读） */
+  navEditable?: boolean
 } = {}) {
   const [apps, setApps] = useState(centerApps)
   const [open, setOpen] = useState<CenterApp | null>(null)
@@ -79,9 +85,13 @@ export default function AppCenterPage({ openPage }: {
         {apps.map(a => {
           const Icon = appIcon[a.id] || FileText
           const isTl = a.id === 'app-task-loop'
+          // 团队记忆总结 / 日志监察员：默认只在应用中心，卡片开关 = 是否固定到左侧导航（用户自决）
+          const isNavApp = a.id === 'app-team-memory' || a.id === 'app-log-monitor'
+          const navPage = a.id === 'app-team-memory' ? 'team-memory' : 'log-monitor'
+          const inNav = isNavApp && !navHidden?.has(navPage)
           const tlPending = tlBusy || tlRunning === null
           return (
-            <div key={a.id} className={`bg-white rounded-xl border p-5 transition hover:shadow-md ${(isTl ? tlRunning : a.on) ? 'border-slate-200/80' : 'border-dashed border-slate-200 opacity-75'}`}>
+            <div key={a.id} className={`bg-white rounded-xl border p-5 transition hover:shadow-md ${(isTl ? tlRunning : isNavApp ? true : a.on) ? 'border-slate-200/80' : 'border-dashed border-slate-200 opacity-75'}`}>
               <div className="flex items-start justify-between mb-3">
                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${iconColor[a.cat] || 'bg-slate-50 text-slate-500'}`}><Icon size={19} /></div>
                 {isTl ? (
@@ -89,6 +99,12 @@ export default function AppCenterPage({ openPage }: {
                     title={tlRunning ? '停用 = 停止机器人进程' : '启用 = 启动机器人进程'}
                     className={`w-10 h-[22px] rounded-full transition relative ${tlRunning ? 'bg-blue-600' : 'bg-slate-200'} ${tlPending ? 'opacity-50 cursor-wait' : ''}`}>
                     <span className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-all ${tlRunning ? 'left-[22px]' : 'left-[3px]'}`} />
+                  </button>
+                ) : isNavApp ? (
+                  <button onClick={() => onToggleNav?.(navPage)} disabled={!navEditable}
+                    title={navEditable ? (inNav ? '从左侧导航移除（仍可从此处进入）' : '固定到左侧导航') : '导航布局由管理员统一配置'}
+                    className={`w-10 h-[22px] rounded-full transition relative ${inNav ? 'bg-blue-600' : 'bg-slate-200'} ${!navEditable ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                    <span className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-all ${inNav ? 'left-[22px]' : 'left-[3px]'}`} />
                   </button>
                 ) : (
                   <button onClick={() => toggle(a.id)} className={`w-10 h-[22px] rounded-full transition relative ${a.on ? 'bg-blue-600' : 'bg-slate-200'}`}>
@@ -102,6 +118,8 @@ export default function AppCenterPage({ openPage }: {
                   <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${tlRunning ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500'} flex items-center gap-1`}>
                     {tlPending && <Loader2 size={9} className="animate-spin" />}{tlRunning === null ? '查询中…' : tlRunning ? '机器人运行中' : '机器人已停止'}
                   </span>
+                ) : isNavApp ? (
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${inNav ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>{inNav ? '已固定到导航' : '不在导航 · 从这里进'}</span>
                 ) : (
                   <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${a.status === '已上线' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>{a.status}</span>
                 )}
@@ -112,11 +130,15 @@ export default function AppCenterPage({ openPage }: {
                 <p className={`text-[11px] rounded-lg px-2.5 py-1.5 mb-3 ${tlNoteErr ? 'text-rose-600 bg-rose-50' : 'text-emerald-700 bg-emerald-50'}`}>{tlNote}</p>
               )}
               <div className="flex gap-2 pt-3 border-t border-slate-50">
-                <button disabled={!isTl && !a.on} onClick={() => isTl ? openPage?.('task-loop') : (a.detail || a.id === 'app-report') && setOpen(a)}
-                  className={`flex-1 text-xs py-1.5 rounded-lg transition ${(!isTl && !a.on) ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>打开</button>
-                <button disabled={!isTl && !a.on}
-                  onClick={() => isTl && openPage?.('task-loop-config')}
-                  className={`flex-1 text-xs py-1.5 rounded-lg border transition ${isTl || a.on ? 'border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-indigo-300 hover:text-indigo-600' : 'border-slate-100 text-slate-300 cursor-not-allowed'}`}>配置</button>
+                <button disabled={!isTl && !isNavApp && !a.on} onClick={() => {
+                  if (isTl) openPage?.('task-loop')
+                  else if (isNavApp) openPage?.(navPage)
+                  else if (a.detail || a.id === 'app-report') setOpen(a)
+                }}
+                  className={`flex-1 text-xs py-1.5 rounded-lg transition ${(!isTl && !isNavApp && !a.on) ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>打开</button>
+                <button disabled={!isTl && !isNavApp && !a.on}
+                  onClick={() => isTl ? openPage?.('task-loop-config') : isNavApp && openPage?.(navPage)}
+                  className={`flex-1 text-xs py-1.5 rounded-lg border transition ${isTl || isNavApp || a.on ? 'border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-indigo-300 hover:text-indigo-600' : 'border-slate-100 text-slate-300 cursor-not-allowed'}`}>配置</button>
               </div>
             </div>
           )

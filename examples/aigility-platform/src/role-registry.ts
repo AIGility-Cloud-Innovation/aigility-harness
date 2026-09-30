@@ -161,7 +161,8 @@ export function setRoute(chatKey: string, roleId: string): void {
 
 /** 技能路径存在性体检（供 UI 标红不存在的目录；不阻断保存） */
 export function checkSkillPaths(doc: RoleRegistryDoc): Record<string, string[]> {
-  const root = doc.skillsRoot ?? "";
+  // 基准与货架枚举一致：skillsRootDir()（相对 skillsRoot 以注册表文件所在目录为基准）
+  const root = skillsRootDir();
   const out: Record<string, string[]> = {};
   for (const [id, cfg] of Object.entries(doc.roles)) {
     const missing = (cfg.skills ?? [])

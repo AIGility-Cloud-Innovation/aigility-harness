@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { mcpTools, pluginTools } from '../mock/data'
-import { fetchCapabilities, fetchDshTools, callDshTool, type CapabilityInfo, type DshToolInfo } from '../lib/harness'
-import { Wrench, X, Plug, Hexagon, Building2, Blocks, Radio, PlugZap, Play, Loader2, RefreshCw } from 'lucide-react'
+import { fetchCapabilities, fetchDshTools, callDshTool, fetchInstalledPlugins, installPlugin, togglePlugin, uninstallPlugin, discoverPlugins, type CapabilityInfo, type DshToolInfo, type InstalledPlugin, type DiscoverPluginItem } from '../lib/harness'
+import { Wrench, X, Plug, Hexagon, Building2, Blocks, Radio, PlugZap, Play, Loader2, RefreshCw, Trash2, Lock, Plus, Search } from 'lucide-react'
 
 type ToolItem = {
   key: string; name: string; desc: string; group: 'TiMEM 上下文能力' | '客户系统封装' | '通用插件'
@@ -31,6 +31,8 @@ export default function ToolsPage({ showMock = true }: { showMock?: boolean }) {
   const [off, setOff] = useState<Set<string>>(new Set(allTools.filter(t => !t.enabled).map(t => t.key)))
   const [detail, setDetail] = useState<ToolItem | null>(null)
   const [capabilities, setCapabilities] = useState<CapabilityInfo[]>([])
+  // 社区发现 → 安装表单的预填通道（token 变化触发填表）
+  const [seedInstall, setSeedInstall] = useState<SeedInstall | null>(null)
 
   useEffect(() => {
     fetchCapabilities().then(setCapabilities).catch(() => {})
@@ -51,6 +53,12 @@ export default function ToolsPage({ showMock = true }: { showMock?: boolean }) {
 
       {/* DSH ctx.tools · MCP 工具总线（真）：dsh-mcp-client 注册的外部 MCP 工具, 经 @action/dsh-tool 桥 */}
       <DshMcpPanel />
+
+      {/* 已安装插件（真 · dsh_plugins 注册表 + 热装卸）：装什么插件就变成什么工作台 */}
+      <InstalledPluginsPanel seed={seedInstall} />
+
+      {/* 社区插件发现（真 · npm registry 检索 dsh-plugin 生态）：发现 → 填入上方安装表单 → 热装载 */}
+      <PluginDiscoverPanel onPick={setSeedInstall} />
 
       {/* 引擎能力总线（真）：内核已装配插件的全部 Provider, 随引擎版本自动更新 */}
       {capabilities.length > 0 && (
@@ -176,6 +184,314 @@ export default function ToolsPage({ showMock = true }: { showMock?: boolean }) {
 }
 
 // ── DSH MCP 工具总线（真）：dsh-mcp-client → ctx.tools → @action/dsh-tool 桥 ──
+
+// ── 已安装插件（真 · dsh_plugins 注册表 + dsh-host 热装卸）────────────────
+// 安装一条 = dsh_plugins 插一行 + dshLoadPlugin 热装载, 免重启。两种类型：
+// MCP server: package=@deepseek-ai/dsh-mcp-client + config={transport:'stdio', serverName, command, args}
+// DSH 插件包: package=<npm 包名>（社区/官方 cordis 插件, 进程内装载, 依赖的 dsh 服务行需已装）
+
+const PROTECTED_PLUGINS = ['system-prompt', 'tools']
+
+export type InstallKind = 'mcp' | 'dsh'
+
+export interface SeedInstall {
+  token: number
+  kind: InstallKind
+  name: string
+  package?: string
+  description?: string
+}
+
+function InstalledPluginsPanel({ seed }: { seed?: SeedInstall | null }) {
+  const [plugins, setPlugins] = useState<InstalledPlugin[]>([])
+  const [busy, setBusy] = useState('')
+  const [msg, setMsg] = useState('')
+  const [kind, setKind] = useState<InstallKind>('mcp')
+  const [form, setForm] = useState({ name: '', package: '', exportName: '', command: '', args: '', description: '' })
+
+  const reload = () => { fetchInstalledPlugins().then(setPlugins).catch(() => {}) }
+  useEffect(reload, [])
+
+  // 社区目录「填入安装表单」：预填类型与字段
+  useEffect(() => {
+    if (!seed) return
+    setKind(seed.kind)
+    setForm(f => ({
+      ...f,
+      name: seed.name,
+      package: seed.kind === 'dsh' ? (seed.package ?? '') : '',
+      command: '', args: '', exportName: '',
+      description: seed.description ?? '',
+    }))
+    setMsg(`已从社区目录填入「${seed.name}」——第三方插件为进程内装载，建议先看 repo 确认再点安装`)
+  }, [seed?.token])
+
+  const install = async () => {
+    const name = form.name.trim()
+    if (!name || busy) return
+    setBusy(name)
+    setMsg('')
+    try {
+      const input = kind === 'mcp'
+        ? {
+            name,
+            package: '@deepseek-ai/dsh-mcp-client',
+            description: form.description.trim() || `MCP server: ${form.command.trim()}`,
+            config: {
+              transport: 'stdio', serverName: name, command: form.command.trim(),
+              args: form.args.trim() ? form.args.trim().split(/\s+/) : [],
+            },
+          }
+        : {
+            name,
+            package: form.package.trim(),
+            exportName: form.exportName.trim() || undefined,
+            description: form.description.trim(),
+            config: {},
+          }
+      const r = await installPlugin(input)
+      setMsg(r.loaded
+        ? `已安装并热装载「${name}」——立即生效（${kind === 'mcp' ? '上方工具总线可验证' : '进程内能力已挂载'}）`
+        : `已登记「${name}」但装载失败：${r.error ?? '?'}（检查包名/依赖的 dsh 服务行是否齐备）`)
+      setForm({ name: '', package: '', exportName: '', command: '', args: '', description: '' })
+      reload()
+    } catch (e) {
+      setMsg(`安装失败：${String(e)}`)
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const toggle = async (p: InstalledPlugin) => {
+    if (busy) return
+    setBusy(p.name)
+    setMsg('')
+    try {
+      const next = !p.enabled
+      const r = await togglePlugin(p.name, next)
+      if (next && !r.loaded) setMsg(`「${p.name}」已启用但装载失败：${r.error ?? '?'}（行保留, 修复命令后重新开启）`)
+      reload()
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const uninstall = async (p: InstalledPlugin) => {
+    if (busy || PROTECTED_PLUGINS.includes(p.name)) return
+    setBusy(p.name)
+    setMsg('')
+    try {
+      await uninstallPlugin(p.name)
+      setMsg(`已卸载「${p.name}」（注册表行已删除, 热卸载生效）`)
+      reload()
+    } catch (e) {
+      setMsg(`卸载失败：${String(e)}`)
+    } finally {
+      setBusy('')
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-violet-200 ring-1 ring-violet-100/60 p-5" style={{ animation: 'fadeSlide .3s ease' }}>
+      <div className="flex items-center gap-2 mb-1">
+        <PlugZap size={14} className="text-violet-500" />
+        <h2 className="text-sm font-semibold text-slate-700">已安装插件 · 安装即生效</h2>
+        <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-50 text-violet-600 border border-violet-100">真 · {plugins.length} 个（dsh_plugins 注册表）</span>
+      </div>
+      <p className="text-[11px] text-slate-400 mb-3">装什么插件就变成什么工作台：MCP server 填一条启动命令、DSH 插件包填 npm 包名，热装载免重启。官方/社区插件（filesystem、neo4j、milvus…）装完即用。变更入审计日志。</p>
+
+      {/* 安装表单：MCP server（命令声明）或 DSH 插件包（npm 包） */}
+      <div className="rounded-lg border border-slate-100 bg-slate-50/60 p-3 mb-3">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-[11px] text-slate-500">安装类型：</span>
+          {([['mcp', 'MCP server（命令声明）'], ['dsh', 'DSH 插件包（npm 包）']] as const).map(([k, label]) => (
+            <button key={k} onClick={() => setKind(k)}
+              className={`text-[11px] px-2.5 py-1 rounded-full border transition ${kind === k ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-500 border-slate-200 hover:border-violet-300'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {kind === 'mcp' ? (
+          <div className="grid gap-2 md:grid-cols-[1fr_1.4fr_1fr_auto] items-end">
+            <label className="text-[11px] text-slate-500">插件名（唯一标识）
+              <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="neo4j"
+                className="mt-1 w-full text-xs px-2.5 py-1.5 bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-100" />
+            </label>
+            <label className="text-[11px] text-slate-500">启动命令（如 npx / docker / 可执行文件）
+              <input value={form.command} onChange={e => setForm(f => ({ ...f, command: e.target.value }))} placeholder="npx -y @neo4j/mcp-neo4j-cypher"
+                className="mt-1 w-full text-xs px-2.5 py-1.5 bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-100" />
+            </label>
+            <label className="text-[11px] text-slate-500">备注（可选）
+              <input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Neo4j 图谱查询"
+                className="mt-1 w-full text-xs px-2.5 py-1.5 bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-100" />
+            </label>
+            <button onClick={install} disabled={busy === form.name.trim() || !form.name.trim() || !form.command.trim()}
+              className="text-xs px-4 py-1.5 rounded-md bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 flex items-center gap-1.5 whitespace-nowrap">
+              {busy === form.name.trim() ? <Loader2 size={13} className="animate-spin" /> : <Plus />}
+              安装
+            </button>
+            <p className="md:col-span-4 text-[10px] text-slate-400">命令首词为可执行文件、其余为参数（空格分隔）。安装 = dsh_plugins 插行 + 热装载 + 审计留痕；工具经 ctx.tools 以 mcp__&lt;插件名&gt;__&lt;工具名&gt; 暴露。</p>
+          </div>
+        ) : (
+          <div className="grid gap-2 md:grid-cols-[1fr_1.4fr_0.8fr_1fr_auto] items-end">
+            <label className="text-[11px] text-slate-500">插件名（注册表行 id）
+              <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="context-milvus"
+                className="mt-1 w-full text-xs px-2.5 py-1.5 bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-100" />
+            </label>
+            <label className="text-[11px] text-slate-500">npm 包名
+              <input value={form.package} onChange={e => setForm(f => ({ ...f, package: e.target.value }))} placeholder="dsh-context-milvus"
+                className="mt-1 w-full text-xs px-2.5 py-1.5 bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-100" />
+            </label>
+            <label className="text-[11px] text-slate-500">导出名（可选）
+              <input value={form.exportName} onChange={e => setForm(f => ({ ...f, exportName: e.target.value }))} placeholder="默认入口"
+                className="mt-1 w-full text-xs px-2.5 py-1.5 bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-100" />
+            </label>
+            <label className="text-[11px] text-slate-500">备注（可选）
+              <input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Milvus 语义检索"
+                className="mt-1 w-full text-xs px-2.5 py-1.5 bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-100" />
+            </label>
+            <button onClick={install} disabled={busy === form.name.trim() || !form.name.trim() || !form.package.trim()}
+              className="text-xs px-4 py-1.5 rounded-md bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 flex items-center gap-1.5 whitespace-nowrap">
+              {busy === form.name.trim() ? <Loader2 size={13} className="animate-spin" /> : <Plus />}
+              安装
+            </button>
+            <p className="md:col-span-5 text-[10px] text-slate-400">进程内装载 cordis 插件（export apply）；插件依赖的 dsh 服务行（如 dsh-session/dsh-llm）需已在注册表，装载失败信息会指路。第三方插件建议装前看 repo、锁版本、进准入清单。</p>
+          </div>
+        )}
+      </div>
+
+      {msg && <div className="mb-3 text-[11px] px-3 py-2 rounded-lg bg-slate-50 border border-slate-100 text-slate-600">{msg}</div>}
+
+      {/* 插件清单 */}
+      <div className="space-y-2">
+        {plugins.map(p => {
+          const protectedRow = PROTECTED_PLUGINS.includes(p.name)
+          const loaded = !!p.runtime.at
+          return (
+            <div key={p.name} className="flex items-center gap-3 rounded-lg border border-slate-100 px-3 py-2.5">
+              <Blocks size={14} className={p.enabled ? 'text-violet-500' : 'text-slate-300'} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-medium text-slate-700">{p.name}</span>
+                  <code className="text-[10px] text-slate-400 truncate max-w-[320px]">{p.package}</code>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${loaded ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : p.runtime.error ? 'bg-red-50 text-red-600 border-red-100' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>
+                    {loaded ? `已装载 ${String(p.runtime.at).slice(11, 19)}` : p.runtime.error ? `装载失败` : p.enabled ? '待装载' : '未启用'}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-400 truncate">{p.description}{p.runtime.error ? ` · ${p.runtime.error}` : ''}</div>
+              </div>
+              <button onClick={() => toggle(p)} disabled={busy === p.name || (protectedRow && p.enabled)}
+                title={protectedRow ? '平台关键插件不可停用' : undefined}
+                className={`w-9 h-5 rounded-full relative transition shrink-0 ${p.enabled ? 'bg-violet-600' : 'bg-slate-200'} ${(protectedRow && p.enabled) || busy === p.name ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                <span className={`absolute top-[2px] w-4 h-4 rounded-full bg-white shadow transition-all ${p.enabled ? 'left-[17px]' : 'left-[2px]'}`} />
+              </button>
+              <button onClick={() => uninstall(p)} disabled={busy === p.name || protectedRow}
+                title={protectedRow ? '平台关键插件不可卸载' : '卸载'}
+                className={`text-slate-300 hover:text-red-500 transition shrink-0 ${protectedRow ? 'opacity-30 cursor-not-allowed' : ''}`}>
+                {protectedRow ? <Lock size={13} /> : busy === p.name ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+              </button>
+            </div>
+          )
+        })}
+      </div>
+      <style>{`@keyframes fadeSlide { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: none; } }`}</style>
+    </div>
+  )
+}
+
+// ── 社区插件发现（真 · npm registry 检索 dsh-plugin 生态）────────────────
+// GitHub topic dsh-plugin 自动收录 → npm 可检索；按关键词粗分类，点「填入安装」预填上方表单。
+
+const DISCOVER_CATS: Array<{ cat: string; test: RegExp }> = [
+  { cat: '知识/检索', test: /context|search|rag|knowledge|milvus|vector|retriev|graph/i },
+  { cat: '记忆/压缩', test: /memory|compact|checkpoint|lens/i },
+  { cat: '运维/健康', test: /ops|health|monitor|observ|diagnos|audit/i },
+  { cat: '模型/路由', test: /model|proxy|router|llm/i },
+  { cat: '通知/集成', test: /notif|message|feishu|wecom|slack|bridge|webhook|mcp/i },
+  { cat: '审批/编排', test: /approv|workflow|task|goal|plan/i },
+  { cat: '技能/Agent', test: /skill|agent|persona/i },
+  { cat: '外观/主题', test: /theme|skin|sidebar|panel|ui/i },
+  { cat: '安全/回滚', test: /rollback|sandbox|guard|safe|time-machine/i },
+  { cat: '截图/视觉', test: /screenshot|shot|vision|image/i },
+]
+
+const categorizePlugin = (p: DiscoverPluginItem): string =>
+  DISCOVER_CATS.find(c => c.test.test(p.name) || c.test.test(p.description))?.cat ?? '通用'
+
+const suggestRowId = (pkgName: string): string => {
+  const base = pkgName.includes('/') ? pkgName.split('/')[1] : pkgName
+  return base.replace(/^dsh[-_]/, '') || pkgName
+}
+
+function PluginDiscoverPanel({ onPick }: { onPick: (seed: SeedInstall) => void }) {
+  const [q, setQ] = useState('dsh-plugin')
+  const [items, setItems] = useState<DiscoverPluginItem[]>([])
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
+  const [cat, setCat] = useState('全部')
+
+  const load = (query: string) => {
+    setLoading(true)
+    setErr('')
+    discoverPlugins(query)
+      .then(r => { setItems(r.items ?? []); if (!r.ok) setErr(r.error ?? '发现失败') })
+      .catch(e => setErr(String(e)))
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => { load('dsh-plugin') }, [])
+
+  const cats = ['全部', ...Array.from(new Set(items.map(categorizePlugin)))]
+  const list = items.filter(p => cat === '全部' || categorizePlugin(p) === cat)
+
+  return (
+    <div className="bg-white rounded-xl border border-sky-200 ring-1 ring-sky-100/60 p-5">
+      <div className="flex items-center gap-2 mb-1 flex-wrap">
+        <Search size={14} className="text-sky-500" />
+        <h2 className="text-sm font-semibold text-slate-700">社区插件发现</h2>
+        <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-50 text-sky-600 border border-sky-100">真 · npm dsh-plugin 生态</span>
+        <span className="text-[10px] text-slate-400">GitHub topic dsh-plugin 收录 · 第三方社区维护，装前看 repo、锁版本</span>
+      </div>
+      <div className="flex gap-2 mb-3">
+        <input value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') load(q) }}
+          placeholder="检索 npm：dsh-plugin / knowledge / notification / milvus / model proxy…"
+          className="flex-1 text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-100" />
+        <button onClick={() => load(q)} disabled={loading}
+          className="text-xs px-3 py-2 rounded-lg bg-sky-600 text-white hover:bg-sky-700 disabled:opacity-50 flex items-center gap-1.5">
+          {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} 搜索
+        </button>
+      </div>
+      {err && <div className="mb-3 text-[11px] px-3 py-2 rounded-lg bg-amber-50 border border-amber-100 text-amber-700">{err}（服务端可用 NPM_REGISTRY_URL 配置镜像源）</div>}
+      {items.length > 0 && (
+        <div className="flex gap-1.5 flex-wrap mb-2">
+          {cats.map(c => (
+            <button key={c} onClick={() => setCat(c)}
+              className={`text-[10px] px-2 py-1 rounded-full border transition ${cat === c ? 'bg-sky-600 text-white border-sky-600' : 'bg-white text-slate-500 border-slate-200 hover:border-sky-300'}`}>{c}</button>
+          ))}
+        </div>
+      )}
+      <div className="space-y-1.5 max-h-80 overflow-y-auto">
+        {list.map(p => (
+          <div key={p.name} className="flex items-center gap-2.5 rounded-lg border border-slate-100 px-3 py-2">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-50 text-sky-600 border border-sky-100 shrink-0">{categorizePlugin(p)}</span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <a href={p.repo || p.npm} target="_blank" rel="noreferrer" className="text-xs font-medium text-slate-700 hover:text-sky-600">{p.name}</a>
+                <code className="text-[10px] text-slate-400">v{p.version}</code>
+                <span className="text-[10px] text-slate-300">{String(p.date).slice(0, 10)}</span>
+              </div>
+              <div className="text-[11px] text-slate-400 truncate">{p.description || '（无描述）'}</div>
+            </div>
+            <button onClick={() => onPick({ token: Date.now(), kind: 'dsh', name: suggestRowId(p.name), package: p.name, description: p.description })}
+              className="text-[11px] px-2.5 py-1 rounded-md border border-violet-200 text-violet-600 hover:bg-violet-50 transition shrink-0 flex items-center gap-1">
+              <Plus size={11} /> 填入安装
+            </button>
+          </div>
+        ))}
+        {!loading && list.length === 0 && <div className="text-xs text-slate-400 text-center py-4">{err ? '' : '没有匹配的插件，换个关键词试试'}</div>}
+      </div>
+    </div>
+  )
+}
 
 function DshMcpPanel() {
   const [payload, setPayload] = useState<{ ok: boolean; hostAlive: boolean; toolsMounted: boolean; tools?: DshToolInfo[]; error?: string } | null>(null)

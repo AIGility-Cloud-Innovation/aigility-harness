@@ -150,7 +150,12 @@ export const aigilityAgentProvider: Provider<AigilityAgentRequest, AigilityAgent
         agent_name: agentName,
         system_prompt: systemPrompt,
         memory: { agent_id: memAgentId, user_id: memUserId, limit: 4 },
-        ...(request.llm ? { llm: request.llm } : {}),
+        // 模型偏好（D2）：工厂发布的 modelId 优先作为请求级路由（调用方显式 llm 优先）
+        ...(request.llm
+          ? { llm: request.llm }
+          : skill?.modelId && skill.modelId !== "unified-upstream"
+            ? { llm: { model: skill.modelId } }
+            : {}),
         ...(request.history?.length ? { history: request.history } : {}),
       },
     )) as { ok: boolean; value?: { result?: string; response?: string; degraded?: boolean } };

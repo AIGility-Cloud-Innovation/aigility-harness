@@ -10,7 +10,7 @@
     "build": "vite build",
     "start": "tsx src/index.ts",
     "typecheck": "tsc -b",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
     "3d-force-graph": "^1.80.0",
@@ -21,6 +21,8 @@
     "@aigility-harness/layer-infrastructure": "workspace:*",
     "@aigility-harness/layer-orchestration": "workspace:*",
     "@aigility-harness/layer-persona": "workspace:*",
+    "@aigility-harness/py-bridge": "workspace:*",
+    "@aigility-harness/role-kit": "workspace:*",
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",

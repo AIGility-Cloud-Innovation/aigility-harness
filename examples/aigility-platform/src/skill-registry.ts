@@ -31,6 +31,8 @@ export interface AigilitySkill {
   status: "已发布";
   updatedAt: string;
   usage: number;
+  /** 发布者邮箱（visibility=仅自己 时的可见性判据；历史数据缺省视为 admin） */
+  owner?: string;
 }
 
 export type AigilitySkillInput = Omit<AigilitySkill, "status" | "updatedAt" | "usage">;
@@ -60,6 +62,15 @@ export function listSkills(): AigilitySkill[] {
   return cache;
 }
 
+/** 按查看者过滤可见技能：企业内全员可见；「仅自己」仅发布者（历史无主数据归 admin）可见 */
+export function visibleSkills(userEmail?: string): AigilitySkill[] {
+  const viewer = userEmail || "";
+  return listSkills().filter((s) => {
+    if (s.visibility !== "仅自己") return true;
+    return (s.owner ?? "admin@aigility.local") === viewer;
+  });
+}
+
 export function getSkill(id: string): AigilitySkill | undefined {
   return listSkills().find((s) => s.id === id);
 }
@@ -79,6 +90,15 @@ export function upsertSkill(input: AigilitySkillInput): AigilitySkill {
   return skill;
 }
 
+/** 发布后补记 owner（visibility=仅自己 的可见性判据；写盘持久化） */
+export function persistOwner(id: string, owner?: string): void {
+  const skills = listSkills();
+  const skill = skills.find((s) => s.id === id);
+  if (!skill) return;
+  skill.owner = owner;
+  persist(skills);
+}
+
 export function removeSkill(id: string): boolean {
   const skills = listSkills();
   const next = skills.filter((s) => s.id !== id);
@@ -88,15 +108,36 @@ export function removeSkill(id: string): boolean {
   return true;
 }
 
-// ── 对话用量（内存态, 运营驾驶舱「真指标」来源之一） ────────────────
+// ── 对话用量（data/aigility-usage.json 写穿落盘, 重启不丢；驾驶舱 skillUsage/butlerChats 来源） ──
 
-const usage = new Map<string, number>();
+const USAGE_FILE = resolve(__dirname, "../data/aigility-usage.json");
+let usage: Map<string, number> | null = null;
 
-/** 数字员工对话计数（aigility-agent 每次对话调用; skill_id 缺省计 butler） */
+function loadUsage(): Map<string, number> {
+  if (usage) return usage;
+  try {
+    const raw: unknown = existsSync(USAGE_FILE) ? JSON.parse(readFileSync(USAGE_FILE, "utf-8")) : {};
+    usage = new Map(
+      Object.entries(raw as Record<string, unknown>).map(([k, v]) => [k, Number(v) || 0]),
+    );
+  } catch {
+    usage = new Map();
+  }
+  return usage;
+}
+
+/** 数字员工对话计数（aigility-agent 每次对话调用; skill_id 缺省计 butler）。每次写穿落盘。 */
 export function bumpSkillUsage(id: string): void {
-  usage.set(id, (usage.get(id) ?? 0) + 1);
+  const m = loadUsage();
+  m.set(id, (m.get(id) ?? 0) + 1);
+  try {
+    mkdirSync(dirname(USAGE_FILE), { recursive: true });
+    writeFileSync(USAGE_FILE, JSON.stringify(Object.fromEntries(m)), "utf-8");
+  } catch {
+    // 落盘失败不阻塞对话：计数保留在内存, 下次 bump 重试写穿
+  }
 }
 
 export function usageSnapshot(): Record<string, number> {
-  return Object.fromEntries(usage);
+  return Object.fromEntries(loadUsage());
 }

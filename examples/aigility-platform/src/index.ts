@@ -29,7 +29,7 @@ import "./defaults.js";
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { extname, join, normalize, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -47,13 +47,18 @@ import { plugin as cognitivePlugin } from "@aigility-harness/layer-cognitive";
 import { plugin as personaPlugin } from "@aigility-harness/layer-persona";
 import { plugin as orchestrationPlugin, YamlWorkflow, parseWorkflowYaml } from "@aigility-harness/layer-orchestration";
 import { plugin as actionPlugin } from "@aigility-harness/layer-action";
+import { createPyBridgePlugin, loadPyPluginsConfig } from "@aigility-harness/py-bridge";
 import { isKnownGatewayKey, writeAudit } from "@aigility-harness/appbase/backend";
-import { ensureAigilityPlatform, routePlatform, sessionUserId, listTeamMembers, recentAudit, emailById,
-  createTask, listTasks, transitionTask, getTask, type TaskRow } from "./platform.js";
+import { dshLoadPlugin, dshStatus, dshUnloadPlugin } from "@aigility-harness/appbase/dsh-host";
+import { ensureAigilityPlatform, routePlatform, sessionUserId, listTeamMembers, recentAudit, emailById, usageSummaryFromPg,
+  createTask, listTasks, transitionTask, getTask, type TaskRow,
+  listModuleState, setModuleState, listModulePresets, saveModulePreset, applyModulePreset, deleteModulePreset,
+  listNavHidden, setNavHidden, isUserAdmin, listNavPrefs,
+  listDshPluginRows, insertDshPlugin, setDshPluginEnabled, deleteDshPluginRow, type DshPluginRow } from "./platform.js";
 import { aigilityAgentPlugin } from "./aigility-agent.js";
 import { siteImproverPlugin, SITE_IMPROVER_PERSONA_ID, SITE_IMPROVER_ROUTE, setTaskFiledHook } from "./site-improver.js";
 import { dshToolBridgePlugin } from "./dsh-tool.js";
-import { listSkills, upsertSkill, removeSkill, usageSnapshot, type AigilitySkillInput } from "./skill-registry.js";
+import { listSkills, visibleSkills, upsertSkill, removeSkill, persistOwner, usageSnapshot, type AigilitySkillInput } from "./skill-registry.js";
 import { loadRoles, upsertRole, removeRole, setRoute, checkSkillPaths, listDshSkills, createDshSkill, attachSkillToRole, listMcpShelf, type RoleCapabilityConfig, type RoleMcpServer } from "./role-registry.js";
 import { listTweaks, addTweak, removeTweak, type SiteTweak } from "./site-tweaks.js";
 import {
@@ -61,15 +66,34 @@ import {
   loadTaskLoopConfig, saveTaskLoopConfig, taskLoopLogs,
   taskLoopConfigView, listFeishuChats, fetchTaskLoopBoard,
 } from "./task-loop-manager.js";
+import {
+  teamMemoryStatus, runTeamMemoryJob, loadTeamMemoryConfig, saveTeamMemoryConfig,
+  teamMemoryLogs, teamMemoryConfigView, listTeamMemoryChats, startTeamMemoryScheduler,
+  type TeamMemoryJobKind,
+} from "./team-memory-manager.js";
+import {
+  fetchLogMonitorStatus, saveLogMonitorConfig, logMonitorLogs,
+  startLogMonitor, stopLogMonitor, restartLogMonitor,
+} from "./log-monitor-manager.js";
+import {
+  identityOverview, runIdentityAutoMatch, identityBind,
+  type IdentityBindRequest,
+} from "./identity-manager.js";
 import type { DshToolBridgeResponse } from "./dsh-tool.js";
 import { planTask, WORKFLOW_DIR } from "./planner.js";
-import { existsSync as fileExists } from "node:fs";
+import { buildAggregatorPlanFromConfig } from "./channel-aggregator.js";
+import { loadRoleManifestFile } from "./role-manifest.js";
+import { upsertRoleManifest, removeRoleManifest } from "./role-manifest-store.js";
+import { loadRolePackage, loadRolePackages, validateRoleManifest, type RoleManifest } from "@aigility-harness/role-kit";
+import { existsSync as fileExists, renameSync } from "node:fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const WEB_PORT = Number(process.env.AIGILITY_WEB_PORT ?? 1236);
 const GATEWAY_PORT = Number(process.env.AIGILITY_GATEWAY_PORT ?? 1237);
 const DIST_DIR = resolve(__dirname, "../app/dist");
+// 仓库根 = examples/aigility-platform/(src|dist) → ../../ (examples → aigility-harness)
+const REPO_ROOT = resolve(__dirname, "../../..");
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -182,8 +206,16 @@ async function main(): Promise<void> {
   const kernel = new InMemoryKernelAdapter();
 
   // 2. 装配五域插件 + 智悦本地数字员工插件（aigility-agent 随示例自带, 不改框架包）
+  // py-bridge: 任务板 workflow 执行器 Do 段（人审批准 → run_yaml_workflow, aigility SDK ≥2.1.0）。
+  // 用平台专用声明 config/py-plugins-aigility-platform.json, 不装载共享 config/py-plugins.json：
+  // 共享文件里的 Python 版 @orchestration/workflow-engine（wecom 系工作流）与本平台对话链路的
+  // TS workflow-engine 同 id, resolve 取先注册者 + autoHotSwap 健康切换可能改绑, 会劫持对话编排。
+  const pyBridgePlugin = createPyBridgePlugin(
+    loadPyPluginsConfig(resolve(REPO_ROOT, "config/py-plugins-aigility-platform.json")),
+  );
   const plugins = [
     infrastructurePlugin,
+    pyBridgePlugin,
     cognitivePlugin,
     personaPlugin,
     orchestrationPlugin,
@@ -374,7 +406,6 @@ async function main(): Promise<void> {
   // headless 模式无法创建模型，交互式账号订阅不适用于无人值守 spawn）。
   // 安全边界：改动落工作区 git diff，任务进 review 人审（rejected/回滚走 git）；
   // 编码代理不 commit、不碰凭证，约束写在 YAML 节点的 system_prompt。
-  const REPO_ROOT = resolve(__dirname, "../../..");
   const CODE_AGENT_ID = process.env.CODE_EXECUTOR_AGENT_ID ?? "@action/codex-agent";
   const dispatchCodeExecutor = (task: TaskRow, rules: string): Promise<void> =>
     (async () => {
@@ -482,7 +513,7 @@ async function main(): Promise<void> {
       } catch (err) {
         const msg = String(err);
         const hint = msg.includes("resolve 失败") || msg.includes("Failed to resolve") || msg.includes("workflow-runtime")
-          ? `${msg}（等待 aigility SDK runtime.py 落地后，在 config/py-plugins.json 声明 @orchestration/workflow-runtime 即通，见 README）`
+          ? `${msg}（py-bridge 未提供该能力：检查 config/py-plugins-aigility-platform.json 与 aigility SDK venv ≥2.1.0，服务启动日志有 py-bridge 装载详情）`
           : msg;
         await transitionTask(task.id, "running", "failed", { kind: "error", text: hint });
         console.error(`[task] 工作流执行失败「${task.title}」:`, err);
@@ -511,15 +542,16 @@ async function main(): Promise<void> {
       }
 
       if (path === "/api/aigility/registry" && req.method === "GET") {
+        const viewer = await emailById(sessionUserId(req) ?? "") ?? undefined;
         json(res, 200, {
           personas,
-          skills: listSkills(),
+          skills: visibleSkills(viewer),
           llm: process.env.LLM_PROVIDER ?? "stub",
         });
         return;
       }
       if (path === "/api/aigility/skills" && req.method === "GET") {
-        json(res, 200, { skills: listSkills() });
+        json(res, 200, { skills: visibleSkills(await emailById(sessionUserId(req) ?? "") ?? undefined) });
         return;
       }
       if (path === "/api/aigility/skills" && req.method === "POST") {
@@ -543,7 +575,9 @@ async function main(): Promise<void> {
             visibility: body.visibility?.trim() || "企业内",
             releaseNote: body.releaseNote?.trim() || "",
           });
-          console.log(`[工厂] 数字员工「${skill.name}」已发布 (id=${skill.id}) → @persona/aigility-agent 可按 skill_id 对话`);
+          skill.owner = await emailById(sessionUserId(req) ?? "") ?? undefined; // 仅自己 可见性的判据
+          persistOwner(skill.id, skill.owner);
+          console.log(`[工厂] 数字员工「${skill.name}」已发布 (id=${skill.id}, owner=${skill.owner ?? "?"}) → @persona/aigility-agent 可按 skill_id 对话`);
           json(res, 200, { skill });
         } catch (err) {
           json(res, 400, { error: String(err) });
@@ -824,19 +858,371 @@ async function main(): Promise<void> {
         return;
       }
       if (path === "/api/aigility/usage" && req.method === "GET") {
-        // Token 用量（真）：D1 token-metering 共享账本（D2 每次推理自动上报）
-        const summary = await seamCall<{ summary: Record<string, unknown> }>("@infrastructure/token-metering", { action: "summary" });
+        // Token 用量（真 · 双账本归一）：优先 PG llm_usage（网关每次完成上报 /app/usage/collect
+        // 持久, 口径=网关全量, 重启不丢）; PG 不可用/空表回退内存账本（仅本会话）。
+        // recent 尾巴始终取内存账本（近期明细, 无需持久）。
+        const pg = await usageSummaryFromPg();
+        const summary = pg
+          ? {
+              total: pg.calls, calls: pg.calls,
+              promptTokens: pg.promptTokens, completionTokens: pg.completionTokens, totalTokens: pg.totalTokens,
+              measuredCalls: pg.calls, estimatedCalls: 0,
+              byUser: [] as unknown[], byModel: pg.byModel, byDay: pg.byDay,
+            }
+          : await (async () => {
+              const m = await seamCall<{ summary: Record<string, unknown> }>("@infrastructure/token-metering", { action: "summary" });
+              return m.ok ? m.value?.summary ?? null : null;
+            })();
         const recent = await seamCall<{ entries: unknown[] }>("@infrastructure/token-metering", { action: "query", query: { limit: 12 } });
         json(res, 200, {
           ok: true,
-          summary: summary.ok ? summary.value?.summary : null,
+          summary,
           recent: recent.ok ? recent.value?.entries : [],
-          error: summary.ok ? undefined : String(summary.error ?? ""),
+          source: pg ? "pg" : "memory",
         });
         return;
       }
       if (path === "/api/aigility/audit" && req.method === "GET") {
         json(res, 200, { ok: true, entries: await recentAudit(20) });
+        return;
+      }
+
+      // ── 编排管理（真 · 数据面工作流 YAML：清单/读取/保存, 服务端校验 + 审计）──
+      if (path === "/api/aigility/flows" && req.method === "GET") {
+        const { readdirSync, statSync } = await import("node:fs");
+        const flows: Array<{ id: string; name: string; source: string; builtin: boolean }> = [
+          { id: "executor-dispatch", name: "任务板执行器路由", source: "workflows/executor-dispatch.yaml", builtin: true },
+        ];
+        try {
+          for (const f of readdirSync(WORKFLOW_DIR)) {
+            if (f.endsWith(".yaml") && statSync(resolve(WORKFLOW_DIR, f)).isFile()) {
+              flows.push({ id: f.replace(/\.yaml$/, ""), name: `任务拆解工作流`, source: `data/workflows/${f}`, builtin: false });
+            }
+          }
+        } catch { /* 目录缺失时仅内置路由 */ }
+        json(res, 200, { ok: true, flows });
+        return;
+      }
+      const flowMatch = path.match(/^\/api\/aigility\/flows\/([\w-]+)$/);
+      if (flowMatch && req.method === "GET") {
+        const file = flowMatch[1] === "executor-dispatch"
+          ? resolve(__dirname, "../workflows/executor-dispatch.yaml")
+          : resolve(WORKFLOW_DIR, `${flowMatch[1]}.yaml`);
+        if (!fileExists(file)) { json(res, 404, { error: `工作流 ${flowMatch[1]} 不存在` }); return; }
+        json(res, 200, { ok: true, id: flowMatch[1], yaml: readFileSync(file, "utf-8") });
+        return;
+      }
+      if (flowMatch && req.method === "PUT") {
+        const body = JSON.parse((await readBody(req)) || "{}") as { yaml?: string };
+        if (!body.yaml?.trim()) { json(res, 400, { error: "缺少 yaml 内容" }); return; }
+        // 服务端校验：结构非法拒绝写盘（对齐启动时 YamlWorkflow.validate 的契约）
+        try {
+          const wf = new YamlWorkflow(parseWorkflowYaml(body.yaml));
+          wf.registerNodes({
+            classify: () => ({}), content: async () => {}, docx: async () => {},
+            dispatch_workflow_planner: () => {}, dispatch_code_executor: () => {}, mark_open: () => {},
+          });
+          wf.registerCondition("route_by_executor", () => "");
+          const { errors } = wf.validate();
+          if (errors.length) { json(res, 400, { error: `工作流校验失败: ${errors.join("; ")}` }); return; }
+        } catch (e) {
+          json(res, 400, { error: `YAML 解析失败: ${String(e)}` });
+          return;
+        }
+        const file = flowMatch[1] === "executor-dispatch"
+          ? resolve(__dirname, "../workflows/executor-dispatch.yaml")
+          : resolve(WORKFLOW_DIR, `${flowMatch[1]}.yaml`);
+        if (!fileExists(file)) { json(res, 404, { error: `工作流 ${flowMatch[1]} 不存在（新建走任务板 Plan 拆解）` }); return; }
+        writeFileSync(file, body.yaml, "utf-8");
+        void writeAudit(sessionUserId(req) ?? "unknown", "flow.save", flowMatch[1], `${body.yaml.length} 字节（校验通过）`);
+        json(res, 200, { ok: true, note: "已保存并校验通过；任务派发在下次加载时使用新配置（编辑器内即时生效）" });
+        return;
+      }
+      // ── 模型池（真 · 网关 /v1/models 代理, 主密钥仅服务端）与工作流清单（D4 编排委托数据源）──
+      if (path === "/api/aigility/llm/models" && req.method === "GET") {
+        try {
+          const r = await fetch(`http://127.0.0.1:${GATEWAY_PORT}/v1/models`, {
+            headers: { Authorization: `Bearer ${gatewayKey}` },
+            signal: AbortSignal.timeout(5000),
+          });
+          const j = await r.json() as { data?: Array<{ id: string }> };
+          const models = (j.data ?? []).map((m) => m.id).sort();
+          json(res, 200, { ok: true, models, source: "gateway" });
+        } catch (err) {
+          json(res, 200, { ok: false, models: [], error: `网关模型池不可达: ${String(err)}` });
+        }
+        return;
+      }
+      if (path === "/api/aigility/workflows" && req.method === "GET") {
+        // 数据面工作流清单：executor-dispatch（任务派发路由）+ data/workflows/*.yaml（Plan 拆解产物）
+        const list: Array<{ id: string; name: string; source: string }> = [
+          { id: "executor-dispatch", name: "任务板执行器路由（content/docx/workflow/code/human）", source: "workflows/executor-dispatch.yaml" },
+        ];
+        try {
+          const { readdirSync } = await import("node:fs");
+          for (const f of readdirSync(WORKFLOW_DIR)) {
+            if (f.endsWith(".yaml")) list.push({ id: f.replace(/\.yaml$/, ""), name: `任务拆解工作流（${f.slice(0, 8)}…）`, source: `data/workflows/${f}` });
+          }
+        } catch { /* 目录缺失时仅内置路由 */ }
+        json(res, 200, { ok: true, workflows: list });
+        return;
+      }
+      // ── 通道聚合（M1 dry-run 装配计划 + M2a manifest 检查/调整：读-改-审一体）──
+      if (path === "/api/aigility/channels/plan" && req.method === "GET") {
+        const plan = buildAggregatorPlanFromConfig();
+        json(res, 200, { ok: true, mode: "dry-run", ...plan });
+        return;
+      }
+      if (path === "/api/aigility/role-manifests" && req.method === "GET") {
+        const file = loadRoleManifestFile();
+        json(res, 200, { ok: true, file });
+        return;
+      }
+      if (path === "/api/aigility/role-manifests" && req.method === "POST") {
+        const body = JSON.parse((await readBody(req)) || "{}") as Record<string, never>;
+        const r = upsertRoleManifest(body);
+        if (!r.ok) { json(res, 400, { ok: false, error: r.error }); return; }
+        void writeAudit(sessionUserId(req) ?? "unknown", "role-manifest.upsert", r.manifest.role_id,
+          `${r.manifest.identity.name} · channels=${(r.manifest.sources.channels ?? []).length}`);
+        json(res, 200, { ok: true, manifest: r.manifest });
+        return;
+      }
+      const manifestDel = path.match(/^\/api\/aigility\/role-manifests\/([\w-]+)$/);
+      if (manifestDel && req.method === "DELETE") {
+        const r = removeRoleManifest(manifestDel[1]);
+        if (!r.ok) { json(res, 404, { ok: false, error: r.error }); return; }
+        void writeAudit(sessionUserId(req) ?? "unknown", "role-manifest.remove", manifestDel[1]);
+        json(res, 200, { ok: true });
+        return;
+      }
+      // ── 角色包（roles/ 目录 · role-kit）：工厂的可移植角色单元，GET 列出 / PUT 写回包目录 ──
+      if (path === "/api/aigility/role-packages" && req.method === "GET") {
+        const pkgs = loadRolePackages({ publicDir: join(REPO_ROOT, "roles") });
+        json(res, 200, {
+          ok: true,
+          packages: pkgs.map((p) => ({
+            id: p.id, layer: p.layer, dir: p.dir, name: p.name,
+            description: p.description, prompt: p.prompt, manifest: p.manifest,
+            issues: validateRoleManifest(p.manifest),
+          })),
+        });
+        return;
+      }
+      const rolePkgPut = path.match(/^\/api\/aigility\/role-packages\/([\w-]+)$/);
+      if (rolePkgPut && req.method === "PUT") {
+        const body = JSON.parse((await readBody(req)) || "{}") as { manifest?: RoleManifest; prompt?: string };
+        const pkg = loadRolePackage(rolePkgPut[1], { publicDir: join(REPO_ROOT, "roles") });
+        if (!pkg) { json(res, 404, { ok: false, error: `角色包不存在: ${rolePkgPut[1]}` }); return; }
+        if (!body.manifest) { json(res, 400, { ok: false, error: "缺 manifest" }); return; }
+        if (body.manifest.role_id !== pkg.id) {
+          json(res, 400, { ok: false, error: `role_id 不匹配（${body.manifest.role_id} ≠ ${pkg.id}），角色 id 不可改名` });
+          return;
+        }
+        const issues = validateRoleManifest(body.manifest);
+        if (issues.length) { json(res, 400, { ok: false, error: issues.join("；") }); return; }
+        // 公共层包也允许写：自托管开发环境下 roles/ 有 git 兜底（diff/回滚），工厂即编辑器
+        try {
+          const tmp = `${pkg.dir}/role.json.tmp`;
+          writeFileSync(tmp, JSON.stringify(body.manifest, null, 2) + "\n", "utf8");
+          renameSync(tmp, `${pkg.dir}/role.json`);
+          if (typeof body.prompt === "string" && body.prompt.trim()) {
+            const md = readFileSync(`${pkg.dir}/SKILL.md`, "utf8");
+            const fm = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(md)?.[0] ?? "";
+            const tmpMd = `${pkg.dir}/SKILL.md.tmp`;
+            writeFileSync(tmpMd, fm + body.prompt.trim() + "\n", "utf8");
+            renameSync(tmpMd, `${pkg.dir}/SKILL.md`);
+          }
+        } catch (err) {
+          json(res, 500, { ok: false, error: `写回失败: ${err}` });
+          return;
+        }
+        void writeAudit(sessionUserId(req) ?? "unknown", "role-package.upsert", pkg.id,
+          `commands=${(body.manifest.actions.commands ?? []).length} schedules=${(body.manifest.actions.schedules ?? []).length}`);
+        json(res, 200, { ok: true });
+        return;
+      }
+      // ── 模块装配（真 · app_modules/app_module_presets 持久化, 设计见 docs/platform-module-plugin-design.md）──
+      if (path === "/api/aigility/modules" && req.method === "GET") {
+        const uid = sessionUserId(req);
+        // 导航可见偏好（per-user · user_module_nav）：未登录只给默认集
+        const navHidden = uid ? await listNavHidden(uid) : Object.fromEntries(
+          ["team-memory", "log-monitor"].map((id) => [id, true]));
+        json(res, 200, { ok: true, state: await listModuleState(), presets: await listModulePresets(), navHidden });
+        return;
+      }
+      if (path === "/api/aigility/modules/presets" && req.method === "POST") {
+        const body = JSON.parse((await readBody(req)) || "{}") as { name?: string; enabledIds?: string[] };
+        if (!body.name?.trim()) { json(res, 400, { error: "预设需要名称" }); return; }
+        const actor = sessionUserId(req) ?? "unknown";
+        const ids = Array.isArray(body.enabledIds)
+          ? body.enabledIds
+          : Object.entries(await listModuleState()).filter(([, v]) => v).map(([k]) => k);
+        const preset = await saveModulePreset(body.name.trim(), ids, actor);
+        void writeAudit(actor, "preset.save", preset.id, `${preset.name}（${ids.length} 个模块）`);
+        json(res, 200, { ok: true, preset });
+        return;
+      }
+      const presetApply = path.match(/^\/api\/aigility\/modules\/presets\/([\w-]+)\/apply$/);
+      if (presetApply && req.method === "POST") {
+        const actor = sessionUserId(req) ?? "unknown";
+        const changed = await applyModulePreset(presetApply[1], actor);
+        void writeAudit(actor, "preset.apply", presetApply[1], `${changed} 个模块`);
+        json(res, 200, { ok: true, state: await listModuleState() });
+        return;
+      }
+      const presetDel = path.match(/^\/api\/aigility\/modules\/presets\/([\w-]+)$/);
+      if (presetDel && req.method === "DELETE") {
+        const ok = await deleteModulePreset(presetDel[1]);
+        if (!ok) { json(res, 400, { error: "预设不存在或为内置预设" }); return; }
+        void writeAudit(sessionUserId(req) ?? "unknown", "preset.delete", presetDel[1]);
+        json(res, 200, { ok: true });
+        return;
+      }
+      const moduleToggle = path.match(/^\/api\/aigility\/modules\/([\w-]+)$/);
+      if (moduleToggle && req.method === "PUT") {
+        const body = JSON.parse((await readBody(req)) || "{}") as { enabled?: boolean };
+        const actor = sessionUserId(req) ?? "unknown";
+        const err = await setModuleState(moduleToggle[1], !!body.enabled, actor);
+        if (err) { json(res, 400, { error: err }); return; }
+        void writeAudit(actor, "module.toggle", moduleToggle[1], body.enabled ? "开" : "关");
+        json(res, 200, { ok: true });
+        return;
+      }
+      // 导航可见偏好（per-user · user_module_nav；切换入 audit_log）
+      // 权限（现阶段约定，RBAC 模块就绪前以 users.is_admin 判定）：
+      //   普通用户不可自行修改布局；管理员可修改任意成员（含自己）的偏好。
+      const navToggle = path.match(/^\/api\/aigility\/modules\/([\w-]+)\/nav$/);
+      if (navToggle && req.method === "PUT") {
+        const body = JSON.parse((await readBody(req)) || "{}") as { hidden?: boolean; userId?: string };
+        const actor = sessionUserId(req);
+        if (!actor) { json(res, 401, { error: "需要登录" }); return; }
+        if (!(await isUserAdmin(actor))) { json(res, 403, { error: "布局由管理员统一配置，普通用户不可修改" }); return; }
+        const target = typeof body.userId === "string" && body.userId && body.userId !== actor ? body.userId : actor;
+        const err = await setNavHidden(target, navToggle[1], !!body.hidden);
+        if (err) { json(res, 400, { error: err }); return; }
+        const targetLabel = target !== actor ? ` · 目标 ${await emailById(target) ?? target}` : "";
+        void writeAudit(actor, "module.nav", navToggle[1], `${body.hidden ? "隐藏" : "显示"}${targetLabel}`);
+        json(res, 200, { ok: true, navHidden: await listNavHidden(target) });
+        return;
+      }
+      // 管理员视图：全部成员的导航偏好（逐用户调整用；非管理员 403）
+      if (path === "/api/aigility/nav-prefs" && req.method === "GET") {
+        const actor = sessionUserId(req);
+        if (!actor) { json(res, 401, { error: "需要登录" }); return; }
+        if (!(await isUserAdmin(actor))) { json(res, 403, { error: "仅管理员可查看成员导航偏好" }); return; }
+        json(res, 200, { ok: true, prefs: await listNavPrefs() });
+        return;
+      }
+
+      // ── 工具插件安装（真 · dsh_plugins 注册表 + dsh-host 热装卸, 安装即用免重启）──
+      // 社区插件发现（真 · npm registry 检索 dsh-plugin 生态; NPM_REGISTRY_URL 可换镜像, 缺省官方源）
+      if (path === "/api/aigility/plugins/discover" && req.method === "GET") {
+        const q = new URL(req.url ?? "/", "http://x").searchParams.get("q")?.trim() || "dsh-plugin";
+        const registry = process.env.NPM_REGISTRY_URL ?? "https://registry.npmjs.org";
+        try {
+          const r = await fetch(`${registry}/-/v1/search?text=${encodeURIComponent(q)}&size=30`, { signal: AbortSignal.timeout(8000) });
+          const j = await r.json() as {
+            objects?: Array<{ package: { name: string; version: string; description?: string; date?: string; links?: Record<string, string>; keywords?: string[] } }>;
+          };
+          const items = (j.objects ?? [])
+            .map((o) => ({
+              name: o.package.name,
+              version: o.package.version,
+              description: o.package.description ?? "",
+              date: o.package.date ?? "",
+              repo: o.package.links?.repository ?? "",
+              npm: o.package.links?.npm ?? `https://www.npmjs.com/package/${o.package.name}`,
+              keywords: o.package.keywords ?? [],
+            }))
+            .filter((p) =>
+              /dsh/i.test(p.name) ||
+              p.keywords.some((k) => /dsh/i.test(k)) ||
+              /deepseek harness|\bdsh\b/i.test(p.description))
+            .sort((a, b) => (a.date < b.date ? 1 : -1));
+          json(res, 200, { ok: true, registry, items });
+        } catch (err) {
+          json(res, 200, { ok: false, items: [], error: `registry 不可达: ${String(err)}` });
+        }
+        return;
+      }
+      if (path === "/api/aigility/plugins" && req.method === "GET") {
+        const rows = await listDshPluginRows();
+        const status = dshStatus();
+        // runtime 只取 at/error：dshStatus 原始条目含 cordis 句柄（循环引用），直接序列化会炸进程
+        json(res, 200, {
+          ok: true,
+          plugins: rows.map((p) => {
+            const rt = (status.plugins[p.name] ?? {}) as { at?: string; error?: string };
+            return { ...p, runtime: { at: rt.at, error: rt.error } };
+          }),
+        });
+        return;
+      }
+      if (path === "/api/aigility/plugins" && req.method === "POST") {
+        const body = JSON.parse((await readBody(req)) || "{}") as {
+          name?: string; package?: string; exportName?: string; description?: string;
+          config?: Record<string, unknown>; enable?: boolean;
+        };
+        if (!body.name?.trim() || !body.package?.trim()) {
+          json(res, 400, { error: "安装至少需要插件名与包名" });
+          return;
+        }
+        const rec: DshPluginRow = {
+          name: body.name.trim(), package: body.package.trim(), exportName: body.exportName?.trim() ?? "",
+          description: body.description?.trim() ?? "", config: body.config ?? {},
+        };
+        const dup = await insertDshPlugin(rec);
+        if (dup) { json(res, 400, { error: dup }); return; }
+        const loaded = body.enable !== false
+          ? await dshLoadPlugin({ name: rec.name, package: rec.package, export_name: rec.exportName, config: rec.config })
+          : { ok: true as const };
+        void writeAudit(sessionUserId(req) ?? "unknown", "plugin.install", rec.name,
+          `${rec.package} · ${loaded.ok ? "热装载成功" : `装载失败: ${loaded.error ?? "?"}`}`);
+        json(res, 200, { ok: true, loaded: loaded.ok, error: loaded.error });
+        return;
+      }
+      const pluginName = path.match(/^\/api\/aigility\/plugins\/([^/]+)$/);
+      if (pluginName && req.method === "PUT") {
+        const name = decodeURIComponent(pluginName[1]);
+        const body = JSON.parse((await readBody(req)) || "{}") as { enabled?: boolean };
+        const enable = !!body.enabled;
+        if (!enable && (name === "system-prompt" || name === "tools")) {
+          json(res, 400, { error: `${name} 是平台关键插件, 不可停用` });
+          return;
+        }
+        const rows = await listDshPluginRows();
+        const rec = rows.find((p) => p.name === name);
+        if (!rec) { json(res, 404, { error: `插件 ${name} 不存在` }); return; }
+        await setDshPluginEnabled(name, enable);
+        const r = enable
+          ? await dshLoadPlugin({ name: rec.name, package: rec.package, export_name: rec.exportName, config: rec.config })
+          : { ok: true, error: undefined as string | undefined };
+        if (!enable) {
+          const rest = rows.filter((p) => p.enabled && p.name !== name)
+            .map((p) => ({ name: p.name, package: p.package, export_name: p.exportName, config: p.config }));
+          const results = await dshUnloadPlugin(name, rest);
+          r.ok = !results[name]?.error;
+          r.error = results[name]?.error;
+        }
+        void writeAudit(sessionUserId(req) ?? "unknown", "plugin.toggle", name,
+          `${enable ? "开" : "关"}${r.ok ? "" : `（失败: ${r.error ?? "?"}）`}`);
+        json(res, 200, { ok: true, loaded: r.ok, error: r.error });
+        return;
+      }
+      if (pluginName && req.method === "DELETE") {
+        const name = decodeURIComponent(pluginName[1]);
+        if (name === "system-prompt" || name === "tools") {
+          json(res, 400, { error: `${name} 是平台关键插件, 不可卸载` });
+          return;
+        }
+        const rows = await listDshPluginRows();
+        const rest = rows.filter((p) => p.enabled && p.name !== name)
+          .map((p) => ({ name: p.name, package: p.package, export_name: p.exportName, config: p.config }));
+        await dshUnloadPlugin(name, rest);
+        const ok = await deleteDshPluginRow(name);
+        if (!ok) { json(res, 404, { error: `插件 ${name} 不存在` }); return; }
+        void writeAudit(sessionUserId(req) ?? "unknown", "plugin.uninstall", name);
+        json(res, 200, { ok: true });
         return;
       }
       if (path === "/api/aigility/team" && req.method === "GET") {
@@ -975,6 +1361,141 @@ async function main(): Promise<void> {
         json(res, 200, { ok: true, ...taskLoopLogs(tail) });
         return;
       }
+      // ── 团队记忆总结（team-memory-console 收编）：状态 / 配置 / 立即生成 / 日志 / 群枚举 ──
+      if (path === "/api/aigility/team-memory/status" && req.method === "GET") {
+        if (!requireUser(req, res)) return;
+        const url = new URL(req.url ?? "/", "http://x");
+        const tail = Number.parseInt(url.searchParams.get("tail") ?? "30", 10) || 30;
+        const s = teamMemoryStatus(Math.min(200, Math.max(1, tail)));
+        json(res, 200, { ok: true, status: { ...s, config: teamMemoryConfigView(s.config) } });
+        return;
+      }
+      if (path === "/api/aigility/team-memory/config" && req.method === "GET") {
+        if (!requireUser(req, res)) return;
+        json(res, 200, { ok: true, config: teamMemoryConfigView(loadTeamMemoryConfig()) });
+        return;
+      }
+      if (path === "/api/aigility/team-memory/config" && req.method === "PUT") {
+        if (!requireUser(req, res)) return;
+        try {
+          const body = JSON.parse((await readBody(req)) || "{}");
+          const config = saveTeamMemoryConfig(body);
+          json(res, 200, { ok: true, config: teamMemoryConfigView(config), note: "配置已保存；调度按新时刻自动生效（凭证类留空/掩码 = 不修改）" });
+        } catch (err) {
+          json(res, 400, { ok: false, error: String(err) });
+        }
+        return;
+      }
+      if (path === "/api/aigility/team-memory/run" && req.method === "POST") {
+        if (!requireUser(req, res)) return;
+        try {
+          const body = JSON.parse((await readBody(req)) || "{}") as { kind?: string };
+          const kind = body?.kind === "morning" ? "morning" : "report";
+          // 同步等待完成（最长 5 分钟），返回结果与日志尾部
+          const r = await runTeamMemoryJob(kind as TeamMemoryJobKind);
+          json(res, r.ok ? 200 : 500, { ...r });
+        } catch (err) {
+          json(res, 500, { ok: false, error: String(err) });
+        }
+        return;
+      }
+      if (path === "/api/aigility/team-memory/logs" && req.method === "GET") {
+        if (!requireUser(req, res)) return;
+        const url = new URL(req.url ?? "/", "http://x");
+        const tail = Number.parseInt(url.searchParams.get("tail") ?? "200", 10) || 200;
+        json(res, 200, { ok: true, ...teamMemoryLogs(tail) });
+        return;
+      }
+      if (path === "/api/aigility/team-memory/feishu/chats" && req.method === "POST") {
+        // 枚举推送群：凭证用请求体传入（未保存的新 Secret 可先行验证），否则用本模块已保存配置
+        if (!requireUser(req, res)) return;
+        try {
+          const body = JSON.parse((await readBody(req)) || "{}") as { appId?: string; appSecret?: string };
+          const r = await listTeamMemoryChats({ appId: body?.appId, appSecret: body?.appSecret });
+          json(res, r.ok ? 200 : 400, { ok: r.ok, chats: r.chats, error: r.error });
+        } catch (err) {
+          json(res, 500, { ok: false, chats: [], error: String(err) });
+        }
+        return;
+      }
+      // ── 日志监察员（log-monitor 收编）：状态 / 配置 / 启停 / 日志 ──
+      if (path === "/api/aigility/log-monitor/status" && req.method === "GET") {
+        if (!requireUser(req, res)) return;
+        const url = new URL(req.url ?? "/", "http://x");
+        const errs = Number.parseInt(url.searchParams.get("errs") ?? "20", 10) || 20;
+        json(res, 200, { ok: true, status: await fetchLogMonitorStatus(Math.min(100, Math.max(1, errs))) });
+        return;
+      }
+      if (path === "/api/aigility/log-monitor/config" && req.method === "PUT") {
+        if (!requireUser(req, res)) return;
+        try {
+          const body = JSON.parse((await readBody(req)) || "{}");
+          const config = await saveLogMonitorConfig(body);
+          json(res, 200, { ok: true, config, note: "配置已下发给运行中的 daemon（即时生效，开启中的自动化会立即检查一次）" });
+        } catch (err) {
+          json(res, 400, { ok: false, error: String(err) });
+        }
+        return;
+      }
+      if (path === "/api/aigility/log-monitor/start" && req.method === "POST") {
+        if (!requireUser(req, res)) return;
+        const r = await startLogMonitor();
+        json(res, r.ok ? 200 : 500, { ...r });
+        return;
+      }
+      if (path === "/api/aigility/log-monitor/stop" && req.method === "POST") {
+        if (!requireUser(req, res)) return;
+        const r = await stopLogMonitor();
+        json(res, r.ok ? 200 : 500, { ...r });
+        return;
+      }
+      if (path === "/api/aigility/log-monitor/restart" && req.method === "POST") {
+        if (!requireUser(req, res)) return;
+        const r = await restartLogMonitor();
+        json(res, r.ok ? 200 : 500, { ...r });
+        return;
+      }
+      if (path === "/api/aigility/log-monitor/logs" && req.method === "GET") {
+        if (!requireUser(req, res)) return;
+        const url = new URL(req.url ?? "/", "http://x");
+        const tail = Number.parseInt(url.searchParams.get("tail") ?? "200", 10) || 200;
+        json(res, 200, { ok: true, ...logMonitorLogs(Math.min(1000, Math.max(1, tail))) });
+        return;
+      }
+      // ── 身份对齐（花名册自动匹配 + 审查）：飞书/Gitea/太忆云 三轴同人对齐 ──
+      if (path === "/api/aigility/identity/overview" && req.method === "GET") {
+        if (!requireUser(req, res)) return;
+        try {
+          json(res, 200, await identityOverview());
+        } catch (err) {
+          json(res, 500, { ok: false, error: String(err) });
+        }
+        return;
+      }
+      if (path === "/api/aigility/identity/auto-match" && req.method === "POST") {
+        if (!requireUser(req, res)) return;
+        try {
+          json(res, 200, await runIdentityAutoMatch());
+        } catch (err) {
+          json(res, 500, { ok: false, error: String(err) });
+        }
+        return;
+      }
+      if (path === "/api/aigility/identity/bind" && req.method === "POST") {
+        if (!requireUser(req, res)) return;
+        try {
+          const body = JSON.parse((await readBody(req)) || "{}") as IdentityBindRequest;
+          if (!body.memberId || !body.axis || !body.op) {
+            json(res, 400, { ok: false, error: "缺少 memberId/axis/op" });
+            return;
+          }
+          const r = identityBind(body);
+          json(res, r.ok ? 200 : 400, { ...r });
+        } catch (err) {
+          json(res, 400, { ok: false, error: String(err) });
+        }
+        return;
+      }
       json(res, 404, { error: "unknown aigility api" });
       return;
     }
@@ -1005,6 +1526,9 @@ async function main(): Promise<void> {
     res.end(readFileSync(filePath));
   });
   await new Promise<void>((r) => server.listen(WEB_PORT, "0.0.0.0", () => r()));
+
+  // 团队记忆总结调度器（进程内；是否到点触发由配置 enabled 决定）
+  startTeamMemoryScheduler();
 
   console.log(`\nAigility 智悦智能平台已就绪:`);
   console.log(`  平台前端:     http://127.0.0.1:${WEB_PORT}/  （登录 → 市场真 persona + 工厂真发布 + 对话同源会话代理）`);

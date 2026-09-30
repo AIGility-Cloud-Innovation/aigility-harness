@@ -223,14 +223,6 @@ export const skills: Skill[] = [
 ]
 
 // ─── 太忆空间 ───
-export const memoryItems = [
-  { time: '09-12 14:32', entity: 'BL3-T-101 主汽温度', type: '报警处置', content: '温度触及 576℃ 触发高温报警，值长按建议减负荷 5%，15 分钟后回落至 561℃。处置过程已沉淀。', status: '已沉淀' },
-  { time: '09-11 10:05', entity: '陈女士 C-2026-0812', type: '客户跟进', content: '量房完成，客户偏好现代简约、预算敏感点在水电改造，已关联报价生成 Skill 草稿。', status: '已沉淀' },
-  { time: '09-10 16:48', entity: '原料输送泵 PUMP-A-001', type: '保养记录', content: '完成季度保养，更换机械密封。王工批注：该型号密封件寿命偏短，建议下次缩短周期至 75 天。', status: '已转规则' },
-  { time: '09-09 09:20', entity: '刘先生 C-2026-0819', type: '审批轨迹', content: '报价单第 2 版被设计师修改：柜体板材升级为 ENF 级，修改原因已记录并进入报价规则。', status: '已转规则' },
-  { time: '09-08 11:15', entity: 'TB2-V-201 轴振', type: '趋势研判', content: '轴振 7 日均线由 72μm 缓升至 86μm，系统预判 20 天内触及报警线，建议安排停机检查窗口。', status: '已沉淀' },
-]
-
 export const rules = [
   { id: 'R-011', name: '主汽温度高温报警', condition: 'BL3-T-101 > 575℃ 持续 60s', action: '推送值长 + 生成处置建议', source: '专家录入', status: true },
   { id: 'R-019', name: '密封件保养周期缩短', condition: 'PUMP-A 系列密封件更换', action: '下次保养周期 90 → 75 天', source: '审批轨迹沉淀', status: true },
@@ -536,41 +528,9 @@ export const memoryLayers: MemoryLayer[] = [
 ]
 
 // ─── 模块化中后台：模块注册表（类 RuoYi 装配）───
-export interface ModuleDef {
-  id: string
-  name: string
-  page: string
-  category: '平台层' | 'TiMEM 上下文层' | '平台能力' | '订阅模块'
-  desc: string
-  core?: boolean        // 核心模块不可关闭
-  available: boolean    // false = 可订阅未上线
-  badge?: string
-  deps?: string         // 依赖说明
-}
-
-export const moduleRegistry: ModuleDef[] = [
-  // 平台层：智能体的创建、使用与分发
-  { id: 'workspace', name: '工作台', page: 'workspace', category: '平台层', desc: '个人工作入口：任务、消息、Token 用量、最近使用、待办审批', available: true },
-  { id: 'agent', name: '数字员工', page: 'agent', category: '平台层', desc: '对话工作台、MCP 执行链路、Skill 编排', core: true, available: true },
-  { id: 'market', name: '智能体市场', page: 'market', category: '平台层', desc: '12 类通用智能体开箱即用，一键启用按需配置', available: true },
-  { id: 'apps', name: '应用中心', page: 'apps', category: '平台层', desc: '8 大场景应用一键开启：问答、文档、会议、分析、审批、督办、客服、报告', available: true },
-  { id: 'studio', name: '智能体工厂', page: 'studio', category: '平台层', desc: '五步向导创建智能体、低代码编排画布、草稿/试运行/发布流水线', available: true },
-  { id: 'tasks', name: '任务板', page: 'tasks', category: '平台层', desc: '对话式改站的任务流水线：改进专员落任务、执行器自动执行、编码改动人审', core: true, available: true },
-  // TiMEM 上下文层：图谱·记忆·规则·知识中间件（太忆上下文基础设施）
-  { id: 'ingest', name: '数据接入', page: 'ingest', category: 'TiMEM 上下文层', desc: '字段表上传、自动理解、清洗建议、跨表本体对齐', core: true, available: true },
-  { id: 'graph', name: '知识图谱', page: 'graph', category: 'TiMEM 上下文层', desc: '图谱构建、分项目查看、事件动态关联', available: true, deps: '依赖数据接入产出' },
-  { id: 'space', name: 'TiMEM 空间', page: 'space', category: 'TiMEM 上下文层', desc: '上下文基础设施可视化：五层记忆流、规则库、多知识库挂载', available: true },
-  { id: 'process', name: '流程与组织', page: 'process', category: 'TiMEM 上下文层', desc: '资料解析、流程/架构编排、节点生成 Skill', available: true },
-  // 平台能力：工具、模型与运营
-  { id: 'tools', name: '工具插件', page: 'tools', category: '平台能力', desc: 'TiMEM 中间件能力 + 客户系统 MCP 封装 + 通用插件，统一工具总线', available: true },
-  { id: 'models', name: '模型管理', page: 'models', category: '平台能力', desc: '多模型接入与路由：语言/代码/视觉/向量/重排序，私有推理可计量', available: true },
-  { id: 'ops', name: '运营驾驶舱', page: 'ops', category: '平台能力', desc: '调用量、Token、成功率、知识库命中率与今日任务一屏总览', available: true },
-  { id: 'task-loop', name: '项目小助理', page: 'task-loop', category: '平台能力', desc: '飞书任务闭环看板：任务派发跟踪 / 配置运维 / 运行日志', available: true },
-  // 订阅模块
-  { id: 'monitor', name: '监控预警', page: '', category: '订阅模块', desc: '实时点位监控、异常预警、止损联动', available: false, badge: '可订阅' },
-  { id: 'report', name: '报表大屏', page: '', category: '订阅模块', desc: '领导驾驶舱、经营分析可视化大屏', available: false, badge: '可订阅' },
-  { id: 'approval', name: '审批中心', page: '', category: '订阅模块', desc: '人在回路审批流、轨迹自动沉淀为规则', available: false, badge: '可订阅' },
-]
+// 清单已迁至 app/src/modules/registry.ts（装配底座：manifest 随代码评审, 装配状态入 PG）
+export { moduleRegistry } from '../modules/registry'
+export type { ModuleManifest as ModuleDef } from '../modules/registry'
 
 // ─── 角色权限（RuoYi 式）───
 export interface RoleDef {
@@ -671,6 +631,9 @@ export const centerApps: CenterApp[] = [
   { id: 'app-report', name: '报告中心', cat: '内容生成', desc: '报告模板库、生成记录、批量下载与定时生成配置', users: 576, updated: '08-19', status: '已上线', on: true },
   // 项目小助理：卡片开关 = 机器人进程启停（真，读运行状态）；导航可见性由「模块装配」页/配置页控制
   { id: 'app-task-loop', name: '项目小助理', cat: '办公效率', desc: '飞书任务闭环：任务看板跟踪派发，配置凭证、功能开关与运行日志。卡片开关即机器人启停', users: 0, updated: '09-29', status: '已上线', on: false, detail: true },
+  // 团队记忆总结 / 日志监察员：默认只出现在应用中心，不占左侧导航位；卡片开关 = 是否固定到导航（用户自决）
+  { id: 'app-team-memory', name: '团队记忆总结', cat: '办公效率', desc: 'TiMEM 团队记忆日报 / 晨报：调度配置、凭证管理、一键生成与运行日志，按时推送飞书群', users: 0, updated: '10-10', status: '已上线', on: false, detail: true },
+  { id: 'app-log-monitor', name: '日志监察员', cat: '流程辅助', desc: '定时拉取目标日志匹配错误关键字并飞书告警：巡检自动化、Webhook、启停运维与运行日志', users: 0, updated: '10-10', status: '已上线', on: false, detail: true },
 ]
 
 export const meetingDetail = {
@@ -700,12 +663,6 @@ export const opsStats = [
   { label: '调用成功率', value: '98.2%', delta: '+0.3% 较上一周期' },
   { label: '运行成功率', value: '99.2%', delta: '近 24 小时无重大异常' },
 ]
-
-export const opsTrend = {
-  days: ['08-22', '08-23', '08-24', '08-25', '08-26', '08-27', '08-28'],
-  agent: [1580, 1690, 1820, 1750, 1960, 1880, 2162],
-  tool: [820, 880, 940, 910, 1050, 990, 1341],
-}
 
 export const opsCatShare = [
   { name: '办公效率', value: 32 },
@@ -755,15 +712,7 @@ export const knowledgeBases = [
 ]
 
 // ─── 工作台（个人工作入口）───
-export interface WsTask { id: string; title: string; source: string; due: string; priority: '高' | '中' | '低'; done: boolean }
 export interface WsMessage { id: string; title: string; content: string; type: '系统' | '审批' | '运行'; read: boolean; time: string }
-
-export const wsTasks: WsTask[] = [
-  { id: 't1', title: '审核待发布的 3 个智能体', source: '智能体工厂', due: '今天 18:00', priority: '高', done: false },
-  { id: 't2', title: '确认知识库「流程制度知识库」的新增文档', source: 'TiMEM 空间', due: '明天 10:00', priority: '中', done: false },
-  { id: 't3', title: '审批：A 产线 PUMP-A-001 停机检查工单', source: '数字员工', due: '今天 16:00', priority: '高', done: false },
-  { id: 't4', title: '查看上周运营驾驶舱周报', source: '运营驾驶舱', due: '本周五', priority: '低', done: true },
-]
 
 export const wsMessages: WsMessage[] = [
   { id: 'm1', title: '审批提醒', content: '设备巡检管家提交了 1 张停机检查工单，等待你处理', type: '审批', read: false, time: '10 分钟前' },
@@ -771,23 +720,6 @@ export const wsMessages: WsMessage[] = [
   { id: 'm3', title: '图谱事件关联', content: 'TiMEM 检测到主汽温度越限事件，已自动关联 2 号锅炉画像与 3 条历史经验', type: '运行', read: false, time: '2 小时前' },
   { id: 'm4', title: '系统通知', content: '平台将于本周日凌晨进行例行维护', type: '系统', read: true, time: '昨天 18:30' },
 ]
-
-export const wsApprovals = [
-  { id: 'ap1', title: 'A 产线 PUMP-A-001 停机检查工单', from: '设备巡检管家', risk: '中风险', detail: '密封件画像进入高风险期，建议本周五低负荷窗口停机 2 小时检查', status: '' },
-  { id: 'ap2', title: '对客发送：滨江壹号报价单 V2', from: '报价生成 Skill', risk: '中风险', detail: '按更新后的工艺包重算，总价 23.6 万，较 V1 上浮 4.2%', status: '' },
-]
-
-export const tokenUsage: Record<'today' | 'week' | 'month', { total: string; points: { label: string; tokens: number; calls: number }[] }> = {
-  today: { total: '12.8 万', points: [
-    { label: '08:00', tokens: 0.8, calls: 46 }, { label: '10:00', tokens: 2.1, calls: 118 }, { label: '12:00', tokens: 1.9, calls: 97 },
-    { label: '14:00', tokens: 2.7, calls: 142 }, { label: '16:00', tokens: 3.1, calls: 168 }, { label: '18:00', tokens: 2.2, calls: 121 }] },
-  week: { total: '86.4 万', points: [
-    { label: '周一', tokens: 11.2, calls: 620 }, { label: '周二', tokens: 12.9, calls: 704 }, { label: '周三', tokens: 12.2, calls: 668 },
-    { label: '周四', tokens: 13.6, calls: 742 }, { label: '周五', tokens: 14.9, calls: 815 }, { label: '周六', tokens: 9.6, calls: 512 }, { label: '周日', tokens: 12.0, calls: 638 }] },
-  month: { total: '348.6 万', points: [
-    { label: '第 1 周', tokens: 80.2, calls: 4380 }, { label: '第 2 周', tokens: 86.4, calls: 4699 },
-    { label: '第 3 周', tokens: 91.2, calls: 5021 }, { label: '第 4 周', tokens: 90.8, calls: 4870 }] },
-}
 
 export const recentUsed = [
   { id: 'a1', kind: 'agent', name: '智能问答 Agent', time: '10 分钟前' },

@@ -119,6 +119,40 @@ export async function ensureAigilityPlatform(): Promise<AigilityPlatform> {
   await pool.query("CREATE INDEX IF NOT EXISTS idx_task_created_by ON task (created_by)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_task_due ON task (due_at)");
 
+  // 3.5 模块装配（真 · platform-module-plugin-design Phase 0）：装配状态 + 预设模板
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS app_modules (
+      scope      TEXT NOT NULL DEFAULT 'platform',
+      module_id  TEXT NOT NULL,
+      enabled    BOOLEAN NOT NULL,
+      updated_by TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (scope, module_id)
+    )`);
+  // 3.5 导航可见偏好（per-user，多端一致）：默认隐藏集见 DEFAULT_NAV_HIDDEN，
+  //     用户显式切换后落库覆盖默认（app_modules 是装配态，导航位是用户偏好，分表）
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_module_nav (
+      user_id    TEXT NOT NULL,
+      module_id  TEXT NOT NULL,
+      hidden     BOOLEAN NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (user_id, module_id)
+    )`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS app_module_presets (
+      id          TEXT PRIMARY KEY,
+      name        TEXT NOT NULL,
+      enabled_ids JSONB NOT NULL,
+      created_by  TEXT,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`);
+  await pool.query(
+    `INSERT INTO app_module_presets (id, name, enabled_ids, created_by)
+     VALUES ('default', '智悦默认', $1::jsonb, 'system')
+     ON CONFLICT (id) DO NOTHING`,
+    [JSON.stringify(Object.keys(SERVER_MODULE_META).filter((id) => SERVER_MODULE_META[id].available !== false))]);
+
   // 4. DSH 工具桥种子（幂等）：dsh-tools 提供 ctx.tools 服务, dsh-mcp-client
   //    把外部 MCP server 工具注册进来（公共名 mcp__<serverName>__<rawName>）。
   //    演示 server 用官方 @modelcontextprotocol/server-everything (stdio, npx 首跑拉包)。
@@ -188,13 +222,23 @@ export function sessionUserId(req: IncomingMessage): string | null {
 }
 
 /** 平台成员（真）：users × app_members（本应用全部平台账号） */
-export async function listTeamMembers(): Promise<Array<{ email: string; isAdmin: boolean; createdAt?: string }>> {
+export async function listTeamMembers(): Promise<Array<{ userId: string; email: string; isAdmin: boolean; createdAt?: string }>> {
   const { rows } = await pool.query(
-    `SELECT u.email, u.is_admin, u.created_at
+    `SELECT u.id, u.email, u.is_admin, u.created_at
      FROM app_members m JOIN users u ON u.id = m.user_id
      WHERE m.app_id = $1 ORDER BY u.created_at ASC`,
     [AIGILITY_APP_ID]);
-  return rows.map((r: any) => ({ email: r.email, isAdmin: !!r.is_admin, createdAt: r.created_at }));
+  return rows.map((r: any) => ({ userId: r.id, email: r.email, isAdmin: !!r.is_admin, createdAt: r.created_at }));
+}
+
+/** 管理员判定（RBAC 模块就绪前的过渡实现：直接读 users.is_admin） */
+export async function isUserAdmin(userId: string): Promise<boolean> {
+  try {
+    const { rows } = await pool.query("SELECT is_admin FROM users WHERE id = $1", [userId]);
+    return !!rows[0]?.is_admin;
+  } catch {
+    return false;
+  }
 }
 
 /** 审计日志（真）：AppBase writeAudit 双写内存环 + PG audit_log（登录/管理操作留痕） */
@@ -216,6 +260,220 @@ export async function recentAudit(limit = 20): Promise<Array<{ at: string; actor
 export async function emailById(userId: string): Promise<string | null> {
   const { rows } = await pool.query("SELECT email FROM users WHERE id = $1", [userId]);
   return rows[0]?.email ?? null;
+}
+
+// ── 模块装配（真 · 装配状态/预设持久化；manifest 本体在前端 app/src/modules/registry.ts）──
+
+/** 服务端只留装配校验标志（core 不可关 / available 可订阅）；名称、描述、图标归前端 manifest */
+export const SERVER_MODULE_META: Record<string, { core?: boolean; available?: boolean }> = {
+  workspace: {}, agent: { core: true }, market: {}, apps: {}, studio: {}, tasks: { core: true },
+  ingest: { core: true }, graph: {}, space: {}, process: {},
+  tools: {}, models: {}, ops: {}, orchestration: {}, "task-loop": {}, "team-memory": {}, "log-monitor": {},
+  monitor: { available: false }, report: { available: false }, approval: { available: false },
+};
+
+/** 装配状态 = 全部可用模块缺省开 ∪ DB 覆盖行（DB 无行时取缺省，对齐 App.tsx 原行为） */
+export async function listModuleState(): Promise<Record<string, boolean>> {
+  const state: Record<string, boolean> = {};
+  for (const [id, meta] of Object.entries(SERVER_MODULE_META)) state[id] = meta.available !== false;
+  try {
+    const { rows } = await pool.query("SELECT module_id, enabled FROM app_modules WHERE scope = 'platform'");
+    for (const r of rows) state[r.module_id] = !!r.enabled;
+  } catch {
+    // PG 不可用 → 缺省装配
+  }
+  return state;
+}
+
+/** 返回 null = 成功；字符串 = 拒绝原因（未知模块 / core / 未上线） */
+export async function setModuleState(id: string, enabled: boolean, by: string): Promise<string | null> {
+  const meta = SERVER_MODULE_META[id];
+  if (!meta) return `未知模块 ${id}`;
+  if (meta.core) return `核心模块 ${id} 不可关闭`;
+  if (meta.available === false) return `模块 ${id} 未上线（可订阅）`;
+  await pool.query(
+    `INSERT INTO app_modules (scope, module_id, enabled, updated_by, updated_at)
+     VALUES ('platform', $1, $2, $3, now())
+     ON CONFLICT (scope, module_id) DO UPDATE SET enabled = $2, updated_by = $3, updated_at = now()`,
+    [id, enabled, by]);
+  return null;
+}
+
+// ── 导航可见偏好（per-user · user_module_nav；默认隐藏集 + 用户覆盖行）──
+
+/** 默认不占导航位的工具类模块（用户可在应用中心/装配页/配置页切换，落库后多端一致） */
+export const DEFAULT_NAV_HIDDEN = new Set(["team-memory", "log-monitor"]);
+
+/** 用户导航隐藏集 = DEFAULT_NAV_HIDDEN ∪ 用户覆盖行（显式 false 即收回默认） */
+export async function listNavHidden(userId: string): Promise<Record<string, boolean>> {
+  const out: Record<string, boolean> = {};
+  for (const id of DEFAULT_NAV_HIDDEN) out[id] = true;
+  try {
+    const { rows } = await pool.query(
+      "SELECT module_id, hidden FROM user_module_nav WHERE user_id = $1", [userId]);
+    for (const r of rows) out[r.module_id] = !!r.hidden;
+  } catch {
+    // PG 不可用 → 仅默认集
+  }
+  return out;
+}
+
+/** 返回 null = 成功；字符串 = 拒绝原因（未知模块） */
+export async function setNavHidden(userId: string, moduleId: string, hidden: boolean): Promise<string | null> {
+  if (!SERVER_MODULE_META[moduleId]) return `未知模块 ${moduleId}`;
+  await pool.query(
+    `INSERT INTO user_module_nav (user_id, module_id, hidden, updated_at)
+     VALUES ($1, $2, $3, now())
+     ON CONFLICT (user_id, module_id) DO UPDATE SET hidden = $3, updated_at = now()`,
+    [userId, moduleId, hidden]);
+  return null;
+}
+
+export interface NavPrefRow {
+  userId: string;
+  email: string;
+  isAdmin: boolean;
+  navHidden: Record<string, boolean>;
+}
+
+/** 管理员视图：全部平台成员的导航偏好（管理端逐用户调整用） */
+export async function listNavPrefs(): Promise<NavPrefRow[]> {
+  const members = await listTeamMembers();
+  return Promise.all(members.map(async (m) => ({
+    userId: m.userId, email: m.email, isAdmin: m.isAdmin,
+    navHidden: await listNavHidden(m.userId),
+  })));
+}
+
+export interface ModulePreset {
+  id: string;
+  name: string;
+  enabledIds: string[];
+  createdBy?: string;
+  createdAt?: string;
+}
+
+export async function listModulePresets(): Promise<ModulePreset[]> {
+  const { rows } = await pool.query(
+    "SELECT id, name, enabled_ids, created_by, created_at FROM app_module_presets ORDER BY created_at");
+  return rows.map((r: any) => ({
+    id: r.id, name: r.name, enabledIds: Array.isArray(r.enabled_ids) ? r.enabled_ids : [],
+    createdBy: r.created_by, createdAt: r.created_at,
+  }));
+}
+
+export async function saveModulePreset(name: string, enabledIds: string[], by: string): Promise<ModulePreset> {
+  const id = `preset-${Date.now().toString(36)}`;
+  await pool.query(
+    "INSERT INTO app_module_presets (id, name, enabled_ids, created_by) VALUES ($1,$2,$3::jsonb,$4)",
+    [id, name, JSON.stringify(enabledIds), by]);
+  return { id, name, enabledIds, createdBy: by };
+}
+
+/** 套用预设 = 完整工作台形态替换：预设内的可用模块开、预设外的可用模块关（core 不动） */
+export async function applyModulePreset(id: string, by: string): Promise<number> {
+  const { rows } = await pool.query("SELECT enabled_ids FROM app_module_presets WHERE id = $1", [id]);
+  const wanted = new Set<string>(
+    Array.isArray(rows[0]?.enabled_ids) ? rows[0].enabled_ids.filter((x: unknown) => typeof x === "string") : [],
+  );
+  let changed = 0;
+  for (const [mid, meta] of Object.entries(SERVER_MODULE_META)) {
+    if (meta.core) continue;
+    const next = meta.available !== false && wanted.has(mid);
+    await pool.query(
+      `INSERT INTO app_modules (scope, module_id, enabled, updated_by, updated_at)
+       VALUES ('platform', $1, $2, $3, now())
+       ON CONFLICT (scope, module_id) DO UPDATE SET enabled = $2, updated_by = $3, updated_at = now()`,
+      [mid, next, by]);
+    changed++;
+  }
+  return changed;
+}
+
+export async function deleteModulePreset(id: string): Promise<boolean> {
+  if (id === "default") return false;
+  const r = await pool.query("DELETE FROM app_module_presets WHERE id = $1", [id]);
+  return (r.rowCount ?? 0) > 0;
+}
+
+// ── 工具插件（dsh_plugins 注册表的读写辅助；热装卸在 index.ts 调 dsh-host）──
+
+export interface DshPluginRow {
+  name: string;
+  package: string;
+  exportName: string;
+  description: string;
+  enabled?: boolean;
+  config: Record<string, unknown>;
+  createdAt?: string;
+}
+
+export async function listDshPluginRows(): Promise<DshPluginRow[]> {
+  const { rows } = await pool.query(
+    "SELECT name, package, export_name, description, enabled, config, created_at FROM dsh_plugins ORDER BY created_at");
+  return rows.map((r: any) => ({
+    name: r.name, package: r.package, exportName: r.export_name ?? "", description: r.description ?? "",
+    enabled: !!r.enabled, config: r.config ?? {},
+    createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at ?? ""),
+  }));
+}
+
+/** 返回 null = 成功；字符串 = 拒绝原因（重名等） */
+export async function insertDshPlugin(row: DshPluginRow): Promise<string | null> {
+  try {
+    await pool.query(
+      `INSERT INTO dsh_plugins (name, package, export_name, description, enabled, config)
+       VALUES ($1,$2,$3,$4,true,$5::jsonb)`,
+      [row.name, row.package, row.exportName, row.description, JSON.stringify(row.config)]);
+    return null;
+  } catch (e) {
+    const msg = String(e);
+    return msg.includes("duplicate key") ? `插件 ${row.name} 已存在` : msg;
+  }
+}
+
+export async function setDshPluginEnabled(name: string, enabled: boolean): Promise<void> {
+  await pool.query("UPDATE dsh_plugins SET enabled = $2 WHERE name = $1", [name, enabled]);
+}
+
+export async function deleteDshPluginRow(name: string): Promise<boolean> {
+  const r = await pool.query("DELETE FROM dsh_plugins WHERE name = $1", [name]);
+  return (r.rowCount ?? 0) > 0;
+}
+
+/** 网关用量聚合（PG llm_usage：网关每次完成上报 /app/usage/collect 持久, 口径=网关全量）。
+ *  日键取 UTC（对齐内存账本 byDay 与前端 inRange 的 toISOString 口径）。
+ *  返回 null = PG 不可用或表为空（调用方回退内存账本, 保留会话内即时数据）。 */
+export async function usageSummaryFromPg(): Promise<{
+  calls: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  byModel: Array<{ key: string; calls: number; promptTokens: number; completionTokens: number; totalTokens: number }>;
+  byDay: Array<{ key: string; calls: number; promptTokens: number; completionTokens: number; totalTokens: number }>;
+} | null> {
+  const dayExpr = "(created_at AT TIME ZONE 'UTC')::date::text";
+  const agg = `COUNT(*)::int AS calls, COALESCE(SUM(prompt_tokens),0)::int AS "promptTokens",
+                COALESCE(SUM(completion_tokens),0)::int AS "completionTokens",
+                COALESCE(SUM(total_tokens),0)::int AS "totalTokens"`;
+  try {
+    const { rows: byDay } = await pool.query(
+      `SELECT ${dayExpr} AS key, ${agg} FROM llm_usage GROUP BY 1 ORDER BY 1`);
+    if (!byDay.length) return null;
+    const { rows: byModel } = await pool.query(
+      `SELECT model AS key, ${agg} FROM llm_usage GROUP BY 1 ORDER BY "totalTokens" DESC`);
+    const sum = (f: string) => byDay.reduce((s: number, r: any) => s + Number(r[f] ?? 0), 0);
+    return {
+      calls: sum("calls"),
+      promptTokens: sum("promptTokens"),
+      completionTokens: sum("completionTokens"),
+      totalTokens: sum("totalTokens"),
+      byModel,
+      byDay,
+    };
+  } catch {
+    return null;
+  }
 }
 
 // ── 任务表（真表, 平台级通用实体）────────────────────────────────

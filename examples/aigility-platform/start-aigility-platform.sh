@@ -20,12 +20,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # ---------- 环境变量 ----------
-# 先继承仓库根 .env（不覆盖已在环境中显式设置的变量）
+# 先继承仓库根 .env（不覆盖已在环境中显式设置的变量）。
+# 不能用 source：.env 里含带空格的值（如 TASK_CHAT_REPO_MAP 多仓映射），source 会把
+# 空格后的词当命令执行。逐行导入：KEY=整行剩余部分作为一个值，保留空格。
 if [[ -f "$REPO_ROOT/.env" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source "$REPO_ROOT/.env"
-  set +a
+  while IFS= read -r envline || [[ -n "$envline" ]]; do
+    case "$envline" in ''|\#*) continue ;; esac
+    envkey="${envline%%=*}"
+    [[ "$envkey" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    envval="${envline#*=}"
+    # 去掉成对包裹的引号（与 dotenv 行为一致）
+    if [[ ${#envval} -ge 2 && "${envval:0:1}" == '"' && "${envval: -1}" == '"' ]]; then
+      envval="${envval:1:${#envval}-2}"
+    elif [[ ${#envval} -ge 2 && "${envval:0:1}" == "'" && "${envval: -1}" == "'" ]]; then
+      envval="${envval:1:${#envval}-2}"
+    fi
+    if [[ -z "${!envkey+x}" ]]; then
+      export "$envkey=$envval"
+    fi
+  done < "$REPO_ROOT/.env"
 fi
 
 # LLM 上游：填了 BIGMODEL_API_KEY 则走智谱；否则用 .env 里的 LITELLM_*；
