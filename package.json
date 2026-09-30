@@ -23,5 +23,9 @@
     "node": ">=20.0.0",
     "pnpm": ">=11.0.0"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@goodandready/dsh-plugin-notify": "0.3.7",
+    "@goodandready/dsh-time-machine": "0.1.24",
+    "dsh-plugin-ops-core": "0.11.1"
+  }
 }
