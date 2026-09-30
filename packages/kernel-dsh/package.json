@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@aigility-harness/core": "workspace:*",
-    "@deepseek-ai/cordis": "^4.0.2"
+    "@deepseek-ai/cordis": "~4.0.4"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

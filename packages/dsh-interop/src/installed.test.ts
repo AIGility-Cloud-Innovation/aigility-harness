@@ -13,9 +13,9 @@ describe("installedDshPackages — 本机实际安装的官方 dsh 插件包", (
 
   it("传递依赖能力包在列且版本锁定一致", () => {
     // dsh-session 是 dsh-base 的传递依赖 —— 只看元包直接依赖会漏
-    expect(byName.get("@deepseek-ai/dsh-session")?.version).toBe("0.1.5-rc.2");
+    expect(byName.get("@deepseek-ai/dsh-session")?.version).toBe("0.2.0-rc.2");
     expect(byName.get("@deepseek-ai/dsh-mcp-client")).toBeTruthy();
-    expect(byName.get("@deepseek-ai/dsh-terminal-bash")?.version).toBe("0.1.5-rc.2");
+    expect(byName.get("@deepseek-ai/dsh-terminal-bash")?.version).toBe("0.2.0-rc.2");
   });
 
   it("与官方清单对齐：session 是插件行；terminal-bash 复用旧包 tool-bash（清单行名仍指向旧包）", () => {

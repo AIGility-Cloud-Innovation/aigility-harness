@@ -17,8 +17,9 @@ describe("dshBaseRows — 官方 dsh-base 行清单解析", () => {
     expect(byId.get("tool-web")?.name).toBe("@deepseek-ai/dsh-tool-web");
   });
 
-  it("静态禁用行为 boolean", () => {
-    expect(byId.get("hmr")?.disabled).toBe(true);
+  it("静态禁用 boolean 与 0.2.0 profileContext 条件禁用并存", () => {
+    // 0.2.0 起 hmr 从静态 disabled:true 改为 !!js "!ctx.get('profileContext')" 条件禁用
+    expect(isJsExpr(byId.get("hmr")?.disabled)).toBe(true);
     expect(byId.get("skill-badge")?.disabled).toBe(true);
     expect(byId.get("timer")?.disabled).toBeUndefined();
   });
@@ -34,9 +35,9 @@ describe("dshBaseRows — 官方 dsh-base 行清单解析", () => {
   });
 
   it("官方注释归到所属行", () => {
-    // timer 是清单第一行, 上方无注释; hmr 的注释以 "Module reload" 开头
+    // timer 是清单第一行, 上方无注释; 0.2.0 起 hmr 注释改为 "Profile configuration reloads…"
     expect(byId.get("timer")?.notes).toBeUndefined();
-    expect(byId.get("hmr")?.notes ?? "").toContain("Module reload");
+    expect(byId.get("hmr")?.notes ?? "").toContain("Profile configuration reloads by default");
     const webNotes = byId.get("web")?.notes ?? "";
     expect(webNotes).toContain("web_search");
   });

@@ -10,8 +10,8 @@
     "start": "tsx src/index.ts"
   },
   "dependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@timem/dsh-plugin-timem": "git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git"
+    "@deepseek-ai/cordis": "~4.0.4",
+    "@timem/dsh-plugin-timem": "git+https://git.aigility.cloud/TiMEM-AI/dsh-plugin-timem.git#e8a96cee3df5d62070e9c94d87a18e16b565dc55"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
