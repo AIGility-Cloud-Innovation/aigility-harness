@@ -36,7 +36,9 @@ export default function RolePackageEditor({ pkg, onSaved, onClose }: {
     setPrompt(pkg.prompt)
     setManifest(structuredClone(pkg.manifest))
     setBanner(''); setError(''); setTab('persona')
-  }, [pkg])
+    // 仅在切换角色包时重置：保存后的列表刷新会更换 pkg 对象引用，不能因此清掉 banner
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pkg.id])
 
   const save = async () => {
     setBusy(true); setError(''); setBanner('')

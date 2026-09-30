@@ -1029,7 +1029,8 @@ async function main(): Promise<void> {
             const md = readFileSync(`${pkg.dir}/SKILL.md`, "utf8");
             const fm = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(md)?.[0] ?? "";
             const tmpMd = `${pkg.dir}/SKILL.md.tmp`;
-            writeFileSync(tmpMd, fm + body.prompt.trim() + "\n", "utf8");
+            // frontmatter 原样保留 + 空行分隔 + 正文（trim 后单换行结尾），保证往返字节稳定
+            writeFileSync(tmpMd, `${fm}\n${body.prompt.trim()}\n`, "utf8");
             renameSync(tmpMd, `${pkg.dir}/SKILL.md`);
           }
         } catch (err) {
