@@ -9,6 +9,8 @@
  *
  * 装配: infrastructure(wecom-ingress + bridge) + persona(coder) + orchestration(codex-agent)
  */
+import { acquireBotLock } from "@aigility-harness/layer-infrastructure";
+
 import {
   bootstrap,
   shutdown,
@@ -26,6 +28,16 @@ import { plugin as actionPlugin } from "@aigility-harness/layer-action";
 import { wecomIngressProvider } from "@aigility-harness/layer-infrastructure";
 
 async function main(): Promise<void> {
+
+  // 单实例守护：同一时刻只允许一个实例连接外部通道（防多实例抢事件；共享实现见 layer-infrastructure/bot-singleton）
+  const botLock = acquireBotLock("wecom-coder");
+  if (!botLock) {
+    console.error(
+      `❌ 已有运行中的实例（锁: /tmp/aigility-wecom-coder.lock），拒绝重复启动。\n` +
+        `   如确认无实例仍在运行，删除锁文件后重试。`,
+    );
+    process.exit(1);
+  }
   console.log("=== 特色案例: 企业微信 → coder → Codex ===\n");
 
   const botId = process.env["WECOM_BOT_ID"] ?? "";
