@@ -17,6 +17,8 @@
  *   3. 启动: pnpm --filter wecom-chat start
  *   4. 在企微群里 @机器人 说话 → AI 回复（支持 Markdown）
  */
+import { acquireBotLock } from "@aigility-harness/layer-infrastructure";
+
 import {
   bootstrap,
   shutdown,
@@ -47,6 +49,16 @@ function parseRoutes(raw: string | undefined): Record<string, string> | undefine
 }
 
 async function main(): Promise<void> {
+
+  // 单实例守护：同一时刻只允许一个实例连接外部通道（防多实例抢事件；共享实现见 layer-infrastructure/bot-singleton）
+  const botLock = acquireBotLock("wecom-chat");
+  if (!botLock) {
+    console.error(
+      `❌ 已有运行中的实例（锁: /tmp/aigility-wecom-chat.lock），拒绝重复启动。\n` +
+        `   如确认无实例仍在运行，删除锁文件后重试。`,
+    );
+    process.exit(1);
+  }
   console.log("=== 企微机器人 → 通用 AI 助手 (wecom-chat) ===\n");
 
   // 1. 凭证（.env 或环境变量）

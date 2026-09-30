@@ -21,6 +21,8 @@
  *   /new                     → 清空当前聊天的对话历史
  *   /session                 → 查看当前聊天保留的轮数
  */
+import { acquireBotLock } from "@aigility-harness/layer-infrastructure";
+
 import {
   bootstrap,
   shutdown,
@@ -46,6 +48,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "../../../");
 
 async function main(): Promise<void> {
+
+  // 单实例守护：同一时刻只允许一个实例连接外部通道（防多实例抢事件；共享实现见 layer-infrastructure/bot-singleton）
+  const botLock = acquireBotLock("feishu-dsh");
+  if (!botLock) {
+    console.error(
+      `❌ 已有运行中的实例（锁: /tmp/aigility-feishu-dsh.lock），拒绝重复启动。\n` +
+        `   如确认无实例仍在运行，删除锁文件后重试。`,
+    );
+    process.exit(1);
+  }
   console.log("=== 飞书机器人 → DSH 会话中继 (feishu-dsh) ===\n");
 
   // 先 example 私有 .env（DSH 专用机器人凭据），再仓库根 .env；先到先得

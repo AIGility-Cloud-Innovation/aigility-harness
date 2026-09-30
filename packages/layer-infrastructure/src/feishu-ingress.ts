@@ -81,6 +81,12 @@ export interface FeishuIngressRequest {
   blockedSenderIds?: string[];
   /** 关键词黑名单；content 包含任一关键词则丢弃 */
   keywordBlacklist?: string[];
+  /**
+   * 免@指令群：这些群里的免@消息也路由给角色（摘要播报群回复「确认 N」等
+   * 核验指令不需要 @机器人）；角色侧按 mentioned_bot=false 只认指令、
+   * 未命中保持静默。群消息处理走静默路径（不發「正在处理」占位）。
+   */
+  mentionExemptChatIds?: string[];
 
   // ── 监听模式（免 @bot 收集群聊消息，供编排层做汇总/判定） ──
   passive?: {
@@ -101,6 +107,13 @@ export interface FeishuIngressRequest {
      * 防回声：多机器人同群时，机器人间消息互喂汇总缓冲会形成循环。
      */
     excludeSenderIds?: string[];
+    /**
+     * 是否同时收集私聊（p2p）消息（默认否——历史上只收群聊）。
+     * 开启后用户私聊发给机器人的文本也进汇总缓冲（如私聊报缺陷 → 机器人群摘要），
+     * 且私聊仍走常规指令链路（交互回复与静默收集并行）；chatIds 群白名单对
+     * 私聊不生效（白名单按群粒度管理），发送者排除仍生效。
+     */
+    collectP2p?: boolean;
   };
 }
 
@@ -110,26 +123,28 @@ export interface FeishuIngressResponse {
   appId: string;
   /** 断开连接函数 */
   stop: () => Promise<void>;
-  /** 主动发消息（供编排层做群播报，如任务汇总/PR 提醒） */
-  send: (chatId: string, text: string) => Promise<void>;
+  /** 主动发消息（供编排层做群播报，如任务汇总/PR 提醒）；返回消息 id（引用定位用） */
+  send: (chatId: string, text: string) => Promise<string | void>;
 }
 
 /**
- * passive 收集判定（导出供单测）：仅群聊、未 @bot、有文本、
- * 会话在监听白名单（空=全部）、发送者不在排除列表（防机器人回声循环）。
+ * passive 收集判定（导出供单测）：仅群聊/私聊（p2p 需显式 collectP2p）、
+ * 未 @bot、有文本、发送者不在排除列表（防机器人回声循环）；
+ * 群聊还需会话在监听白名单（空=全部），私聊不走群白名单。
  */
 export function shouldPassiveCollect(
   msg: NormalizedMessage,
   passive?: FeishuIngressRequest["passive"],
 ): boolean {
-  if (!passive?.enabled || msg.chatType !== "group" || msg.mentionedBot) return false;
+  if (!passive?.enabled || msg.mentionedBot) return false;
+  if (msg.chatType !== "group" && msg.chatType !== "p2p") return false;
   const text = messageText(msg);
   if (!text) return false;
-  const ids = passive.chatIds;
-  const chatOk = !ids || ids.length === 0 || ids.includes(msg.chatId);
   const excluded = passive.excludeSenderIds ?? [];
-  const senderOk = !msg.senderId || !excluded.includes(msg.senderId);
-  return chatOk && senderOk;
+  if (msg.senderId && excluded.includes(msg.senderId)) return false;
+  if (msg.chatType === "p2p") return passive.collectP2p === true;
+  const ids = passive.chatIds;
+  return !ids || ids.length === 0 || ids.includes(msg.chatId);
 }
 
 // ── 服务/清单 ────────────────────────────────────────────────────
@@ -175,7 +190,7 @@ export function messageText(msg: NormalizedMessage): string {
 }
 
 /** 通用过滤器：按黑白名单/关键词/mention 规则判定是否处理消息 */
-function shouldProcessMessage(
+export function shouldProcessMessage(
   msg: NormalizedMessage,
   config: FeishuIngressRequest,
 ): boolean {
@@ -212,9 +227,11 @@ function shouldProcessMessage(
       return false;
     }
   }
-  // 5. Trigger 判定：仅 p2p 或 group（含话题群，msg 自带 rootId 区分话题）+@bot 才处理
+  // 5. Trigger 判定：仅 p2p 或 group（含话题群，msg 自带 rootId 区分话题）+@bot 才处理；
+  //    mentionExemptChatIds 里的群例外——免@消息也处理（摘要播报群回复「确认 N」等
+  //    指令不用 @；persona 侧按 mentioned_bot=false 走「仅指令」模式，未命中保持静默）
   if (msg.chatType === "group" && !msg.mentionedBot) {
-    return false;
+    if (!(config.mentionExemptChatIds ?? []).includes(msg.chatId)) return false;
   }
   // chatType 为 p2p 时 always process（不要求 @bot）
   // 其他 chatType（未知类型）静默丢弃
@@ -432,9 +449,32 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
 
         try {
           // 两段式回复（方案 C，零权限）：占位 + 原地编辑，已在群里被 @ 过不再重复；
-          // 话题/回复场景：把回复锚到用户的话题串里（replyTo=话题根），p2p/普通群聊直发
+          // 话题/回复场景：把回复锚到用户的话题串里（replyTo=话题根），p2p/普通群聊直发。
+          // 免@指令群（mentionExemptChatIds）走静默路径：不發占位，角色返回空文本
+          // （未命中指令）就什么都不发——群里的普通聊天不打扰
           const to = msg.chatId || msg.senderId;
           const threadAnchor = threadAnchorFor(msg);
+          const quietCommand = msg.chatType === "group" && !msg.mentionedBot;
+          if (quietCommand) {
+            const r = (await ctx.call(
+              { id: roleId, versionRange: "^1.0.0" },
+              {
+                user_input: text,
+                user_id: msg.senderId || "feishu-unknown",
+                conversation_id: msg.chatId,
+                message_id: msg.messageId,
+                root_id: msg.rootId,
+                chat_type: msg.chatType,
+                mentioned_bot: false,
+                resources: resources.length > 0 ? resources : undefined,
+              },
+            )) as { ok?: boolean; value?: { response?: string } };
+            const reply = (r?.ok ? r.value?.response : "") ?? "";
+            if (reply.trim()) {
+              await channel.send(to, { text: reply }, threadAnchor ? { replyTo: threadAnchor } : undefined);
+            }
+            return;
+          }
           // 1) 立即发占位消息「✍️ 正在处理…」（敲键盘提示）
           // 2) 处理完成 → 原地编辑成最终回复（一条消息变内容，无刷屏）
           const placeholder = await channel.send(
@@ -456,6 +496,7 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
                 message_id: msg.messageId,
                 root_id: msg.rootId,
                 chat_type: msg.chatType,
+                mentioned_bot: msg.mentionedBot,
                 resources: resources.length > 0 ? resources : undefined,
               },
             );
@@ -502,15 +543,24 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
       activeUnsubscribe = null;
     };
 
-    // 启动长连接（connect 内部完成握手后才 resolve，自动重连）
-    channel
-      .connect()
-      .then(() => {
-        console.log(`[feishu-ingress] connected: appId=${appId}`);
-      })
-      .catch((e) => {
-        console.error("[feishu-ingress] connect error:", String(e));
-      });
+    // 启动长连接（connect 内部完成握手后才 resolve，自动重连）。
+    // 首连失败（如 bot/v3/info 身份解析遇瞬时网络错误）会让通道静默死亡——
+    // 有限次退避重试兜底，重试期内 stop() 断开即可。
+    const connectWithRetry = async (): Promise<void> => {
+      const attempts = 5;
+      for (let i = 1; i <= attempts; i++) {
+        try {
+          await channel.connect();
+          console.log(`[feishu-ingress] connected: appId=${appId}`);
+          return;
+        } catch (e) {
+          console.error(`[feishu-ingress] connect error (第${i}/${attempts}次):`, String(e));
+          if (i < attempts) await new Promise((r) => setTimeout(r, 10_000 * i));
+        }
+      }
+      console.error(`[feishu-ingress] 连续 ${attempts} 次首连失败，放弃（需重启进程恢复）`);
+    };
+    void connectWithRetry();
 
     return ok({
       ok: true,
@@ -518,7 +568,8 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
       appId,
       stop: activeStop,
       send: async (chatId: string, text: string) => {
-        await channel.send(chatId, { text });
+        const sent = await channel.send(chatId, { text });
+        return sent?.messageId;
       },
     });
   },

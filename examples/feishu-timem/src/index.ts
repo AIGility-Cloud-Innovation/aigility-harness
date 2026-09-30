@@ -18,6 +18,8 @@
  * 装配: infrastructure(feishu-ingress) + persona(timem-project-assistant)
  *        + orchestration + cognitive
  */
+import { acquireBotLock } from "@aigility-harness/layer-infrastructure";
+
 import {
   bootstrap,
   shutdown,
@@ -44,6 +46,16 @@ const FEISHU_AGENT_ROUTES: Record<string, string> = {
 };
 
 async function main(): Promise<void> {
+
+  // 单实例守护：同一时刻只允许一个实例连接外部通道（防多实例抢事件；共享实现见 layer-infrastructure/bot-singleton）
+  const botLock = acquireBotLock("feishu-timem");
+  if (!botLock) {
+    console.error(
+      `❌ 已有运行中的实例（锁: /tmp/aigility-feishu-timem.lock），拒绝重复启动。\n` +
+        `   如确认无实例仍在运行，删除锁文件后重试。`,
+    );
+    process.exit(1);
+  }
   console.log("=== 飞书机器人 → TiMEM Project 项目小助手 ===\n");
 
   // 1. 加载飞书凭证（.env 文件: FEISHU_APP_ID / FEISHU_APP_SECRET）

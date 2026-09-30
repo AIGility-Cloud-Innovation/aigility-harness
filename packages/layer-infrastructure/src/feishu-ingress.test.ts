@@ -148,11 +148,27 @@ describe("shouldPassiveCollect", () => {
     ).toBe(false);
   });
 
-  it("私聊消息 → 不收集", async () => {
+  it("私聊消息 → 默认不收集（collectP2p 未开）", async () => {
     const { shouldPassiveCollect } = await import("./feishu-ingress.js");
     expect(shouldPassiveCollect({ ...base, chatType: "p2p" } as never, passive as never)).toBe(
       false,
     );
+  });
+
+  it("私聊消息 + collectP2p → 收集，群白名单不限制私聊、发送者排除仍生效", async () => {
+    const { shouldPassiveCollect } = await import("./feishu-ingress.js");
+    const p2pMsg = { ...base, chatType: "p2p", chatId: "oc_p2p_chat" };
+    const withP2p = { ...passive, collectP2p: true };
+    expect(shouldPassiveCollect(p2pMsg as never, withP2p as never)).toBe(true);
+    expect(
+      shouldPassiveCollect(p2pMsg as never, { ...withP2p, chatIds: ["oc_other"] } as never),
+    ).toBe(true);
+    expect(
+      shouldPassiveCollect(
+        { ...p2pMsg, senderId: "ou_bot_a" } as never,
+        { ...withP2p, excludeSenderIds: ["ou_bot_a"] } as never,
+      ),
+    ).toBe(false);
   });
 
   it("chatIds 白名单外 → 不收集", async () => {
@@ -181,5 +197,44 @@ describe("shouldPassiveCollect", () => {
   it("空文本 → 不收集", async () => {
     const { shouldPassiveCollect } = await import("./feishu-ingress.js");
     expect(shouldPassiveCollect({ ...base, content: "" } as never, passive as never)).toBe(false);
+  });
+});
+
+// ── shouldProcessMessage — 免@指令群（mentionExemptChatIds） ─────────
+
+describe("shouldProcessMessage — mentionExemptChatIds", () => {
+  const base = {
+    messageId: "om_9",
+    chatId: "oc_robot",
+    chatType: "group",
+    senderId: "ou_human",
+    content: "确认 1",
+    mentionedBot: false,
+  };
+  const config = { appId: "a", appSecret: "s", mentionExemptChatIds: ["oc_robot"] };
+
+  it("免@群里的消息 → 处理（核验指令不用 @机器人）", async () => {
+    const { shouldProcessMessage } = await import("./feishu-ingress.js");
+    expect(shouldProcessMessage(base as never, config as never)).toBe(true);
+  });
+
+  it("其他群的免@消息 → 过滤（原行为不变）", async () => {
+    const { shouldProcessMessage } = await import("./feishu-ingress.js");
+    expect(
+      shouldProcessMessage({ ...base, chatId: "oc_other" } as never, config as never),
+    ).toBe(false);
+  });
+
+  it("未配置免@群时行为不变（群消息需 @bot）", async () => {
+    const { shouldProcessMessage } = await import("./feishu-ingress.js");
+    expect(shouldProcessMessage(base as never, { appId: "a", appSecret: "s" } as never)).toBe(
+      false,
+    );
+    expect(
+      shouldProcessMessage({ ...base, mentionedBot: true } as never, {
+        appId: "a",
+        appSecret: "s",
+      } as never),
+    ).toBe(true);
   });
 });

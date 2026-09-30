@@ -13,6 +13,8 @@
  *
  * 装配: infrastructure(wecom-ingress) + persona(timem-support) + orchestration + cognitive
  */
+import { acquireBotLock } from "@aigility-harness/layer-infrastructure";
+
 import {
   bootstrap,
   shutdown,
@@ -47,6 +49,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "../../../");
 
 async function main(): Promise<void> {
+
+  // 单实例守护：同一时刻只允许一个实例连接外部通道（防多实例抢事件；共享实现见 layer-infrastructure/bot-singleton）
+  const botLock = acquireBotLock("wecom-timem");
+  if (!botLock) {
+    console.error(
+      `❌ 已有运行中的实例（锁: /tmp/aigility-wecom-timem.lock），拒绝重复启动。\n` +
+        `   如确认无实例仍在运行，删除锁文件后重试。`,
+    );
+    process.exit(1);
+  }
   console.log("=== 企微机器人 → TiMEM Space 客服 ===\n");
 
   // 1. 加载企业微信凭证（.env 文件: WECOM_TIMEM_BOT_ID / WECOM_TIMEM_BOT_SECRET）

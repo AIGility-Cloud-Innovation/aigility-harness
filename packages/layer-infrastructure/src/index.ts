@@ -242,6 +242,17 @@ export type {
   MemoryRateLimiter,
 } from "./rate-limit.js";
 
+// 机器人单实例守护（feishu-*/wecom-* 事件驱动机器人统一用, 防多实例抢事件）
+export {
+  acquireBotLock,
+  botHolderAlive,
+  botLockPath,
+} from "./bot-singleton.js";
+export type {
+  BotSingletonLock,
+  BotLockOptions,
+} from "./bot-singleton.js";
+
 // 审计日志（敏感操作留痕；内存环形缓冲，装配可镜像持久化）
 export {
   auditService,

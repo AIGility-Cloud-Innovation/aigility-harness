@@ -312,7 +312,10 @@ describe("http-ingress 最小 Web UI", () => {
 
     const uiResp = await fetch("http://127.0.0.1:18342/ui");
     expect(uiResp.status).toBe(200);
-    expect((await uiResp.text())).toContain("注册 / 登录 AppBase");
+    const uiHtml = await uiResp.text();
+    // APPBASE_URL 未设置时不渲染「注册 / 登录 AppBase」引导链接（ui.ts 按 env 条件渲染）
+    expect(uiHtml).toContain("aigility 原型演示");
+    expect(uiHtml).not.toContain("注册 / 登录 AppBase");
 
     // POST 链路不受影响: 未知路径仍 404
     const postResp = await fetch("http://127.0.0.1:18342/api/nonexistent", {
