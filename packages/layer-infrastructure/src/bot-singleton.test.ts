@@ -42,10 +42,10 @@ describe("bot singleton lock", () => {
 
   it("互斥：持有者存活时第二次获取返回 null", () => {
     const path = tmpLock();
-    // vitest 进程自身存活且 cwd 在本包目录 → cwdMarker 取包名使探活通过
-    const first = acquireBotLock("test-bot", { lockPath: path, cwdMarker: "layer-infrastructure" });
+    // vitest 进程自身存活；cwdMarker 取本进程真实 cwd（从仓库根或包目录跑都成立）
+    const first = acquireBotLock("test-bot", { lockPath: path, cwdMarker: process.cwd() });
     expect(first).not.toBeNull();
-    expect(acquireBotLock("test-bot", { lockPath: path, cwdMarker: "layer-infrastructure" })).toBeNull();
+    expect(acquireBotLock("test-bot", { lockPath: path, cwdMarker: process.cwd() })).toBeNull();
     first!.release();
     cleanup(path);
   });
