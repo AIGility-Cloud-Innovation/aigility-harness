@@ -1,0 +1,21 @@
+{
+  "role_id": "harness-guide",
+  "identity": {
+    "name": "框架介绍员",
+    "signature": "aigility-harness",
+    "capability_ref": "harness-guide"
+  },
+  "sources": {
+    "data": []
+  },
+  "actions": {
+    "tools": [],
+    "workflows": []
+  },
+  "outbound": {
+    "reply": "same-channel"
+  },
+  "memory": {
+    "agent_id": "harness-guide"
+  }
+}

@@ -1,0 +1,149 @@
+{
+  "version": 2,
+  "updated_at": "2026-09-30T05:41:20.538Z",
+  "notes": [
+    "M1 试点：三形态覆盖——独立 app / 共享 app（如实登记冲突）/ 纯网页。",
+    "已知面貌冲突（基线 2）：cli_aa2bca9f0c789bed 现由 feishu-dsh 会话中继与 feishu-timem 共用——一个 app 挂两个角色本体；M3 收编时拆分 app 或合并角色，此处如实登记。",
+    "appFaceNames（app 注册名快照）M1 留空：真实注册名核对随 M2 平台侧 app 元数据表接入。"
+  ],
+  "roles": [
+    {
+      "role_id": "feishu-task-assistant",
+      "identity": {
+        "name": "项目小助理",
+        "capability_ref": "feishu-task-assistant"
+      },
+      "sources": {
+        "channels": [
+          {
+            "platform": "feishu",
+            "apps": [
+              {
+                "app": "cli_a9e24e913a39dcd6",
+                "mention_only": true
+              }
+            ]
+          }
+        ],
+        "data": [
+          "gitea:issues",
+          "gitea:prs",
+          "feishu:tasks",
+          "timem:memory",
+          "log-monitor"
+        ]
+      },
+      "actions": {
+        "tools": [
+          "@orchestration/project-briefing"
+        ],
+        "workflows": []
+      },
+      "outbound": {
+        "reply": "same-channel",
+        "push": [
+          "feishu:task-assistant-broadcast"
+        ]
+      },
+      "memory": {
+        "agent_id": "feishu-task-assistant"
+      }
+    },
+    {
+      "role_id": "timem-project-assistant",
+      "identity": {
+        "name": "项目任务助手",
+        "capability_ref": "timem-project-assistant"
+      },
+      "sources": {
+        "channels": [
+          {
+            "platform": "feishu",
+            "apps": [
+              {
+                "app": "cli_aa2bca9f0c789bed",
+                "mention_only": true
+              }
+            ]
+          }
+        ],
+        "data": [
+          "timem:memory"
+        ]
+      },
+      "actions": {
+        "tools": [],
+        "workflows": []
+      },
+      "outbound": {
+        "reply": "same-channel",
+        "push": []
+      },
+      "memory": {
+        "agent_id": "timem-project-assistant"
+      }
+    },
+    {
+      "role_id": "fde-assistant",
+      "identity": {
+        "name": "FDE 交付助手"
+      },
+      "sources": {
+        "data": [
+          "appbase:/app/data"
+        ]
+      },
+      "actions": {
+        "tools": [],
+        "workflows": []
+      },
+      "outbound": {
+        "push": []
+      },
+      "memory": {
+        "agent_id": "fde-assistant"
+      }
+    },
+    {
+      "role_id": "readonly",
+      "identity": {
+        "name": "只读访客（无任何 skill/MCP）",
+        "capability_ref": "readonly"
+      },
+      "sources": {
+        "data": []
+      },
+      "actions": {
+        "tools": [],
+        "workflows": []
+      },
+      "outbound": {
+        "push": []
+      },
+      "memory": {
+        "agent_id": "readonly"
+      }
+    },
+    {
+      "role_id": "zy-mui8eu02",
+      "identity": {
+        "name": "周会待办督办员",
+        "capability_ref": "zy-mui8eu02"
+      },
+      "sources": {
+        "data": []
+      },
+      "actions": {
+        "tools": [],
+        "workflows": []
+      },
+      "outbound": {
+        "push": []
+      },
+      "memory": {
+        "agent_id": "zy-mui8eu02"
+      }
+    }
+  ],
+  "$schema": "角色 manifest v2 —— 五要素声明层（docs/角色通道声明模型设计.md §二）。与 roles.json 的关系：roles.json 管能力面（skills/mcpServers/routes），本文件只声明通道订阅/记忆归集/出站事实，按 role_id 关联。channels 可选（基线 1：纯网页角色省略）；面貌=本体（基线 2：一 app 一角色）；memory.agent_id 恒等于 role_id（基线 3/4：跨位置/跨平台同一记忆域，user 维由 identity-registry 归集）。聚合器 M1 为 dry-run（buildAggregatorPlan），真连切换由 M2 逐角色迁移（CHANNEL_AGGREGATOR_ENABLED）。"
+}

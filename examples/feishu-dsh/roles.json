@@ -21,6 +21,11 @@
       "label": "只读访客（无任何 skill/MCP）",
       "skills": [],
       "mcpServers": []
+    },
+    "zy-mui8eu02": {
+      "label": "周会待办督办员",
+      "skills": [],
+      "mcpServers": []
     }
   },
   "routes": {}

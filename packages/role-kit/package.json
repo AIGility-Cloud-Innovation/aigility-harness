@@ -1,0 +1,21 @@
+{
+  "name": "@aigility-harness/role-kit",
+  "version": "0.1.0",
+  "description": "角色包共享加载器 —— 读取公共/站点双层 roles 目录（SKILL.md + role.json），按 role.id 解析人设/能力/通道/记忆域。机制归 harness，编辑器（智悦工厂等）与消费站点共用。",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}
