@@ -5,7 +5,7 @@ import { feishuApiProvider } from "./src/feishu-api.js";
 const cred = JSON.parse(readFileSync("../../feishu/app.local.json", "utf8"));
 process.env.FEISHU_APP_ID = cred.app_id;
 process.env.FEISHU_APP_SECRET = cred.app_secret;
-process.env.FEISHU_USER_TOKEN_STORE = "../../feishu/user_token.local.json";
+process.env.FEISHU_USER_TOKEN_STORE = "../../config/feishu/user_token.local.json";
 
 const ctx = { emit: () => {}, traceId: "smoke" } as never;
 

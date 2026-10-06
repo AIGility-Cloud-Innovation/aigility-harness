@@ -31,42 +31,154 @@
       "@action/timem-memory-write",
       "agentd-uds"
     ],
-    "workflows": ["chat-briefing"],
+    "workflows": [
+      "chat-briefing"
+    ],
     "commands": [
-      { "pattern": "建任务 @仓库：<标题> [截止 YYYY-MM-DD]", "action": "task-issue-sync:create", "summary": "飞书任务+Gitea工单双建" },
-      { "pattern": "建工单 @仓库：<标题>", "action": "task-issue-sync:issue-create", "summary": "Gitea工单+飞书任务双建（自动查重）" },
-      { "pattern": "我的任务", "action": "project-briefing:person-brief", "summary": "四源全景：待办工单+PR+飞书任务+记忆" },
-      { "pattern": "完成 <关键字>", "action": "task-issue-sync:complete", "summary": "完结匹配的飞书任务" },
-      { "pattern": "工单列表 [@仓库]", "action": "task-issue-sync:issue-list", "summary": "列 Gitea 工单" },
-      { "pattern": "查工单 [@仓库] <#编号或关键字>", "action": "task-issue-sync:issue-show", "summary": "查工单详情" },
-      { "pattern": "关闭工单 [@仓库] <#编号或关键字>", "action": "task-issue-sync:issue-close", "summary": "关单（自动评论+任务挪C待测试）" },
-      { "pattern": "重开工单 [@仓库] <#编号>", "action": "task-issue-sync:issue-reopen", "summary": "重开工单" },
-      { "pattern": "评论工单 [@仓库] <#编号> <内容>", "action": "task-issue-sync:issue-comment", "summary": "评论工单" },
-      { "pattern": "项目概览", "action": "task-issue-sync:overview", "summary": "飞书待办+进行中工单汇总" },
-      { "pattern": "项目进展 [名称]", "action": "project-briefing:project-brief", "summary": "四源项目进展汇总" },
-      { "pattern": "反馈：<内容>", "action": "project-briefing:feedback", "summary": "沉淀长期记忆" },
-      { "pattern": "安排执行者 #N @姓名", "action": "task-issue-sync:assign", "summary": "P→D 前置：记录执行人" },
-      { "pattern": "确认派发 #N", "action": "task-issue-sync:dispatch-confirm", "summary": "闸门内提前执行（agentd）" },
-      { "pattern": "取消派发 #N", "action": "task-issue-sync:dispatch-cancel", "summary": "撤销 agentd 任务" },
-      { "pattern": "任务归属 <N> <仓库/简称>", "action": "task-issue-sync:pending-assign", "summary": "澄清队列落单" },
-      { "pattern": "跳过任务 <N>", "action": "task-issue-sync:pending-skip", "summary": "丢弃澄清候选" },
-      { "pattern": "确认 <N>", "action": "task-issue-sync:confirm-pending", "summary": "认可摘要判断" },
-      { "pattern": "帮助", "action": "persona:help", "summary": "返回命令面板" }
+      {
+        "pattern": "建任务 @仓库：<标题> [截止 YYYY-MM-DD]",
+        "action": "task-issue-sync:create",
+        "summary": "飞书任务+Gitea工单双建"
+      },
+      {
+        "pattern": "建工单 @仓库：<标题>",
+        "action": "task-issue-sync:issue-create",
+        "summary": "Gitea工单+飞书任务双建（自动查重）"
+      },
+      {
+        "pattern": "我的任务",
+        "action": "project-briefing:person-brief",
+        "summary": "四源全景：待办工单+PR+飞书任务+记忆"
+      },
+      {
+        "pattern": "完成 <关键字>",
+        "action": "task-issue-sync:complete",
+        "summary": "完结匹配的飞书任务"
+      },
+      {
+        "pattern": "工单列表 [@仓库]",
+        "action": "task-issue-sync:issue-list",
+        "summary": "列 Gitea 工单"
+      },
+      {
+        "pattern": "查工单 [@仓库] <#编号或关键字>",
+        "action": "task-issue-sync:issue-show",
+        "summary": "查工单详情"
+      },
+      {
+        "pattern": "关闭工单 [@仓库] <#编号或关键字>",
+        "action": "task-issue-sync:issue-close",
+        "summary": "关单（自动评论+任务挪C待测试）"
+      },
+      {
+        "pattern": "重开工单 [@仓库] <#编号>",
+        "action": "task-issue-sync:issue-reopen",
+        "summary": "重开工单"
+      },
+      {
+        "pattern": "评论工单 [@仓库] <#编号> <内容>",
+        "action": "task-issue-sync:issue-comment",
+        "summary": "评论工单"
+      },
+      {
+        "pattern": "项目概览",
+        "action": "task-issue-sync:overview",
+        "summary": "飞书待办+进行中工单汇总"
+      },
+      {
+        "pattern": "项目进展 [名称]",
+        "action": "project-briefing:project-brief",
+        "summary": "四源项目进展汇总"
+      },
+      {
+        "pattern": "反馈：<内容>",
+        "action": "project-briefing:feedback",
+        "summary": "沉淀长期记忆"
+      },
+      {
+        "pattern": "安排执行者 #N @姓名",
+        "action": "task-issue-sync:assign",
+        "summary": "P→D 前置：记录执行人"
+      },
+      {
+        "pattern": "确认派发 #N",
+        "action": "task-issue-sync:dispatch-confirm",
+        "summary": "闸门内提前执行（agentd）"
+      },
+      {
+        "pattern": "取消派发 #N",
+        "action": "task-issue-sync:dispatch-cancel",
+        "summary": "撤销 agentd 任务"
+      },
+      {
+        "pattern": "任务归属 <N> <仓库/简称>",
+        "action": "task-issue-sync:pending-assign",
+        "summary": "澄清队列落单"
+      },
+      {
+        "pattern": "跳过任务 <N>",
+        "action": "task-issue-sync:pending-skip",
+        "summary": "丢弃澄清候选"
+      },
+      {
+        "pattern": "确认 <N>",
+        "action": "task-issue-sync:confirm-pending",
+        "summary": "认可摘要判断"
+      },
+      {
+        "pattern": "帮助",
+        "action": "persona:help",
+        "summary": "返回命令面板"
+      }
     ],
     "schedules": [
-      { "name": "pipeline-tick", "trigger": "interval 10m", "action": "task-pipeline", "summary": "被动收集兜底tick+PR轮询提醒", "enabled": true },
-      { "name": "quiet-window", "trigger": "silence 180s", "action": "task-pipeline:summarize", "summary": "免@消息静默窗口汇总播报", "enabled": true },
-      { "name": "state-scan", "trigger": "interval 10m", "action": "task-issue-sync:scan", "summary": "P/D/C/A 状态机扫描", "enabled": false },
-      { "name": "daily-digest", "trigger": "daily 18:30", "action": "project-briefing:write-digest", "summary": "每日记忆快照", "enabled": true },
-      { "name": "briefing-events", "trigger": "event 建单/关单", "action": "project-briefing:write-digest", "summary": "显著事件防抖快照", "enabled": true }
+      {
+        "name": "pipeline-tick",
+        "trigger": "interval 10m",
+        "action": "task-pipeline",
+        "summary": "被动收集兜底tick+PR轮询提醒",
+        "enabled": true
+      },
+      {
+        "name": "quiet-window",
+        "trigger": "silence 180s",
+        "action": "task-pipeline:summarize",
+        "summary": "免@消息静默窗口汇总播报",
+        "enabled": true
+      },
+      {
+        "name": "state-scan",
+        "trigger": "interval 10m",
+        "action": "task-issue-sync:scan",
+        "summary": "P/D/C/A 状态机扫描",
+        "enabled": false
+      },
+      {
+        "name": "daily-digest",
+        "trigger": "daily 18:30",
+        "action": "project-briefing:write-digest",
+        "summary": "每日记忆快照",
+        "enabled": true
+      },
+      {
+        "name": "briefing-events",
+        "trigger": "event 建单/关单",
+        "action": "project-briefing:write-digest",
+        "summary": "显著事件防抖快照",
+        "enabled": true
+      }
     ]
   },
   "outbound": {
     "reply": "same-channel",
-    "push": ["feishu:TASK_NOTIFY_CHAT_ID"]
+    "push": [
+      "feishu:TASK_NOTIFY_CHAT_ID"
+    ]
   },
   "memory": {
     "agent_id": "project-assistant",
-    "legacy_agent_ids": ["feishu-task-assistant"]
+    "legacy_agent_ids": [
+      "feishu-task-assistant"
+    ]
   }
 }

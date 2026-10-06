@@ -22,6 +22,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./llm-node": {
+      "types": "./src/llm-node.ts",
+      "default": "./src/llm-node.ts"
     }
   }
 }

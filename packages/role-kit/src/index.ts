@@ -10,7 +10,8 @@
  * 消费站点（feishu/wecom ingress、dsh headless）都走本加载器读角色。
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // ── 类型 ─────────────────────────────────────────────────────────
 
@@ -47,6 +48,14 @@ export interface RoleManifest {
     agent_id: string;
     /** 迁移前旧记忆域（如实登记，待迁移后删除） */
     legacy_agent_ids?: string[];
+    /** 记忆策略声明位（Letta 式自治的声明面；运行时按声明执行，缺省平台代管）：
+     *  retention: 记忆保留范围；teamMemory: 加入智能体小队共享的团队记忆 */
+    strategy?: {
+      retention?: "long-term" | "session";
+      teamMemory?: boolean;
+      /** 归纳节奏（如 daily-digest），对齐 project-briefing 快照机制 */
+      digest?: string;
+    };
   };
 }
 
@@ -143,4 +152,100 @@ export function validateRoleManifest(m: RoleManifest): string[] {
   if (!m.role_id) issues.push("缺 role_id");
   if (!m.memory || m.memory.agent_id !== m.role_id) issues.push(`memory.agent_id 必须等于 role_id（基线 3/4：跨位置/跨平台同一记忆域）`);
   return issues;
+}
+
+// ── 出厂模板目录 ────────────────────────────────────────────────
+// 随 role-kit 包分发的公共角色模板（packages/role-kit/roles/，git 版本化）；
+// 站点事实源在各站 data/roles/（siteDirs，同 id 站点优先），模板永远只读分发。
+const KIT_ROOT = dirname(fileURLToPath(import.meta.url));
+
+/** 出厂模板目录绝对路径（调用方作为 publicDir 传入 loadRolePackages） */
+export function bundledRolesDir(): string {
+  return resolve(KIT_ROOT, "../roles");
+}
+
+// ── ElizaOS character file 兼容层 ───────────────────────────────
+// 设计哲学对齐（2026-10 生态调研）：ElizaOS 以 character file 为"最重要的单一产物"，
+// 本转换器让角色包能与其格式互通（导出传播 / 导入安装）。转换是尽力而为的映射：
+// 人设主旨走 bio + system（后者为常见扩展字段），能力声明走 plugins/knowledge。
+
+/**
+ * ElizaOS Character —— 对齐 @elizaos/core@1.7.2 已发布 schema（dist/types/agent.d.ts）的结构类型。
+ * 为何 vendor 而非 import type：实测该包 1.7.2 的类型发布损坏——exports["."].types 指向的
+ * dist/index.d.ts star-export 链解析为空，"./node" 子路径的 index.d.ts 指向无类型的 index.node.js。
+ * 待上游修复后改回 `import type { Character } from "@elizaos/core"`（运行时零依赖不变）。
+ */
+export interface ElizaCharacter {
+  name: string;
+  /** 官方可选 system prompt 字段 */
+  system?: string;
+  bio: string | string[];
+  knowledge?: (string | { path: string; shared?: boolean })[];
+  plugins?: string[];
+  topics?: string[];
+  style?: { all?: string[]; chat?: string[]; post?: string[] };
+  settings?: { [key: string]: string | boolean | number | Record<string, unknown> };
+  messageExamples?: unknown[][];
+  postExamples?: string[];
+  adjectives?: string[];
+  id?: string;
+  username?: string;
+  templates?: { [key: string]: unknown };
+  secrets?: { [key: string]: string | boolean | number };
+}
+
+/** 角色包 → ElizaOS character file（字段映射：人设主旨→bio+system，能力→plugins，数据→knowledge；
+ *  溯源放 settings.aigility —— settings 有索引签名，可安全携带回转字段） */
+export function toElizaCharacter(pkg: {
+  id: string;
+  name: string;
+  description: string;
+  prompt: string;
+  manifest: RoleManifest;
+}): ElizaCharacter {
+  const bio = [pkg.description, ...pkg.prompt.split(/\n\n/).slice(0, 2)].filter(Boolean);
+  const character: ElizaCharacter = {
+    name: pkg.name || pkg.id,
+    bio: bio.length ? bio : [pkg.id],
+  };
+  if (pkg.prompt) character.system = pkg.prompt;
+  if (pkg.manifest.sources?.data?.length) character.knowledge = [...pkg.manifest.sources.data];
+  if (pkg.manifest.actions?.tools?.length) character.plugins = [...pkg.manifest.actions.tools];
+  character.settings = {
+    aigility: {
+      role_id: pkg.id,
+      memory_agent_id: pkg.manifest.memory?.agent_id ?? pkg.id,
+      ...(pkg.manifest.identity?.capability_ref ? { capability_ref: pkg.manifest.identity.capability_ref } : {}),
+    },
+  };
+  return character;
+}
+
+/** ElizaOS character file → 角色包（manifest + prompt）；不合法返回 null */
+export function fromElizaCharacter(
+  char: ElizaCharacter | Record<string, unknown>,
+): { manifest: RoleManifest; prompt: string } | null {
+  const c = char as Record<string, unknown>;
+  const name = typeof c.name === "string" ? c.name.trim() : "";
+  if (!name) return null;
+  const settings = (c.settings ?? {}) as { aigility?: { role_id?: string; memory_agent_id?: string; capability_ref?: string } };
+  const aig = settings.aigility ?? {};
+  const roleId = typeof aig.role_id === "string" && aig.role_id ? aig.role_id : name.toLowerCase().replace(/\s+/g, "-");
+  const bio = Array.isArray(char.bio) ? char.bio.filter((x: unknown) => typeof x === "string").join("\n") : typeof char.bio === "string" ? char.bio : "";
+  const system = typeof char.system === "string" ? char.system : "";
+  const prompt = (system || bio).trim();
+  const plugins = Array.isArray(char.plugins) ? char.plugins.filter((x: unknown) => typeof x === "string") : [];
+  const knowledge = Array.isArray(char.knowledge) ? char.knowledge.filter((x: unknown) => typeof x === "string") : [];
+  // 基线 3/4：记忆域恒 = role_id。换 id 导入（分享副本）时记忆域跟随新 id，
+  // 源角色的记忆域如实登记 legacy（不与源共享记忆，防止误读他人记忆）。
+  const memAgent = typeof aig.memory_agent_id === "string" ? aig.memory_agent_id : roleId;
+  const manifest: RoleManifest = {
+    role_id: roleId,
+    identity: { name, ...(typeof aig.capability_ref === "string" ? { capability_ref: aig.capability_ref } : {}) },
+    sources: { ...(knowledge.length ? { data: knowledge } : {}) },
+    actions: { ...(plugins.length ? { tools: plugins } : {}) },
+    outbound: {},
+    memory: { agent_id: roleId, ...(memAgent !== roleId ? { legacy_agent_ids: [memAgent] } : {}) },
+  };
+  return { manifest, prompt };
 }

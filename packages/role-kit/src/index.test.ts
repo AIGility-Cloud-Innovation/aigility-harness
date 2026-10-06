@@ -1,7 +1,8 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadRolePackage, loadRolePackages, validateRoleManifest } from "./index.js";
+import { existsSync } from "node:fs";
+import { bundledRolesDir, fromElizaCharacter, loadRolePackage, loadRolePackages, toElizaCharacter, validateRoleManifest } from "./index.js";
 
 // 临时双层目录：公共层 + 站点层（站点覆盖公共的同 id）
 const root = `/tmp/role-kit-test-${process.pid}-${Math.random().toString(36).slice(2)}`;
@@ -101,8 +102,9 @@ describe("role-kit 扩展字段与真实仓库角色", () => {
     expect(validateRoleManifest(pkg!.manifest)).toHaveLength(0);
   });
 
-  it("真实仓库 roles/：harness-guide 与 project-assistant 均可加载且校验通过", () => {
-    const repoRoles = join(import.meta.dirname, "../../../roles");
+  it("出厂模板（bundledRolesDir）：harness-guide 与 project-assistant 均可加载且校验通过", () => {
+    const repoRoles = bundledRolesDir();
+    expect(existsSync(join(repoRoles, "harness-guide"))).toBe(true);
     const pkgs = loadRolePackages({ publicDir: repoRoles, siteDirs: [] });
     const byId = Object.fromEntries(pkgs.map((p) => [p.id, p]));
     expect(byId["harness-guide"]).toBeTruthy();
@@ -111,5 +113,42 @@ describe("role-kit 扩展字段与真实仓库角色", () => {
     expect(byId["project-assistant"].manifest.actions.commands?.length).toBeGreaterThan(10);
     expect(byId["project-assistant"].manifest.actions.schedules?.some((s) => s.enabled === false)).toBe(true);
     for (const p of pkgs) expect(validateRoleManifest(p.manifest)).toHaveLength(0);
+  });
+});
+
+
+describe("ElizaOS 兼容层与记忆策略声明位", () => {
+  const manifest = {
+    role_id: "pa",
+    identity: { name: "项目小助理", capability_ref: "feishu-task-assistant" },
+    sources: { data: ["config/project-registry.json"] },
+    actions: { tools: ["@action/gitea-api"] },
+    outbound: { reply: "same-channel" as const },
+    memory: { agent_id: "pa", strategy: { retention: "long-term" as const, teamMemory: true } },
+  };
+
+  it("导出：role → character file（bio/system/plugins/knowledge/溯源）", () => {
+    const c = toElizaCharacter({ id: "pa", name: "项目小助理", description: "项目协调员", prompt: "你是项目小助理。\n\n只管理不执行。", manifest });
+    expect(c.name).toBe("项目小助理");
+    expect(c.system).toContain("只管理不执行");
+    expect(c.bio[0]).toBe("项目协调员");
+    expect(c.plugins).toContain("@action/gitea-api");
+    expect((c.settings?.aigility as { role_id: string })?.role_id).toBe("pa");
+    expect(manifest.memory.strategy?.teamMemory).toBe(true);
+  });
+
+  it("导入：character → manifest+prompt，校验通过且 plugins/knowledge 落位", () => {
+    const c = toElizaCharacter({ id: "pa", name: "项目小助理", description: "协调", prompt: "你是小助理", manifest });
+    const r = fromElizaCharacter(c as unknown as Record<string, unknown>);
+    expect(r).toBeTruthy();
+    expect(r!.manifest.role_id).toBe("pa");
+    expect(r!.manifest.actions.tools).toEqual(["@action/gitea-api"]);
+    expect(r!.manifest.sources.data).toEqual(["config/project-registry.json"]);
+    expect(r!.prompt).toContain("小助理");
+    expect(validateRoleManifest(r!.manifest)).toHaveLength(0);
+  });
+
+  it("导入：非 character JSON（缺 name）拒绝", () => {
+    expect(fromElizaCharacter({ foo: 1 })).toBeNull();
   });
 });

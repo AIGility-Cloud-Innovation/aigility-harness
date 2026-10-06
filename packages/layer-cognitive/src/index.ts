@@ -447,3 +447,5 @@ export const plugin: LayerPlugin = {
     return pluginState;
   },
 };
+
+export * from "./llm-node.js";

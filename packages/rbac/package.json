@@ -1,0 +1,20 @@
+{
+  "name": "@aigility-harness/rbac",
+  "version": "0.1.0",
+  "description": "RBAC 鉴权机制包（底座能力）—— User→Role→PermissionGroup→Permission 四层模型、三步解析算法、判定工厂与管理服务。机制在包、数据在站点：存储经 RbacStore 接口由站点适配（如 AppBase PG），权限码目录由站点播种。移植自 hire_web_backend 自研 RBAC（剥离业务耦合：无超管旁路语义保留、SHA256/JWT/租户配额不移植——认证归站点登录，本包只管授权）。",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": { "types": "./src/index.ts", "default": "./src/index.ts" },
+    "./sql": { "types": "./src/sql.ts", "default": "./src/sql.ts" }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}
