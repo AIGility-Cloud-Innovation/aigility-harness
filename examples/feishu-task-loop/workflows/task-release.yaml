@@ -1,0 +1,72 @@
+# 项目小助理 · 任务放行检查单（五要素 → ready）
+# ─────────────────────────────────────────────────────────────────
+# 本文件即放行规则的开关面板：每次判定前重新读取，改完存盘即生效，无需重启。
+# 加载失败自动回退内置默认（task-release-gate.ts 的 BUILTIN_RELEASE_YAML）。
+#
+# 放行规则（2026-10-03 与负责人确认）：
+#   五要素 = 项目(归属) / 执行人 / 现状 / 过程方法 / 目标
+#   · 项目、执行人 = 结构性检查（登记表 projectRef、描述"执行者："标记），不靠 LLM
+#   · 现状/过程方法/目标 = LLM 只判"是否交代清楚"，不判内容对错
+#   · 五项全齐   → 自动放行（登记表 review.via=auto, by=system）
+#   · 缺结构要素 → 【待确认归属】/【待安排执行者】留 P（复用既有约定）
+#   · 缺 LLM 要素 → 【缺X】逐项列出，人补描述后群「确认 编号」人工放行（记复核人）
+#   · LLM 判不准 → 【待复核】人工一票
+#
+# 控制方式：节点改 enabled: false 即旁路该项检查（图结构不动）。
+#   - llm_elements 禁用 = 只查结构要素，LLM 要素视为不检查（直接放行）
+#   - 人工一票制（全员人工复核）：把 auto 语义关掉 = 禁用本文件做不到，
+#     人工门在路由层（TaskRouter 只对 ready 派发），要强制人审可让
+#     llm_elements 全部判 unsure 的场景走 pending-review，或在此将
+#     executor_check 的 pattern 调严倒逼人工补齐。
+#
+# 节点函数体由 task-release-gate.ts 实现，不进 YAML —— 与
+# chat-briefing.yaml 的「数据面/执行面」分界一致。
+
+workflow:
+  name: task-release
+  description: 五要素放行检查单 — 项目/执行人(结构) + 现状/过程方法/目标(LLM)
+  entry_point: project_check
+
+  nodes:
+    project_check:
+      type: function_node
+      function_ref: check_project
+      enabled: true
+      description: 结构性：登记表 projectRef（org/repo）；缺 → 【待确认归属】留 P
+
+    executor_check:
+      type: function_node
+      function_ref: check_executor
+      enabled: true
+      description: 结构性：描述含执行者标记；缺 → 【待安排执行者】留 P
+      config:
+        pattern: "执行者：\\S+"
+
+    notify_executor:
+      type: function_node
+      function_ref: notify_executor
+      enabled: true
+      description: 放行私信执行人；静默窗内合并成一条（私信只报"新工作落到你头上"）
+      config:
+        quiet_window_minutes: 30   # 同一执行人 30 分钟内多次放行 → 合并一条 digest；0 = 立即逐条发
+
+    llm_elements:
+      type: function_node
+      function_ref: check_llm_elements
+      enabled: true
+      description: LLM 只判"是否交代清楚"；required 要素缺失拦下，unsure → 【待复核】人工一票
+      config:
+        # 选填要素：缺了不拦放行，只软提示一句（2026-10-04 决策：过程方法选填）
+        optional:
+          - 过程方法
+        elements:
+          现状: "是否交代了当前状况与为什么做（背景/问题）"
+          过程方法: "是否给出了可执行的方案/路径/步骤"
+          目标: "是否明确做到什么程度算完成（验收标准）"
+        system_prompt: >-
+          你是任务要素审查员。对照检查单逐项判断下面的任务描述"是否交代清楚"该要素。
+          只判清楚与否，不判内容对错、不代写内容。
+          只输出 JSON：{"现状":"ok|missing|unsure","过程方法":"ok|missing|unsure","目标":"ok|missing|unsure",
+          "缺什么":"一句话面向任务的补齐提示，全部 ok 时为空串"}
+          判定标准：描述里能明确指出该要素说了什么 → ok；完全没提 → missing；
+          提了但含糊到无法判断是否交代清楚 → unsure。
