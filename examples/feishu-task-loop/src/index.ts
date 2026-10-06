@@ -24,7 +24,7 @@
  *   FEISHU_APP_ID=cli_a9e24e913a39dcd6
  *   FEISHU_APP_SECRET=xxx
  *   # 用户身份 token 落盘（首次授权用 npx tsx packages/layer-action/authorize-feishu.ts，app.local.json 里放本应用凭证）
- *   FEISHU_USER_TOKEN_STORE=feishu/user_token.local.json
+ *   FEISHU_USER_TOKEN_STORE=config/feishu/user_token.local.json
  *   # Gitea（可选：默认读 ~/.gitea-token 与 TiMEM-AI/timem-platform-backend）
  *   # GITEA_TOKEN=xxx
  *   # GITEA_DEFAULT_REPO=TiMEM-AI/timem-platform-backend
@@ -58,14 +58,24 @@ import {
   projectBriefingProvider,
   startBriefingDigestScheduler,
   setBriefingActivitySink,
+  feishuApiRef,
+  createPeriodicAligner,
+  createFeishuTaskProvider,
+  createGiteaIssueProvider,
 } from "@aigility-harness/layer-orchestration";
+import { getSharedRegistry, getReviewCodes, assignReviewCodes } from "./review-aware.js";
+import { syncGiteaCompletions } from "./completion-sync.js";
+import { remindPendingTasks } from "./review-reminder.js";
+import { syncBoardAlignment } from "./board-sync.js";
 import { loadEnv, REPO_ROOT } from "./env.js";
 import { isAbsolute, resolve as resolvePath } from "node:path";
+import { readFileSync } from "node:fs";
 import { acquireBotLock, botLockPath, type BotSingletonLock } from "@aigility-harness/layer-infrastructure";
+import { plugin as reviewAwarePlugin } from "./review-aware.js";
 
-/** 网关机器人 AppID → 任务管理人格 */
+/** 网关机器人 AppID → 任务管理人格（复核感知包装：短码自然语言补要素/放行，其余透传） */
 const FEISHU_AGENT_ROUTES: Record<string, string> = {
-  cli_a9e24e913a39dcd6: "@persona/feishu-task-assistant",
+  cli_a9e24e913a39dcd6: "@persona/review-aware-assistant",
 };
 
 async function main(): Promise<void> {
@@ -107,6 +117,7 @@ async function main(): Promise<void> {
     personaPlugin,
     orchestrationPlugin,
     actionPlugin,
+    reviewAwarePlugin,
   ];
   for (const p of plugins) {
     console.log(`装配 ${p.manifest.name} (layer=${p.manifest.layer})`);
@@ -195,6 +206,8 @@ async function main(): Promise<void> {
       intervalMs,
       notifyChatId: notifyChatId || undefined,
       workflowFile,
+      registry: getSharedRegistry(),
+      reviewCodeFile: resolvePath(REPO_ROOT, "config/review-session.local.json"),
     },
     ctx,
   );
@@ -202,6 +215,85 @@ async function main(): Promise<void> {
     console.error("task-pipeline 启动失败:", pipeline.error);
     process.exit(1);
   }
+
+  // 4.5 任务台账（config/*.local.json）+ 定期对齐器（默认 10 分钟一拍）
+  //     收集归机器人单进程（写者唯一）；scripts/review-session.ts 已降级为只读查询。
+  //     每拍：三源收集 → 同体收敛 → 标题重复合并 → 冲突/独占巡检；新任务自动续号发短码。
+  const alignCtx = kernel.createContext("feishu-task-loop-align", LayerId.Infrastructure);
+  const alignFeishuCall = async (req: Record<string, unknown>) =>
+    (await alignCtx.call(feishuApiRef, req)) as {
+      ok: boolean;
+      value?: { code?: number; msg?: string; data?: unknown };
+      error?: string;
+    };
+  const alignGiteaCall = async (req: Record<string, unknown>) =>
+    (await alignCtx.call({ id: "@action/gitea-api", versionRange: "^1.0.0" }, req)) as {
+      ok: boolean;
+      value?: { status?: number; data?: unknown };
+      error?: string;
+    };
+  const registryRepos = (() => {
+    try {
+      const reg = JSON.parse(
+        readFileSync(resolvePath(REPO_ROOT, "config/project-registry.json"), "utf-8"),
+      ) as { projects?: Array<{ gitea_repos?: string[] }> };
+      return (reg.projects ?? []).flatMap((p) => p.gitea_repos ?? []);
+    } catch {
+      return [];
+    }
+  })();
+  const alignIntervalMs = Number(process.env["TASK_ALIGN_INTERVAL_MS"] ?? "1800000");
+  const aligner = createPeriodicAligner({
+    registry: getSharedRegistry(),
+    providers: [
+      createFeishuTaskProvider(alignFeishuCall, {
+        tasklistNames: [...new Set(registryRepos.map((r) => r.split("/")[0]))],
+      }),
+      createGiteaIssueProvider(alignGiteaCall, { repos: registryRepos }),
+    ],
+    intervalMs: alignIntervalMs,
+    runAtStart: true,
+    onReport: async (rep) => {
+      const assigned = assignReviewCodes(getSharedRegistry());
+      if (assigned.length > 0) {
+        console.log(
+          `[align] 新增复核短码: ${assigned.map((a) => `${a.code}「${a.title.slice(0, 20)}」`).join(" / ")}`,
+        );
+      }
+      // ① 完成核对（先于提醒）：工单已关闭 → 台账 review + 飞书挪「C 待测试」+ 留痕
+      const synced = await syncGiteaCompletions(getSharedRegistry(), alignGiteaCall, alignFeishuCall);
+      if (synced.length > 0) {
+        console.log(`[align] 完成核对: ${synced.join(" / ")}`);
+      }
+      // ①.5 看板反向对齐：人工挪组 → 台账经合法路径跟随（预期截面防误判）
+      const boardChanges = await syncBoardAlignment(getSharedRegistry(), alignFeishuCall);
+      if (boardChanges.length > 0) {
+        console.log(`[align] 看板反向对齐: ${boardChanges.join(" / ")}`);
+      }
+      // ② 「待你处理」提醒：每天最多一次私信负责人（未绑定飞书则跳过）
+      await remindPendingTasks({
+        sendDm: async (openId, text) => {
+          const r = (await alignCtx.call(feishuApiRef, {
+            method: "POST",
+            path: "/open-apis/im/v1/messages",
+            query: { receive_id_type: "open_id" },
+            identity: "tenant",
+            body: { receive_id: openId, msg_type: "text", content: JSON.stringify({ text }) },
+          })) as { ok: boolean; value?: { code?: number } };
+          return r.ok && (r.value?.code ?? -1) === 0;
+        },
+        log: (m) => console.log(m),
+      });
+      if (rep.conflicts.length > 0 || rep.exclusivity.length > 0) {
+        console.warn(`[align] 巡检异常: 冲突 ${rep.conflicts.length} / 独占 ${rep.exclusivity.length}`);
+      }
+    },
+    onError: (e) => console.error(`[align] 对齐失败: ${e.message}`),
+  });
+  aligner.start();
+  console.log(
+    `   任务台账: config/*.local.json（对齐器 ${Math.round(alignIntervalMs / 60000)} 分钟/拍，短码已发 ${Object.keys(getReviewCodes()).length} 个）`,
+  );
 
   // 5. 启动状态队列扫描（P 加工 + D 派发 + 终态回写；与流水线同节奏）
   //    TASK_STATE_SCAN=0 整体停用：现阶段 digest-only 不建工单，同时避免

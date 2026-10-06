@@ -25,7 +25,7 @@ export function resolveSummarizeConfig(env: NodeJS.ProcessEnv = process.env): Su
     baseUrl,
     apiKey,
     model: env["REPORT_SUMMARY_MODEL"] ?? env["TASK_PIPELINE_MODEL"] ?? "glm-4-flash",
-    timeoutMs: 120_000,
+    timeoutMs: 300_000,
   };
 }
 
@@ -88,11 +88,17 @@ async function summarizeCore(systemPrompt: string, report: DayReport, cfg: Summa
       }),
       signal: controller.signal,
     });
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "(body unreadable)");
+      console.error(`[summarize] LLM HTTP ${resp.status}: ${errText.slice(0, 300)}`);
+      return null;
+    }
     const json = (await resp.json()) as { choices?: Array<{ message?: { content?: string } }> };
     const text = json.choices?.[0]?.message?.content?.trim();
+    if (!text) console.error("[summarize] LLM 返回空内容");
     return text || null;
-  } catch {
+  } catch (e) {
+    console.error(`[summarize] LLM 调用异常: ${String(e)}`);
     return null;
   } finally {
     clearTimeout(timer);

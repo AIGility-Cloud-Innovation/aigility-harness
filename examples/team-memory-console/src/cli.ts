@@ -23,6 +23,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { TeamRegistry } from "./registry.js";
 import { TeamMemoryService } from "./service.js";
 import { buildDayReport, buildDayPlan, renderReport, resolveDate } from "./report.js";
+import { buildTaskCards } from "./task-cards.js";
 import { resolveSummarizeConfig, summarizeDayReport, summarizeDayPlan } from "./summarize.js";
 import { sendGroupTextChunked, DEFAULT_REPORT_CHAT_ID } from "./feishu.js";
 
@@ -61,6 +62,17 @@ function printMemberLine(indent: string, m: import("./registry.js").TeamMember):
 
 async function main(argv: string[]): Promise<void> {
   const [cmd, ...args] = argv;
+  const withTaskCards = async (text: string, date: string): Promise<string> => {
+    try {
+      const cards = await buildTaskCards(date);
+      return cards ? `${text}\n\n${cards}` : text;
+    } catch (e) {
+      console.error(`(任务卡片生成失败, 跳过: ${String(e)})`);
+      return text;
+    }
+  };
+
+
   const reg = new TeamRegistry(REGISTRY_PATH);
 
   switch (cmd) {
@@ -180,6 +192,7 @@ async function main(argv: string[]): Promise<void> {
       } else {
         text = renderReport(rep);
       }
+      text = await withTaskCards(text, rep.date);
       console.log(text);
       if (send) {
         const chatId = process.env.FEISHU_REPORT_CHAT_ID ?? DEFAULT_REPORT_CHAT_ID;
@@ -213,6 +226,7 @@ async function main(argv: string[]): Promise<void> {
       } else {
         text = renderReport(rep);
       }
+      text = await withTaskCards(text, rep.date);
       console.log(text);
       if (send) {
         const chatId = process.env.FEISHU_REPORT_CHAT_ID ?? DEFAULT_REPORT_CHAT_ID;

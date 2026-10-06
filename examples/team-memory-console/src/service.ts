@@ -120,7 +120,8 @@ export class TeamMemoryService {
       const seenIds = new Set<string>();
       for (let page = 1; page <= Math.max(1, pages); page++) {
         try {
-          const res = await this.client.searchMemory({ user_id: uid, query: text, limit, domain: this.defaultDomain, page });
+          // 检索限定 L2 提炼层：过滤 L1 原始层（个人快照等碎片噪音，2026-10-05）
+          const res = await this.client.searchMemory({ user_id: uid, query: text, limit, domain: this.defaultDomain, page, level: 2 });
           const items = res.memories ?? res.results ?? res.items ?? [];
           for (const it of items) {
             const attributed = this.attribute(it, uid);
