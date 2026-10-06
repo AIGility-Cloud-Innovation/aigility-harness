@@ -11,7 +11,7 @@
  * 凭证来源（与 feishu-ingress 共用同一组环境变量，零额外配置）：
  *   FEISHU_APP_ID / FEISHU_APP_SECRET   — 必填，应用凭证（两种身份都依赖）
  *   FEISHU_USER_TOKEN_STORE             — 可选，user token 落盘路径，
- *                                         默认 <repo-root>/feishu/user_token.local.json
+ *                                         默认 <repo-root>/config/feishu/user_token.local.json
  *                                         （相对路径一律相对仓库根解析，不随 cwd 漂移；
  *                                         本地凭证仓，整个 feishu/ 已 gitignore）
  *
@@ -199,7 +199,7 @@ export function readTokenEnv(overrides?: FeishuApiCredentials): TokenEnv {
     tokenStorePath: resolveTokenStorePath(
       overrides?.tokenStorePath ??
         process.env.FEISHU_USER_TOKEN_STORE ??
-        "feishu/user_token.local.json",
+        "config/feishu/user_token.local.json",
     ),
   };
 }

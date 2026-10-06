@@ -251,6 +251,21 @@ export function threadAnchorFor(msg: {
   return msg.rootId ?? msg.messageId;
 }
 
+/** 话题群适配（2026-10-04）：锚定回复带 replyInThread——
+ *  · 话题群：回复落在原话题内，不再每次新建话题；
+ *  · 普通群：楼中楼回复（比引用更聚拢，上下文不散）。
+ *  TASK_REPLY_IN_THREAD=0 恢复旧行为（仅引用、不进串）。 */
+export function replyInThreadEnabled(): boolean {
+  return !["0", "false", "off"].includes((process.env["TASK_REPLY_IN_THREAD"] ?? "1").toLowerCase());
+}
+
+export function anchorSendOptions(
+  anchor: string | undefined,
+): { replyTo: string; replyInThread?: boolean } | undefined {
+  if (!anchor) return undefined;
+  return replyInThreadEnabled() ? { replyTo: anchor, replyInThread: true } : { replyTo: anchor };
+}
+
 /** 内存去重器：Map<messageId, timestamp> + TTL 5 分钟 */
 class MessageDeduper {
   private seen = new Map<string, number>();
@@ -471,17 +486,13 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
             )) as { ok?: boolean; value?: { response?: string } };
             const reply = (r?.ok ? r.value?.response : "") ?? "";
             if (reply.trim()) {
-              await channel.send(to, { text: reply }, threadAnchor ? { replyTo: threadAnchor } : undefined);
+              await channel.send(to, { text: reply }, anchorSendOptions(threadAnchor));
             }
             return;
           }
           // 1) 立即发占位消息「✍️ 正在处理…」（敲键盘提示）
           // 2) 处理完成 → 原地编辑成最终回复（一条消息变内容，无刷屏）
-          const placeholder = await channel.send(
-            to,
-            { text: thinkingText },
-            threadAnchor ? { replyTo: threadAnchor } : undefined,
-          );
+          const placeholder = await channel.send(to, { text: thinkingText }, anchorSendOptions(threadAnchor));
           let finalText = "抱歉，处理失败，请稍后重试或查看服务日志。";
           try {
             // ctx.call 人格请求：附带通用会话上下文字段
@@ -511,11 +522,7 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
             await channel.editMessage(placeholder.messageId, finalText);
           } catch {
             // 编辑失败（罕见）→ 占位消息已在话题串里，直接补发最终内容（同样锚定话题）
-            await channel.send(
-              to,
-              { text: finalText },
-              threadAnchor ? { replyTo: threadAnchor } : undefined,
-            );
+            await channel.send(to, { text: finalText }, anchorSendOptions(threadAnchor));
           }
         } catch (e) {
           // 占位消息发送失败 → 直接发最终回复

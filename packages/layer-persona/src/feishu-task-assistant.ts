@@ -462,11 +462,12 @@ function llmFallbackEnabled(): boolean {
   return process.env.TASK_ASSISTANT_LLM_FALLBACK !== "0";
 }
 
-/** 兜底回复模型（可 env 覆盖；默认 sensenova-deepseek-v4-flash——litellm 网关实测可用
- * 且服从禁编造约束。glm-5.3-flash 已从网关下线（HTTP 400 Invalid model name）；
- * qwen-turbo 在禁编造约束下仍编出 #1234 工单号，已弃用） */
+/** 兜底回复模型（可 env 覆盖；默认 deepseek-v4-flash——2026-10-04 实测：
+ * 旧默认 sensenova-deepseek-v4-flash 在网关返回空内容（每次兜底必失败回退帮助
+ * 文本）；现名 deepseek-v4-flash 可用且服从禁编造约束（诱饵实测通过）。
+ * qwen-turbo 同样通过诱饵测试，可作备选） */
 function fallbackModel(): string {
-  return process.env.TASK_ASSISTANT_MODEL ?? "sensenova-deepseek-v4-flash";
+  return process.env.TASK_ASSISTANT_MODEL ?? "qwen-turbo";
 }
 
 /**
