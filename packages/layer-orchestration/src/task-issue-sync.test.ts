@@ -540,3 +540,21 @@ describe("plan-gate 顺序（飞书先行）— 先执行者闸门，后回填�
     expect(log).toContain('create-issue:"修白屏"');
   });
 });
+
+describe("resolveChatName 群名解析", () => {
+  it("解析群名并缓存（同一 chatId 只调一次接口），* 返回未知", async () => {
+    let calls = 0;
+    const ctx = {
+      call: async () => {
+        calls += 1;
+        return { ok: true, value: { code: 0, data: { name: "NX 电信群" } } };
+      },
+    } as never;
+    const { resolveChatName } = await import("./task-issue-sync.js");
+    expect(await resolveChatName(ctx, "oc_abc")).toBe("NX 电信群");
+    expect(await resolveChatName(ctx, "oc_abc")).toBe("NX 电信群");
+    expect(calls).toBe(1); // 缓存生效
+    expect(await resolveChatName(ctx, "*")).toBe("未知");
+    expect(calls).toBe(1);
+  });
+});

@@ -167,6 +167,10 @@ export type TaskIssueSyncRequest =
       priority?: string;
       /** 任务信息来源群 chatId（写入任务描述，plan-gate 提问/汇总可回溯） */
       sourceChatId?: string;
+      /** 原始讨论消息文本（判定输入同序；进任务描述「原始讨论」段，2026-10-05 补齐） */
+      texts?: string[];
+      /** LLM 引用的消息下标（1-based；缺省引用全部） */
+      sources?: number[];
     };
 
 export interface TaskIssueSyncResponse {
@@ -548,6 +552,8 @@ async function syncIssueToTask(
   issue: { number?: number; title?: string; html_url?: string },
   sourceChatId?: string,
   executor?: string,
+  texts?: string[],
+  sources?: number[],
 ): Promise<{ ok: boolean; detail: string }> {
   const listName = tasklistNameForRepo(repo);
   const list = await ensureTasklist(ctx, listName);
@@ -557,7 +563,7 @@ async function syncIssueToTask(
   const body: Record<string, unknown> = { summary: syncTaskSummary(repo, issue) };
   const descParts: string[] = [];
   if (issue.html_url) descParts.push(`工单链接：${issue.html_url}`);
-  if (sourceChatId) descParts.push(`来源群：${sourceChatId}`);
+  if (sourceChatId) descParts.push(`来源群：${await resolveChatName(ctx, sourceChatId)}`);
   // 执行者是 plan-gate 的 P→D 闸门依据（/执行者：\S+/）
   if (executor) descParts.push(`执行者：${executor}`);
   if (descParts.length > 0) body.description = descParts.join("\n");
@@ -599,7 +605,7 @@ async function syncIssueToTask(
  */
 export async function createPlannedTask(
   ctx: SeamContext,
-  opts: { repo: string; title: string; priority?: string; sourceChatId?: string },
+  opts: { repo: string; title: string; priority?: string; sourceChatId?: string; texts?: string[]; sources?: number[] },
 ): Promise<{ ok: boolean; guid?: string; detail: string }> {
   const listName = tasklistNameForRepo(opts.repo);
   const list = await ensureTasklist(ctx, listName);
@@ -610,8 +616,19 @@ export async function createPlannedTask(
     summary: opts.priority ? `[${opts.priority}] ${opts.title}` : opts.title,
   };
   const descParts: string[] = [];
-  if (opts.sourceChatId) descParts.push(`来源群：${opts.sourceChatId}`);
+  if (opts.sourceChatId) descParts.push(`来源群：${await resolveChatName(ctx, opts.sourceChatId)}`);
   descParts.push("状态：待确认归属与执行者（两者齐备后自动创建 Gitea 工单）");
+  const supTexts = opts.texts;
+  if (supTexts && supTexts.length > 0) {
+    const idx = (opts.sources ?? supTexts.map((_, i) => i + 1))
+      .map((n) => n - 1)
+      .filter((i) => i >= 0 && i < supTexts.length)
+      .slice(0, 5);
+    const quoted = (idx.length > 0 ? idx : supTexts.map((_, i) => i))
+      .slice(0, 5)
+      .map((i) => `> ${supTexts[i].replace(/\n/g, "\n> ")}`.slice(0, 500));
+    if (quoted.length > 0) descParts.push(`原始讨论：\n${quoted.join("\n")}`);
+  }
   body.description = descParts.join("\n");
   const tr = await callFeishuApi(ctx, {
     method: "POST",
@@ -987,6 +1004,28 @@ export async function adoptUnsectionedTasks(
     if (planGuid && (await moveToSection(ctx, g, tasklistGuid, planGuid))) adopted++;
   }
   return adopted;
+}
+
+/** chat_id → 群名缓存（群名基本不变；查不到回退原始 ID） */
+const chatNameCache = new Map<string, string>();
+
+/** 群聊显示名：写进任务描述给人看的「来源群」用群名，不用 oc_ ID（2026-10-05 用户反馈） */
+export async function resolveChatName(ctx: SeamContext, chatId: string): Promise<string> {
+  if (!chatId || chatId === "*") return "未知";
+  const cached = chatNameCache.get(chatId);
+  if (cached) return cached;
+  const r = await callFeishuApi(ctx, {
+    method: "GET",
+    path: `/open-apis/im/v1/chats/${chatId}`,
+    query: { user_id_type: "open_id" },
+    identity: "user",
+  });
+  const name =
+    r.ok && (r.value?.code ?? -1) === 0
+      ? ((r.value?.data as { name?: string })?.name ?? chatId)
+      : chatId;
+  chatNameCache.set(chatId, name);
+  return name;
 }
 
 /**
@@ -2105,6 +2144,8 @@ const taskIssueSyncProvider: Provider<TaskIssueSyncRequest, TaskIssueSyncRespons
         title: request.title,
         priority: request.priority,
         sourceChatId: request.sourceChatId,
+        texts: request.texts,
+        sources: request.sources,
       });
       return ok({
         response: created.ok ? `📋 ${created.detail}` : `⚠️ 计划任务创建未完成：${created.detail}`,

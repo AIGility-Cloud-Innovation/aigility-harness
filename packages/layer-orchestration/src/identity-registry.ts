@@ -35,6 +35,8 @@ export interface IdentityMember {
   web_emails: string[];
   /** 各身份轴的绑定来源；缺省视为 manual（老数据兼容） */
   match_source?: Partial<Record<IdentityAxis, MatchSource>>;
+  /** 飞书绑定元数据（by=绑定操作者 open_id，at=时间）：「本人绑定优先」的判定依据 */
+  feishu_bind_meta?: { by: string; at: string };
   role?: string;
   team?: string;
   email?: string;
@@ -61,6 +63,7 @@ export function normalizeMember(raw: Partial<IdentityMember>): IdentityMember {
     wecom_user_ids: (raw.wecom_user_ids ?? []).map(String),
     web_emails: (raw.web_emails ?? []).map((s) => String(s).toLowerCase()),
     match_source: raw.match_source ?? {},
+    feishu_bind_meta: raw.feishu_bind_meta,
     role: raw.role,
     team: raw.team,
     email: raw.email,

@@ -429,7 +429,9 @@ describe("taskPipelineProvider — 数据面工作流", () => {
     expect(sent[0].text).toContain("修复登录页白屏");
     // 摘要带 LLM 判断（项目/执行人）+ 来源措辞 + 核验指引；
     // 私聊来源候选池是全项目并集 → 归属按低置信展示（❓ 待定（疑似 …））
-    expect(sent[0].text).toContain("从私聊汇报里");
+    // 来源带真实群名（测试桩的 chatId 本身会被 resolveChatName 回退显示）+ 线索原文
+    expect(sent[0].text).toContain("的私聊汇报里整理出");
+    expect(sent[0].text).toContain("线索原文：");
     expect(sent[0].text).toContain("项目：❓ 待定（疑似 TiMEM-AI/TiMEM-Space）");
     expect(sent[0].text).toContain("执行人：❓ 待定");
     expect(sent[0].text).toContain("现阶段仅记录");

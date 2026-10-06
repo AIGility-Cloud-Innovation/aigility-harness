@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@aigility-harness/core": "workspace:*",
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.1.0",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "typescript": "^5.5.0",
@@ -24,6 +25,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./workflow-doc": {
+      "types": "./src/workflow-doc.ts",
+      "default": "./src/workflow-doc.ts"
     }
   }
 }

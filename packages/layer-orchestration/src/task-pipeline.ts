@@ -42,8 +42,13 @@ import type {
   HealthStatus,
   CapabilityRef,
 } from "@aigility-harness/core";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { YamlWorkflow, parseWorkflowYaml, loadWorkflowFile } from "./workflow-driver.js";
+import type { TaskRegistry } from "./task-registry.js";
 import type { WorkflowDoc } from "./workflow-driver.js";
+import { resolveChatName } from "./task-issue-sync.js";
+import { getIdentityRegistry, identityMembers } from "./identity-registry.js";
 
 // ── 消费引用 ─────────────────────────────────────────────────────
 
@@ -69,6 +74,13 @@ export const taskIssueSyncRef: CapabilityRef = {
 // ── 请求/响应 ────────────────────────────────────────────────────
 
 export interface TaskPipelineRequest {
+  /**
+   * 任务台账（2026-10-05）：digest-only 候选入台账获得 R 短码，播报/回复
+   * 统一用 R 码。由装配层传入共享实例（与复核人格/对齐器同进程单例）。
+   */
+  registry?: TaskRegistry;
+  /** 复核短码会话文件路径（R 码分配持久化）；缺省不分配短码 */
+  reviewCodeFile?: string;
   /** 汇总周期毫秒，默认 600000（10 分钟）；作为兜底 tick 间隔（PR 轮询等） */
   intervalMs?: number;
   /**
@@ -270,13 +282,15 @@ export function buildIssueBody(
   texts: string[] | undefined,
   sources: number[] | undefined,
   chatId: string,
+  chatName?: string,
 ): string {
   const discussion = quoteDiscussion(texts, sources);
+  const chatDisplay = chatName ?? (chatId === "*" ? "未知" : chatId);
   return (
     `> 来源：飞书群聊自动汇总（${new Date().toISOString()}）\n` +
     `>\n` +
     `> 判定依据：${reason ?? "LLM 判定为待执行任务"}\n` +
-    `> 来源群：${chatId === "*" ? "未知" : chatId}\n` +
+    `> 来源群：${chatDisplay}\n` +
     (discussion ? `\n${discussion}\n` : "\n") +
     `\n由 @orchestration/task-pipeline 自动创建，请负责人认领。`
   );
@@ -621,6 +635,27 @@ function recentTitlesForDedupe(): string[] {
     recentDigestTitles.shift();
   }
   return recentDigestTitles.map((x) => x.title);
+}
+
+
+// ── R 短码会话读写（与复核人格共用同一会话文件） ──────────────────
+
+function loadReviewCodes(file: string): Record<string, string> {
+  try {
+    return JSON.parse(readFileSync(file, "utf-8")) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+function saveReviewCodes(file: string, codes: Record<string, string>): void {
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify(codes, null, 2));
+}
+
+function nextReviewCode(codes: Record<string, string>): string {
+  const max = Object.keys(codes).reduce((m, k) => Math.max(m, Number(k.replace(/^R/, "")) || 0), 0);
+  return `R${String(max + 1).padStart(2, "0")}`;
 }
 
 // ── 数据面工作流：state 类型 + 内置默认 + 加载 ───────────────────
@@ -1007,7 +1042,7 @@ export const taskPipelineProvider: Provider<TaskPipelineRequest, TaskPipelineRes
               action: "create_issue",
               repo,
               title: `[${c.priority}] ${c.title}`,
-              body: buildIssueBody(c.reason, x.texts, c.sources, x.chatId),
+              body: buildIssueBody(c.reason, x.texts, c.sources, x.chatId, await resolveChatName(ctx, x.chatId)),
             });
             if (r && typeof r.data === "object" && r.data !== null) {
               const issue = r.data as { number?: number; html_url?: string };
@@ -1041,7 +1076,7 @@ export const taskPipelineProvider: Provider<TaskPipelineRequest, TaskPipelineRes
           return patch;
         },
 
-        build_digest: (s: PipelineState): Partial<PipelineState> => {
+        build_digest: async (s: PipelineState): Promise<Partial<PipelineState>> => {
           const scoped = s.scoped ?? [];
           const created = s.created ?? [];
           const clarify = s.clarify ?? [];
@@ -1138,31 +1173,98 @@ export const taskPipelineProvider: Provider<TaskPipelineRequest, TaskPipelineRes
                   )
                 : undefined,
             );
-            const msg =
-              `📋 汇总：从${srcLabel(chatId)}里整理出 ${items.length} 条疑似任务/待办：\n` +
-              items
-                .map((x, i) => {
-                  const no = registered[i]?.no;
-                  const repo =
-                    x.poolDefinite === false
-                      ? `❓ 待定${x.candidate.repo ? `（疑似 ${x.candidate.repo}）` : ""}`
-                      : x.candidate.repo || "❓ 待定";
-                  const executor = x.candidate.executor || "❓ 待定";
-                  return (
-                    `${no ? `#${no}` : i + 1} [${x.candidate.priority}] ${x.candidate.title}${x.candidate.reason ? ` —— ${x.candidate.reason}` : ""}\n` +
-                    `   项目：${repo} · 执行人：${executor}`
-                  );
-                })
-                .join("\n") +
-              `\n\n（我的判断对吗？对的回复「确认 #编号」；要改就回复「任务归属 #编号 项目简称」「安排执行者 #编号 姓名」，多条可分行或直接连写；引用本条摘要回复时编号可省略。项目简称如 太忆/nx/电信平台。现阶段仅记录，不建任务/工单）`;
-            const target = targetFor(chatId);
-            if (target) {
+            const chatName = await resolveChatName(ctx, chatId).catch(() => chatId);
+            // ① 候选入台账（digest-only 记录模式）：获得 R 短码，播报/回复统一用 R 码
+            const reg = request.registry;
+            const reviewCodes = request.reviewCodeFile ? loadReviewCodes(request.reviewCodeFile) : {};
+            const codeOfIdx = new Map<number, string>();
+            if (reg) {
+              for (const [i, x] of items.entries()) {
+                const rec = reg.adopt({
+                  title: x.candidate.title,
+                  description: (x.texts ?? []).join("\n"),
+                  origin: { provider: "chat-digest", guid: `${chatId}#${registered[i]?.no ?? i}` },
+                  projectRef: x.candidate.repo ?? undefined,
+                });
+                const code =
+                  Object.entries(reviewCodes).find(([, u]) => u === rec.uid)?.[0] ??
+                  nextReviewCode(reviewCodes);
+                reviewCodes[code] = rec.uid;
+                codeOfIdx.set(i, code);
+              }
+              if (request.reviewCodeFile) saveReviewCodes(request.reviewCodeFile, reviewCodes);
+            }
+            // ② 播报分流（2026-10-05 负责人确认）：TiMEM 组织项目 → issue反馈群；
+            // 其他项目/未定 → 私信负责人。每条候选按归属独立判定。
+            const TIMEM_PREFIX = "TiMEM-AI/";
+            const destOf = (x: (typeof items)[number]): "timem" | "owner" => {
+              const repo = x.candidate.repo;
+              if (repo && repo.startsWith(TIMEM_PREFIX)) return "timem";
+              const poolRepos = x.pool ?? [];
+              if (poolRepos.length > 0 && poolRepos.every((r) => r.startsWith(TIMEM_PREFIX))) return "timem";
+              return "owner";
+            };
+            const fmtItem = (x: (typeof items)[number], i: number): string => {
+              const code = codeOfIdx.get(i);
+              const repo =
+                x.poolDefinite === false
+                  ? `❓ 待定${x.candidate.repo ? `（疑似 ${x.candidate.repo}）` : ""}`
+                  : x.candidate.repo || "❓ 待定";
+              const executor = x.candidate.executor || "❓ 待定";
+              const srcPick = (x.candidate.sources ?? [])
+                .map((n) => n - 1)
+                .filter((idx) => idx >= 0 && idx < (x.texts?.length ?? 0))
+                .slice(0, 2);
+              const clue = (srcPick.length > 0 ? srcPick : (x.texts ?? []).map((_, idx) => idx))
+                .slice(0, 2)
+                .map((idx) => (x.texts?.[idx] ?? "").replace(/\n/g, " ").slice(0, 80))
+                .filter(Boolean)
+                .join(" ｜ ");
+              return (
+                `${code ?? `#${registered[i]?.no ?? i + 1}`} [${x.candidate.priority}] ${x.candidate.title}${x.candidate.reason ? ` —— ${x.candidate.reason}` : ""}\n` +
+                `   项目：${repo} · 执行人：${executor}` +
+                (clue ? `\n   线索原文：${clue}` : "")
+              );
+            };
+            const buckets: Record<"timem" | "owner", Array<{ item: (typeof items)[number]; idx: number }>> = { timem: [], owner: [] };
+            items.forEach((x, idx) => buckets[destOf(x)].push({ item: x, idx }));
+
+            // TiMEM 桶 → issue反馈群
+            if (buckets.timem.length > 0 && targetFor(chatId)) {
+              const timemMsg =
+                `📋 汇总：从「${chatName}」的${srcLabel(chatId)}里整理出 ${buckets.timem.length} 条疑似任务/待办：\n` +
+                buckets.timem.map(({ item, idx }) => fmtItem(item, idx)).join("\n") +
+                `\n\n（我的判断对吗？对的回复「确认 R编号（如 R12）」；要改就回复「任务归属 #编号 项目简称」「安排执行者 #编号 姓名」，多条可分行或直接连写；引用本条摘要回复时编号可省略。项目简称如 太忆/nx/电信平台。现阶段仅记录，不建任务/工单）`;
               messages.push({
-                target,
-                text: msg,
-                items: registered.map((r) => ({ no: r?.no })),
-                titles: items.map((x) => x.candidate.title),
+                target: targetFor(chatId)!,
+                text: timemMsg,
+                items: buckets.timem.map(({ idx }) => ({ no: registered[idx]?.no })),
+                titles: buckets.timem.map(({ item }) => item.candidate.title),
               });
+            }
+
+            // 非 TiMEM 桶 → 私信负责人
+            if (buckets.owner.length > 0) {
+              const ownerMsg =
+                `📋 汇总：从「${chatName}」的${srcLabel(chatId)}里整理出 ${buckets.owner.length} 条疑似任务/待办（非 TiMEM 项目）：\n` +
+                buckets.owner.map(({ item, idx }) => fmtItem(item, idx)).join("\n") +
+                `\n\n（每天最多一次；处理完自动停止）`;
+              const johnny = identityMembers(getIdentityRegistry()).find((m: { member_id: string }) => m.member_id === "member-johnny");
+              const johnnyId = johnny?.feishu_open_ids?.[0];
+              if (!johnnyId) {
+                console.error("[task-pipeline] johnny 未绑定飞书，非 TiMEM 候选无法私信（已跳过）");
+              } else {
+                const r = (await ctx.call(feishuApiRef, {
+                  method: "POST",
+                  path: "/open-apis/im/v1/messages",
+                  query: { receive_id_type: "open_id" },
+                  identity: "tenant",
+                  body: { receive_id: johnnyId, msg_type: "text", content: JSON.stringify({ text: ownerMsg }) },
+                })) as { ok: boolean; value?: { code?: number }; error?: string };
+                if (!r.ok || (r.value?.code ?? -1) !== 0) {
+                  console.error(`[task-pipeline] 私信负责人失败: ${r.ok ? r.value?.code : r.error}`);
+                }
+              }
             }
           }
           // 观测日志（建单口径沿用旧版 + digest-only 口径）
