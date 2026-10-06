@@ -55,6 +55,19 @@ export type {
   TaskQueue,
 } from "./task-queue.js";
 
+// ── TaskProvider (统一任务契约, 收集/实施 provider 化) ────────────
+export { TASK_STATUS_TRANSITIONS, newTaskUid } from "./task-provider.js";
+export type {
+  UnifiedStatus,
+  ExternalHandle,
+  TaskRecord,
+  TaskEvent,
+  ExecutionHandle,
+  TaskCursor,
+  CollectTaskInput,
+  TaskProvider,
+} from "./task-provider.js";
+
 // ── VectorStore (向量检索契约, PG 单库化) ─────────────────────────
 export type {
   VectorPoint,

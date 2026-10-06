@@ -65,6 +65,7 @@ export {
   runDispatchScan,
   stopDispatchScan,
   setDispatchNotifySend,
+  feishuApiRef,
 } from "./task-issue-sync.js";
 export type {
   TaskIssueSyncRequest,
@@ -189,6 +190,67 @@ export type {
   Consolidation,
   ConsolidationItem,
 } from "./requirement-store.js";
+export { TaskRegistry } from "./task-registry.js";
+export type { AdoptTaskInput, TaskListFilter } from "./task-registry.js";
+export {
+  FEISHU_TASK_PROVIDER_ID,
+  SECTION_TO_STATUS,
+  projectRefFromSummary,
+  sweepFeishuTasks,
+  collectFeishuTasks,
+  createFeishuTaskProvider,
+} from "./feishu-task-provider.js";
+export type {
+  FeishuApiResultLike,
+  FeishuCall,
+  FeishuCollectOptions,
+} from "./feishu-task-provider.js";
+export {
+  GITEA_ISSUE_PROVIDER_ID,
+  GITEA_STATE_TO_STATUS,
+  issueGuid,
+  sweepGiteaIssues,
+  collectGiteaIssues,
+  createGiteaIssueProvider,
+} from "./gitea-issue-provider.js";
+export type {
+  GiteaApiResultLike,
+  GiteaCall,
+  GiteaCollectOptions,
+} from "./gitea-issue-provider.js";
+export {
+  AGENTD_TASK_PROVIDER_ID,
+  AGENTD_STATUS_TO_UNIFIED,
+  issueHandleFromSource,
+  sweepAgentdTasks,
+  collectAgentdTasks,
+  createAgentdTaskProvider,
+} from "./agentd-task-provider.js";
+export type {
+  AgentdTaskLike,
+  AgentdTaskList,
+} from "./agentd-task-provider.js";
+export { collectIntoRegistry, countByStatus } from "./task-collector.js";
+export type { CollectStats, CollectRunStats, CollectorRunOptions } from "./task-collector.js";
+export {
+  DEFAULT_ALIGN_INTERVAL_MS,
+  issueGuidFromTitle,
+  alignOnce,
+  createPeriodicAligner,
+} from "./task-reconciler.js";
+export type { AlignReport, PeriodicAligner } from "./task-reconciler.js";
+export {
+  BUILTIN_RELEASE_YAML,
+  loadReleaseDoc,
+  evaluateReleaseGate,
+  runReleaseGate,
+} from "./task-release-gate.js";
+export type {
+  ReleaseDoc,
+  ReleaseDecision,
+  ElementVerdict,
+  ReleaseLlm,
+} from "./task-release-gate.js";
 export {
   CONSOLIDATION_SYSTEM_PROMPT,
   parseConsolidation,
@@ -240,6 +302,7 @@ export {
   taskPipelineService,
   taskPipelineProvider,
   collectMessage,
+  findPendingCandidateByNo,
   clearBuffer,
   setNotifySend,
   parseCandidateTasks,
@@ -567,3 +630,9 @@ export const plugin: LayerPlugin = {
 
 // ── @harness/workflow-run 消费端接线（多代理编排，家族中立） ──────
 export { workflowRunRef, runWorkflowViaSeam } from "./workflow-run-consumer.js";
+
+export * from "./workflow-doc.js";
+
+// ── AgentdExecutor（D→agentd 派发执行半边） ──────────────────────
+export { dispatchToAgentd, createAgentdExecutor, AGENTD_EXECUTOR_ID } from "./agentd-executor.js";
+export type { AgentdExecutorOptions, AgentdDispatchResult } from "./agentd-executor.js";
