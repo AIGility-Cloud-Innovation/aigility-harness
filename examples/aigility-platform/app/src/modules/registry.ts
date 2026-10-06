@@ -45,7 +45,7 @@ export const moduleRegistry: ModuleManifest[] = [
   { id: 'market', name: '智能体市场', kind: 'page', page: 'market', category: '平台层', desc: '12 类通用智能体开箱即用，一键启用按需配置', available: true },
   { id: 'apps', name: '应用中心', kind: 'page', page: 'apps', category: '平台层', desc: '8 大场景应用一键开启：问答、文档、会议、分析、审批、督办、客服、报告', available: true },
   { id: 'studio', name: '智能体工厂', kind: 'page', page: 'studio', category: '平台层', desc: '五步向导创建智能体、低代码编排画布、草稿/试运行/发布流水线', available: true },
-  { id: 'tasks', name: '任务板', kind: 'page', page: 'tasks', category: '平台层', desc: '对话式改站的任务流水线：改进专员落任务、执行器自动执行、编码改动人审', core: true, available: true },
+  { id: 'tasks', name: '任务台账看板', kind: 'page', page: 'tasks', category: '平台层', desc: '所有人和 Agent 的任务统一管理：跨源收集（飞书/Gitea/群聊/agentd）、五要素复核、PDCA 状态流转、执行指派', core: true, available: true },
   // TiMEM 上下文层：图谱·记忆·规则·知识中间件（太忆上下文基础设施）
   { id: 'ingest', name: '数据接入', kind: 'page', page: 'ingest', category: 'TiMEM 上下文层', desc: '字段表上传、自动理解、清洗建议、跨表本体对齐', core: true, available: true },
   { id: 'graph', name: '知识图谱', kind: 'page', page: 'graph', category: 'TiMEM 上下文层', desc: '图谱构建、分项目查看、事件动态关联', available: true, deps: '依赖数据接入产出' },
@@ -56,7 +56,7 @@ export const moduleRegistry: ModuleManifest[] = [
   { id: 'orchestration', name: '编排管理', kind: 'page', page: 'orchestration', category: '平台能力', desc: '数据面工作流图形化管理：节点画布、条件分支、循环与编排委托', available: true, serverRoutes: ['/api/aigility/flows'] },
   { id: 'models', name: '模型管理', kind: 'page', page: 'models', category: '平台能力', desc: '多模型接入与路由：语言/代码/视觉/向量/重排序，私有推理可计量', available: true },
   { id: 'ops', name: '运营驾驶舱', kind: 'page', page: 'ops', category: '平台能力', desc: '调用量、Token、成功率、知识库命中率与今日任务一屏总览', available: true },
-  { id: 'task-loop', name: '项目小助理', kind: 'page', page: 'task-loop', category: '平台能力', desc: '飞书任务闭环看板：任务派发跟踪 / 配置运维 / 运行日志', available: true, serverRoutes: ['/api/aigility/task-loop'] },
+  { id: 'task-loop', name: '项目小助理运维', kind: 'app-package', category: '平台能力', desc: '机器人进程启停 / 凭证 / 配置 / 运行日志（看板已并入任务台账看板）', available: true, entry: { mode: 'redirect', url: 'task-loop-config' }, serverRoutes: ['/api/aigility/task-loop'] },
   { id: 'identity', name: '身份对齐', kind: 'page', page: 'identity', category: '平台能力', desc: '同一个人在 飞书/Gitea/太忆云 是同一个人：花名册自动匹配 + 人工审查绑定', available: true, serverRoutes: ['/api/aigility/identity'] },
   { id: 'team-memory', name: '团队记忆总结', kind: 'page', page: 'team-memory', category: '平台能力', desc: 'TiMEM 团队记忆日报/晨报：调度配置 / 凭证管理 / 一键生成 / 运行日志', available: true },
   { id: 'log-monitor', name: '日志监察员', kind: 'page', page: 'log-monitor', category: '平台能力', desc: '定时拉取目标日志匹配错误关键字并飞书告警：巡检自动化 / Webhook / 启停运维 / 运行日志', available: true, serverRoutes: ['/api/aigility/log-monitor'] },

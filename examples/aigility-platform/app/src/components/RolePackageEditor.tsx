@@ -1,9 +1,8 @@
 /**
  * RolePackageEditor — 角色包编辑器（roles/ 目录 · role-kit 五要素）
  *
- * 与 RoleDshEditor（编辑 role-manifests.json 声明面）不同：本组件编辑的是
- * 可移植角色包本体（SKILL.md 人设 + role.json 五要素），保存即原子写回包目录
- * （git 兜底可 diff/回滚）。命令面板与调度器是项目小助理引入的两个新配置面：
+ * 与 RoleDshEditor（编辑 roles.json 能力面）不同：本组件编辑的是角色包五要素声明（
+ * 底座模板 copy-on-override 站点化 / 站点包原地写），公共层与站点层见 role-kit README。命令面板与调度器是项目小助理引入的两个新配置面：
  *   - commands：确定性意图表（正则命中零 LLM 成本）
  *   - schedules：进程内调度器声明（interval/silence/daily/event，enabled=false 即旁路）
  */
@@ -43,8 +42,10 @@ export default function RolePackageEditor({ pkg, onSaved, onClose }: {
   const save = async () => {
     setBusy(true); setError(''); setBanner('')
     try {
-      await saveRolePackage(pkg.id, { manifest, prompt })
-      setBanner(`角色包「${pkg.id}」已保存 → 原子写回 ${pkg.dir.split('/').slice(-2).join('/')}（git 可 diff/回滚）`)
+      const { siteOverride } = await saveRolePackage(pkg.id, { manifest, prompt })
+      setBanner(siteOverride
+        ? `已创建站点定制版（data/roles/${pkg.id}）——底座模板保持只读，恢复出厂可随时回落`
+        : `角色包「${pkg.id}」已保存 → 原子写回 ${pkg.dir.split('/').slice(-2).join('/')}`)
       onSaved()
     } catch (e) { setError(String((e as Error).message ?? e)) } finally { setBusy(false) }
   }

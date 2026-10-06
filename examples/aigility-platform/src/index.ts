@@ -58,7 +58,8 @@ import { ensureAigilityPlatform, routePlatform, sessionUserId, listTeamMembers, 
 import { aigilityAgentPlugin } from "./aigility-agent.js";
 import { siteImproverPlugin, SITE_IMPROVER_PERSONA_ID, SITE_IMPROVER_ROUTE, setTaskFiledHook } from "./site-improver.js";
 import { dshToolBridgePlugin } from "./dsh-tool.js";
-import { listSkills, visibleSkills, upsertSkill, removeSkill, persistOwner, usageSnapshot, type AigilitySkillInput } from "./skill-registry.js";
+import { listSkills, visibleSkills, getSkill, upsertSkill, removeSkill, persistOwner, setSkillVisibility, usageSnapshot, type AigilitySkill, type AigilitySkillInput } from "./skill-registry.js";
+import { getMarketConfig, setMarketDataMode, type MarketDataMode } from "./market-config.js";
 import { loadRoles, upsertRole, removeRole, setRoute, checkSkillPaths, listDshSkills, createDshSkill, attachSkillToRole, listMcpShelf, type RoleCapabilityConfig, type RoleMcpServer } from "./role-registry.js";
 import { listTweaks, addTweak, removeTweak, type SiteTweak } from "./site-tweaks.js";
 import {
@@ -81,11 +82,13 @@ import {
 } from "./identity-manager.js";
 import type { DshToolBridgeResponse } from "./dsh-tool.js";
 import { planTask, WORKFLOW_DIR } from "./planner.js";
-import { buildAggregatorPlanFromConfig } from "./channel-aggregator.js";
-import { loadRoleManifestFile } from "./role-manifest.js";
-import { upsertRoleManifest, removeRoleManifest } from "./role-manifest-store.js";
-import { loadRolePackage, loadRolePackages, validateRoleManifest, type RoleManifest } from "@aigility-harness/role-kit";
-import { existsSync as fileExists, renameSync } from "node:fs";
+import { buildAggregatorPlanFromConfig, SITE_ROLES_DIR } from "./channel-aggregator.js";
+import { loadRolePackage, loadRolePackages, validateRoleManifest, bundledRolesDir, toElizaCharacter, fromElizaCharacter, type RoleManifest } from "@aigility-harness/role-kit";
+import { checkPermissions, resolveUserPermissionKeys, assignRoleToUser, revokeRoleFromUser, setRolePermissionGroups } from "@aigility-harness/rbac";
+import { ensureRbacReady, rbacStore } from "./rbac-store.js";
+import { ensureLlmNodeReady, llmNodeStore } from "./llm-node-store.js";
+import { resolveLLMNode } from "@aigility-harness/layer-cognitive/llm-node";
+import { existsSync as fileExists, mkdirSync, cpSync, rmSync, renameSync } from "node:fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -211,7 +214,7 @@ async function main(): Promise<void> {
   // 共享文件里的 Python 版 @orchestration/workflow-engine（wecom 系工作流）与本平台对话链路的
   // TS workflow-engine 同 id, resolve 取先注册者 + autoHotSwap 健康切换可能改绑, 会劫持对话编排。
   const pyBridgePlugin = createPyBridgePlugin(
-    loadPyPluginsConfig(resolve(REPO_ROOT, "config/py-plugins-aigility-platform.json")),
+    loadPyPluginsConfig(resolve(process.env.PY_PLUGINS_CONFIG || join(REPO_ROOT, "config/py-plugins-aigility-platform.json"))),
   );
   const plugins = [
     infrastructurePlugin,
@@ -321,7 +324,11 @@ async function main(): Promise<void> {
               key: process.env.BIGMODEL_API_KEY,
             },
           }
-        : {}),
+        : process.env.LITELLM_URL && process.env.LITELLM_KEY
+          ? {
+              modelsUpstream: { url: process.env.LITELLM_URL, key: process.env.LITELLM_KEY },
+            }
+          : {}),
     },
     gwCtx,
   );
@@ -520,7 +527,47 @@ async function main(): Promise<void> {
       }
     })();
   };
-  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+  /** 发布同步：数字员工 → 站点角色包（data/roles/<id>）。
+ * 人设事实源以包为准（aigility-agent 读包），账本 prompt 字段降为包缺失时的恢复缓存。
+ * 记忆域登记为裸 role_id；运行时旧域 aigility-skill-<id> 记入 legacy_agent_ids（迁移待专门步骤）。 */
+function syncSkillPackage(skill: AigilitySkill): void {
+  const dir = join(SITE_ROLES_DIR, skill.id);
+  mkdirSync(dir, { recursive: true });
+  const manifest = {
+    role_id: skill.id,
+    identity: { name: skill.name, signature: skill.category, capability_ref: skill.id },
+    sources: { data: skill.knowledge ?? [] },
+    actions: { tools: skill.tools ?? [], workflows: [] },
+    outbound: { reply: "same-channel" as const },
+    memory: { agent_id: skill.id, legacy_agent_ids: [`aigility-skill-${skill.id}`] },
+  };
+  const tmp = `${dir}/role.json.tmp`;
+  writeFileSync(tmp, JSON.stringify(manifest, null, 2) + "\n", "utf8");
+  renameSync(tmp, `${dir}/role.json`);
+  const md = `---\nname: ${skill.name}\ndescription: ${skill.description}\n---\n\n${skill.prompt.trim()}\n`;
+  writeFileSync(`${dir}/SKILL.md.tmp`, md, "utf8");
+  renameSync(`${dir}/SKILL.md.tmp`, `${dir}/SKILL.md`);
+}
+
+/** 角色包写盘（站点层共用）：role.json 原子替换 + SKILL.md（有包则 frontmatter 保留，往返字节稳定） */
+function writePackageFiles(targetDir: string, manifest: RoleManifest, prompt: string | undefined, hadPkg: boolean): void {
+  const tmp = `${targetDir}/role.json.tmp`;
+  writeFileSync(tmp, JSON.stringify(manifest, null, 2) + "\n", "utf8");
+  renameSync(tmp, `${targetDir}/role.json`);
+  if (prompt?.trim()) {
+    let fm = "";
+    if (hadPkg && fileExists(`${targetDir}/SKILL.md`)) {
+      fm = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(readFileSync(`${targetDir}/SKILL.md`, "utf8"))?.[0] ?? "";
+    } else {
+      fm = `---\nname: ${manifest.identity?.name ?? ""}\ndescription: ${manifest.identity?.signature ?? "站点角色"}\n---\n`;
+    }
+    const tmpMd = `${targetDir}/SKILL.md.tmp`;
+    writeFileSync(tmpMd, `${fm}\n${prompt.trim()}\n`, "utf8");
+    renameSync(tmpMd, `${targetDir}/SKILL.md`);
+  }
+}
+
+const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     // 平台 API 优先（AppBase app-backend：/app/auth/* /app/data/* /app/usage/* …）
     if (await routePlatform(req, res)) return;
 
@@ -561,23 +608,36 @@ async function main(): Promise<void> {
             json(res, 400, { error: "发布至少需要名称、能力描述与角色 Prompt" });
             return;
           }
+          // 可见性纪律：企业内（=上架市场）是管理员动作；普通用户发布一律 仅自己
+          // （数字员工工作台对自己可见，不上架市场）。覆盖他人发布同样仅限发布者或管理员。
+          const pubUid = sessionUserId(req);
+          const pubAdmin = pubUid ? await isUserAdmin(pubUid) : false;
+          const pubViewer = await emailById(pubUid ?? "") ?? "";
+          if (body.id?.trim()) {
+            const existing = getSkill(body.id.trim());
+            if (existing && !pubAdmin && (existing.owner ?? "admin@aigility.local") !== pubViewer) {
+              json(res, 403, { error: "仅发布者或管理员可修改该数字员工" });
+              return;
+            }
+          }
           const skill = upsertSkill({
             id: body.id?.trim() || `zy-${Date.now().toString(36)}`,
             name: body.name.trim(),
             category: body.category?.trim() || "知识服务",
             description: body.description.trim(),
             tags: Array.isArray(body.tags) ? body.tags : [],
-            modelId: body.modelId?.trim() || "kimi-k3",
+            modelId: body.modelId?.trim() || "sensenova-deepseek-v4-flash",
             prompt: body.prompt.trim(),
             temperature: typeof body.temperature === "number" ? body.temperature : 0.3,
             knowledge: Array.isArray(body.knowledge) ? body.knowledge : [],
             tools: Array.isArray(body.tools) ? body.tools : [],
-            visibility: body.visibility?.trim() || "企业内",
+            visibility: pubAdmin ? (body.visibility?.trim() || "企业内") : "仅自己",
             releaseNote: body.releaseNote?.trim() || "",
           });
           skill.owner = await emailById(sessionUserId(req) ?? "") ?? undefined; // 仅自己 可见性的判据
           persistOwner(skill.id, skill.owner);
-          console.log(`[工厂] 数字员工「${skill.name}」已发布 (id=${skill.id}, owner=${skill.owner ?? "?"}) → @persona/aigility-agent 可按 skill_id 对话`);
+          syncSkillPackage(skill); // 发布即同步站点角色包（人设事实源）
+          console.log(`[工厂] 数字员工「${skill.name}」已发布 (id=${skill.id}, owner=${skill.owner ?? "?"}, visibility=${skill.visibility}${!pubAdmin && body.visibility === "企业内" ? "，普通用户发布由企业内降为仅自己" : ""}) → @persona/aigility-agent 可按 skill_id 对话`);
           json(res, 200, { skill });
         } catch (err) {
           json(res, 400, { error: String(err) });
@@ -586,7 +646,56 @@ async function main(): Promise<void> {
       }
       const delMatch = path.match(/^\/api\/aigility\/skills\/([\w-]+)$/);
       if (delMatch && req.method === "DELETE") {
+        // 下架保护：仅发布者或管理员（防止普通用户摘除管理员的市场的货架）
+        const delUid = sessionUserId(req) ?? "";
+        if (!(await isUserAdmin(delUid))) {
+          const delViewer = await emailById(delUid) ?? "";
+          const target = getSkill(delMatch[1]);
+          if (!target || (target.owner ?? "admin@aigility.local") !== delViewer) {
+            json(res, 403, { error: "仅发布者或管理员可下架该数字员工" });
+            return;
+          }
+        }
         json(res, 200, { ok: removeSkill(delMatch[1]) });
+        return;
+      }
+      // 可见范围单独更新（管理员上架/撤下市场）：企业内 = 普通用户在智能体市场可见
+      const visMatch = path.match(/^\/api\/aigility\/skills\/([\w-]+)\/visibility$/);
+      if (visMatch && req.method === "PUT") {
+        const actor = sessionUserId(req);
+        if (!actor) { json(res, 401, { error: "需要登录" }); return; }
+        if (!(await isUserAdmin(actor))) { json(res, 403, { error: "仅管理员可调整市场上架范围" }); return; }
+        const body = JSON.parse((await readBody(req)) || "{}") as { visibility?: string };
+        if (body.visibility !== "企业内" && body.visibility !== "仅自己") {
+          json(res, 400, { error: "visibility 只能是企业内或仅自己" });
+          return;
+        }
+        const skill = setSkillVisibility(visMatch[1], body.visibility);
+        if (!skill) { json(res, 404, { error: "数字员工不存在" }); return; }
+        void writeAudit(actor, "market.shelf", skill.id, `可见范围 → ${body.visibility}`);
+        console.log(`[市场] 数字员工「${skill.name}」(id=${skill.id}) 可见范围 → ${body.visibility}`);
+        json(res, 200, { skill });
+        return;
+      }
+
+      // ── 智能体市场数据模式（站点级）：mock=演示模板（缺省，管理员未设置时）· real=工厂发布（企业内可见=上架）──
+      if (path === "/api/aigility/market-config" && req.method === "GET") {
+        json(res, 200, getMarketConfig());
+        return;
+      }
+      if (path === "/api/aigility/market-config" && req.method === "PUT") {
+        const actor = sessionUserId(req);
+        if (!actor) { json(res, 401, { error: "需要登录" }); return; }
+        if (!(await isUserAdmin(actor))) { json(res, 403, { error: "市场数据模式由管理员统一配置" }); return; }
+        const body = JSON.parse((await readBody(req)) || "{}") as { dataMode?: MarketDataMode };
+        if (body.dataMode !== "mock" && body.dataMode !== "real") {
+          json(res, 400, { error: "dataMode 只能是 mock 或 real" });
+          return;
+        }
+        const config = setMarketDataMode(body.dataMode);
+        void writeAudit(actor, "market.config", "data-mode", config.dataMode === "real" ? "真实数据（工厂发布上架）" : "模拟数据（演示模板）");
+        console.log(`[市场] 数据模式 → ${config.dataMode}`);
+        json(res, 200, { ok: true, ...config });
         return;
       }
 
@@ -802,6 +911,33 @@ async function main(): Promise<void> {
         json(res, 200, { ok: true, tasks });
         return;
       }
+      // ── 统一台账只读路由（TaskRegistry → 看板） ──────────────────
+      if (path === "/api/aigility/registry-tasks" && req.method === "GET") {
+        try {
+          const regFile = join(REPO_ROOT, "config/task-registry.local.json");
+          const raw = readFileSync(regFile, "utf-8");
+          const parsed = JSON.parse(raw) as { tasks?: Array<Record<string, unknown>> };
+          const tasks = (parsed.tasks ?? []).map((t) => ({
+            uid: t.uid,
+            title: t.title,
+            description: t.description ?? "",
+            status: t.status,
+            projectRef: t.projectRef ?? "",
+            originProvider: (t.origin as { provider?: string })?.provider ?? "",
+            assignee: (t.assignee as { provider?: string })?.provider ?? "",
+            executor: (t.description as string | undefined)?.match(/执行者：(\S+)/)?.[1] ?? "",
+            reviewer: (t.review as { by?: string })?.by ?? "",
+            reviewVia: (t.review as { via?: string })?.via ?? "",
+            links: t.links ?? {},
+            createdAt: t.createdAt,
+            updatedAt: t.updatedAt,
+          }));
+          json(res, 200, { ok: true, tasks });
+        } catch (e) {
+          json(res, 200, { ok: true, tasks: [], error: String(e) });
+        }
+        return;
+      }
       if (path === "/api/aigility/tasks" && req.method === "POST") {
         // 新建任务：human 留 open 待人办；content/docx 立即异步派发执行器（open→running→review）
         try {
@@ -973,72 +1109,273 @@ async function main(): Promise<void> {
         json(res, 200, { ok: true, mode: "dry-run", ...plan });
         return;
       }
-      if (path === "/api/aigility/role-manifests" && req.method === "GET") {
-        const file = loadRoleManifestFile();
-        json(res, 200, { ok: true, file });
+      // ── RBAC 鉴权（底座能力 @aigility-harness/rbac · AppBase PG 适配）──
+      // 试点强制点：管理端点双门放行（isUserAdmin 过渡 或 rbac system:rbac:manage）——
+      // RBAC 自举接管自己的管理面，isUserAdmin 在全面接管后退役。
+      const rbacAdminGate = async (): Promise<boolean> => {
+        const uid = sessionUserId(req) ?? "";
+        if (!uid) return false;
+        if (await isUserAdmin(uid)) return true;
+        await ensureRbacReady();
+        return (await checkPermissions(rbacStore, uid, "system:rbac:manage")).ok;
+      };
+      if (path === "/api/aigility/rbac/whoami" && req.method === "GET") {
+        if (!requireUser(req, res)) return;
+        const uid = sessionUserId(req) ?? "";
+        await ensureRbacReady();
+        const keys = [...(await resolveUserPermissionKeys(rbacStore, uid))].sort();
+        const urs = await rbacStore.listUserRoles(uid);
+        const roles = await rbacStore.listRolesByIds(urs.map((u) => u.roleId));
+        json(res, 200, { ok: true, userId: uid, keys, roles: roles.map((r) => ({ id: r.id, code: r.code, name: r.name })) });
         return;
       }
-      if (path === "/api/aigility/role-manifests" && req.method === "POST") {
-        const body = JSON.parse((await readBody(req)) || "{}") as Record<string, never>;
-        const r = upsertRoleManifest(body);
-        if (!r.ok) { json(res, 400, { ok: false, error: r.error }); return; }
-        void writeAudit(sessionUserId(req) ?? "unknown", "role-manifest.upsert", r.manifest.role_id,
-          `${r.manifest.identity.name} · channels=${(r.manifest.sources.channels ?? []).length}`);
-        json(res, 200, { ok: true, manifest: r.manifest });
+      if (path === "/api/aigility/rbac/catalog" && req.method === "GET") {
+        if (!requireUser(req, res)) return;
+        if (!(await rbacAdminGate())) { json(res, 403, { ok: false, error: "需要 system:rbac:manage 权限" }); return; }
+        await ensureRbacReady();
+        json(res, 200, { ok: true, groups: await rbacStore.listGroups(), permissions: await rbacStore.listPermissions(), roles: await rbacStore.listRoles() });
         return;
       }
-      const manifestDel = path.match(/^\/api\/aigility\/role-manifests\/([\w-]+)$/);
-      if (manifestDel && req.method === "DELETE") {
-        const r = removeRoleManifest(manifestDel[1]);
-        if (!r.ok) { json(res, 404, { ok: false, error: r.error }); return; }
-        void writeAudit(sessionUserId(req) ?? "unknown", "role-manifest.remove", manifestDel[1]);
+      if (path === "/api/aigility/rbac/roles" && req.method === "POST") {
+        if (!requireUser(req, res)) return;
+        if (!(await rbacAdminGate())) { json(res, 403, { ok: false, error: "需要 system:rbac:manage 权限" }); return; }
+        const body = JSON.parse((await readBody(req)) || "{}") as { code?: string; name?: string; level?: number };
+        if (!body.code?.trim() || !body.name?.trim()) { json(res, 400, { ok: false, error: "需要 code 与 name" }); return; }
+        const role = await rbacStore.createRole({ code: body.code.trim(), name: body.name.trim(), level: body.level ?? 0 });
+        void writeAudit(sessionUserId(req) ?? "unknown", "rbac.role.create", role.code);
+        json(res, 200, { ok: true, role });
+        return;
+      }
+      const rbacAssign = path.match(/^\/api\/aigility\/rbac\/assign-role$/);
+      if (rbacAssign && req.method === "POST") {
+        if (!requireUser(req, res)) return;
+        if (!(await rbacAdminGate())) { json(res, 403, { ok: false, error: "需要 system:rbac:manage 权限" }); return; }
+        const body = JSON.parse((await readBody(req)) || "{}") as { userId?: string; roleId?: number; expireTime?: string };
+        if (!body.userId || !body.roleId) { json(res, 400, { ok: false, error: "需要 userId 与 roleId" }); return; }
+        await ensureRbacReady();
+        await assignRoleToUser(rbacStore, body.userId, body.roleId, body.expireTime ?? null);
+        void writeAudit(sessionUserId(req) ?? "unknown", "rbac.role.assign", `${body.userId} → role ${body.roleId}${body.expireTime ? ` · 至 ${body.expireTime}` : ""}`);
         json(res, 200, { ok: true });
         return;
       }
-      // ── 角色包（roles/ 目录 · role-kit）：工厂的可移植角色单元，GET 列出 / PUT 写回包目录 ──
+      const rbacRevoke = path.match(/^\/api\/aigility\/rbac\/revoke-role$/);
+      if (rbacRevoke && req.method === "POST") {
+        if (!requireUser(req, res)) return;
+        if (!(await rbacAdminGate())) { json(res, 403, { ok: false, error: "需要 system:rbac:manage 权限" }); return; }
+        const body = JSON.parse((await readBody(req)) || "{}") as { userId?: string; roleId?: number };
+        if (!body.userId || !body.roleId) { json(res, 400, { ok: false, error: "需要 userId 与 roleId" }); return; }
+        await revokeRoleFromUser(rbacStore, body.userId, body.roleId);
+        void writeAudit(sessionUserId(req) ?? "unknown", "rbac.role.revoke", `${body.userId} ✕ role ${body.roleId}`);
+        json(res, 200, { ok: true });
+        return;
+      }
+      const rbacRoleGroups = path.match(/^\/api\/aigility\/rbac\/roles\/([\d]+)\/groups$/);
+      if (rbacRoleGroups && req.method === "POST") {
+        if (!requireUser(req, res)) return;
+        if (!(await rbacAdminGate())) { json(res, 403, { ok: false, error: "需要 system:rbac:manage 权限" }); return; }
+        const body = JSON.parse((await readBody(req)) || "{}") as { groupIds?: number[] };
+        if (!Array.isArray(body.groupIds)) { json(res, 400, { ok: false, error: "需要 groupIds 数组" }); return; }
+        await ensureRbacReady();
+        await setRolePermissionGroups(rbacStore, Number(rbacRoleGroups[1]), body.groupIds);
+        void writeAudit(sessionUserId(req) ?? "unknown", "rbac.role.groups", `role ${rbacRoleGroups[1]} → ${body.groupIds.length} 组`);
+        json(res, 200, { ok: true });
+        return;
+      }
+      // ── LLM 节点可视化配置（D2 模型算力层 · 移植自 hire llm_node）──
+      const llmAdminGate = async (): Promise<boolean> => {
+        const uid = sessionUserId(req) ?? "";
+        if (!uid) return false;
+        if (await isUserAdmin(uid)) return true;
+        await ensureRbacReady();
+        return (await checkPermissions(rbacStore, uid, "model:manage")).ok;
+      };
+      if (path === "/api/aigility/llm/nodes" && req.method === "GET") {
+        if (!requireUser(req, res)) return;
+        await ensureLlmNodeReady();
+        json(res, 200, { ok: true, nodes: await llmNodeStore.listNodes(), providers: await llmNodeStore.listProviders() });
+        return;
+      }
+      if (path === "/api/aigility/llm/providers" && req.method === "POST") {
+        if (!requireUser(req, res)) return;
+        if (!(await llmAdminGate())) { json(res, 403, { ok: false, error: "需要 model:manage 权限" }); return; }
+        const body = JSON.parse((await readBody(req)) || "{}") as { name?: string; tag?: string; apiKey?: string; apiBase?: string };
+        if (!body.name?.trim() || !body.tag?.trim()) { json(res, 400, { ok: false, error: "需要 name 与 tag" }); return; }
+        const provider = await llmNodeStore.createProvider({ name: body.name.trim(), tag: body.tag.trim(), apiKey: body.apiKey ?? "", apiBase: body.apiBase ?? "" });
+        void writeAudit(sessionUserId(req) ?? "unknown", "llm.provider.create", provider.tag);
+        json(res, 200, { ok: true, provider });
+        return;
+      }
+      const llmNodeResolve = path.match(/^\/api\/aigility\/llm\/nodes\/([\w.-]+)\/resolve$/);
+      if (llmNodeResolve && req.method === "GET") {
+        if (!requireUser(req, res)) return;
+        await ensureLlmNodeReady();
+        try {
+          json(res, 200, { ok: true, resolved: await resolveLLMNode(llmNodeStore, llmNodeResolve[1]) });
+        } catch (e) { json(res, 404, { ok: false, error: String(e) }); }
+        return;
+      }
+      if (path === "/api/aigility/llm/nodes" && req.method === "POST") {
+        if (!requireUser(req, res)) return;
+        if (!(await llmAdminGate())) { json(res, 403, { ok: false, error: "需要 model:manage 权限" }); return; }
+        const body = JSON.parse((await readBody(req)) || "{}") as { name?: string; description?: string; serviceModule?: string; functionName?: string; modelName?: string; parameter?: Record<string, unknown>; providerId?: number; isStream?: boolean };
+        if (!body.name?.trim() || !body.modelName?.trim() || !body.providerId) {
+          json(res, 400, { ok: false, error: "需要 name、modelName 与 providerId" });
+          return;
+        }
+        await ensureLlmNodeReady();
+        try {
+          const node = await llmNodeStore.createNode({
+            name: body.name.trim(), description: body.description ?? "", serviceModule: body.serviceModule ?? "",
+            functionName: body.functionName ?? "", modelName: body.modelName.trim(),
+            parameter: body.parameter ?? {}, providerId: body.providerId, isStream: body.isStream ?? true,
+          });
+          void writeAudit(sessionUserId(req) ?? "unknown", "llm.node.create", node.name);
+          json(res, 200, { ok: true, node });
+        } catch (e) { json(res, 400, { ok: false, error: `创建失败（name 重复?）: ${e}` }); }
+        return;
+      }
+      const llmNodePut = path.match(/^\/api\/aigility\/llm\/nodes\/([\d]+)$/);
+      if (llmNodePut && req.method === "PUT") {
+        if (!requireUser(req, res)) return;
+        if (!(await llmAdminGate())) { json(res, 403, { ok: false, error: "需要 model:manage 权限" }); return; }
+        const body = JSON.parse((await readBody(req)) || "{}") as { description?: string; serviceModule?: string; functionName?: string; modelName?: string; parameter?: Record<string, unknown>; providerId?: number; isStream?: boolean };
+        await llmNodeStore.updateNode(Number(llmNodePut[1]), body);
+        void writeAudit(sessionUserId(req) ?? "unknown", "llm.node.update", llmNodePut[1]);
+        json(res, 200, { ok: true });
+        return;
+      }
+      const llmNodeDel = path.match(/^\/api\/aigility\/llm\/nodes\/([\d]+)$/);
+      if (llmNodeDel && req.method === "DELETE") {
+        if (!requireUser(req, res)) return;
+        if (!(await llmAdminGate())) { json(res, 403, { ok: false, error: "需要 model:manage 权限" }); return; }
+        await llmNodeStore.deleteNode(Number(llmNodeDel[1]));
+        void writeAudit(sessionUserId(req) ?? "unknown", "llm.node.delete", llmNodeDel[1]);
+        json(res, 200, { ok: true });
+        return;
+      }
+      // ── 角色包（role-kit 双层）：底座模板（packages/role-kit/roles，只读分发）
+      //    + 站点事实源（data/roles，工厂编辑写这里）。编辑公共角色 = copy-on-override 站点化。──
       if (path === "/api/aigility/role-packages" && req.method === "GET") {
-        const pkgs = loadRolePackages({ publicDir: join(REPO_ROOT, "roles") });
-        json(res, 200, {
-          ok: true,
-          packages: pkgs.map((p) => ({
+        // 统一角色列表：角色包（双层）× 发布账本 × 引擎人格注册表 → origin 生命周期分类
+        // 可见性纪律：仅自己 的发布仅发布者（或管理员）在账本可见；被隐藏者的角色包卡一并隐藏
+        const rpUid = sessionUserId(req);
+        const rpAdmin = rpUid ? await isUserAdmin(rpUid) : false;
+        const rpViewer = await emailById(rpUid ?? "") ?? "";
+        const canSeeSkill = (sk: AigilitySkill) =>
+          sk.visibility !== "仅自己" || rpAdmin || (sk.owner ?? "admin@aigility.local") === rpViewer;
+        const allSkills = listSkills();
+        const ledger = new Map(allSkills.filter(canSeeSkill).map((sk) => [sk.id, sk]));
+        const hiddenSkillIds = new Set(allSkills.filter((sk) => !canSeeSkill(sk)).map((sk) => sk.id));
+        const pkgs = loadRolePackages({ publicDir: bundledRolesDir(), siteDirs: [SITE_ROLES_DIR] }).filter((p) => !hiddenSkillIds.has(p.id));
+        const personaById = new Map(personas.map((pe) => [pe.personaId.replace("@persona/", ""), pe]));
+        const packages: Record<string, unknown>[] = pkgs.map((p) => {
+          const pub = ledger.get(p.id);
+          const isEngine = personaById.has(p.id);
+          const pe = personaById.get(p.id);
+          const origin = pub ? "published" : p.layer === "site" ? "site" : isEngine ? "engine" : "template";
+          return {
             id: p.id, layer: p.layer, dir: p.dir, name: p.name,
             description: p.description, prompt: p.prompt, manifest: p.manifest,
             issues: validateRoleManifest(p.manifest),
-          })),
+            origin, virtual: false,
+            ...(pub ? { published: { category: pub.category, tags: pub.tags, modelId: pub.modelId, visibility: pub.visibility, owner: pub.owner ?? null } } : {}),
+            ...(isEngine && pe ? { personaRoute: pe.route, personaDesc: pe.desc } : {}),
+          };
         });
+        // 引擎原生但尚未包化 → 虚拟卡（工厂可见，可「定制副本」站点化）
+        for (const [pid, pe] of personaById) {
+          if (pkgs.some((x) => x.id === pid)) continue;
+          packages.push({
+            id: pid, layer: "public", dir: "", name: pe.name, description: pe.desc,
+            prompt: "",
+            manifest: { role_id: pid, identity: { name: pe.name, capability_ref: pid }, sources: {}, actions: {}, outbound: {}, memory: { agent_id: pid } },
+            issues: [], origin: "engine", virtual: true, personaRoute: pe.route, personaDesc: pe.desc,
+          });
+        }
+        json(res, 200, { ok: true, packages });
         return;
       }
       const rolePkgPut = path.match(/^\/api\/aigility\/role-packages\/([\w-]+)$/);
       if (rolePkgPut && req.method === "PUT") {
         const body = JSON.parse((await readBody(req)) || "{}") as { manifest?: RoleManifest; prompt?: string };
-        const pkg = loadRolePackage(rolePkgPut[1], { publicDir: join(REPO_ROOT, "roles") });
-        if (!pkg) { json(res, 404, { ok: false, error: `角色包不存在: ${rolePkgPut[1]}` }); return; }
+        const pkg = loadRolePackage(rolePkgPut[1], { publicDir: bundledRolesDir(), siteDirs: [SITE_ROLES_DIR] });
         if (!body.manifest) { json(res, 400, { ok: false, error: "缺 manifest" }); return; }
-        if (body.manifest.role_id !== pkg.id) {
-          json(res, 400, { ok: false, error: `role_id 不匹配（${body.manifest.role_id} ≠ ${pkg.id}），角色 id 不可改名` });
+        if (body.manifest.role_id !== rolePkgPut[1]) {
+          json(res, 400, { ok: false, error: `role_id 不匹配（${body.manifest.role_id} ≠ ${rolePkgPut[1]}），角色 id 不可改名` });
           return;
         }
         const issues = validateRoleManifest(body.manifest);
         if (issues.length) { json(res, 400, { ok: false, error: issues.join("；") }); return; }
-        // 公共层包也允许写：自托管开发环境下 roles/ 有 git 兜底（diff/回滚），工厂即编辑器
+        // 不存在的包 = 工厂角色首次声明 → 直接创建站点包（data/roles/<id>，含生成的 SKILL.md 存根）
+        let targetDir: string;
+        let siteOverride = false;
+        let created = false;
         try {
-          const tmp = `${pkg.dir}/role.json.tmp`;
-          writeFileSync(tmp, JSON.stringify(body.manifest, null, 2) + "\n", "utf8");
-          renameSync(tmp, `${pkg.dir}/role.json`);
-          if (typeof body.prompt === "string" && body.prompt.trim()) {
-            const md = readFileSync(`${pkg.dir}/SKILL.md`, "utf8");
-            const fm = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(md)?.[0] ?? "";
-            const tmpMd = `${pkg.dir}/SKILL.md.tmp`;
-            // frontmatter 原样保留 + 空行分隔 + 正文（trim 后单换行结尾），保证往返字节稳定
-            writeFileSync(tmpMd, `${fm}\n${body.prompt.trim()}\n`, "utf8");
-            renameSync(tmpMd, `${pkg.dir}/SKILL.md`);
+          if (!pkg) {
+            targetDir = join(SITE_ROLES_DIR, rolePkgPut[1]);
+            mkdirSync(targetDir, { recursive: true });
+            const fmName = body.manifest.identity?.name || rolePkgPut[1];
+            const fmDesc = body.manifest.identity?.signature || "站点角色（工厂声明创建）";
+            const stub = `---\nname: ${fmName}\ndescription: ${fmDesc}\n---\n\n（人设待补：在智能体工厂「人设」区编辑后保存）\n`;
+            writeFileSync(`${targetDir}/SKILL.md`, body.prompt?.trim() ? `${body.prompt.trim()}\n` : stub, "utf8");
+            created = true;
+          } else {
+            // copy-on-override：公共模板只读，编辑即复制到站点层（data/roles/<id>）成为站点定制版
+            targetDir = pkg.dir;
+            if (pkg.layer === "public") {
+              targetDir = join(SITE_ROLES_DIR, pkg.id);
+              mkdirSync(SITE_ROLES_DIR, { recursive: true });
+              rmSync(targetDir, { recursive: true, force: true });
+              cpSync(pkg.dir, targetDir, { recursive: true });
+              siteOverride = true;
+            }
           }
+          writePackageFiles(targetDir, body.manifest, typeof body.prompt === "string" ? body.prompt : undefined, Boolean(pkg) && !created);
         } catch (err) {
           json(res, 500, { ok: false, error: `写回失败: ${err}` });
           return;
         }
-        void writeAudit(sessionUserId(req) ?? "unknown", "role-package.upsert", pkg.id,
-          `commands=${(body.manifest.actions.commands ?? []).length} schedules=${(body.manifest.actions.schedules ?? []).length}`);
+        void writeAudit(sessionUserId(req) ?? "unknown", "role-package.upsert", rolePkgPut[1],
+          `commands=${(body.manifest.actions.commands ?? []).length} schedules=${(body.manifest.actions.schedules ?? []).length}${created ? " · 创建站点包" : ""}${siteOverride ? " · 站点化" : ""}`);
+        json(res, 200, { ok: true, siteOverride, created, dir: targetDir });
+        return;
+      }
+      const rolePkgEliza = path.match(/^\/api\/aigility\/role-packages\/([\w-]+)\/eliza$/);
+      if (rolePkgEliza && req.method === "GET") {
+        if (!requireUser(req, res)) return;
+        const pkg = loadRolePackage(rolePkgEliza[1], { publicDir: bundledRolesDir(), siteDirs: [SITE_ROLES_DIR] });
+        if (!pkg) { json(res, 404, { ok: false, error: "角色包不存在" }); return; }
+        json(res, 200, { ok: true, character: toElizaCharacter({ id: pkg.id, name: pkg.name, description: pkg.description, prompt: pkg.prompt, manifest: pkg.manifest }) });
+        return;
+      }
+      if (path === "/api/aigility/role-packages/import-eliza" && req.method === "POST") {
+        if (!requireUser(req, res)) return;
+        const body = JSON.parse((await readBody(req)) || "{}") as { character?: Record<string, unknown> };
+        const char = body.character ?? (body as Record<string, unknown>);
+        const r = fromElizaCharacter(char);
+        if (!r) { json(res, 400, { ok: false, error: "不是合法的 ElizaOS character file（缺 name）" }); return; }
+        const issues = validateRoleManifest(r.manifest);
+        if (issues.length) { json(res, 400, { ok: false, error: issues.join("；") }); return; }
+        const existing = loadRolePackage(r.manifest.role_id, { publicDir: bundledRolesDir(), siteDirs: [SITE_ROLES_DIR] });
+        const targetDir = existing && existing.layer === "site" ? existing.dir : join(SITE_ROLES_DIR, r.manifest.role_id);
+        try {
+          mkdirSync(targetDir, { recursive: true });
+          writePackageFiles(targetDir, r.manifest, r.prompt, Boolean(existing && existing.layer === "site"));
+        } catch (err) {
+          json(res, 500, { ok: false, error: `写回失败: ${err}` });
+          return;
+        }
+        void writeAudit(sessionUserId(req) ?? "unknown", "role-package.import-eliza", r.manifest.role_id);
+        json(res, 200, { ok: true, id: r.manifest.role_id });
+        return;
+      }
+      const rolePkgDel = path.match(/^\/api\/aigility\/role-packages\/([\w-]+)$/);
+      if (rolePkgDel && req.method === "DELETE") {
+        // 恢复出厂 = 删除站点定制版，解析自动回落底座模板
+        const siteDir = join(SITE_ROLES_DIR, rolePkgDel[1]);
+        if (!existsSync(siteDir)) { json(res, 404, { ok: false, error: "无站点定制版可恢复" }); return; }
+        rmSync(siteDir, { recursive: true, force: true });
+        void writeAudit(sessionUserId(req) ?? "unknown", "role-package.revert", rolePkgDel[1]);
         json(res, 200, { ok: true });
         return;
       }
@@ -1278,6 +1615,43 @@ async function main(): Promise<void> {
         return;
       }
       // ── 项目小助理（feishu-task-loop）管理：启停 / 状态 / 配置 / 日志 ──
+      // 数据面工作流（chat-briefing.yaml）：可视化编辑的读写端点。
+      // 该文件即功能开关面板：机器人每次触发前重读，保存即生效无需重启。
+      const TASK_LOOP_WF = resolve(process.env.TASK_LOOP_WORKFLOW_FILE || join(REPO_ROOT, "examples/feishu-task-loop/workflows/chat-briefing.yaml"));
+      if (path === "/api/aigility/task-loop/workflow" && req.method === "GET") {
+        if (!requireUser(req, res)) return;
+        if (!fileExists(TASK_LOOP_WF)) { json(res, 404, { ok: false, error: "工作流文件缺失" }); return; }
+        json(res, 200, { ok: true, path: TASK_LOOP_WF, yaml: readFileSync(TASK_LOOP_WF, "utf8") });
+        return;
+      }
+      if (path === "/api/aigility/task-loop/workflow" && req.method === "PUT") {
+        if (!requireUser(req, res)) return;
+        const body = JSON.parse((await readBody(req)) || "{}") as { yaml?: string };
+        const text = body.yaml ?? "";
+        // 写前校验：能解析 + 结构最低限度（workflow.nodes 非空 Map）——坏文件不落盘
+        try {
+          const { parse: parseYaml } = await import("yaml");
+          const doc = parseYaml(text) as { workflow?: { nodes?: Record<string, unknown> } } | null;
+          if (!doc?.workflow || typeof doc.workflow.nodes !== "object" || !doc.workflow.nodes || !Object.keys(doc.workflow.nodes).length) {
+            json(res, 400, { ok: false, error: "YAML 校验失败：需含 workflow.nodes 且至少一个节点" });
+            return;
+          }
+        } catch (e) {
+          json(res, 400, { ok: false, error: `YAML 解析失败: ${e instanceof Error ? e.message.split("\n")[0] : e}` });
+          return;
+        }
+        try {
+          const tmp = `${TASK_LOOP_WF}.tmp`;
+          writeFileSync(tmp, text, "utf8");
+          renameSync(tmp, TASK_LOOP_WF);
+        } catch (err) {
+          json(res, 500, { ok: false, error: `写回失败: ${err}` });
+          return;
+        }
+        void writeAudit(sessionUserId(req) ?? "unknown", "task-loop.workflow.put", "chat-briefing", `${text.length} 字节`);
+        json(res, 200, { ok: true, hint: "机器人每次触发前重读本文件，保存即生效（无需重启）" });
+        return;
+      }
       if (path === "/api/aigility/task-loop/status" && req.method === "GET") {
         if (!requireUser(req, res)) return;
         const url = new URL(req.url ?? "/", "http://x");

@@ -1,0 +1,24 @@
+{
+  "role_id": "site-improver",
+  "identity": {
+    "name": "平台改进专员",
+    "signature": "流程辅助",
+    "capability_ref": "site-improver"
+  },
+  "sources": {
+    "data": []
+  },
+  "actions": {
+    "tools": [],
+    "workflows": []
+  },
+  "outbound": {
+    "reply": "same-channel"
+  },
+  "memory": {
+    "agent_id": "site-improver",
+    "legacy_agent_ids": [
+      "aigility-skill-site-improver"
+    ]
+  }
+}

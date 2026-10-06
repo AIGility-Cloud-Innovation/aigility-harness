@@ -165,6 +165,32 @@ export async function deleteSkill(id: string): Promise<boolean> {
   return j.ok ?? false
 }
 
+/** 可见范围单独更新（管理员）：企业内 = 上架智能体市场，仅自己 = 撤下 */
+export async function setSkillVisibility(id: string, visibility: '企业内' | '仅自己'): Promise<SkillInfo> {
+  const j = await authJsonFetch<{ skill?: SkillInfo; error?: string }>(`/api/aigility/skills/${encodeURIComponent(id)}/visibility`, {
+    method: 'PUT',
+    body: JSON.stringify({ visibility }),
+  })
+  if (!j.skill) throw new Error(j.error ?? '更新失败')
+  return j.skill
+}
+
+// ── 智能体市场数据模式（站点级，管理员配置） ──
+
+export type MarketDataMode = 'mock' | 'real'
+
+export async function fetchMarketConfig(): Promise<{ dataMode: MarketDataMode }> {
+  return authJsonFetch<{ dataMode: MarketDataMode }>('/api/aigility/market-config')
+}
+
+export async function saveMarketConfig(dataMode: MarketDataMode): Promise<void> {
+  const j = await authJsonFetch<{ ok?: boolean; error?: string }>('/api/aigility/market-config', {
+    method: 'PUT',
+    body: JSON.stringify({ dataMode }),
+  })
+  if (!j.ok) throw new Error(j.error ?? '保存失败')
+}
+
 // ── 真接口：角色能力注册表（DSH 渠道 role → skills/MCP, roles.json 热生效） ──
 
 export interface RoleMcpServer {
@@ -539,6 +565,32 @@ export async function fetchTasks(opts?: { status?: string; mine?: boolean }): Pr
   if (opts?.status) q.set('status', opts.status)
   if (opts?.mine) q.set('mine', '1')
   const j = await authJsonFetch<{ ok: boolean; tasks: TaskItem[] }>(`/api/aigility/tasks?${q}`)
+  return j.tasks
+}
+
+
+// ── 统一台账（TaskRegistry） ─────────────────────────────────────
+
+export interface RegistryTask {
+  uid: string
+  title: string
+  description: string
+  status: string
+  projectRef: string
+  originProvider: string
+  assignee: string
+  executor: string
+  reviewer: string
+  reviewVia: string
+  review?: { by: string; via: string; at: number; note?: string }
+  links: Record<string, { guid?: string; url?: string }>
+  createdAt: number
+  updatedAt: number
+}
+
+/** 拉取统一台账任务（TaskRegistry → 智悦平台看板） */
+export async function fetchRegistryTasks(): Promise<RegistryTask[]> {
+  const j = await authJsonFetch<{ ok: boolean; tasks: RegistryTask[] }>('/api/aigility/registry-tasks')
   return j.tasks
 }
 
@@ -1171,15 +1223,6 @@ export interface ChannelAppBindingView {
   mention_only?: boolean
 }
 
-export interface RoleManifestView {
-  role_id: string
-  identity: { name: string; signature?: string; capability_ref?: string }
-  sources: { channels?: Array<{ platform: 'feishu' | 'wecom'; apps: ChannelAppBindingView[] }>; data?: string[] }
-  actions: { tools?: string[]; workflows?: string[]; engine?: string }
-  outbound: { reply?: 'same-channel'; push?: string[] }
-  memory: { agent_id: string }
-}
-
 export interface ChannelPlanApp {
   platform: 'feishu' | 'wecom'
   appId: string
@@ -1196,24 +1239,6 @@ export interface ChannelPlan {
   webOnlyRoleIds: string[]
 }
 
-export async function fetchRoleManifests(): Promise<RoleManifestView[]> {
-  const j = await authJsonFetch<{ ok: boolean; file: { roles: RoleManifestView[] } }>('/api/aigility/role-manifests')
-  return j.file?.roles ?? []
-}
-
-/** 保存角色声明（服务端校验前置：agent_id=role_id 等；不合格拒写） */
-export async function saveRoleManifest(m: RoleManifestView): Promise<void> {
-  const j = await authJsonFetch<{ ok: boolean; error?: string }>('/api/aigility/role-manifests', {
-    method: 'POST',
-    body: JSON.stringify(m),
-  })
-  if (!j.ok) throw new Error(j.error ?? '保存失败')
-}
-
-export async function removeRoleManifest(roleId: string): Promise<void> {
-  const j = await authJsonFetch<{ ok: boolean; error?: string }>(`/api/aigility/role-manifests/${encodeURIComponent(roleId)}`, { method: 'DELETE' })
-  if (!j.ok) throw new Error(j.error ?? '删除失败')
-}
 
 // ── 模型池（真 · 网关 /v1/models 代理）与工作流清单（D4 编排委托）──
 
@@ -1253,6 +1278,65 @@ export async function saveFlowYaml(id: string, yaml: string): Promise<void> {
   if (!j.ok) throw new Error(j.error ?? '保存失败')
 }
 
+// ── LLM 节点可视化配置（D2 模型算力层 · 移植自 hire llm_node）──────
+
+export interface LlmProviderInfo { id: number; name: string; tag: string; apiKey: string; apiBase: string; enabled: boolean }
+export interface LlmNodeInfo {
+  id: number; name: string; description: string; serviceModule: string; functionName: string;
+  modelName: string; parameter: Record<string, unknown>; providerId: number; isStream: boolean;
+}
+
+export async function fetchLlmNodes(): Promise<{ nodes: LlmNodeInfo[]; providers: LlmProviderInfo[] }> {
+  const j = await authJsonFetch<{ ok: boolean; nodes: LlmNodeInfo[]; providers: LlmProviderInfo[] }>('/api/aigility/llm/nodes')
+  if (!j.ok) throw new Error('加载失败')
+  return { nodes: j.nodes ?? [], providers: j.providers ?? [] }
+}
+
+export async function createLlmNode(n: Omit<LlmNodeInfo, 'id'>): Promise<LlmNodeInfo> {
+  const j = await authJsonFetch<{ ok: boolean; node: LlmNodeInfo; error?: string }>('/api/aigility/llm/nodes', { method: 'POST', body: JSON.stringify(n) })
+  if (!j.ok) throw new Error(j.error ?? '创建失败')
+  return j.node
+}
+
+export async function updateLlmNode(id: number, patch: Partial<LlmNodeInfo>): Promise<void> {
+  const j = await authJsonFetch<{ ok: boolean; error?: string }>(`/api/aigility/llm/nodes/${id}`, { method: 'PUT', body: JSON.stringify(patch) })
+  if (!j.ok) throw new Error(j.error ?? '保存失败')
+}
+
+export async function deleteLlmNode(id: number): Promise<void> {
+  const j = await authJsonFetch<{ ok: boolean; error?: string }>(`/api/aigility/llm/nodes/${id}`, { method: 'DELETE' })
+  if (!j.ok) throw new Error(j.error ?? '删除失败')
+}
+
+export async function createLlmProvider(p: { name: string; tag: string; apiKey?: string; apiBase?: string }): Promise<LlmProviderInfo> {
+  const j = await authJsonFetch<{ ok: boolean; provider: LlmProviderInfo; error?: string }>('/api/aigility/llm/providers', { method: 'POST', body: JSON.stringify(p) })
+  if (!j.ok) throw new Error(j.error ?? '创建失败')
+  return j.provider
+}
+
+export async function resolveLlmNode(name: string): Promise<{ node: string; model: string; baseUrl: string; apiKey: string; isStream: boolean; parameter: Record<string, unknown> }> {
+  const j = await authJsonFetch<{ ok: boolean; resolved: { node: string; model: string; baseUrl: string; apiKey: string; isStream: boolean; parameter: Record<string, unknown> } }>(`/api/aigility/llm/nodes/${encodeURIComponent(name)}/resolve`)
+  if (!j.ok) throw new Error('解析失败')
+  return j.resolved
+}
+
+// ── 项目小助理数据面工作流（chat-briefing.yaml 可视化编排数据源）──
+
+export async function fetchTaskLoopWorkflow(): Promise<string> {
+  const j = await authJsonFetch<{ ok: boolean; yaml: string }>('/api/aigility/task-loop/workflow')
+  if (!j.ok) throw new Error('加载失败')
+  return j.yaml
+}
+
+export async function saveTaskLoopWorkflow(yaml: string): Promise<string> {
+  const j = await authJsonFetch<{ ok: boolean; error?: string; hint?: string }>('/api/aigility/task-loop/workflow', {
+    method: 'PUT',
+    body: JSON.stringify({ yaml }),
+  })
+  if (!j.ok) throw new Error(j.error ?? '保存失败')
+  return j.hint ?? '已保存'
+}
+
 // ── 角色包（roles/ 目录 · role-kit：工厂的可移植角色单元）─────────
 
 export interface RolePackageCommand { pattern: string; action: string; summary?: string }
@@ -1274,6 +1358,8 @@ export interface RolePackageManifest {
   memory: { agent_id: string; legacy_agent_ids?: string[] }
 }
 
+export type RoleOrigin = 'published' | 'site' | 'template' | 'engine'
+
 export interface RolePackageInfo {
   id: string
   layer: 'public' | 'site'
@@ -1283,6 +1369,13 @@ export interface RolePackageInfo {
   prompt: string
   manifest: RolePackageManifest
   issues: string[]
+  /** 生命周期来源：已发布 / 站点定制 / 底座模板 / 引擎原生 */
+  origin?: RoleOrigin
+  /** 引擎原生未包化（虚拟卡）：定制副本后落为站点包 */
+  virtual?: boolean
+  published?: { category?: string; tags?: string[]; modelId?: string; visibility?: string; owner?: string | null }
+  personaRoute?: string
+  personaDesc?: string
 }
 
 export function fetchRolePackages(): Promise<RolePackageInfo[]> {
@@ -1290,11 +1383,41 @@ export function fetchRolePackages(): Promise<RolePackageInfo[]> {
     .then((j) => j.packages ?? [])
 }
 
-/** 保存角色包（服务端校验 role_id 不变 + memory.agent_id=role_id；原子写回包目录） */
-export async function saveRolePackage(id: string, body: { manifest: RolePackageManifest; prompt?: string }): Promise<void> {
-  const j = await authJsonFetch<{ ok: boolean; error?: string }>(`/api/aigility/role-packages/${encodeURIComponent(id)}`, {
+/** 导出 ElizaOS character file（官方 schema 结构，aigility 溯源在 settings.aigility） */
+export async function fetchRoleEliza(id: string): Promise<Record<string, unknown>> {
+  const j = await authJsonFetch<{ ok: boolean; character: Record<string, unknown> }>(`/api/aigility/role-packages/${encodeURIComponent(id)}/eliza`)
+  if (!j.ok) throw new Error('导出失败')
+  return j.character
+}
+
+/** 导入角色文件：自动识别 aigility 角色包 JSON / ElizaOS character file，落为站点角色包 */
+export async function importRoleFile(text: string): Promise<string> {
+  const parsed = JSON.parse(text) as Record<string, unknown>
+  if (parsed.format === 'aigility-role-package' && parsed.manifest) {
+    const body = parsed as { manifest: RolePackageManifest; prompt?: string }
+    await saveRolePackage(body.manifest.role_id, { manifest: body.manifest, prompt: body.prompt })
+    return body.manifest.role_id
+  }
+  const j = await authJsonFetch<{ ok: boolean; error?: string; id?: string }>('/api/aigility/role-packages/import-eliza', {
+    method: 'POST',
+    body: JSON.stringify({ character: parsed }),
+  })
+  if (!j.ok) throw new Error(j.error ?? '导入失败')
+  return j.id ?? ''
+}
+
+/** 保存角色包：编辑公共模板 = copy-on-override 站点化（返回 siteOverride 供提示） */
+export async function saveRolePackage(id: string, body: { manifest: RolePackageManifest; prompt?: string }): Promise<{ siteOverride: boolean }> {
+  const j = await authJsonFetch<{ ok: boolean; error?: string; siteOverride?: boolean }>(`/api/aigility/role-packages/${encodeURIComponent(id)}`, {
     method: 'PUT',
     body: JSON.stringify(body),
   })
   if (!j.ok) throw new Error(j.error ?? '保存失败')
+  return { siteOverride: j.siteOverride ?? false }
+}
+
+/** 恢复出厂：删除站点定制版，解析回落底座模板 */
+export async function revertRolePackage(id: string): Promise<void> {
+  const j = await authJsonFetch<{ ok: boolean; error?: string }>(`/api/aigility/role-packages/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  if (!j.ok) throw new Error(j.error ?? '恢复失败')
 }

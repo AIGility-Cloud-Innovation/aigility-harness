@@ -99,6 +99,16 @@ export function persistOwner(id: string, owner?: string): void {
   persist(skills);
 }
 
+/** 可见范围单独更新（管理员上架/撤下市场）：企业内 = 上架市场，仅自己 = 撤下 */
+export function setSkillVisibility(id: string, visibility: string): AigilitySkill | undefined {
+  const skills = listSkills();
+  const skill = skills.find((s) => s.id === id);
+  if (!skill) return undefined;
+  skill.visibility = visibility;
+  persist(skills);
+  return skill;
+}
+
 export function removeSkill(id: string): boolean {
   const skills = listSkills();
   const next = skills.filter((s) => s.id !== id);

@@ -630,7 +630,7 @@ export const centerApps: CenterApp[] = [
   { id: 'app-service', name: '客服工作台', cat: '客户服务', desc: '会话分流、智能应答、人工接管与服务质检的完整客服闭环', users: 1053, updated: '08-20', status: '已上线', on: true },
   { id: 'app-report', name: '报告中心', cat: '内容生成', desc: '报告模板库、生成记录、批量下载与定时生成配置', users: 576, updated: '08-19', status: '已上线', on: true },
   // 项目小助理：卡片开关 = 机器人进程启停（真，读运行状态）；导航可见性由「模块装配」页/配置页控制
-  { id: 'app-task-loop', name: '项目小助理', cat: '办公效率', desc: '飞书任务闭环：任务看板跟踪派发，配置凭证、功能开关与运行日志。卡片开关即机器人启停', users: 0, updated: '09-29', status: '已上线', on: false, detail: true },
+  { id: 'app-task-loop', name: '项目小助理', cat: '办公效率', desc: '任务收集与复核机器人：看板见「任务台账看板」，此处管理机器人启停、凭证配置与运行日志。卡片开关即机器人启停', users: 0, updated: '10-06', status: '已上线', on: false, detail: true },
   // 团队记忆总结 / 日志监察员：默认只出现在应用中心，不占左侧导航位；卡片开关 = 是否固定到导航（用户自决）
   { id: 'app-team-memory', name: '团队记忆总结', cat: '办公效率', desc: 'TiMEM 团队记忆日报 / 晨报：调度配置、凭证管理、一键生成与运行日志，按时推送飞书群', users: 0, updated: '10-10', status: '已上线', on: false, detail: true },
   { id: 'app-log-monitor', name: '日志监察员', cat: '流程辅助', desc: '定时拉取目标日志匹配错误关键字并飞书告警：巡检自动化、Webhook、启停运维与运行日志', users: 0, updated: '10-10', status: '已上线', on: false, detail: true },

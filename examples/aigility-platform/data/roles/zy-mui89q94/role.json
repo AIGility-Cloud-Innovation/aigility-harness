@@ -1,0 +1,28 @@
+{
+  "role_id": "zy-mui89q94",
+  "identity": {
+    "name": "班组安全问答员",
+    "signature": "知识服务",
+    "capability_ref": "zy-mui89q94"
+  },
+  "sources": {
+    "data": [
+      "锅炉运行规程库"
+    ]
+  },
+  "actions": {
+    "tools": [
+      "timem.memory.search"
+    ],
+    "workflows": []
+  },
+  "outbound": {
+    "reply": "same-channel"
+  },
+  "memory": {
+    "agent_id": "zy-mui89q94",
+    "legacy_agent_ids": [
+      "aigility-skill-zy-mui89q94"
+    ]
+  }
+}

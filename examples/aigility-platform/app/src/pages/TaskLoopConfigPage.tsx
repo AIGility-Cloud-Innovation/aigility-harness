@@ -7,6 +7,7 @@
  *   - 配置卡：LLM 兜底模型、流水线轮询间隔、自动派发/通知开关（保存后需重启生效）
  *   - 功能开关：featureFlags 动态 key-value 开关（可新增/删除行）
  *   - 日志卡：stdout/stderr Tab 切换，10s 轮询（可暂停）
+ *   - 工作流卡：chat-briefing.yaml 可视化编辑（SVG 节点图，保存即生效）
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -16,8 +17,10 @@ import {
   type TaskLoopLogTail, type FeishuChatItem,
 } from '../lib/harness'
 import {
-  Play, Square, RotateCw, Save, Plus, Trash2, Pause, RefreshCw, KeyRound, MessageSquareShare, ArrowLeft, Settings2,
+  Play, Square, RotateCw, Save, Plus, Trash2, Pause, RefreshCw, KeyRound, MessageSquareShare, ArrowLeft, Settings2, Workflow,
 } from 'lucide-react'
+import WorkflowYamlEditor from '../components/WorkflowYamlEditor'
+import { fetchTaskLoopWorkflow, saveTaskLoopWorkflow } from '../lib/harness'
 
 const COMMON_MODELS = ['sensenova-deepseek-v4-flash', 'qwen-plus', 'qwen-turbo', 'sensenova-glm-5.2']
 
@@ -169,6 +172,21 @@ export default function TaskLoopConfigPage({ go, navVisible = true, onToggleNav,
 
       {banner && <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm rounded-lg px-4 py-2.5">{banner}</div>}
       {error && <div className="bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-lg px-4 py-2.5">{error}</div>}
+
+      {/* 工作流卡：数据面 YAML 可视化编辑 */}
+      <div className="bg-white rounded-xl border border-slate-200/80 p-5">
+        <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2"><Workflow size={15} className="text-indigo-500" />工作流 · 群聊整理流水线（可视化编辑）</h2>
+            <p className="text-[11px] text-slate-400 mt-0.5">监听缓冲 → LLM 判定 → 查重 →（建单*）→ 摘要播报；改完保存即生效，机器人每次触发前重读本文件</p>
+          </div>
+        </div>
+        <WorkflowYamlEditor
+          title="chat-briefing.yaml · 项目小助理群聊整理"
+          load={fetchTaskLoopWorkflow}
+          save={saveTaskLoopWorkflow}
+        />
+      </div>
 
       {/* 状态卡 */}
       <div className="bg-white rounded-xl border border-slate-200/80 p-5">

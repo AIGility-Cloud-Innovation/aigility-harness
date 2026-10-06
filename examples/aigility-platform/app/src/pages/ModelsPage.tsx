@@ -4,6 +4,7 @@ import EChart from '../components/EChart'
 import { fetchLlmStatus, type LlmStatus } from '../lib/harness'
 import { Cpu, X, KeyRound, Gauge, CheckCircle2, TrendingUp, Radio } from 'lucide-react'
 import type { ModelInfo } from '../mock/data'
+import LlmNodeConfig from '../components/LlmNodeConfig'
 
 const typeColor: Record<string, string> = {
   通用语言模型: 'bg-blue-50 text-blue-600', 代码模型: 'bg-sky-50 text-sky-600', 视觉模型: 'bg-amber-50 text-amber-600',
@@ -32,6 +33,9 @@ export default function ModelsPage() {
         </div>
         <button className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">接入自有模型</button>
       </div>
+
+      {/* LLM 节点可视化配置（移植自 hire llm_node）*/}
+      <LlmNodeConfig />
 
       {/* 当前推理上游（真）：D2 llm-inference 实际生效配置 */}
       {llm && (

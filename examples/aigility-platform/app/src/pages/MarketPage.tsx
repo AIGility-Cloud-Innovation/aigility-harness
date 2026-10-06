@@ -1,33 +1,38 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { marketAgents, agentCats, type MarketAgent } from '../mock/data'
 import { getCurrentUser } from '../lib/api'
-import { streamPersonaChat, fetchRegistry, type PersonaInfo, type SkillInfo } from '../lib/harness'
-import { Search, Star, ArrowLeft, Bot, CheckCircle2, BookOpen, Wrench, Play, Radio, Send, Store, Loader2, Settings2, ScrollText } from 'lucide-react'
+import { fetchRegistry, fetchMarketConfig, type MarketDataMode, type SkillInfo } from '../lib/harness'
+import { Search, Star, ArrowLeft, Bot, CheckCircle2, BookOpen, Wrench, Play, Store, Settings2, ScrollText, ShieldCheck } from 'lucide-react'
 
+/**
+ * 智能体市场 = 面向普通用户的应用货架，内容由管理员控制：
+ *   - 真实数据模式：只显示工厂发布且可见范围=企业内 的数字员工（选企业内可见 = 上架市场）；
+ *   - 模拟数据模式（缺省，管理员未设置时）：只显示演示模板，不暴露工厂/引擎内部能力。
+ * 引擎原生角色（@persona/*）属引擎内部能力，不再进市场。
+ */
 export default function MarketPage({ go }: { go: (p: string) => void }) {
   const [cat, setCat] = useState('全部')
   const [kw, setKw] = useState('')
   const [detail, setDetail] = useState<MarketAgent | null>(null)
-  const [realDetail, setRealDetail] = useState<PersonaInfo | null>(null)
-  const [personas, setPersonas] = useState<PersonaInfo[]>([])
   const [skills, setSkills] = useState<SkillInfo[]>([])
-  const [llm, setLlm] = useState('')
+  const [dataMode, setDataMode] = useState<MarketDataMode>('mock')
 
   useEffect(() => {
-    fetchRegistry().then(r => { setPersonas(r.personas); setSkills(r.skills); setLlm(r.llm) }).catch(() => {})
+    fetchRegistry().then(r => setSkills(r.skills)).catch(() => {})
+    fetchMarketConfig().then(c => setDataMode(c.dataMode)).catch(() => {})
   }, [])
 
+  const isAdmin = !!getCurrentUser()?.isAdmin
+  const real = dataMode === 'real'
+  // 真实数据货架 = 工厂发布且可见范围=企业内（「仅自己」不上架市场）
+  const shelf = skills
+    .filter(s => s.visibility === '企业内')
+    .filter(s => (cat === '全部' || s.category === cat) &&
+      (!kw || s.name.includes(kw) || s.description.includes(kw) || s.tags.some(t => t.includes(kw))))
   const list = marketAgents.filter(a =>
     (cat === '全部' || a.cat === cat) &&
     (!kw || a.name.includes(kw) || a.desc.includes(kw) || a.tags.some(t => t.includes(kw))))
-  const realList = personas.filter(p =>
-    (cat === '全部' || p.cat === cat) &&
-    (!kw || p.name.includes(kw) || p.desc.includes(kw)))
-  const skillList = skills.filter(s =>
-    (cat === '全部' || s.category === cat) &&
-    (!kw || s.name.includes(kw) || s.description.includes(kw)))
 
-  if (realDetail) return <RealAgentDetail persona={realDetail} llm={llm} back={() => setRealDetail(null)} />
   if (detail) return <AgentDetail agent={detail} back={() => setDetail(null)} />
 
   return (
@@ -35,7 +40,11 @@ export default function MarketPage({ go }: { go: (p: string) => void }) {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-semibold text-slate-800">智能体市场</h1>
-          <p className="text-sm text-slate-500 mt-1">引擎原生角色真对话 · 智能体工厂发布直通上架 · 官方模板库按需改造 —— 全部私有化运行</p>
+          <p className="text-sm text-slate-500 mt-1">
+            {real
+              ? '智能体工厂发布上架的数字员工 —— 选择即可直接对话使用，全部私有化运行'
+              : '当前展示演示模板（模拟数据）；管理员上架后，这里显示真实可用的数字员工'}
+          </p>
         </div>
         <div className="relative">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -44,253 +53,110 @@ export default function MarketPage({ go }: { go: (p: string) => void }) {
         </div>
       </div>
 
+      {isAdmin && !real && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-700 flex items-center gap-2 flex-wrap">
+          <ShieldCheck size={14} />
+          <span>管理员提示：市场处于<b>模拟数据模式</b>，普通用户看到的是演示模板。到智能体工厂切换为「真实数据」，并把发布的数字员工可见范围设为「企业内」即可上架。</span>
+          <button onClick={() => go('studio')} className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-amber-500 text-white hover:bg-amber-600">去智能体工厂配置</button>
+        </div>
+      )}
+
       <div className="flex gap-2 flex-wrap">
         {agentCats.map(c => (
           <button key={c} onClick={() => setCat(c)}
             className={`text-xs px-3.5 py-1.5 rounded-full transition ${cat === c ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:border-blue-300'}`}>{c}</button>
         ))}
-        <span className="text-xs text-slate-400 self-center ml-auto">{realList.length} 个引擎原生角色 · {skillList.length} 个工厂发布 · {list.length} 个演示模板</span>
+        <span className="text-xs text-slate-400 self-center ml-auto">
+          {real ? `${shelf.length} 个已上架智能体 · 真实数据` : `${list.length} 个演示模板 · 模拟数据`}
+        </span>
       </div>
 
-      {/* 引擎原生角色（aigility-harness layer-persona 注册表, 真对话） */}
-      {realList.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Radio size={14} className="text-emerald-500" />
-            <h2 className="text-sm font-semibold text-slate-700">已接入 aigility-harness · 引擎原生角色</h2>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100">真对话 · 直接路由 @persona/*</span>
-          </div>
-          <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {realList.map(p => (
-              <div key={p.personaId} className="bg-white rounded-xl border border-emerald-200 ring-1 ring-emerald-100/60 p-5 hover:shadow-md transition flex flex-col">
-                <div className="flex items-start justify-between mb-2.5">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 text-white flex items-center justify-center"><Bot size={17} /></div>
-                    <div>
-                      <div className="font-medium text-slate-800 text-sm">{p.name}</div>
-                      <div className="text-[10px] text-slate-400 mt-0.5"><code>{p.personaId}</code></div>
+      {real ? (
+        /* 真实数据模式：工厂发布（企业内可见）的数字员工货架 */
+        shelf.length > 0 ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Store size={14} className="text-sky-500" />
+              <h2 className="text-sm font-semibold text-slate-700">已上架 · 数字员工</h2>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-50 text-sky-600 border border-sky-100">工厂发布 · 真对话 · 对话工作台可直接切换</span>
+            </div>
+            <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {shelf.map(s => (
+                <div key={s.id} className="bg-white rounded-xl border border-sky-200 ring-1 ring-sky-100/60 p-5 hover:shadow-md transition flex flex-col">
+                  <div className="flex items-start justify-between mb-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-500 to-sky-500 text-white flex items-center justify-center"><Bot size={17} /></div>
+                      <div>
+                        <div className="font-medium text-slate-800 text-sm">{s.name}</div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">skill_id={s.id} · 更新 {s.updatedAt}</div>
+                      </div>
                     </div>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600">已上架</span>
                   </div>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600">已接入</span>
+                  <p className="text-xs text-slate-500 leading-relaxed mb-3 flex-1">{s.description}</p>
+                  <div className="flex gap-1.5 flex-wrap mb-4">
+                    {s.tags.map(t => <span key={t} className="text-[10px] px-2 py-0.5 rounded bg-slate-50 border border-slate-100 text-slate-500">{t}</span>)}
+                  </div>
+                  <div className="flex gap-2 pt-3 border-t border-slate-50">
+                    <button onClick={() => go('agent')} className="flex-1 text-xs py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 flex items-center justify-center gap-1"><Play size={12} />立即使用</button>
+                  </div>
                 </div>
-                <p className="text-xs text-slate-500 leading-relaxed mb-3 flex-1">{p.desc}</p>
-                <div className="flex items-center gap-2 mb-3 text-[10px] text-slate-400">
-                  <span className="px-2 py-0.5 rounded bg-slate-50 border border-slate-100">{p.cat}</span>
-                  <span className="px-2 py-0.5 rounded bg-slate-50 border border-slate-100">D5 角色人格层</span>
-                </div>
-                <div className="flex gap-2 pt-3 border-t border-slate-50">
-                  <button onClick={() => setRealDetail(p)} className="flex-1 text-xs py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 flex items-center justify-center gap-1"><Play size={12} />真对话体验</button>
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
-      )}
-
-      {/* 智能体工厂已发布（skill-registry 真注册） */}
-      {skillList.length > 0 && (
+        ) : (
+          <div className="bg-white rounded-xl border border-dashed border-slate-200 p-16 text-center">
+            <Store size={28} className="text-slate-300 mx-auto mb-3" />
+            <div className="text-sm text-slate-500">暂无上架的智能体</div>
+            <div className="text-xs text-slate-400 mt-1.5">
+              {isAdmin
+                ? '到智能体工厂发布数字员工，可见范围选「企业内」即自动上架本市场'
+                : '管理员正在筹备中，敬请期待'}
+            </div>
+            {isAdmin && (
+              <button onClick={() => go('studio')} className="mt-4 text-xs px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">去智能体工厂发布</button>
+            )}
+          </div>
+        )
+      ) : (
+        /* 模拟数据模式：官方演示模板库（Mock） */
         <div className="space-y-3">
           <div className="flex items-center gap-2">
-            <Store size={14} className="text-sky-500" />
-            <h2 className="text-sm font-semibold text-slate-700">智能体工厂 · 已发布</h2>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-50 text-sky-600 border border-sky-100">真注册 · 对话工作台可直接切换</span>
+            <BookOpen size={14} className="text-slate-400" />
+            <h2 className="text-sm font-semibold text-slate-700">官方模板库</h2>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">模拟数据 · 演示效果</span>
           </div>
           <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {skillList.map(s => (
-              <div key={s.id} className="bg-white rounded-xl border border-sky-200 ring-1 ring-sky-100/60 p-5 hover:shadow-md transition flex flex-col">
+            {list.map(a => (
+              <div key={a.id} className="bg-white rounded-xl border border-slate-200/80 p-5 hover:shadow-md transition flex flex-col">
                 <div className="flex items-start justify-between mb-2.5">
                   <div className="flex items-center gap-2.5">
                     <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-500 to-sky-500 text-white flex items-center justify-center"><Bot size={17} /></div>
                     <div>
-                      <div className="font-medium text-slate-800 text-sm">{s.name}</div>
-                      <div className="text-[10px] text-slate-400 mt-0.5">skill_id={s.id} · 更新 {s.updatedAt}</div>
+                      <div className="font-medium text-slate-800 text-sm">{a.name}</div>
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <Star size={11} className="text-amber-400 fill-amber-400" />
+                        <span className="text-xs text-slate-500">{a.rating}</span>
+                        <span className="text-[10px] text-slate-300 mx-1">·</span>
+                        <span className="text-xs text-slate-400">{a.calls} 次调用</span>
+                      </div>
                     </div>
                   </div>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600">已发布</span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${a.status === '运行中' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>{a.status}</span>
                 </div>
-                <p className="text-xs text-slate-500 leading-relaxed mb-3 flex-1">{s.description}</p>
+                <p className="text-xs text-slate-500 leading-relaxed mb-3 flex-1">{a.desc}</p>
                 <div className="flex gap-1.5 flex-wrap mb-4">
-                  {s.tags.map(t => <span key={t} className="text-[10px] px-2 py-0.5 rounded bg-slate-50 border border-slate-100 text-slate-500">{t}</span>)}
+                  {a.tags.map(t => <span key={t} className="text-[10px] px-2 py-0.5 rounded bg-slate-50 border border-slate-100 text-slate-500">{t}</span>)}
                 </div>
                 <div className="flex gap-2 pt-3 border-t border-slate-50">
                   <button onClick={() => go('agent')} className="flex-1 text-xs py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 flex items-center justify-center gap-1"><Play size={12} />立即使用</button>
+                  <button onClick={() => setDetail(a)} className="flex-1 text-xs py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">详情</button>
                 </div>
               </div>
             ))}
           </div>
         </div>
       )}
-
-      {/* 官方演示模板库（Mock） */}
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <BookOpen size={14} className="text-slate-400" />
-          <h2 className="text-sm font-semibold text-slate-700">官方模板库</h2>
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">演示数据 · 可挑模板到工厂改造</span>
-        </div>
-        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {list.map(a => (
-            <div key={a.id} className="bg-white rounded-xl border border-slate-200/80 p-5 hover:shadow-md transition flex flex-col">
-              <div className="flex items-start justify-between mb-2.5">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-500 to-sky-500 text-white flex items-center justify-center"><Bot size={17} /></div>
-                  <div>
-                    <div className="font-medium text-slate-800 text-sm">{a.name}</div>
-                    <div className="flex items-center gap-1 mt-0.5">
-                      <Star size={11} className="text-amber-400 fill-amber-400" />
-                      <span className="text-xs text-slate-500">{a.rating}</span>
-                      <span className="text-[10px] text-slate-300 mx-1">·</span>
-                      <span className="text-xs text-slate-400">{a.calls} 次调用</span>
-                    </div>
-                  </div>
-                </div>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full ${a.status === '运行中' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>{a.status}</span>
-              </div>
-              <p className="text-xs text-slate-500 leading-relaxed mb-3 flex-1">{a.desc}</p>
-              <div className="flex gap-1.5 flex-wrap mb-4">
-                {a.tags.map(t => <span key={t} className="text-[10px] px-2 py-0.5 rounded bg-slate-50 border border-slate-100 text-slate-500">{t}</span>)}
-              </div>
-              <div className="flex gap-2 pt-3 border-t border-slate-50">
-                <button onClick={() => go('agent')} className="flex-1 text-xs py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 flex items-center justify-center gap-1"><Play size={12} />立即使用</button>
-                <button onClick={() => setDetail(a)} className="flex-1 text-xs py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">详情</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ─── 引擎原生角色 · 真对话详情（http-ingress 直路由 @persona/*） ───
-
-interface RealChatMsg {
-  role: 'user' | 'assistant'
-  text: string
-  streaming?: boolean
-  error?: boolean
-}
-
-function RealAgentDetail({ persona, llm, back }: { persona: PersonaInfo; llm: string; back: () => void }) {
-  const [msgs, setMsgs] = useState<RealChatMsg[]>([])
-  const [draft, setDraft] = useState('')
-  const [busy, setBusy] = useState(false)
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const sessionId = useRef(`zy-market-${Date.now().toString(36)}`)
-
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [msgs])
-
-  const send = async () => {
-    const q = draft.trim()
-    if (!q || busy) return
-    setDraft('')
-    setBusy(true)
-    setMsgs(m => [...m, { role: 'user', text: q }, { role: 'assistant', text: '', streaming: true }])
-    try {
-      const full = await streamPersonaChat(persona.route, {
-        user_input: q, session_id: sessionId.current, user_key: getCurrentUser()?.email ?? 'fde-local',
-      }, full => {
-        setMsgs(m => m.map((x, i) => i === m.length - 1 ? { ...x, text: full } : x))
-      })
-      setMsgs(m => m.map((x, i) => i === m.length - 1 ? { ...x, text: full, streaming: false } : x))
-    } catch (e) {
-      setMsgs(m => m.map((x, i) => i === m.length - 1
-        ? { ...x, text: `对话调用失败：${e instanceof Error ? e.message : String(e)}`, streaming: false, error: true }
-        : x))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="space-y-5">
-      <div className="flex items-center gap-3 flex-wrap">
-        <button onClick={back} className="w-8 h-8 rounded-lg border border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:bg-slate-50"><ArrowLeft size={15} /></button>
-        <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 text-white flex items-center justify-center"><Bot size={17} /></div>
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-lg font-semibold text-slate-800">{persona.name}</h1>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600">引擎原生 · 真对话</span>
-          </div>
-          <p className="text-xs text-slate-400 mt-0.5"><code>{persona.personaId}</code> · {persona.cat}</p>
-        </div>
-      </div>
-
-      <div className="grid lg:grid-cols-[1fr_320px] gap-4">
-        {/* 真对话 */}
-        <div className="bg-white rounded-xl border border-slate-200/80 flex flex-col h-[70vh] lg:h-[560px]">
-          <div className="flex-1 overflow-y-auto p-5 space-y-4">
-            {msgs.length === 0 && (
-              <div className="pt-12 text-center">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-500 text-white flex items-center justify-center mx-auto mb-3"><Bot size={22} /></div>
-                <p className="text-sm text-slate-600 font-medium">与引擎原生角色直接对话</p>
-                <p className="text-xs text-slate-400 mt-1.5 leading-relaxed max-w-sm mx-auto">不经工厂封装：POST {persona.route} → {persona.personaId} → workflow-engine → LLM{llm ? `（当前上游 ${llm}）` : ''}</p>
-              </div>
-            )}
-            {msgs.map((m, i) => m.role === 'user' ? (
-              <div key={i} className="flex justify-end">
-                <div className="bg-blue-600 text-white text-sm rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[75%]">{m.text}</div>
-              </div>
-            ) : (
-              <div key={i} className="flex gap-3">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 text-white flex items-center justify-center shrink-0 mt-0.5"><Bot size={15} /></div>
-                <div className="flex-1 max-w-[85%]">
-                  <div className={`text-sm leading-relaxed rounded-xl px-4 py-3 whitespace-pre-wrap border ${m.error ? 'text-red-600 bg-red-50/60 border-red-100' : 'text-slate-700 bg-slate-50/80 border-slate-100'}`}>
-                    {m.text || (m.streaming ? <span className="text-slate-400 animate-pulse">思考中…</span> : '')}
-                    {m.streaming && m.text && <span className="inline-block w-1.5 h-4 bg-emerald-500 animate-pulse align-middle ml-0.5" />}
-                  </div>
-                </div>
-              </div>
-            ))}
-            <div ref={bottomRef} />
-          </div>
-          <div className="border-t border-slate-100 p-4">
-            <div className="flex gap-2">
-              <input value={draft} onChange={e => setDraft(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) void send() }}
-                placeholder="输入问题，Enter 发送（真对话）…"
-                disabled={busy}
-                className="flex-1 text-sm border border-slate-200 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 disabled:bg-slate-50" />
-              <button disabled={busy || !draft.trim()} onClick={() => void send()}
-                className="px-4 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40">
-                {busy ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* 右侧配置面板 */}
-        <div className="space-y-4">
-          <div className="bg-white rounded-xl border border-slate-200/80 p-5">
-            <h4 className="text-sm font-medium text-slate-800 mb-3">接入信息</h4>
-            <div className="space-y-2.5 text-xs">
-              {[
-                ['能力 ID', persona.personaId],
-                ['所属层', 'D5 角色人格层（layer-persona）'],
-                ['调用路由', persona.route],
-                ['LLM 上游', llm || '未配置（stub 降级）'],
-                ['记忆隔离', '按会话（TiMEM 流内节点）'],
-              ].map(([k, v]) => (
-                <div key={k} className="flex justify-between gap-3"><span className="text-slate-400 shrink-0">{k}</span><span className="text-slate-700 font-medium text-right break-all">{v}</span></div>
-              ))}
-            </div>
-          </div>
-          <div className="bg-white rounded-xl border border-slate-200/80 p-5">
-            <div className="flex items-center gap-2 mb-3"><Wrench size={14} className="text-slate-400" /><h4 className="text-sm font-medium text-slate-800">引擎链路</h4></div>
-            <div className="text-[11px] font-mono text-slate-500 space-y-1.5">
-              <div className="text-blue-600">POST {persona.route}</div>
-              <div>→ D1 http-ingress（Bearer 鉴权）</div>
-              <div>→ D5 {persona.personaId}</div>
-              <div>→ D4 workflow-engine（记忆召回 → LLM → 沉淀）</div>
-              <div>→ D2 llm-inference</div>
-            </div>
-          </div>
-          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-5 text-white">
-            <div className="flex items-center gap-2 mb-2"><BookOpen size={15} className="text-emerald-300" /><span className="text-sm font-medium">与「工厂发布」的区别</span></div>
-            <p className="text-xs text-slate-300 leading-relaxed">引擎原生角色随 aigility-harness 代码注册，人设固定；要自定义人设/知识/工具，到智能体工厂发布数字员工。</p>
-          </div>
-        </div>
-      </div>
     </div>
   )
 }
@@ -307,7 +173,7 @@ function AgentDetail({ agent, back }: { agent: MarketAgent; back: () => void }) 
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-semibold text-slate-800">{agent.name}</h1>
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600">{agent.status}</span>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">演示数据</span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">模拟数据</span>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">{agent.cat} · 评分 {agent.rating} · {agent.calls} 次调用</p>
         </div>
@@ -364,7 +230,7 @@ function AgentDetail({ agent, back }: { agent: MarketAgent; back: () => void }) 
                     ))}
                   </div>
                 </div>
-                <div className="text-[11px] text-slate-400">要与此类能力真实对话，请到「智能体工厂」基于该模板发布数字员工，或在上方「已接入」区选择引擎原生角色。</div>
+                <div className="text-[11px] text-slate-400">要与此类能力真实对话，请管理员在「智能体工厂」发布数字员工并上架市场。</div>
               </div>
             </div>
           </div>

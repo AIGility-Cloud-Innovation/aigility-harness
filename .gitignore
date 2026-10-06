@@ -47,7 +47,7 @@ examples/fde-workbench/start-fde-workbench.cmd
 examples/fde-workbench/.tmp/
 
 # feishu 本地凭证仓（整个目录不入库；首次授权引导脚本在 packages/layer-action/authorize-feishu.ts）
-feishu/
+config/feishu/
 
 # IM 中继会话历史等运行时状态
 examples/*/.state/
@@ -55,3 +55,11 @@ examples/*/.state/
 # 本地包管理缓存与编辑器备份
 .pnpm-store/
 *.orig
+
+# 复核台账/会话/审计（运行时本地文件，不入库）
+config/*.local.json
+config/*.local.jsonl
+
+# 临时工作目录（截图/草稿，不入库）
+.tmp-baojing/
+gui-test-screenshots/

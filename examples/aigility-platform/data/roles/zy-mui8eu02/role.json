@@ -1,0 +1,31 @@
+{
+  "role_id": "zy-mui8eu02",
+  "identity": {
+    "name": "周会待办督办员",
+    "signature": "知识服务",
+    "capability_ref": "zy-mui8eu02"
+  },
+  "sources": {
+    "data": [
+      "通用办公知识库"
+    ]
+  },
+  "actions": {
+    "tools": [
+      "timem.memory.search"
+    ],
+    "workflows": [
+      "executor-dispatch",
+      "610daafc-a070-4677-af2a-6a6108c7e7e5"
+    ]
+  },
+  "outbound": {
+    "reply": "same-channel"
+  },
+  "memory": {
+    "agent_id": "zy-mui8eu02",
+    "legacy_agent_ids": [
+      "aigility-skill-zy-mui8eu02"
+    ]
+  }
+}

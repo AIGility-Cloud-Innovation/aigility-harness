@@ -2,8 +2,11 @@ import { useEffect, useState } from 'react'
 import { studioSeed, agentCats, type StudioAgent } from '../mock/data'
 import RoleDshEditor from '../components/RoleDshEditor'
 import RolePackageEditor from '../components/RolePackageEditor'
-import { publishSkill, deleteSkill, fetchRegistry, createDshSkill, fetchLlmModels, fetchRolePackages, type RolePackageInfo } from '../lib/harness'
-import { Plus, Bot, Rocket, Trash2, PenLine, CheckCircle2, Loader, Store, SearchX, User, Wrench, Radio, Send, Cpu, ListTree, Package, Terminal, CalendarClock } from 'lucide-react'
+import { publishSkill, deleteSkill, fetchRegistry, createDshSkill, fetchLlmModels, fetchRolePackages, revertRolePackage, fetchFlows, fetchFlowYaml, saveFlowYaml, fetchTaskLoopWorkflow, saveTaskLoopWorkflow, saveRolePackage, fetchRoleEliza, importRoleFile, fetchMarketConfig, saveMarketConfig, setSkillVisibility, type RolePackageInfo, type FlowInfo, type MarketDataMode } from '../lib/harness'
+import { getCurrentUser } from '../lib/api'
+import WorkflowYamlEditor from '../components/WorkflowYamlEditor'
+import { X } from 'lucide-react'
+import { Plus, Bot, Rocket, Trash2, PenLine, CheckCircle2, Loader, Store, SearchX, User, Wrench, Radio, Send, Cpu, ListTree, Package, Terminal, CalendarClock, Save, Download, Upload, Undo2 } from 'lucide-react'
 
 const blank: Omit<StudioAgent, 'id' | 'status' | 'updatedAt'> = {
   name: '', category: '知识服务', description: '', tags: [],
@@ -21,6 +24,9 @@ export default function StudioPage() {
   const [agents, setAgents] = useState<Listed[]>(demoSeed)
   const [rolePkgs, setRolePkgs] = useState<RolePackageInfo[]>([])
   const [pkgId, setPkgId] = useState<string | null>(null)
+  const [originFilter, setOriginFilter] = useState<'全部' | '已发布' | '引擎原生' | '站点定制' | '底座模板' | '演示'>('全部')
+  const [wfModal, setWfModal] = useState<string | null>(null)
+  const [flowList, setFlowList] = useState<FlowInfo[]>([])
   const [filter, setFilter] = useState<'全部' | '已发布' | '草稿'>('全部')
   const [form, setForm] = useState(blank)
   const [editId, setEditId] = useState<string | null>(null)
@@ -35,6 +41,32 @@ export default function StudioPage() {
   useEffect(() => { fetchLlmModels().then(r => setModelPool(r.models ?? [])).catch(() => {}) }, [])
   const refreshPkgs = () => { fetchRolePackages().then(setRolePkgs).catch(() => {}) }
   useEffect(() => { refreshPkgs() }, [])
+  useEffect(() => { fetchFlows().then(setFlowList).catch(() => {}) }, [])
+
+  // ── 智能体市场管理（仅管理员）：数据模式开关 + 已发布数字员工上架/撤下 ──
+  const isAdmin = !!getCurrentUser()?.isAdmin
+  const [dataMode, setDataMode] = useState<MarketDataMode>('mock')
+  const [shelfBusy, setShelfBusy] = useState(false)
+  useEffect(() => { if (isAdmin) fetchMarketConfig().then(c => setDataMode(c.dataMode)).catch(() => {}) }, [isAdmin])
+
+  const changeDataMode = async (m: MarketDataMode) => {
+    setShelfBusy(true)
+    try {
+      await saveMarketConfig(m)
+      setDataMode(m)
+      setBanner(m === 'real' ? '市场已切换为「真实数据」—— 可见范围=企业内 的已发布数字员工上架展示' : '市场已切换为「模拟数据」—— 普通用户看到演示模板')
+    } catch (e) { setPubError(String((e as Error).message ?? e)) } finally { setShelfBusy(false) }
+  }
+
+  const toggleShelf = async (id: string, name: string, cur: string) => {
+    const next = cur === '企业内' ? '仅自己' : '企业内'
+    try {
+      await setSkillVisibility(id, next)
+      setBanner(next === '企业内' ? `「${name}」已上架智能体市场（企业内可见）` : `「${name}」已撤下市场（仅对话工作台自己可用）`)
+      refresh()
+      refreshPkgs()
+    } catch (e) { setPubError(String((e as Error).message ?? e)) }
+  }
 
   const SECTIONS = [
     { id: 'persona', label: '人设 · 它是谁', icon: User },
@@ -97,7 +129,7 @@ export default function StudioPage() {
       } catch (err) {
         setPubError(`平台发布成功，但 DSH 技能同步失败：${err instanceof Error ? err.message : String(err)}`)
       }
-      setBanner(`「${skill.name}」发布成功（skill_id=${skill.id}，已注册 @persona/aigility-agent）—— 对话工作台与智能体市场立即可用${dshNote}`)
+      setBanner(`「${skill.name}」发布成功（skill_id=${skill.id}，已注册 @persona/aigility-agent）—— 对话工作台立即可用${skill.visibility === '企业内' ? '，已上架智能体市场' : '（仅自己 · 不上架市场）'}${dshNote}`)
       backToList()
       refresh()
     } catch (err) {
@@ -173,6 +205,30 @@ export default function StudioPage() {
           </div>
         )}
         {pubError && <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-xs text-red-600">{pubError}</div>}
+
+        {/* 工作流可视化编排弹窗（chat-briefing + 平台 flows） */}
+        {wfModal && (
+          <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-[2px] flex items-start justify-center p-4 overflow-auto"
+            onClick={() => setWfModal(null)}>
+            <div className="bg-white rounded-2xl w-full max-w-6xl my-6 p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm font-semibold text-slate-800">工作流可视化编排</h3>
+                <select value={wfModal} onChange={(e) => setWfModal(e.target.value)}
+                  className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600">
+                  <option value="chat-briefing">chat-briefing · 项目小助理群聊整理</option>
+                  {flowList.map((f) => <option key={f.id} value={f.id}>{f.id}{f.name ? ` · ${f.name}` : ''}</option>)}
+                </select>
+                <span className="text-[11px] text-slate-400">条件边/LLM system_prompt 只读保护，其余图形编辑保存即落盘</span>
+                <div className="flex-1" />
+                <button onClick={() => setWfModal(null)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100"><X size={16} /></button>
+              </div>
+              <WorkflowYamlEditor key={wfModal}
+                title={wfModal === 'chat-briefing' ? 'chat-briefing.yaml · 项目小助理群聊整理' : `flows/${wfModal}.yaml · 平台工作流`}
+                load={wfModal === 'chat-briefing' ? fetchTaskLoopWorkflow : () => fetchFlowYaml(wfModal)}
+                save={wfModal === 'chat-briefing' ? saveTaskLoopWorkflow : (t) => saveFlowYaml(wfModal, t)} />
+            </div>
+          </div>
+        )}
 
         {/* ① 人设 · 它是谁（D5） */}
         <div id="sec-persona" className="bg-white rounded-xl border border-slate-200/80 p-6 space-y-4 scroll-mt-4">
@@ -264,6 +320,10 @@ export default function StudioPage() {
             <span className="w-7 h-7 rounded-lg bg-violet-100 text-violet-600 flex items-center justify-center"><ListTree size={15} /></span>
             <h2 className="text-base font-semibold text-slate-800">编排 · 复杂任务拆解（D4）</h2>
             <span className="text-[11px] text-slate-400">角色可委托的数据面工作流（YAML 声明, 可版本化）</span>
+            <button onClick={() => setWfModal('chat-briefing')}
+              className="ml-auto text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 flex items-center gap-1.5">
+              <ListTree size={12} />可视化编排
+            </button>
           </div>
           {isEdit ? (
             <RoleDshEditor roleId={editId} label={form.name} sections={['workflow']} onChanged={refresh} />
@@ -298,12 +358,21 @@ export default function StudioPage() {
           <div className="max-w-3xl space-y-4">
             <div>
               <label className="text-xs text-slate-400 block mb-2">可见范围</label>
-              <div className="flex gap-2">
-                {(['企业内', '仅自己'] as const).map(v => (
-                  <button key={v} onClick={() => set('visibility', v)}
-                    className={`text-xs px-4 py-2 rounded-lg border transition ${form.visibility === v ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500'}`}>{v}</button>
-                ))}
-              </div>
+              {isAdmin ? (
+                <>
+                  <div className="flex gap-2">
+                    {(['企业内', '仅自己'] as const).map(v => (
+                      <button key={v} onClick={() => set('visibility', v)}
+                        className={`text-xs px-4 py-2 rounded-lg border transition ${form.visibility === v ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500'}`}>{v}</button>
+                    ))}
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-1.5">「企业内」= 上架智能体市场，普通用户可见可用；「仅自己」= 不上架市场，仅对话工作台自己可用（管理员可在列表卡上随时上架/撤下）</div>
+                </>
+              ) : (
+                <div className="text-[11px] text-slate-500 rounded-lg bg-slate-50 border border-slate-100 px-3 py-2 leading-relaxed">
+                  你发布的数字员工为「仅自己」可见 —— 发布后直接在「数字员工工作台」可见可用，不上架智能体市场；如需企业内上架，请联系管理员。
+                </div>
+              )}
             </div>
             <div>
               <label className="text-xs text-slate-400 block mb-1">发布说明</label>
@@ -316,7 +385,7 @@ export default function StudioPage() {
             </div>
             <button onClick={() => void publish()} disabled={pubBusy}
               className="text-sm px-5 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 flex items-center gap-1.5 disabled:opacity-50">
-              {pubBusy ? <Loader size={15} className="animate-spin" /> : <Rocket size={15} />}{pubBusy ? '发布中…' : '发布到对话工作台与市场'}
+              {pubBusy ? <Loader size={15} className="animate-spin" /> : <Rocket size={15} />}{pubBusy ? '发布中…' : isAdmin ? '发布到对话工作台与市场' : '发布到数字员工工作台'}
             </button>
           </div>
         </div>
@@ -327,17 +396,75 @@ export default function StudioPage() {
     )
   }
 
-  // ── 列表视图 ──
-  const shown = agents.filter(a => filter === '全部' || a.status === filter)
+  // ── 列表视图：统一角色卡（一种卡片 + 生命周期徽标）──
+  // 领域模型：卡片 = 角色（角色包或引擎人格虚拟卡）；徽标 = 生命周期状态（模板/引擎原生/站点定制/已发布/演示）。
+  // 「发布」是卡上的动作而非另一类卡 —— 数字员工 = 走到已发布这一步的角色。
+
+  const ORIGIN_META: Record<string, { label: string; cls: string; grad: string }> = {
+    published: { label: '已发布 · 数字员工', cls: 'bg-emerald-50 text-emerald-600 border-emerald-200', grad: 'from-emerald-500 to-teal-500' },
+    site: { label: '站点定制', cls: 'bg-sky-50 text-sky-600 border-sky-200', grad: 'from-sky-500 to-blue-500' },
+    engine: { label: '引擎原生', cls: 'bg-amber-50 text-amber-600 border-amber-200', grad: 'from-amber-500 to-orange-500' },
+    template: { label: '底座模板', cls: 'bg-violet-50 text-violet-600 border-violet-200', grad: 'from-violet-500 to-purple-500' },
+    demo: { label: '演示模板', cls: 'bg-slate-100 text-slate-500 border-slate-200', grad: 'from-slate-400 to-slate-500' },
+  }
+  const ORIGIN_ORDER: Array<'全部' | '已发布' | '引擎原生' | '站点定制' | '底座模板' | '演示'> = ['全部', '已发布', '引擎原生', '站点定制', '底座模板', '演示']
+  const originCount = (o: string) =>
+    o === '全部' ? rolePkgs.length + demoSeed.length
+      : o === '演示' ? demoSeed.length
+      : rolePkgs.filter((p) => ORIGIN_META[p.origin ?? 'template'].label.startsWith(o)).length
+
+  const shownPkg = rolePkgs.filter((p) => originFilter === '全部' || ORIGIN_META[p.origin ?? 'template'].label.startsWith(originFilter))
+  const shownDemo = demoSeed.filter(() => originFilter === '全部' || originFilter === '演示')
+
+  const exportPkg = (p: RolePackageInfo) => {
+    const bundle = { format: 'aigility-role-package', version: 1, exportedAt: new Date().toISOString(), manifest: p.manifest, prompt: p.prompt }
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `role-${p.id}.json`
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
+  /** 定制副本：引擎虚拟卡 → 创建站点角色包（可编辑；capability_ref 指回引擎，对话仍走引擎） */
+  const [forkBusy, setForkBusy] = useState<string | null>(null)
+  const forkEngine = async (p: RolePackageInfo) => {
+    setForkBusy(p.id)
+    try {
+      await saveRolePackage(p.id, {
+        manifest: p.manifest,
+        prompt: `你是「${p.name}」。${p.description || ''}\n\n（定制副本：在此撰写完整人设；capability_ref 指向引擎原生人格，保存后对话仍由引擎承载。）\n`,
+      })
+      await refreshPkgs()
+      setBanner(`已创建「${p.name}」站点定制副本（data/roles/${p.id}）——可在角色包编辑器中完善人设`)
+    } catch (e) { setPubError(String((e as Error).message ?? e)) } finally { setForkBusy(null) }
+  }
+
+  /** 发布预填：站点/模板包 → 打开发布表单（发布后成为数字员工） */
+  const publishPrefill = (p: RolePackageInfo) => {
+    setForm({ ...blank, name: p.name, description: p.description || p.manifest.identity.name, prompt: p.prompt || `你是「${p.name}」。`, category: agentCats.includes(p.manifest.identity.signature ?? '') ? (p.manifest.identity.signature ?? '知识服务') : '知识服务' })
+    setEditId(null); setView('edit')
+  }
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-semibold text-slate-800">智能体工厂</h1>
-          <p className="text-sm text-slate-500 mt-1">数字员工的角色产线：人设、能力、通道一站配齐 —— 发布即真注册（@persona/aigility-agent）</p>
+          <p className="text-sm text-slate-500 mt-1">全量角色产线：一种卡片，徽标即生命周期 —— 定制、发布、分享一站完成（发布 = 真注册 @persona/aigility-agent）</p>
         </div>
-        <button onClick={openNew} className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-1.5"><Plus size={15} />新建数字员工</button>
+        <div className="flex gap-2">
+          <label className="text-sm px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 flex items-center gap-1.5 cursor-pointer">
+            <Upload size={15} />导入角色
+            <input type="file" accept=".json" className="hidden" onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (!f) return
+              f.text().then((t) => importRoleFile(t).then((id) => { setBanner(`已导入角色「${id}」→ 站点角色包（data/roles/${id}）`); refreshPkgs() }).catch((err) => setPubError(String((err as Error).message ?? err))))
+              e.target.value = ''
+            }} />
+          </label>
+          <button onClick={openNew} className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 flex items-center gap-1.5"><Plus size={15} />新建数字员工</button>
+        </div>
       </div>
 
       {banner && (
@@ -345,108 +472,161 @@ export default function StudioPage() {
           <CheckCircle2 size={14} />{banner}
         </div>
       )}
+      {pubError && <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-xs text-red-600">{pubError}</div>}
 
+      {/* 生命周期筛选 */}
       <div className="flex gap-2 items-center flex-wrap">
-        {(['全部', '已发布', '草稿'] as const).map(f => (
-          <button key={f} onClick={() => setFilter(f)}
-            className={`text-xs px-3.5 py-1.5 rounded-full transition ${filter === f ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:border-blue-300'}`}>
-            {f}{f !== '全部' && ` ${agents.filter(a => a.status === f).length}`}
+        {ORIGIN_ORDER.map(f => (
+          <button key={f} onClick={() => setOriginFilter(f)}
+            className={`text-xs px-3.5 py-1.5 rounded-full transition ${originFilter === f ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:border-blue-300'}`}>
+            {f} {originCount(f) > 0 && ` ${originCount(f)}`}
           </button>
         ))}
-        <span className="text-xs text-slate-400 ml-auto flex items-center gap-1"><Store size={12} />另有官方模板库可在智能体市场直接复用改造</span>
+        <span className="text-xs text-slate-400 ml-auto flex items-center gap-1"><Store size={12} />角色包可导出分享（JSON），或经 git 直接分发 roles/ 目录</span>
       </div>
 
-      {shown.length === 0 ? (
-        <div className="bg-white rounded-xl border border-slate-200/80 p-16 text-center">
-          <SearchX size={28} className="text-slate-300 mx-auto mb-3" />
-          <div className="text-sm text-slate-500">暂无{filter}的数字员工</div>
-          <button onClick={openNew} className="mt-4 text-xs px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">新建第一个</button>
-        </div>
-      ) : (
-        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {shown.map(a => (
-            <div key={a.id} className={`bg-white rounded-xl border p-5 hover:shadow-md transition ${a.src === 'factory' ? 'border-sky-300 ring-1 ring-sky-100' : 'border-slate-200/80'}`}>
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-500 to-sky-500 text-white flex items-center justify-center"><Bot size={16} /></div>
-                  <div>
-                    <div className="font-medium text-slate-800 text-sm">{a.name}</div>
-                    <div className="text-[11px] text-slate-400">{a.category} · 更新 {a.updatedAt}</div>
-                  </div>
-                </div>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full ${a.status === '已发布' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500'}`}>
-                  {a.status}{a.src === 'factory' ? ' · 真注册' : ' · 演示'}
-                </span>
-              </div>
-              <p className="text-xs text-slate-500 leading-relaxed mb-3 min-h-[32px]">{a.description}</p>
-              <div className="flex gap-1.5 flex-wrap mb-3">
-                {a.tags.map((t: string) => <span key={t} className="text-[10px] px-2 py-0.5 rounded bg-slate-50 border border-slate-100 text-slate-500">{t}</span>)}
-              </div>
-              <div className="text-[11px] text-slate-400 mb-3">
-                {a.src === 'factory'
-                  ? <>角色 ID <code className="text-sky-600">{a.id}</code> · 编辑内可配 IM 能力与通道</>
-                  : '演示数据 · 可作模板复用'}
-              </div>
-              <div className="flex gap-2 pt-3 border-t border-slate-50">
-                <button onClick={() => openEdit(a)}
-                  className="flex-1 text-xs py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 flex items-center justify-center gap-1"><PenLine size={12} />{a.src === 'factory' ? '编辑' : '以此为基础新建'}</button>
-                <button onClick={() => void removeAgent(a)}
-                  className="text-xs py-1.5 px-3 rounded-lg border border-slate-200 text-slate-400 hover:text-red-500 hover:border-red-200"><Trash2 size={12} /></button>
-              </div>
-            </div>
-          ))}
+      {/* 智能体市场管理（仅管理员）：数据模式 + 上架范围 */}
+      {isAdmin && (
+        <div className="bg-white rounded-xl border border-sky-200 ring-1 ring-sky-100/60 p-5 space-y-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="w-7 h-7 rounded-lg bg-sky-100 text-sky-600 flex items-center justify-center"><Store size={15} /></span>
+            <h2 className="text-sm font-semibold text-slate-800">智能体市场 · 数据模式</h2>
+            <span className="text-[11px] text-slate-400">市场面向普通用户，展示内容由管理员控制（站点级，全站生效）</span>
+          </div>
+          <div className="flex gap-2 flex-wrap items-center">
+            {([['mock', '模拟数据', '市场显示演示模板（管理员未设置时的缺省）'], ['real', '真实数据', '市场显示已上架的数字员工（可见范围=企业内）']] as const).map(([m, label, tip]) => (
+              <button key={m} onClick={() => void changeDataMode(m)} disabled={shelfBusy}
+                className={`text-xs px-4 py-2 rounded-lg border transition text-left disabled:opacity-50 ${dataMode === m ? 'border-sky-400 bg-sky-50 text-sky-700' : 'border-slate-200 text-slate-500 hover:border-sky-300'}`}>
+                <div className="font-medium flex items-center gap-1.5">{shelfBusy && dataMode !== m ? <Loader size={12} className="animate-spin" /> : null}{label}{dataMode === m && <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-100">当前</span>}</div>
+                <div className="text-[10px] text-slate-400 mt-0.5">{tip}</div>
+              </button>
+            ))}
+            <span className="text-[11px] text-slate-400 ml-auto">已发布 {rolePkgs.filter(p => p.origin === 'published').length} 个数字员工 · 其中 {rolePkgs.filter(p => p.origin === 'published' && (p.published?.visibility ?? '企业内') === '企业内').length} 个已上架（企业内可见）</span>
+          </div>
         </div>
       )}
 
-      {/* 角色包（roles/ 目录）：可移植角色单元 —— 命令面板/调度器在此配置 */}
-      <div>
-        <div className="flex items-center gap-2 mb-3 flex-wrap">
-          <Package size={15} className="text-violet-500" />
-          <h2 className="text-sm font-semibold text-slate-700">角色包 · roles/ 目录</h2>
-          <span className="text-[11px] text-slate-400">可移植五要素单元（SKILL.md 人设 + role.json）；保存即原子写回包目录，git 可 diff/回滚</span>
-        </div>
-        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {rolePkgs.map((p) => {
-            const cmds = p.manifest.actions.commands ?? []
-            const schs = p.manifest.actions.schedules ?? []
-            return (
-              <div key={p.id} className="bg-white rounded-xl border border-violet-200 ring-1 ring-violet-50 p-5 hover:shadow-md transition">
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-violet-500 to-purple-500 text-white flex items-center justify-center"><Package size={16} /></div>
-                    <div>
-                      <div className="font-medium text-slate-800 text-sm">{p.name}</div>
-                      <code className="text-[10px] text-slate-400">{p.id}</code>
-                    </div>
+      {/* 统一角色卡网格 */}
+      <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {shownPkg.map((p) => {
+          const meta = ORIGIN_META[p.origin ?? 'template']
+          const cmds = p.manifest.actions.commands ?? []
+          const schs = p.manifest.actions.schedules ?? []
+          const chs = p.manifest.sources.channels ?? []
+          const vis = p.published?.visibility ?? '企业内'
+          return (
+            <div key={p.id} className={`bg-white rounded-xl border p-5 hover:shadow-md transition ${p.origin === 'published' ? 'border-emerald-200 ring-1 ring-emerald-50' : p.origin === 'engine' && p.virtual ? 'border-amber-200 border-dashed' : 'border-slate-200/80'}`}>
+              <div className="flex items-start justify-between mb-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${meta.grad} text-white flex items-center justify-center shrink-0`}>
+                    {p.origin === 'engine' ? <Cpu size={16} /> : p.origin === 'published' ? <Rocket size={16} /> : <Package size={16} />}
                   </div>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${p.layer === 'public' ? 'bg-violet-50 text-violet-600' : 'bg-sky-50 text-sky-600'}`}>
-                    {p.layer === 'public' ? '公共包' : '站点包'}
-                  </span>
+                  <div className="min-w-0">
+                    <div className="font-medium text-slate-800 text-sm truncate">{p.name}</div>
+                    <code className="text-[10px] text-slate-400">{p.id}</code>
+                  </div>
                 </div>
-                <p className="text-xs text-slate-500 leading-relaxed mb-3 min-h-[32px]">{p.description}</p>
-                <div className="flex gap-1.5 flex-wrap mb-3">
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-slate-50 border border-slate-100 text-slate-500 flex items-center gap-1"><Terminal size={9} />命令 {cmds.length}</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-slate-50 border border-slate-100 text-slate-500 flex items-center gap-1"><CalendarClock size={9} />调度 {schs.filter((s) => s.enabled !== false).length}/{schs.length}</span>
-                  {(p.manifest.actions.tools ?? []).length > 0 && (
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-slate-50 border border-slate-100 text-slate-500">工具 {(p.manifest.actions.tools ?? []).length}</span>
-                  )}
-                  {p.issues.length > 0 && (
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-red-50 text-red-600 border border-red-100">校验未过</span>
-                  )}
-                </div>
-                <div className="flex gap-2 pt-3 border-t border-slate-50">
+                <span className={`text-[10px] px-2 py-0.5 rounded-full border shrink-0 ${meta.cls}`}>{meta.label}</span>
+              </div>
+              <p className="text-xs text-slate-500 leading-relaxed mb-3 min-h-[32px] line-clamp-2">{p.description || '（人设待补）'}</p>
+              <div className="flex gap-1.5 flex-wrap mb-3">
+                {p.published && <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-50 border border-emerald-100 text-emerald-600">{p.published.visibility ?? '企业内'}</span>}
+                {cmds.length > 0 && <span className="text-[10px] px-2 py-0.5 rounded bg-slate-50 border border-slate-100 text-slate-500">命令 {cmds.length}</span>}
+                {schs.length > 0 && <span className="text-[10px] px-2 py-0.5 rounded bg-slate-50 border border-slate-100 text-slate-500">调度 {schs.filter((x) => x.enabled !== false).length}/{schs.length}</span>}
+                {chs.length > 0 && <span className="text-[10px] px-2 py-0.5 rounded bg-slate-50 border border-slate-100 text-slate-500">通道 {chs.map((c) => c.platform).join('/')}</span>}
+                {p.issues.length > 0 && <span className="text-[10px] px-2 py-0.5 rounded bg-red-50 text-red-600 border border-red-100">校验未过</span>}
+              </div>
+              <div className="flex gap-2 pt-3 border-t border-slate-50 flex-wrap">
+                {p.origin === 'published' && (
+                  <>
+                    <button onClick={() => { setForm({ ...blank, name: p.name, description: p.description, prompt: p.prompt, category: p.published?.category ?? '知识服务', tags: p.published?.tags ?? [] }); setEditId(p.id); setView('edit') }}
+                      className="flex-1 text-xs py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 flex items-center justify-center gap-1"><PenLine size={12} />编辑</button>
+                    <button onClick={() => { setPkgId(p.id); setView('pkg') }}
+                      className="flex-1 text-xs py-1.5 rounded-lg border border-violet-200 text-violet-600 hover:bg-violet-50 flex items-center justify-center gap-1"><Package size={12} />角色包</button>
+                    {isAdmin && (
+                      <button title={vis === '企业内' ? '撤下市场：可见范围改为「仅自己」，智能体市场不再对普通用户展示' : '上架市场：可见范围改为「企业内」，普通用户在智能体市场可见可用'}
+                        onClick={() => { if (window.confirm(vis === '企业内' ? `撤下「${p.name}」的市场上架？普通用户将不可见（对话工作台自己仍可用）。` : `将「${p.name}」上架智能体市场？普通用户将可见可用。`)) void toggleShelf(p.id, p.name, vis) }}
+                        disabled={shelfBusy}
+                        className={`text-xs py-1.5 px-3 rounded-lg border flex items-center gap-1 disabled:opacity-50 ${vis === '企业内' ? 'border-emerald-200 text-emerald-600 hover:bg-emerald-50' : 'border-sky-200 text-sky-600 hover:bg-sky-50'}`}>
+                        <Store size={12} />{vis === '企业内' ? '撤下市场' : '上架市场'}
+                      </button>
+                    )}
+                    <button title="下架：摘除发布账本（角色包保留，回到站点定制态）"
+                      onClick={() => { if (window.confirm(`下架「${p.name}」？角色包保留，工作台/市场将不可再对话。`)) void deleteSkill(p.id).then(() => { refresh(); refreshPkgs(); setBanner(`「${p.name}」已下架——角色包保留，可重新发布`) }).catch((err) => setPubError(String((err as Error).message ?? err))) }}
+                      className="text-xs py-1.5 px-3 rounded-lg border border-slate-200 text-slate-400 hover:text-amber-600 hover:border-amber-200"><Undo2 size={12} /></button>
+                  </>
+                )}
+                {p.origin === 'site' && (
+                  <>
+                    <button onClick={() => { setPkgId(p.id); setView('pkg') }}
+                      className="flex-1 text-xs py-1.5 rounded-lg border border-violet-200 text-violet-600 hover:bg-violet-50 flex items-center justify-center gap-1"><PenLine size={12} />编辑角色包</button>
+                    <button onClick={() => publishPrefill(p)}
+                      className="flex-1 text-xs py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 flex items-center justify-center gap-1"><Rocket size={12} />发布上架</button>
+                  </>
+                )}
+                {(p.origin === 'template' || (p.origin === 'engine' && !p.virtual)) && (
                   <button onClick={() => { setPkgId(p.id); setView('pkg') }}
-                    className="flex-1 text-xs py-1.5 rounded-lg border border-violet-200 text-violet-600 hover:bg-violet-50 flex items-center justify-center gap-1"><PenLine size={12} />配置角色包</button>
+                    className="flex-1 text-xs py-1.5 rounded-lg border border-violet-200 text-violet-600 hover:bg-violet-50 flex items-center justify-center gap-1"><PenLine size={12} />配置（自动站点化）</button>
+                )}
+                {p.origin === 'site' && (
+                  <button title="删除站点定制版：模板来源回落底座模板，市场安装的回落引擎虚拟卡"
+                    onClick={() => { if (window.confirm(`删除「${p.name}」的站点定制版？`)) void revertRolePackage(p.id).then(() => { refreshPkgs(); setBanner(`「${p.name}」站点定制版已删除`) }).catch((err) => setPubError(String((err as Error).message ?? err))) }}
+                    className="text-xs py-1.5 px-3 rounded-lg border border-slate-200 text-slate-400 hover:text-amber-600 hover:border-amber-200"><Undo2 size={12} /></button>
+                )}
+                {p.origin !== 'engine' && (
+                  <button title="导出 ElizaOS character file（官方 schema，settings.aigility 携带回转字段）"
+                    onClick={() => { void fetchRoleEliza(p.id).then((c) => {
+                      const blob = new Blob([JSON.stringify(c, null, 2)], { type: 'application/json' })
+                      const a = document.createElement('a')
+                      a.href = URL.createObjectURL(blob)
+                      a.download = `${p.id}.character.json`
+                      a.click()
+                      URL.revokeObjectURL(a.href)
+                    }).catch((err) => setPubError(String((err as Error).message ?? err))) }}
+                    className="text-xs py-1.5 px-3 rounded-lg border border-slate-200 text-slate-400 hover:text-slate-700"><Download size={12} /></button>
+                )}
+                {p.origin === 'engine' && p.virtual && (
+                  <button onClick={() => void forkEngine(p)} disabled={forkBusy === p.id}
+                    className="flex-1 text-xs py-1.5 rounded-lg bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 flex items-center justify-center gap-1">
+                    {forkBusy === p.id ? <Loader size={12} className="animate-spin" /> : <Plus size={12} />}定制副本
+                  </button>
+                )}
+                {p.origin !== 'engine' && (
+                  <button title="导出角色包 JSON（可直接分享/导入）" onClick={() => exportPkg(p)}
+                    className="text-xs py-1.5 px-3 rounded-lg border border-slate-200 text-slate-400 hover:text-slate-700"><Save size={12} /></button>
+                )}
+              </div>
+            </div>
+          )
+        })}
+        {shownDemo.map(a => (
+          <div key={a.id} className="bg-white rounded-xl border border-slate-200/80 p-5 hover:shadow-md transition opacity-90">
+            <div className="flex items-start justify-between mb-2">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-slate-400 to-slate-500 text-white flex items-center justify-center"><Bot size={16} /></div>
+                <div>
+                  <div className="font-medium text-slate-800 text-sm">{a.name}</div>
+                  <div className="text-[11px] text-slate-400">{a.category} · 更新 {a.updatedAt}</div>
                 </div>
               </div>
-            )
-          })}
-          {rolePkgs.length === 0 && (
-            <div className="md:col-span-2 xl:col-span-3 text-xs text-slate-400 px-4 py-8 text-center bg-white rounded-xl border border-dashed border-slate-200">
-              roles/ 目录暂无角色包（目录下每个含 SKILL.md + role.json 的子目录即一个包）
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">演示模板</span>
             </div>
-          )}
-        </div>
+            <p className="text-xs text-slate-500 leading-relaxed mb-3 min-h-[32px]">{a.description}</p>
+            <div className="flex gap-1.5 flex-wrap mb-3">
+              {a.tags.map((t: string) => <span key={t} className="text-[10px] px-2 py-0.5 rounded bg-slate-50 border border-slate-100 text-slate-500">{t}</span>)}
+            </div>
+            <div className="flex gap-2 pt-3 border-t border-slate-50">
+              <button onClick={() => openEdit(a)}
+                className="flex-1 text-xs py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 flex items-center justify-center gap-1"><PenLine size={12} />以此为基础新建</button>
+            </div>
+          </div>
+        ))}
+        {shownPkg.length === 0 && shownDemo.length === 0 && (
+          <div className="md:col-span-2 xl:col-span-3 bg-white rounded-xl border border-dashed border-slate-200/80 p-16 text-center">
+            <SearchX size={28} className="text-slate-300 mx-auto mb-3" />
+            <div className="text-sm text-slate-500">该生命周期下暂无角色</div>
+          </div>
+        )}
       </div>
       <style>{`@keyframes fadeSlide { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: none; } }`}</style>
     </div>

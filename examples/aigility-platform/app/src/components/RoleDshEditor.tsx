@@ -1,8 +1,8 @@
 /**
  * RoleDshEditor — 单角色 IM 能力编辑器（skill/MCP/通道声明）
  *
- * 一个角色一份能力组合：roles.json（skill/MCP，DSH 中继热读取）+ role-manifests.json
- * （通道声明，记忆域恒=角色 ID）。被两处复用：
+ * 一个角色一份能力组合：roles.json（skill/MCP，DSH 中继热读取）+ 角色包五要素
+ * 声明（每个角色一个 role.json，站点层在 data/roles；role-manifests.json 已退役并入角色包）。被两处复用：
  *  - 智能体工厂编辑界面（roleId = 已发布技能 id —— 角色的 IM 面）；
  *  - 「通道与角色」页（roleId = default/readonly 等渠道路由系统角色）。
  *
@@ -10,8 +10,8 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import {
-  fetchRoles, saveRole, fetchDshSkills, fetchMcpShelf, fetchRoleManifests, saveRoleManifest, fetchWorkflows,
-  type RoleMcpServer, type RolesPayload, type DshSkillInfo, type McpShelfItem, type RoleManifestView,
+  fetchRoles, saveRole, fetchDshSkills, fetchMcpShelf, fetchRolePackages, saveRolePackage, fetchWorkflows,
+  type RoleMcpServer, type RolesPayload, type DshSkillInfo, type McpShelfItem, type RolePackageManifest,
 } from '../lib/harness'
 import { Loader2, Plus, Trash2, Save, Sparkles, AlertTriangle, Package, MessageSquare, CheckCircle2, GitBranch } from 'lucide-react'
 
@@ -36,7 +36,7 @@ export default function RoleDshEditor({ roleId, label, onChanged, headerExtra, s
   const [shelfSkills, setShelfSkills] = useState<DshSkillInfo[]>([])
   const [mcpShelf, setMcpShelf] = useState<McpShelfItem[]>([])
   const [missing, setMissing] = useState<string[]>([])
-  const [manifest, setManifest] = useState<RoleManifestView | null>(null)
+  const [manifest, setManifest] = useState<RolePackageManifest | null>(null)
   const [workflows, setWorkflows] = useState<Array<{ id: string; name: string }>>([])
   const [busy, setBusy] = useState(false)
   const [banner, setBanner] = useState('')
@@ -45,7 +45,7 @@ export default function RoleDshEditor({ roleId, label, onChanged, headerExtra, s
   const reload = useCallback(async () => {
     const [j, shelf, mshelf, mans, wfs] = await Promise.all([
       fetchRoles(), fetchDshSkills().catch(() => ({ skills: [] as DshSkillInfo[] })),
-      fetchMcpShelf().catch(() => [] as McpShelfItem[]), fetchRoleManifests().catch(() => []),
+      fetchMcpShelf().catch(() => [] as McpShelfItem[]), fetchRolePackages().catch(() => []),
       fetchWorkflows().catch(() => []),
     ])
     setWorkflows(wfs)
@@ -56,7 +56,7 @@ export default function RoleDshEditor({ roleId, label, onChanged, headerExtra, s
     setMissing(j.missingSkills?.[roleId] ?? [])
     setShelfSkills(shelf.skills ?? [])
     setMcpShelf(mshelf)
-    setManifest(mans.find((m) => m.role_id === roleId) ?? null)
+    setManifest(mans.find((m) => m.id === roleId)?.manifest ?? null)
   }, [roleId])
 
   useEffect(() => { reload().catch((e) => setError(String((e as Error).message ?? e))) }, [reload])
@@ -87,18 +87,21 @@ export default function RoleDshEditor({ roleId, label, onChanged, headerExtra, s
   }
 
   /** 保存通道声明（即时；记忆域恒=角色 ID, 基线 3/4） */
-  const saveChannels = async (channels: NonNullable<RoleManifestView['sources']['channels']>) => {
+  const saveChannels = async (channels: NonNullable<RolePackageManifest['sources']['channels']>) => {
     setError(''); setBanner('')
     try {
-      const next: RoleManifestView = {
+      const next: RolePackageManifest = {
         role_id: roleId,
         identity: { name: manifest?.identity.name || label || roleId, capability_ref: manifest?.identity.capability_ref ?? roleId },
         sources: { channels: channels.length ? channels : undefined, data: manifest?.sources.data ?? [] },
-        actions: { tools: manifest?.actions.tools ?? [], workflows: manifest?.actions.workflows ?? [], engine: manifest?.actions.engine },
+        actions: {
+          tools: manifest?.actions.tools ?? [], workflows: manifest?.actions.workflows ?? [],
+          commands: manifest?.actions.commands, schedules: manifest?.actions.schedules, engine: manifest?.actions.engine,
+        },
         outbound: { reply: manifest?.outbound.reply, push: manifest?.outbound.push ?? [] },
-        memory: { agent_id: roleId },
+        memory: { agent_id: roleId, legacy_agent_ids: manifest?.memory.legacy_agent_ids },
       }
-      await saveRoleManifest(next)
+      await saveRolePackage(roleId, { manifest: next })
       setManifest(next)
       setBanner(channels.length
         ? `通道声明已保存：${channels.map((c) => `${c.platform}×${c.apps.length}`).join('、')}`
@@ -111,14 +114,14 @@ export default function RoleDshEditor({ roleId, label, onChanged, headerExtra, s
   const toggleWorkflow = async (wfId: string) => {
     setError(''); setBanner('')
     try {
-      const base: RoleManifestView = manifest ?? {
+      const base: RolePackageManifest = manifest ?? {
         role_id: roleId, identity: { name: label || roleId, capability_ref: roleId },
         sources: {}, actions: { tools: [], workflows: [] }, outbound: {}, memory: { agent_id: roleId },
       }
       const cur = base.actions.workflows ?? []
       const next = cur.includes(wfId) ? cur.filter((x) => x !== wfId) : [...cur, wfId]
-      const nextManifest: RoleManifestView = { ...base, actions: { ...base.actions, workflows: next } }
-      await saveRoleManifest(nextManifest)
+      const nextManifest: RolePackageManifest = { ...base, actions: { ...base.actions, workflows: next } }
+      await saveRolePackage(roleId, { manifest: nextManifest })
       setManifest(nextManifest)
       setBanner(next.length ? `编排委托已更新：${next.join('、')}` : '编排委托已清空')
       onChanged?.()

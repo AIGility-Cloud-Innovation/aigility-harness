@@ -57,7 +57,7 @@ function loadFile(): IdentityRegistryFile {
 /** 仓库根 .env 单键读取（与被管模块同源语义） */
 function readEnvValue(key: string): string | undefined {
   try {
-    const content = readFileSync(resolve(REPO_ROOT, ".env"), "utf-8");
+    const content = readFileSync(resolve(process.env.DOTENV_FILE || resolve(REPO_ROOT, ".env")), "utf-8");
     for (const line of content.split(/\r?\n/)) {
       const trimmed = line.trim();
       if (trimmed.startsWith(`${key}=`)) return trimmed.slice(key.length + 1).trim();

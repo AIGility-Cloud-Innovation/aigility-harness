@@ -224,7 +224,7 @@ export async function listFeishuChats(override?: { appId?: string; appSecret?: s
 /** 读取仓库根 .env 的单个键（与被管模块 loadEnv 同源，不含 export 前缀/引号处理从简） */
 function readEnvValue(key: string): string | undefined {
   try {
-    const content = readFileSync(resolve(REPO_ROOT, ".env"), "utf-8");
+    const content = readFileSync(resolve(process.env.DOTENV_FILE || resolve(REPO_ROOT, ".env")), "utf-8");
     for (const line of content.split(/\r?\n/)) {
       const trimmed = line.trim();
       if (trimmed.startsWith(`${key}=`)) return trimmed.slice(key.length + 1).trim();
@@ -357,12 +357,24 @@ export async function startTaskLoop(timeoutMs = 12000): Promise<StartResult> {
   const err = appendHandle(STDERR_LOG);
   let proc: ChildProcess;
   try {
-    proc = spawn(pnpmBin(), ["--filter", "feishu-task-loop", "start"], {
-      cwd: REPO_ROOT,
-      stdio: ["ignore", out, err],
-      env: { ...process.env, ...configEnv(cfg) },
-      detached: false,
-    });
+    // 分离准备：站点迁出 harness 后 pnpm workspace filter 失效，
+    // 可用 TASK_LOOP_START_CMD 注入完整启动命令（shell 解析，如
+    // "pnpm --dir /opt/feishu-task-loop start" 或 "node /opt/.../dist/index.js"）
+    const customCmd = process.env.TASK_LOOP_START_CMD?.trim();
+    proc = customCmd
+      ? spawn(customCmd, {
+          cwd: REPO_ROOT,
+          stdio: ["ignore", out, err],
+          env: { ...process.env, ...configEnv(cfg) },
+          shell: true,
+          detached: false,
+        })
+      : spawn(pnpmBin(), ["--filter", "feishu-task-loop", "start"], {
+          cwd: REPO_ROOT,
+          stdio: ["ignore", out, err],
+          env: { ...process.env, ...configEnv(cfg) },
+          detached: false,
+        });
   } catch (e) {
     closeSync(out); closeSync(err);
     throw new TaskLoopError(`启动失败：${String(e)}`);

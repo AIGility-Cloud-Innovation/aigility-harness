@@ -24,7 +24,16 @@ import type {
   HealthStatus,
 } from "@aigility-harness/core";
 
-import { getSkill, bumpSkillUsage } from "./skill-registry.js";
+import { getSkill, bumpSkillUsage, type AigilitySkill } from "./skill-registry.js";
+import { bundledRolesDir, loadRolePackage } from "@aigility-harness/role-kit";
+import { SITE_ROLES_DIR } from "./channel-aggregator.js";
+
+/** 人设读侧：站点角色包为事实源（发布时 syncSkillPackage 同步写入）；
+ * 包缺失时回落账本 prompt（恢复缓存语义）。 */
+function skillPersonaPrompt(skill: AigilitySkill): string {
+  const fromPackage = loadRolePackage(skill.id, { publicDir: bundledRolesDir(), siteDirs: [SITE_ROLES_DIR] })?.prompt;
+  return (fromPackage ?? skill.prompt).trim();
+}
 import { SITE_IMPROVER_SKILL_ID, improverTurn } from "./site-improver.js";
 
 // ── 服务定义 ─────────────────────────────────────────────────────
@@ -125,7 +134,7 @@ export const aigilityAgentProvider: Provider<AigilityAgentRequest, AigilityAgent
     // 技能人设：工厂 Prompt 为主体 + 描述/标签补充边界
     const systemPrompt = skill
       ? [
-          skill.prompt.trim(),
+          skillPersonaPrompt(skill),
           "",
           `## 角色设定（智能体工厂发布）`,
           `- 数字员工名称：${skill.name}（分类：${skill.category}）`,

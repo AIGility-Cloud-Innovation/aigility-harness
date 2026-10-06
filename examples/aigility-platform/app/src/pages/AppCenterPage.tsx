@@ -131,7 +131,7 @@ export default function AppCenterPage({ openPage, navHidden, onToggleNav, navEdi
               )}
               <div className="flex gap-2 pt-3 border-t border-slate-50">
                 <button disabled={!isTl && !isNavApp && !a.on} onClick={() => {
-                  if (isTl) openPage?.('task-loop')
+                  if (isTl) openPage?.('tasks')  // 项目小助理看板已并入统一台账看板（task-board 路由 = 'tasks'）
                   else if (isNavApp) openPage?.(navPage)
                   else if (a.detail || a.id === 'app-report') setOpen(a)
                 }}

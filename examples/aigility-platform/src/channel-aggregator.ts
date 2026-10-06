@@ -12,7 +12,32 @@
 import { canonicalTimemUserId, findMemberByAxis } from "@aigility-harness/layer-orchestration";
 import type { IdentityRegistryFile } from "@aigility-harness/layer-orchestration";
 import type { FeishuIngressRequest } from "@aigility-harness/layer-infrastructure";
-import { loadRoleManifestFile, validateManifest, type RoleManifestV2 } from "./role-manifest.js";
+import { bundledRolesDir, loadRolePackages, type RoleManifest } from "@aigility-harness/role-kit";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+/** 站点角色事实源（data/roles，gitignored 站点状态）——聚合器与角色包端点共用 */
+export const SITE_ROLES_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../data/roles");
+
+/** manifest 校验（自 role-manifest.ts 收编）：五要素 + 通道字段完整性 */
+export function validateManifest(m: RoleManifest): string[] {
+  const issues: string[] = [];
+  if (!m.role_id) issues.push("缺 role_id");
+  if (!m.identity?.name) issues.push("缺 identity.name");
+  if (!m.memory?.agent_id) issues.push("缺 memory.agent_id（记忆域必须显式声明）");
+  if (m.memory?.agent_id && m.memory.agent_id !== m.role_id) {
+    // 基线 3/4：记忆域随角色唯一——不一致视为声明错误（防分裂）
+    issues.push(`memory.agent_id (${m.memory.agent_id}) 必须等于 role_id (${m.role_id})`);
+  }
+  for (const c of m.sources?.channels ?? []) {
+    if (!c.platform) issues.push("channel 缺 platform");
+    if (!c.apps?.length) issues.push(`channel ${c.platform} 缺 apps`);
+    for (const a of c.apps ?? []) {
+      if (!a.app) issues.push(`channel ${c.platform} 有 app 绑定缺 app 标识`);
+    }
+  }
+  return issues;
+}
 
 export interface AppPlan {
   platform: "feishu" | "wecom";
@@ -36,7 +61,7 @@ export interface AggregatorPlan {
 }
 
 /** 生成装配计划（dry-run 纯函数） */
-export function buildAggregatorPlan(manifests: RoleManifestV2[]): AggregatorPlan {
+export function buildAggregatorPlan(manifests: RoleManifest[]): AggregatorPlan {
   const issues: string[] = [];
   const byApp = new Map<string, AppPlan>();
   const webOnly: string[] = [];
@@ -85,9 +110,11 @@ export function buildAggregatorPlan(manifests: RoleManifestV2[]): AggregatorPlan
   return { apps: [...byApp.values()], issues, webOnlyRoleIds: webOnly };
 }
 
-/** 便捷读取：仓库 config/role-manifests.json → 计划 */
+/** 便捷读取：角色包双层（底座模板 + 站点 data/roles）→ 计划（role-manifests.json 已退役） */
 export function buildAggregatorPlanFromConfig(): AggregatorPlan {
-  return buildAggregatorPlan(loadRoleManifestFile().roles);
+  return buildAggregatorPlan(
+    loadRolePackages({ publicDir: bundledRolesDir(), siteDirs: [SITE_ROLES_DIR] }).map((p) => p.manifest),
+  );
 }
 
 /** 把计划中的 feishu app 转成 feishu-ingress 装配请求（真连装配用；M2 起 enableChannelAggregator 调用） */

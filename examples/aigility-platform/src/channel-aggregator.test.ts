@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { buildAggregatorPlan, resolveChannelUserId, toFeishuIngressRequest } from "./channel-aggregator.js";
-import type { RoleManifestV2 } from "./role-manifest.js";
+import type { RoleManifest } from "@aigility-harness/role-kit";
 import type { IdentityRegistryFile } from "@aigility-harness/layer-orchestration";
 
-function manifest(partial: Partial<RoleManifestV2>): RoleManifestV2 {
+function manifest(partial: Partial<RoleManifest>): RoleManifest {
   return {
     role_id: partial.role_id ?? "demo-role",
     identity: { name: partial.identity?.name ?? "演示角色", ...partial.identity },

@@ -1,0 +1,13 @@
+{
+  "role_id": "sales-chat",
+  "identity": {
+    "name": "销售客服",
+    "capability_ref": "sales-chat"
+  },
+  "sources": {},
+  "actions": {},
+  "outbound": {},
+  "memory": {
+    "agent_id": "sales-chat"
+  }
+}
