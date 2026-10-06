@@ -1,0 +1,9 @@
+# Gitea 私有 npm registry 消费侧配置示例
+# 复制到 ~/.npmrc（发布机/消费机都要），TOKEN 换成有 packages:read（发布机还需 packages:write）权限的 Gitea token
+#
+# @aigility-harness:registry=https://git.aigility.cloud/api/packages/AIGility-Cloud-Innovation/npm/
+# //git.aigility.cloud/api/packages/AIGility-Cloud-Innovation/npm/:_authToken=<TOKEN>
+# always-auth=true
+#
+# 验证：
+#   npm view @aigility-harness/core --registry https://git.aigility.cloud/api/packages/AIGility-Cloud-Innovation/npm/
