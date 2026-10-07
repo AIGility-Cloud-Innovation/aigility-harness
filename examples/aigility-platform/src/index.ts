@@ -54,7 +54,9 @@ import { ensureAigilityPlatform, routePlatform, sessionUserId, listTeamMembers, 
   createTask, listTasks, transitionTask, getTask, type TaskRow,
   listModuleState, setModuleState, listModulePresets, saveModulePreset, applyModulePreset, deleteModulePreset,
   listNavHidden, setNavHidden, isUserAdmin, listNavPrefs,
+  getChatPrefs, saveChatPrefs, isThinkingLevel,
   listDshPluginRows, insertDshPlugin, setDshPluginEnabled, deleteDshPluginRow, type DshPluginRow } from "./platform.js";
+import { workspaceRoots, browseWorkspace, resolveWorkspace } from "./workspace.js";
 import { aigilityAgentPlugin } from "./aigility-agent.js";
 import { siteImproverPlugin, SITE_IMPROVER_PERSONA_ID, SITE_IMPROVER_ROUTE, setTaskFiledHook } from "./site-improver.js";
 import { dshToolBridgePlugin } from "./dsh-tool.js";
@@ -1089,8 +1091,50 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
         }
         return;
       }
+      // ── 数字员工对话三件套（真 · per-user 持久化）：模型 / 思考等级 / 本地工作区 ──
+      // 「模型」取值来自网关模型池；「思考等级」是站点定义的枚举（auto/off/low/medium/high），
+      // 前端按所选模型把档位翻译成供应商参数直通上游；「工作区」是服务端可见目录（白名单内）。
+      if (path === "/api/aigility/chat/prefs" && req.method === "GET") {
+        const uid = sessionUserId(req);
+        if (!uid) { json(res, 401, { error: "未登录或会话已过期" }); return; }
+        json(res, 200, { ok: true, prefs: await getChatPrefs(uid) });
+        return;
+      }
+      if (path === "/api/aigility/chat/prefs" && req.method === "PUT") {
+        const uid = sessionUserId(req);
+        if (!uid) { json(res, 401, { error: "未登录或会话已过期" }); return; }
+        const body = JSON.parse((await readBody(req)) || "{}") as { model?: string; thinking?: string; workspace?: string };
+        if (body.thinking !== undefined && !isThinkingLevel(body.thinking)) {
+          json(res, 400, { ok: false, error: "思考等级取值须为 auto/off/low/medium/high" });
+          return;
+        }
+        // 工作区落库前必须过白名单（防任意路径写进偏好后被对话链路当授权目录用）
+        if (typeof body.workspace === "string" && body.workspace.trim()) {
+          const ws = resolveWorkspace(body.workspace);
+          if (!ws.ok) { json(res, 400, { ok: false, error: ws.error ?? "工作区不可用" }); return; }
+          body.workspace = ws.path;
+        }
+        const prefs = await saveChatPrefs(uid, body);
+        void writeAudit(uid, "chat.prefs.save",
+          `model=${prefs.model || "(跟随平台)"} thinking=${prefs.thinking} workspace=${prefs.workspace || "(未选)"}`);
+        json(res, 200, { ok: true, prefs });
+        return;
+      }
+      // 工作区根白名单（用户主目录 / 智悦仓库 / tmp，env AIGILITY_WORKSPACE_ROOTS 可追加）
+      if (path === "/api/aigility/workspace/roots" && req.method === "GET") {
+        if (!requireUser(req, res)) return;
+        json(res, 200, { ok: true, roots: workspaceRoots(true) });
+        return;
+      }
+      // 目录浏览（只列子目录；所有路径 realpath 后校验落在白名单根内）
+      if (path === "/api/aigility/workspace/browse" && req.method === "GET") {
+        if (!requireUser(req, res)) return;
+        const url = new URL(req.url ?? "/", "http://x");
+        const target = url.searchParams.get("path")?.trim() || workspaceRoots()[0]?.path || "";
+        json(res, 200, browseWorkspace(target));
+        return;
+      }
       if (path === "/api/aigility/workflows" && req.method === "GET") {
-        // 数据面工作流清单：executor-dispatch（任务派发路由）+ data/workflows/*.yaml（Plan 拆解产物）
         const list: Array<{ id: string; name: string; source: string }> = [
           { id: "executor-dispatch", name: "任务板执行器路由（content/docx/workflow/code/human）", source: "workflows/executor-dispatch.yaml" },
         ];

@@ -47,6 +47,13 @@ export interface LlmInferenceRequest {
     /** API key */
     key: string;
   };
+  /**
+   * 额外 OpenAI 兼容参数直通（可选）：供应商/模型专有旋钮原样透传给上游
+   * （如 thinking:{type}, reasoning_effort, enable_thinking 等），
+   * 由「思考等级」等 UI 组件翻译后携带。上游为 LiteLLM 时 drop_params
+   * 会静默忽略不支持参数, 不会炸链路。
+   */
+  parameter?: Record<string, unknown>;
 }
 
 export interface LlmInferenceResponse {

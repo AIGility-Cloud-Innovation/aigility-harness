@@ -308,6 +308,13 @@ const litellmProvider: Provider<LlmInferenceRequest, LlmInferenceResponse> = {
     // 请求级上游覆盖 (可选): 应用自带 LLM 配置时由调用方传入, 优先于 env 全局
     if (request.upstream?.url) endpoint.completionsUrl = normalizeBase(request.upstream.url) + "/chat/completions";
     if (request.upstream?.key) endpoint.key = request.upstream.key;
+    // 调用方直通参数（思考等级等）先铺, 再让平台级 LLM_THINKING 兜底覆盖 ——
+    // 平台显式配置是运维开关, 请求级旋钮只在平台未强制时生效
+    if (request.parameter) {
+      for (const [k, v] of Object.entries(request.parameter)) {
+        if (v !== undefined) payload[k] = v;
+      }
+    }
     if (endpoint.thinking) payload["thinking"] = { type: endpoint.thinking };
     const body = JSON.stringify(payload);
 

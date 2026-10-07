@@ -2,8 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { chatScripts, mcpTools, type ChatScript, type Skill } from '../mock/data'
 import FlowCanvas from '../components/FlowCanvas'
 import { getCurrentUser } from '../lib/api'
-import { streamAigilityChat, fetchRegistry, fetchDshTools, type SkillInfo, type DshToolInfo } from '../lib/harness'
-import { Bot, Send, Wrench, CheckCircle2, Clock, User, Sparkles, Plug, PlugZap, PlusCircle, ChevronRight, Loader2, ShieldCheck, Play, Bug, History, Rocket, Radio } from 'lucide-react'
+import {
+  streamAigilityChat, fetchRegistry, fetchDshTools, fetchLlmModels, fetchChatPrefs, saveChatPrefs,
+  fetchWorkspaceRoots, fetchWorkspaceBrowse, buildChatThinking,
+  type SkillInfo, type DshToolInfo, type ChatPrefs, type ThinkingLevel, type WorkspaceRoot,
+  type WorkspaceEntry, type WorkspaceBrowse,
+} from '../lib/harness'
+import { Bot, Send, Wrench, CheckCircle2, Clock, User, Sparkles, Plug, PlugZap, PlusCircle, ChevronRight, Loader2, ShieldCheck, Play, Bug, History, Rocket, Radio, Brain, FolderTree, Folder, HardDrive, Home, CornerUpLeft, X, AlertTriangle, Cpu } from 'lucide-react'
 
 interface Msg {
   role: 'user' | 'agent'
@@ -33,13 +38,38 @@ export default function AgentPage({ skillList, showMock = true }: { skillList: S
   const [skills, setSkills] = useState<SkillInfo[]>([])
   const [activeSkillId, setActiveSkillId] = useState('') // '' = 平台管家
 
+  // ── 对话三件套（真 · per-user 持久化）：模型设置 / 思考等级 / 本地工作区 ──
+  const [modelPool, setModelPool] = useState<string[]>([])
+  const [prefs, setPrefs] = useState<ChatPrefs>({ model: '', thinking: 'auto', workspace: '', updatedAt: '' })
+  const [prefsBusy, setPrefsBusy] = useState(false)
+  const [prefsError, setPrefsError] = useState('')
+  const [wsOpen, setWsOpen] = useState(false)
+
   useEffect(() => () => timeouts.current.forEach(clearTimeout), [])
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [msgs])
   useEffect(() => {
     fetchRegistry()
       .then(r => { setGwLlm(r.llm); setSkills(r.skills) })
       .catch(() => setGwLlm(null))
+    // 三件套：模型池（网关 /v1/models）+ 当前用户偏好（PG chat_prefs）
+    fetchLlmModels().then(r => setModelPool(r.models ?? [])).catch(() => {})
+    fetchChatPrefs().then(setPrefs).catch(() => { /* 未登录/旧后端 → 保持默认 */ })
   }, [])
+
+  /** 三件套「选择即保存」：写库成功才改本地状态；失败回滚并提示 */
+  const patchPrefs = async (patch: Partial<Pick<ChatPrefs, 'model' | 'thinking' | 'workspace'>>) => {
+    const before = prefs
+    setPrefsBusy(true); setPrefsError('')
+    try {
+      const next = await saveChatPrefs(patch)
+      setPrefs(next)
+    } catch (e) {
+      setPrefs(before)
+      setPrefsError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setPrefsBusy(false)
+    }
+  }
 
   const activeSkill = skills.find(s => s.id === activeSkillId)
   const activeName = activeSkill ? activeSkill.name : 'Aigility 平台管家'
@@ -56,12 +86,17 @@ export default function AgentPage({ skillList, showMock = true }: { skillList: S
       content: m.text!,
     }))
     try {
+      const thinking = buildChatThinking(prefs.thinking, prefs.model || activeSkill?.modelId || gwLlm || '')
       const full = await streamAigilityChat({
         user_input: q,
         ...(activeSkillId ? { skill_id: activeSkillId } : {}),
         session_id: sessionId.current,
         user_key: getCurrentUser()?.email ?? 'fde-local',
         history,
+        // 对话三件套：模型（请求级路由）/ 思考等级（上游参数直通）/ 工作区（能力边界）
+        ...(prefs.model ? { llm: { model: prefs.model } } : {}),
+        ...(thinking ? { thinking } : {}),
+        ...(prefs.workspace ? { workspace: prefs.workspace } : {}),
       }, full => {
         setMsgs(m => m.map((x, i) => i === m.length - 1 ? { ...x, text: full } : x))
       })
@@ -214,6 +249,10 @@ export default function AgentPage({ skillList, showMock = true }: { skillList: S
                   <button key={i} disabled={running} onClick={() => ask(s)} className="text-xs px-3 py-1.5 rounded-full bg-white border border-dashed border-slate-200 text-slate-400 hover:text-blue-600 hover:border-blue-300 transition disabled:opacity-40">@{s.skill}</button>
                 ))}
               </div>
+              {/* 对话三件套（真 · per-user 持久化）：模型设置 / 思考等级 / 本地工作区 */}
+              <ChatSettingsBar
+                prefs={prefs} busy={prefsBusy} error={prefsError} modelPool={modelPool}
+                disabled={running} onPatch={patchPrefs} onOpenWorkspace={() => setWsOpen(true)} />
               <div className="flex gap-2">
                 <input value={draft} onChange={e => setDraft(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) void sendLive() }}
@@ -318,6 +357,13 @@ export default function AgentPage({ skillList, showMock = true }: { skillList: S
       ) : <RealMcpPanel />)}
 
       {tab === 'skill' && <SkillPanel skillList={skillList} skills={skills} showMock={showMock} />}
+      {wsOpen && (
+        <WorkspacePicker
+          current={prefs.workspace}
+          onClose={() => setWsOpen(false)}
+          onPick={async (p) => { await patchPrefs({ workspace: p }); setWsOpen(false) }}
+        />
+      )}
       <style>{`@keyframes fadeSlide { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: none; } }`}</style>
     </div>
   )
@@ -473,6 +519,174 @@ function RealMcpPanel() {
           暂无已注册的真实 MCP 工具（可在 appbase dsh_plugins 启用 dsh-mcp-client，或在角色能力页给角色配 MCP）
         </div>
       )}
+    </div>
+  )
+}
+
+// ── 对话三件套组件：模型设置 / 思考等级 / 本地工作区（真 · per-user 持久化）──
+
+const THINK_OPTIONS: Array<{ v: ThinkingLevel; label: string; hint: string }> = [
+  { v: 'auto', label: '跟随默认', hint: '模型/平台配置决定，不额外干预' },
+  { v: 'off', label: '关闭', hint: '直接给结论（GLM 系实测生效）' },
+  { v: 'low', label: '低', hint: '简要推理' },
+  { v: 'medium', label: '中', hint: '分步推理' },
+  { v: 'high', label: '高', hint: '深度推理链' },
+]
+
+function ChatSettingsBar({ prefs, busy, error, modelPool, disabled, onPatch, onOpenWorkspace }: {
+  prefs: ChatPrefs
+  busy: boolean
+  error: string
+  modelPool: string[]
+  disabled: boolean
+  onPatch: (p: Partial<Pick<ChatPrefs, 'model' | 'thinking' | 'workspace'>>) => void
+  onOpenWorkspace: () => void
+}) {
+  const wsLabel = prefs.workspace
+    ? prefs.workspace.split(/[\\/]/).filter(Boolean).slice(-2).join('/') || prefs.workspace
+    : '未选择'
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-2 px-1">
+      {/* 模型设置 */}
+      <label className="flex items-center gap-1.5 text-[11px] text-slate-500" title="对话请求级模型路由（网关模型池）">
+        <Cpu size={12} className="text-blue-500" />
+        <select
+          value={prefs.model}
+          disabled={disabled || busy}
+          onChange={e => void onPatch({ model: e.target.value })}
+          className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:opacity-50 max-w-[15rem]">
+          <option value="">跟随平台统一上游</option>
+          {modelPool.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+      </label>
+      {/* 思考等级 */}
+      <div className="flex items-center gap-1.5 text-[11px] text-slate-500" title="按模型族翻译为上游参数（thinking / enable_thinking / reasoning_effort）">
+        <Brain size={12} className="text-violet-500" />
+        <div className="flex bg-slate-100 rounded-lg p-0.5">
+          {THINK_OPTIONS.map(o => (
+            <button key={o.v} disabled={disabled || busy}
+              onClick={() => void onPatch({ thinking: o.v })}
+              title={o.hint}
+              className={`text-[11px] px-2 py-1 rounded-md transition disabled:opacity-50 ${prefs.thinking === o.v ? 'bg-white text-violet-700 shadow-sm font-medium' : 'text-slate-500 hover:text-slate-700'}`}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {/* 本地工作区 */}
+      <button disabled={disabled || busy}
+        onClick={onOpenWorkspace}
+        title="打开工作区选择（服务端白名单目录）"
+        className={`flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-lg border transition disabled:opacity-50 ${prefs.workspace ? 'border-sky-200 bg-sky-50/60 text-sky-700' : 'border-dashed border-slate-300 text-slate-500 hover:text-sky-600 hover:border-sky-300'}`}>
+        <FolderTree size={12} className={prefs.workspace ? 'text-sky-500' : 'text-slate-400'} />
+        <span className="max-w-[13rem] truncate">工作区：{wsLabel}</span>
+      </button>
+      {busy && <Loader2 size={12} className="text-slate-400 animate-spin" />}
+      {error && <span className="text-[11px] text-red-600 flex items-center gap-1"><AlertTriangle size={11} />{error}</span>}
+      <span className="text-[10px] text-slate-400 ml-auto">设置随账号保存 · 对后续发送生效</span>
+    </div>
+  )
+}
+
+/** 工作区选择弹层：白名单根 + 目录树浏览 + 选择（服务端 realpath 校验） */
+function WorkspacePicker({ current, onClose, onPick }: {
+  current: string
+  onClose: () => void
+  onPick: (path: string) => void
+}) {
+  const [roots, setRoots] = useState<WorkspaceRoot[]>([])
+  const [view, setView] = useState('')           // 当前浏览目录
+  const [browse, setBrowse] = useState<WorkspaceBrowse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+
+  const open = (path: string) => {
+    setLoading(true); setErr('')
+    fetchWorkspaceBrowse(path)
+      .then(b => { setBrowse(b); if (b.ok) setView(b.path) })
+      .catch(e => setErr(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    fetchWorkspaceRoots()
+      .then(r => {
+        setRoots(r)
+        if (r[0]) open(r[0].path)
+      })
+      .catch(e => { setErr(e instanceof Error ? e.message : String(e)); setLoading(false) })
+  }, [])
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-slate-900/30" />
+      <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl p-5 max-h-[82vh] flex flex-col" onClick={e => e.stopPropagation()} style={{ animation: 'fadeSlide .2s ease' }}>
+        <div className="flex items-start justify-between mb-3">
+          <div>
+            <h3 className="text-base font-semibold text-slate-800 flex items-center gap-2"><HardDrive size={16} className="text-sky-500" />本地工作区（服务端目录）</h3>
+            <p className="text-xs text-slate-400 mt-0.5">选择数字员工被授权工作的目录范围（仅白名单根内；真实文件读写由已安装工具插件执行）</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-400 hover:bg-slate-50"><X size={15} /></button>
+        </div>
+
+        {/* 白名单根 */}
+        <div className="flex flex-wrap gap-2 mb-3">
+          {roots.map(r => (
+            <button key={r.path} onClick={() => open(r.path)}
+              className={`text-xs px-3 py-1.5 rounded-lg border flex items-center gap-1.5 transition ${view === r.path ? 'border-sky-300 bg-sky-50 text-sky-700' : 'border-slate-200 text-slate-600 hover:border-sky-200 hover:bg-sky-50/40'}`}>
+              <Home size={11} />{r.label}
+              {!r.readable && <span className="text-[10px] text-red-500">不可读</span>}
+            </button>
+          ))}
+        </div>
+
+        {/* 路径面包屑 + 上级 */}
+        <div className="flex items-center gap-2 text-xs mb-2 flex-wrap">
+          {browse?.parent && (
+            <button onClick={() => browse.parent && open(browse.parent)} className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50" title="上一级">
+              <CornerUpLeft size={12} />
+            </button>
+          )}
+          <code className="flex-1 min-w-0 truncate rounded-lg bg-slate-50 border border-slate-100 px-3 py-1.5 text-slate-600">{view || '加载中…'}</code>
+          {browse && !browse.ok && <span className="text-[11px] text-red-600 flex items-center gap-1"><AlertTriangle size={11} />{browse.error}</span>}
+          {err && <span className="text-[11px] text-red-600">{err}</span>}
+        </div>
+
+        {/* 子目录列表 */}
+        <div className="flex-1 overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100 min-h-[12rem]">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 text-xs text-slate-400 py-10"><Loader2 size={13} className="animate-spin" />目录加载中…</div>
+          ) : (browse?.entries?.length ?? 0) === 0 ? (
+            <div className="text-xs text-slate-400 py-10 text-center">此目录下没有子目录</div>
+          ) : (
+            browse?.entries.map((e: WorkspaceEntry) => (
+              <div key={e.path} className="flex items-center gap-2.5 px-3 py-2.5 hover:bg-sky-50/40 transition">
+                <button onClick={() => open(e.path)} className="flex-1 min-w-0 flex items-center gap-2.5 text-left">
+                  <Folder size={14} className="text-sky-500 shrink-0" />
+                  <span className="text-sm text-slate-700 truncate">{e.name}</span>
+                  {e.isGitRoot && <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600 shrink-0">git 仓库</span>}
+                  {!e.readable && <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-50 text-red-500 shrink-0">不可读</span>}
+                  {e.readable && !e.writable && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 shrink-0">只读</span>}
+                </button>
+                <button
+                  disabled={!e.readable || loading}
+                  onClick={() => void onPick(e.path)}
+                  className={`text-xs px-3 py-1.5 rounded-lg shrink-0 transition disabled:opacity-40 ${current === e.path ? 'bg-emerald-500 text-white' : 'bg-sky-600 text-white hover:bg-sky-700'}`}>
+                  {current === e.path ? '已选择' : '选择'}
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="flex items-center justify-between mt-3 flex-wrap gap-2">
+          <div className="text-xs text-slate-400 flex items-center gap-1.5">
+            <FolderTree size={12} />
+            {current ? <>当前工作区：<code className="text-sky-600">{current}</code></> : '尚未选择工作区'}
+          </div>
+          <button onClick={onClose} className="text-xs px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">关闭</button>
+        </div>
+      </div>
     </div>
   )
 }

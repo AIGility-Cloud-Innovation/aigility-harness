@@ -396,6 +396,11 @@ export interface WorkflowEngineRequest {
     url?: string;
     key?: string;
     model?: string;
+    /**
+     * 供应商专有参数直通（可选）：思考等级/采样参数等原样下传认知层 → 上游。
+     * temperature 由本引擎显式读取并覆盖默认 0.7; 其余键原样透传。
+     */
+    parameter?: Record<string, unknown>;
   };
 }
 
@@ -502,11 +507,18 @@ const workflowEngineProvider: Provider<
         {
           model: request.llm?.model || process.env.LLM_MODEL || "glm-4.6",
           messages,
-          temperature: 0.7,
+          // 采样参数：请求级声明优先（如智能体工厂的 temperature），缺省保持
+          // 原有 0.7 —— 调用点未声明时行为与历史一致
+          temperature:
+            typeof request.llm?.parameter?.temperature === "number"
+              ? request.llm.parameter.temperature
+              : 0.7,
           userId: request.user_key ?? request.customer_id ?? request.merchant_id,
           ...(request.llm?.url || request.llm?.key
             ? { upstream: { url: request.llm?.url ?? "", key: request.llm?.key ?? "" } }
             : {}),
+          // 供应商专有参数直通（思考等级等）：原样下传认知层 → 上游
+          ...(request.llm?.parameter ? { parameter: request.llm.parameter } : {}),
         },
       )) as Result<LlmInferenceResponse>;
       if (llmRes.ok && llmRes.value?.text) {

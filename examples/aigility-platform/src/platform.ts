@@ -153,6 +153,17 @@ export async function ensureAigilityPlatform(): Promise<AigilityPlatform> {
      ON CONFLICT (id) DO NOTHING`,
     [JSON.stringify(Object.keys(SERVER_MODULE_META).filter((id) => SERVER_MODULE_META[id].available !== false))]);
 
+  // 3.6 数字员工对话偏好（per-user）：模型 / 思考等级 / 本地工作区——
+  //     对话页三件套（模型设置 · 思考等级 · 工作区选择）的持久化事实源
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS chat_prefs (
+      user_id    TEXT PRIMARY KEY,
+      model      TEXT NOT NULL DEFAULT '',
+      thinking   TEXT NOT NULL DEFAULT 'auto',
+      workspace  TEXT NOT NULL DEFAULT '',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`);
+
   // 4. DSH 工具桥种子（幂等）：dsh-tools 提供 ctx.tools 服务, dsh-mcp-client
   //    把外部 MCP server 工具注册进来（公共名 mcp__<serverName>__<rawName>）。
   //    演示 server 用官方 @modelcontextprotocol/server-everything (stdio, npx 首跑拉包)。
@@ -327,6 +338,67 @@ export async function setNavHidden(userId: string, moduleId: string, hidden: boo
      ON CONFLICT (user_id, module_id) DO UPDATE SET hidden = $3, updated_at = now()`,
     [userId, moduleId, hidden]);
   return null;
+}
+
+// ── 数字员工对话偏好（per-user · chat_prefs；模型/思考等级/工作区三件套）──
+
+export interface ChatPrefs {
+  /** 请求级模型（'' = 跟随平台统一上游 / 技能偏好）；值来自网关模型池 */
+  model: string;
+  /** 思考等级：auto（跟随模型默认）| off | low | medium | high */
+  thinking: string;
+  /** 本地工作区绝对路径（'' = 未选择；服务端校验过存在且为目录） */
+  workspace: string;
+  updatedAt: string;
+}
+
+export const THINKING_LEVELS = ["auto", "off", "low", "medium", "high"] as const;
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
+export function isThinkingLevel(v: unknown): v is ThinkingLevel {
+  return typeof v === "string" && (THINKING_LEVELS as readonly string[]).includes(v);
+}
+
+/** 读取用户对话偏好（缺行返回默认：全部跟随平台） */
+export async function getChatPrefs(userId: string): Promise<ChatPrefs> {
+  const def: ChatPrefs = { model: "", thinking: "auto", workspace: "", updatedAt: "" };
+  try {
+    const { rows } = await pool.query(
+      "SELECT model, thinking, workspace, updated_at FROM chat_prefs WHERE user_id = $1", [userId]);
+    if (rows[0]) {
+      return {
+        model: typeof rows[0].model === "string" ? rows[0].model : "",
+        thinking: isThinkingLevel(rows[0].thinking) ? rows[0].thinking : "auto",
+        workspace: typeof rows[0].workspace === "string" ? rows[0].workspace : "",
+        updatedAt: rows[0].updated_at ? String(rows[0].updated_at) : "",
+      };
+    }
+  } catch {
+    // PG 不可用 → 默认偏好
+  }
+  return def;
+}
+
+/** 保存用户对话偏好（upsert，入审计由调用方负责） */
+export async function saveChatPrefs(
+  userId: string,
+  prefs: { model?: string; thinking?: string; workspace?: string },
+): Promise<ChatPrefs> {
+  const cur = await getChatPrefs(userId);
+  const model = typeof prefs.model === "string" ? prefs.model.slice(0, 200) : cur.model;
+  const thinking = isThinkingLevel(prefs.thinking) ? prefs.thinking : cur.thinking;
+  const workspace = typeof prefs.workspace === "string" ? prefs.workspace.slice(0, 2000) : cur.workspace;
+  try {
+    await pool.query(
+      `INSERT INTO chat_prefs (user_id, model, thinking, workspace, updated_at)
+       VALUES ($1, $2, $3, $4, now())
+       ON CONFLICT (user_id) DO UPDATE SET
+         model = $2, thinking = $3, workspace = $4, updated_at = now()`,
+      [userId, model, thinking, workspace]);
+  } catch {
+    // PG 不可用 → 仅内存侧保存（调用方按返回值展示）
+  }
+  return { ...cur, model, thinking, workspace, updatedAt: new Date().toISOString() };
 }
 
 export interface NavPrefRow {

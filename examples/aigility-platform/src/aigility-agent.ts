@@ -49,6 +49,24 @@ export interface AigilityAgentRequest {
   user_key?: string;
   /** 会话历史 (前端维护, 透传编排层做上下文) */
   history?: Array<{ role: "user" | "assistant"; content: string }>;
+  /**
+   * 本地工作区（对话级，可选）：数字员工在服务端可见的目录范围。
+   * 只作为「能力边界」注入系统提示词 —— 具体读写由已安装的工具插件（文件/shell
+   * 类 MCP）执行，本平台不在此授予进程级文件权限。缺省 = 未选工作区。
+   */
+  workspace?: {
+    /** 工作区根目录绝对路径（服务端已校验存在且为目录） */
+    root: string;
+    /** 工作区显示名（缺省取目录名） */
+    name?: string;
+  };
+  /** 思考等级（对话级，可选）：翻译为供应商专有参数直通上游 */
+  thinking?: {
+    /** 档位 id（off/low/medium/high…，站点定义） */
+    level: string;
+    /** 该档位对应的上游参数（站点翻译后下发，平台原样透传） */
+    parameter?: Record<string, unknown>;
+  };
   /** 请求级 LLM 上游覆盖 (缺省走全局) */
   llm?: {
     url?: string;
@@ -149,6 +167,23 @@ export const aigilityAgentProvider: Provider<AigilityAgentRequest, AigilityAgent
         ].join("\n")
       : BUTLER_PROMPT;
 
+    // 本地工作区（对话级）：把用户选择的工作区作为「能力边界」注入人设 ——
+    // 数字员工知道自己被授权在哪个目录内工作；真实读写由已安装的工具插件执行
+    let effectivePrompt = systemPrompt;
+    if (request.workspace?.root) {
+      effectivePrompt += `\n\n## 当前工作区（本地授权目录）\n- 工作区根目录：${request.workspace.root}${request.workspace.name ? `（${request.workspace.name}）` : ""}\n- 涉及本地文件操作时, 请只在上述工作区目录内进行, 并在回复中说明你将操作的具体文件路径。`;
+    }
+    // 思考等级：作为系统提示词中的「回复风格」提示（参数层直通见下, 双管齐下）
+    if (request.thinking?.level && request.thinking.level !== "auto") {
+      const hint: Record<string, string> = {
+        off: "直接给出结论, 不做过程推理。",
+        low: "简要推理, 输出精简的要点式思考过程。",
+        medium: "中等深度推理, 在回答前给出分步推理。",
+        high: "深度推理, 充分展开推理链再给结论。",
+      };
+      effectivePrompt += `\n\n## 思考等级（用户已设置）\n- ${request.thinking.level}：${hint[request.thinking.level] ?? "按当前档位控制推理深度。"}`;
+    }
+
     // 委托 L4 编排（记忆召回 → LLM → 沉淀 三段流内编排, 尽力而为）
     const result = (await ctx.call(
       { id: "@orchestration/workflow-engine", versionRange: "^1.0.0" },
@@ -157,14 +192,16 @@ export const aigilityAgentProvider: Provider<AigilityAgentRequest, AigilityAgent
         session_id: request.session_id ?? ctx.sessionId,
         user_key: memUserId,
         agent_name: agentName,
-        system_prompt: systemPrompt,
+        system_prompt: effectivePrompt,
         memory: { agent_id: memAgentId, user_id: memUserId, limit: 4 },
-        // 模型偏好（D2）：工厂发布的 modelId 优先作为请求级路由（调用方显式 llm 优先）
+        // 模型偏好（D2）：调用方显式 llm 优先，其次工厂发布的 modelId（unified-upstream = 跟随平台统一上游）
         ...(request.llm
-          ? { llm: request.llm }
+          ? { llm: { ...request.llm, ...(request.thinking?.parameter ? { parameter: request.thinking.parameter } : {}) } }
           : skill?.modelId && skill.modelId !== "unified-upstream"
-            ? { llm: { model: skill.modelId } }
-            : {}),
+            ? { llm: { model: skill.modelId, ...(request.thinking?.parameter ? { parameter: request.thinking.parameter } : {}) } }
+            : request.thinking?.parameter
+              ? { llm: { parameter: request.thinking.parameter } }
+              : {}),
         ...(request.history?.length ? { history: request.history } : {}),
       },
     )) as { ok: boolean; value?: { result?: string; response?: string; degraded?: boolean } };

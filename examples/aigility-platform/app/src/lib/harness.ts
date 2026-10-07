@@ -67,6 +67,44 @@ export interface AigilityChatBody {
   session_id?: string
   user_key?: string
   history?: Array<{ role: 'user' | 'assistant'; content: string }>
+  /** 请求级模型覆盖（对话三件套·模型设置；'' 或缺省 = 跟随平台/技能偏好） */
+  llm?: { model?: string }
+  /** 思考等级（对话三件套）：auto=不覆盖；off/low/medium/high 翻译为上游参数直通 */
+  thinking?: { level: ThinkingLevel; parameter?: Record<string, unknown> }
+  /** 本地工作区（对话三件套）：服务端白名单内目录，作为数字员工能力边界 */
+  workspace?: string
+}
+
+/** 把「思考等级」档位组装为对话请求体字段（auto = 不覆盖，交由模型默认/平台配置） */
+export function buildChatThinking(level: ThinkingLevel, model: string): { level: ThinkingLevel; parameter?: Record<string, unknown> } | undefined {
+  if (level === 'auto') return undefined
+  return { level, parameter: thinkingToParameter(level, model) }
+}
+
+/** 思考等级 → 上游直通参数（按模型族适配；litellm drop_params 会忽略不支持的） */
+export function thinkingToParameter(level: string, model: string): Record<string, unknown> {
+  const isGlm = /glm/i.test(model)
+  const isQwen = /qwen/i.test(model)
+  const isDeepseek = /deepseek/i.test(model)
+  const thinkingOn = level !== 'off' && level !== 'auto'
+  const out: Record<string, unknown> = {}
+  if (isGlm) {
+    // 智谱 Anthropic/OpenAI 兼容端点：thinking.type 是官方开关（本机 bigmodel-glm-* 已实测生效）
+    out['thinking'] = { type: thinkingOn ? 'enabled' : 'disabled' }
+    if (thinkingOn) out['reasoning_effort'] = level === 'low' ? 'low' : level === 'high' ? 'high' : 'medium'
+  } else if (isQwen) {
+    // DashScope Qwen3 系：enable_thinking 开关 + thinking_budget 档位
+    out['enable_thinking'] = thinkingOn
+    if (thinkingOn) out['thinking_budget'] = level === 'low' ? 512 : level === 'high' ? 4096 : 1024
+  } else if (isDeepseek) {
+    // DeepSeek 系：reasoning 是模型固有属性，等级 → 提示词档位（agent 侧已注入），
+    // 参数层给 reasoning_effort（支持的供应商会应用，不支持的被 drop）
+    if (thinkingOn) out['reasoning_effort'] = level === 'low' ? 'low' : level === 'high' ? 'high' : 'medium'
+  } else {
+    // 通用模型：只带 reasoning_effort（不支持的被 drop_params 静默忽略）
+    if (thinkingOn) out['reasoning_effort'] = level === 'low' ? 'low' : level === 'high' ? 'high' : 'medium'
+  }
+  return out
 }
 
 /** 数字员工对话 → 同源 /api/aigility/chat（服务端代理 → @persona/aigility-agent，记忆按技能隔离） */
@@ -366,6 +404,68 @@ export interface LlmStatus {
 /** 模型管理（真）：当前引擎推理上游 */
 export async function fetchLlmStatus(): Promise<LlmStatus> {
   return authJsonFetch<LlmStatus>('/api/aigility/llm')
+}
+
+// ── 数字员工对话三件套（真 · per-user 持久化）：模型 / 思考等级 / 本地工作区 ──
+
+export type ThinkingLevel = 'auto' | 'off' | 'low' | 'medium' | 'high'
+
+export interface ChatPrefs {
+  model: string
+  thinking: ThinkingLevel
+  workspace: string
+  updatedAt: string
+}
+
+/** 读取当前用户的对话偏好 */
+export async function fetchChatPrefs(): Promise<ChatPrefs> {
+  const r = await authJsonFetch<{ ok: true; prefs: ChatPrefs }>('/api/aigility/chat/prefs')
+  return r.prefs
+}
+
+/** 保存当前用户的对话偏好（模型/思考等级/工作区，均为三元组可选更新） */
+export async function saveChatPrefs(prefs: Partial<Pick<ChatPrefs, 'model' | 'thinking' | 'workspace'>>): Promise<ChatPrefs> {
+  const r = await authJsonFetch<{ ok: true; prefs: ChatPrefs }>('/api/aigility/chat/prefs', {
+    method: 'PUT',
+    body: JSON.stringify(prefs),
+  })
+  return r.prefs
+}
+
+export interface WorkspaceRoot {
+  path: string
+  label: string
+  readable: boolean
+  writable: boolean
+}
+
+export interface WorkspaceEntry {
+  name: string
+  path: string
+  isDir: boolean
+  readable: boolean
+  writable: boolean
+  isGitRoot: boolean
+}
+
+export interface WorkspaceBrowse {
+  ok: boolean
+  path: string
+  parent: string | null
+  root: string | null
+  entries: WorkspaceEntry[]
+  error?: string
+}
+
+/** 工作区根白名单（服务端：用户主目录 / 智悦仓库 / tmp） */
+export async function fetchWorkspaceRoots(): Promise<WorkspaceRoot[]> {
+  const r = await authJsonFetch<{ ok: true; roots: WorkspaceRoot[] }>('/api/aigility/workspace/roots')
+  return r.roots
+}
+
+/** 浏览服务端目录（只列子目录；路径 realpath 后校验在白名单根内） */
+export async function fetchWorkspaceBrowse(path: string): Promise<WorkspaceBrowse> {
+  return authJsonFetch<WorkspaceBrowse>(`/api/aigility/workspace/browse?path=${encodeURIComponent(path)}`)
 }
 
 export interface MetricsPayload {

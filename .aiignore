@@ -1,0 +1,34 @@
+# .aiignore — AI 代理（ZCode / pi / codex / zcode 等）在仓库内探索与读取的忽略层
+# 语法同 .gitignore；各工具支持度不一（Cursor=.cursorignore、Claude=.claudeignore、
+# ZCode/pi 至少尊重 .gitignore），本文件同时充当"哪些目录不该进 AI 上下文"的约定文档。
+# 原则（三层）：可重建的构建/依赖产物 → 运行时数据/状态 → 密钥凭证。
+# 注意：本文件只引导 AI 的检索与阅读，不影响 harness 运行时对这些文件的程序化访问。
+
+# ── 1. 依赖与构建产物（可重建，体积大，进上下文纯属浪费）─────────────
+node_modules/
+dist/
+.pnpm-store/
+*.tsbuildinfo
+.turbo/
+coverage/
+**/app/dist/
+
+# ── 2. 运行时数据 / 日志 / 截图（大且无检索价值）────────────────────
+*.log
+gui-test-screenshots/
+.tmp-baojing/
+.tmp-*/
+__pycache__/
+examples/*/.state/
+examples/.dsh-home/
+examples/aigility-platform/data/
+examples/aigility-platform/aigility-platform.log
+
+# ── 3. 密钥与凭证（防 AI 全文检索把凭证扫进上下文/上行）──────────────
+.env
+.env.*
+!.env.example
+config/feishu/
+# 台账/会话/审计为运行时状态（大 JSON/JSONL），需要时按精确路径读取
+config/*.local.json
+config/*.local.jsonl
