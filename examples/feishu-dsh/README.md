@@ -26,6 +26,34 @@ FEISHU_APP_SECRET=xxx
 
 本文件先于仓库根 `.env` 加载且先到先得：只影响本装配，不会覆盖/污染小助理读的根 `.env` 凭据。
 
+## 角色能力注册表（可选）
+
+`roles.json` 是本地环境配置（含本机绝对路径与 MCP 密钥），**已 gitignore，不入库**。
+首次使用从模板复制：
+
+```
+cp examples/feishu-dsh/roles.example.json examples/feishu-dsh/roles.json
+# 然后填入本机路径与密钥
+```
+
+注册表把渠道身份映射成角色（`skills` + `mcpServers`），每条消息热读取，改完即生效；
+但 MCP 客户端在会话启动时注入，**新增/修改 mcpServers 后需重启本装配**。
+
+### timem（太忆空间长期记忆）
+
+`mcpServers` 里的 `timem` 提供 `search_memories` / `create_memory` / `delete_memory` 等工具。
+
+- 地址用 **`https://test.space.timem.cloud/mcp/`**（**尾斜杠必须有**）。
+  本仓库处于开发验证期，**以 Space 测试服为主要在线服务**。
+- ⚠️ 认证头必须是 **`X-API-Key`**（不是 `Authorization: Bearer`）。
+  用错头时服务端只回一个笼统 401，**不能据此判定端点不存在**。
+- `X-API-Key` 用 **Space 密钥（`tmk_` 开头）**——团队成员建自己的工作记忆。
+- ⚠️ 与 `timem.cloud` 正式服的 REST 密钥（`sk-` 开头，团队负责人管理团队记忆）**不通用**：
+  `tmk_` 打 REST 报 401，`sk-` 打 Space MCP 报 401。
+- 测试服与 `api.space.timem.cloud` 是**两套独立部署**，密钥各自有效、不可混用。
+- ⚠️ 网页路由与 MCP 路径不同：`/mcp`（无尾斜杠）是**网页路由**，会返回 Next.js 404，
+  别拿它当"MCP 不存在"的证据。
+
 ## 启动
 
 ```
