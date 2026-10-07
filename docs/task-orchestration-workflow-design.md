@@ -4,6 +4,8 @@
 > 位置：`aigility-harness/packages/layer-orchestration`
 > 目标：让「入口消息 → 任务执行」走正确的三段式工作流，替代现在的
 >       「任何消息直接建任务 + 固定 standalone」
+> 注（2026-10-07）：文中示例装配方 `feishu-timem` 已删除（死代码，职责并入
+> `feishu-task-loop`）；相关装配描述按 task-loop 口径理解。
 
 ---
 

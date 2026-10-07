@@ -62,7 +62,7 @@ packages/
 └── prototype-mode/       # 原型演示入口
 
 examples/                 # 可替换示例装配：appbase（产品装配）/ wecom-chat / wecom-coder /
-                          # wecom-dsh / wecom-guide / wecom-timem / feishu-timem /
+                          # wecom-dsh / wecom-guide / wecom-timem /
                           # openai-gateway-composition / dsh-timem-demo
 ```
 

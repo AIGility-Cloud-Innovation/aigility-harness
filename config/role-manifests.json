@@ -3,7 +3,7 @@
   "updated_at": "2026-09-30T05:41:20.538Z",
   "notes": [
     "M1 试点：三形态覆盖——独立 app / 共享 app（如实登记冲突）/ 纯网页。",
-    "已知面貌冲突（基线 2）：cli_aa2bca9f0c789bed 现由 feishu-dsh 会话中继与 feishu-timem 共用——一个 app 挂两个角色本体；M3 收编时拆分 app 或合并角色，此处如实登记。",
+    "已知面貌冲突（基线 2）：cli_aa2bca9f0c789bed 现由 feishu-dsh 会话中继与 feishu-timem 共用——一个 app 挂两个角色本体；M3 收编时拆分 app 或合并角色，此处如实登记。（2026-10-07 更新：feishu-timem 进程已删除——零依赖死代码，职责由 feishu-task-loop 完整取代，其 AppID cli_a9e24e913a39dcd6 与 task-loop 相同会造成消息竞争投递；本冲突现仅剩 feishu-dsh 一侧。）",
     "appFaceNames（app 注册名快照）M1 留空：真实注册名核对随 M2 平台侧 app 元数据表接入。"
   ],
   "roles": [

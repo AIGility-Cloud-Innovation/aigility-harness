@@ -2,7 +2,7 @@
  * LLMNodeStore 的 AppBase PG 实现 + 建表 + 种子（站点共享底座）。
  *
  * 位置说明：本文件住在 appbase 而非 aigility-platform —— 因为「按节点名取模型」
- * 是多个站点进程（platform / feishu-task-loop / feishu-timem）的**共同**需求，
+ * 是多个站点进程（platform / feishu-task-loop 等）的**共同**需求，
  * 而 appbase 是它们唯一共享的、且已具备 pg + layer-cognitive 依赖的底座。
  * 机制仍在 layer-cognitive（包），只有这份 PG 适配 + 种子属于站点。
  *

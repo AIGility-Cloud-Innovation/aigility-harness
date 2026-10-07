@@ -1,4 +1,4 @@
-/** 加载仓库根 .env（与 feishu-timem/wecom 系示例一致） */
+/** 加载仓库根 .env（与 wecom 系示例一致） */
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";

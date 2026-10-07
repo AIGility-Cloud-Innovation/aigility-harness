@@ -584,7 +584,6 @@ aigility-harness/
 ├── examples/                      # 可替换示例装配（各自独立 pnpm 包）
 │   ├── appbase/                   # 产品装配：应用大厅 + 网页应用开发员 + 管理中心(/admin) + AI 网关 + 对话流图 + 内置应用(班主任小本本/教师备课夹)
 │   ├── fde-workbench/             # TiMEM FDE 工作台：数字员工(@persona/fde-assistant) + 文档工人(@action/doc-worker) + AI 网关（Kimi FDE 前端收编深度整合）
-│   ├── feishu-timem/              # 飞书 @机器人 → timem-project-assistant → timem-project-task 三段式工作流
 │   ├── dsh-timem-demo/            # DSH 内核 TiMEM 插件演示
 │   ├── openai-gateway-composition/ # OpenAI 兼容网关组合示例
 │   ├── wecom-chat/                 # 企微 @机器人 → sales-chat 通用对话（装配示例）
