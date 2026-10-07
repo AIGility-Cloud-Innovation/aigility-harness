@@ -55,6 +55,12 @@ export const feishuTimemSupportRef: CapabilityRef = {
   versionRange: "^1.0.0",
 };
 
+// ── 首连退避参数（导出供测试断言） ───────────────────────────────
+/** 线性退避基数：第 n 次失败等待 n × 该值 */
+export const CONNECT_BACKOFF_BASE_MS = 10_000;
+/** 退避封顶：超过后按固定间隔重试，避免无限拉长导致恢复延迟 */
+export const CONNECT_BACKOFF_MAX_MS = 60_000;
+
 // ── 请求/响应 ────────────────────────────────────────────────────
 
 export interface FeishuIngressRequest {
@@ -552,20 +558,27 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
 
     // 启动长连接（connect 内部完成握手后才 resolve，自动重连）。
     // 首连失败（如 bot/v3/info 身份解析遇瞬时网络错误）会让通道静默死亡——
-    // 有限次退避重试兜底，重试期内 stop() 断开即可。
+    // 进程还活着、单实例锁还持有，但机器人再也不响应，只能人工重启。
+    // 因此这里持续退避重试（不设上限）：退避封顶后按固定间隔重试，
+    // 与 connect() 内部的重连语义对齐；stop() 通过 activeStop 断开即可退出。
     const connectWithRetry = async (): Promise<void> => {
-      const attempts = 5;
-      for (let i = 1; i <= attempts; i++) {
+      let attempt = 0;
+      while (activeChannel === channel) {
+        attempt += 1;
         try {
           await channel.connect();
           console.log(`[feishu-ingress] connected: appId=${appId}`);
           return;
         } catch (e) {
-          console.error(`[feishu-ingress] connect error (第${i}/${attempts}次):`, String(e));
-          if (i < attempts) await new Promise((r) => setTimeout(r, 10_000 * i));
+          const delayMs = Math.min(CONNECT_BACKOFF_BASE_MS * attempt, CONNECT_BACKOFF_MAX_MS);
+          console.error(
+            `[feishu-ingress] connect error (第${attempt}次，${Math.round(delayMs / 1000)}s 后重试):`,
+            String(e),
+          );
+          await new Promise((r) => setTimeout(r, delayMs));
         }
       }
-      console.error(`[feishu-ingress] 连续 ${attempts} 次首连失败，放弃（需重启进程恢复）`);
+      console.log(`[feishu-ingress] stop 已请求，停止重连 (appId=${appId})`);
     };
     void connectWithRetry();
 

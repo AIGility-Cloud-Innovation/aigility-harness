@@ -61,6 +61,39 @@ describe("feishu-ingress", () => {
     expect(health.healthy).toBe(false);
   });
 });
+// ── connectWithRetry — 首连失败持续退避（静默死亡回归） ──────────────
+//
+// 历史故障：首连失败退避 5 次后永久放弃，进程还活着、单实例锁还持有，但
+// 机器人不再响应（09-28 静默死亡一次，只能人工重启）。本组锁定修复后的
+// 两条不变式：退避间隔有上限、stop() 能让重试循环退出。
+
+describe("connectWithRetry — 首连失败持续退避", () => {
+  it("退避间隔封顶，不会随失败次数无限拉长", async () => {
+    const { CONNECT_BACKOFF_BASE_MS, CONNECT_BACKOFF_MAX_MS } = await import("./feishu-ingress.js");
+    const delayFor = (attempt: number) =>
+      Math.min(CONNECT_BACKOFF_BASE_MS * attempt, CONNECT_BACKOFF_MAX_MS);
+    expect(CONNECT_BACKOFF_BASE_MS).toBeGreaterThan(0);
+    expect(delayFor(1)).toBe(CONNECT_BACKOFF_BASE_MS);
+    expect(delayFor(100)).toBe(CONNECT_BACKOFF_MAX_MS);
+    // 封顶值应为有界常量（分钟级），否则恢复延迟会被拖到不可接受
+    expect(CONNECT_BACKOFF_MAX_MS).toBeLessThanOrEqual(5 * 60_000);
+  });
+
+  it("stop() 可重复调用且让重试循环退出（不残留悬挂重连）", async () => {
+    const ctx = mockCtx({ response: "hi" });
+    const result = await feishuIngressProvider.execute(
+      { appId: "cli_test", appSecret: "secret_test" },
+      ctx as never,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      await result.value.stop();
+      // 幂等：重复 stop 不抛（第二次调用时 activeChannel 已为 null）
+      await expect(result.value.stop()).resolves.toBeUndefined();
+    }
+  });
+});
+
 // ── threadAnchorFor — 话题锚定（回复落到话题串下） ───────────────────
 
 describe("threadAnchorFor", () => {

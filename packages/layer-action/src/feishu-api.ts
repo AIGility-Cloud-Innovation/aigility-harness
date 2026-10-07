@@ -138,6 +138,12 @@ export function isTokenExpired(expiresAtIso: string, now = Date.now()): boolean 
   return now >= t - 60_000;
 }
 
+/** 距 expires_at 剩余毫秒（非法/缺失串返回 -Infinity = 视为早已过期） */
+export function msUntilExpiry(expiresAtIso: string, now = Date.now()): number {
+  const t = Date.parse(expiresAtIso);
+  return Number.isNaN(t) ? Number.NEGATIVE_INFINITY : t - now;
+}
+
 /** 从 OAuth 回调完整 URL 中提取 code；裸 code 原样返回；无则 null */
 export function extractAuthCode(callbackUrlOrCode: string): string | null {
   const m = callbackUrlOrCode.match(/[?&]code=([^&\s]+)/);
@@ -205,6 +211,14 @@ export function readTokenEnv(overrides?: FeishuApiCredentials): TokenEnv {
 }
 
 let cachedTenantToken: { token: string; expiresAt: number } | null = null;
+let cachedUserToken: { token: string; expiresAt: number; storePath: string } | null = null;
+let userTokenInFlight: Promise<string> | null = null;
+
+/** 清空进程内用户 token 缓存（换装配/换 token store 时调用；测试亦用） */
+export function resetUserTokenCache(): void {
+  cachedUserToken = null;
+  userTokenInFlight = null;
+}
 
 /** 应用身份 tenant_access_token（内存缓存，提前 60s 刷新） */
 async function getTenantToken(env: TokenEnv, baseUrl: string): Promise<string> {
@@ -228,6 +242,32 @@ async function getTenantToken(env: TokenEnv, baseUrl: string): Promise<string> {
   return cachedTenantToken.token;
 }
 
+/**
+ * 进程内提前续期窗口：在 access_token 真正过期前 30 分钟就换新。
+ *
+ * 为什么必须提前（而不是「等过期再 refresh」）：
+ *   refresh_token 也是一份有寿命的凭证，飞书侧按签发时刻推它的有效期；
+ *   若 access_token 已过期很久才拿去续期，refresh_token 可能已经一起失效，
+ *   此时任何接口都只会返回「续期失败」——本可自动恢复的过期，退化成
+ *   必须人工重走 OAuth 的故障。提前窗口把这类退化挡在发生之前。
+ */
+const USER_TOKEN_REFRESH_AHEAD_MS = 30 * 60_000;
+
+/** 共享的 app_access_token 调用（exchange / refresh 两条路径同源） */
+async function getAppAccessToken(env: TokenEnv, baseUrl: string): Promise<string> {
+  const appResp = await fetch(`${baseUrl}/open-apis/auth/v3/app_access_token/internal`, {
+    method: "POST",
+    headers: { "content-type": "application/json; charset=utf-8" },
+    body: JSON.stringify({ app_id: env.appId, app_secret: env.appSecret }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  const appJson = (await appResp.json()) as { code: number; msg: string; app_access_token?: string };
+  if (appJson.code !== 0 || !appJson.app_access_token) {
+    throw new Error(`feishu-api: 获取 app_access_token 失败: ${appJson.msg} (code=${appJson.code})`);
+  }
+  return appJson.app_access_token;
+}
+
 async function loadUserRecord(env: TokenEnv): Promise<UserTokenRecord> {
   const raw = await readFile(env.tokenStorePath, "utf8");
   return JSON.parse(raw) as UserTokenRecord;
@@ -245,21 +285,12 @@ export async function exchangeAuthCode(
   opts?: { baseUrl?: string; redirectUri?: string },
 ): Promise<UserTokenRecord> {
   const baseUrl = opts?.baseUrl ?? DEFAULT_BASE;
-  const appResp = await fetch(`${baseUrl}/open-apis/auth/v3/app_access_token/internal`, {
-    method: "POST",
-    headers: { "content-type": "application/json; charset=utf-8" },
-    body: JSON.stringify({ app_id: env.appId, app_secret: env.appSecret }),
-    signal: AbortSignal.timeout(20_000),
-  });
-  const appJson = (await appResp.json()) as { code: number; msg: string; app_access_token?: string };
-  if (appJson.code !== 0 || !appJson.app_access_token) {
-    throw new Error(`feishu-api: 获取 app_access_token 失败: ${appJson.msg} (code=${appJson.code})`);
-  }
+  const appToken = await getAppAccessToken(env, baseUrl);
   const r = await fetch(`${baseUrl}/open-apis/authen/v1/oidc/access_token`, {
     method: "POST",
     headers: {
       "content-type": "application/json; charset=utf-8",
-      authorization: `Bearer ${appJson.app_access_token}`,
+      authorization: `Bearer ${appToken}`,
     },
     body: JSON.stringify({ grant_type: "authorization_code", code }),
     signal: AbortSignal.timeout(20_000),
@@ -292,58 +323,84 @@ export async function exchangeAuthCode(
   return rec;
 }
 
-/** 用户身份 token：读取落盘记录，过期自动 refresh 并回写 */
+/**
+ * 用户身份 token：读取落盘记录，临期/过期自动 refresh 并回写。
+ *
+ * 两级缓存：
+ *   1. 进程内缓存（cachedUserToken）——避免每个 API 调用都读盘；
+ *   2. 落盘 token store——跨进程共享的唯一真相源，refresh 成功后回写。
+ *
+ * 并发合并（userTokenInFlight）：同一进程内多个请求同时发现临期时，
+ * 只发一次 refresh。飞书 refresh_token 是轮换式的（旧的一次性作废），
+ * 并发两次 refresh 会导致后到的那次拿着已作废的 refresh_token 失败，
+ * 并把失败结果当作真相——这是并发下最容易踩的坑。
+ */
 export async function getFreshUserToken(env: TokenEnv, baseUrl: string): Promise<string> {
-  const rec = await loadUserRecord(env);
-  if (!isTokenExpired(rec.expires_at)) return rec.access_token;
-
-  const appResp = await fetch(`${baseUrl}/open-apis/auth/v3/app_access_token/internal`, {
-    method: "POST",
-    headers: { "content-type": "application/json; charset=utf-8" },
-    body: JSON.stringify({ app_id: env.appId, app_secret: env.appSecret }),
-    signal: AbortSignal.timeout(20_000),
-  });
-  const appJson = (await appResp.json()) as { code: number; msg: string; app_access_token?: string };
-  if (appJson.code !== 0 || !appJson.app_access_token) {
-    throw new Error(`feishu-api: 获取 app_access_token 失败: ${appJson.msg} (code=${appJson.code})`);
+  if (
+    cachedUserToken &&
+    cachedUserToken.storePath === env.tokenStorePath &&
+    Date.now() < cachedUserToken.expiresAt - USER_TOKEN_REFRESH_AHEAD_MS
+  ) {
+    return cachedUserToken.token;
   }
-  const r = await fetch(`${baseUrl}/open-apis/authen/v1/oidc/refresh_access_token`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      authorization: `Bearer ${appJson.app_access_token}`,
-    },
-    body: JSON.stringify({ grant_type: "refresh_token", refresh_token: rec.refresh_token }),
-    signal: AbortSignal.timeout(20_000),
-  });
-  const j = (await r.json()) as {
-    code?: number;
-    data?: {
+  if (userTokenInFlight) return userTokenInFlight;
+
+  const run = async (): Promise<string> => {
+    const rec = await loadUserRecord(env);
+    // 落盘记录本身还很新（例如另一进程刚续过）→ 直接采信，不重复 refresh
+    const remaining = msUntilExpiry(rec.expires_at);
+    if (remaining > USER_TOKEN_REFRESH_AHEAD_MS) {
+      cachedUserToken = { token: rec.access_token, expiresAt: Date.parse(rec.expires_at), storePath: env.tokenStorePath };
+      return rec.access_token;
+    }
+
+    const appToken = await getAppAccessToken(env, baseUrl);
+    const r = await fetch(`${baseUrl}/open-apis/authen/v1/oidc/refresh_access_token`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        authorization: `Bearer ${appToken}`,
+      },
+      body: JSON.stringify({ grant_type: "refresh_token", refresh_token: rec.refresh_token }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    const j = (await r.json()) as {
+      code?: number;
+      msg?: string;
+      data?: {
+        access_token?: string;
+        refresh_token?: string;
+        expires_in?: number;
+        scope?: string;
+      };
       access_token?: string;
       refresh_token?: string;
       expires_in?: number;
       scope?: string;
     };
-    access_token?: string;
-    refresh_token?: string;
-    expires_in?: number;
-    scope?: string;
+    // v1 oidc 用 data 包裹，旧 v1 为扁平结构，两者兼容
+    const d = j.data ?? j;
+    if (!d.access_token || !d.refresh_token) {
+      const detail = j.msg ? ` (code=${j.code ?? "?"}, msg=${j.msg})` : "";
+      throw new Error(
+        `feishu-api: 用户 token 续期失败${detail}（refresh_token 可能已失效），请重新走一次 OAuth 授权（npx tsx packages/layer-action/authorize-feishu.ts）`,
+      );
+    }
+    const next: UserTokenRecord = {
+      access_token: d.access_token,
+      refresh_token: d.refresh_token,
+      expires_at: new Date(Date.now() + ((d.expires_in ?? 7200) - 60) * 1000).toISOString(),
+      scope: d.scope ?? rec.scope,
+    };
+    await persistUserRecord(env, next);
+    cachedUserToken = { token: next.access_token, expiresAt: Date.parse(next.expires_at), storePath: env.tokenStorePath };
+    return next.access_token;
   };
-  // v1 oidc 用 data 包裹，旧 v1 为扁平结构，两者兼容
-  const d = j.data ?? j;
-  if (!d.access_token || !d.refresh_token) {
-    throw new Error(
-      "feishu-api: 用户 token 续期失败（refresh_token 可能已失效），请重新走一次 OAuth 授权（npx tsx packages/layer-action/authorize-feishu.ts）",
-    );
-  }
-  const next: UserTokenRecord = {
-    access_token: d.access_token,
-    refresh_token: d.refresh_token,
-    expires_at: new Date(Date.now() + ((d.expires_in ?? 7200) - 60) * 1000).toISOString(),
-    scope: d.scope ?? rec.scope,
-  };
-  await persistUserRecord(env, next);
-  return next.access_token;
+
+  userTokenInFlight = run().finally(() => {
+    userTokenInFlight = null;
+  });
+  return userTokenInFlight;
 }
 
 // ── Provider 实现 ────────────────────────────────────────────────
@@ -413,16 +470,28 @@ export const feishuApiProvider: Provider<FeishuApiRequest, FeishuApiResponse> = 
       };
     }
     let userTokenReady = false;
+    let expiresAt: string | undefined;
     try {
       const rec = await loadUserRecord(env);
       userTokenReady = Boolean(rec.refresh_token);
+      expiresAt = rec.expires_at;
     } catch {
       // token store 不存在：用户身份不可用，但应用身份仍可用
     }
+    // 临期提示（不判 unhealthy）：token 会自动续期，但持续临期说明续期在失败，
+    // 把「静默等到接口报错」提前成一句可读的健康信息。
+    const remainingMs = expiresAt ? msUntilExpiry(expiresAt) : Number.NEGATIVE_INFINITY;
+    const expiryNote = userTokenReady
+      ? remainingMs <= 0
+        ? `；用户 token 已过期（${expiresAt}），下次调用将自动续期`
+        : remainingMs < USER_TOKEN_REFRESH_AHEAD_MS
+          ? `；用户 token 将于 ${expiresAt} 到期（剩余 ${Math.round(remainingMs / 60_000)} 分钟），临期自动续期`
+          : ""
+      : "";
     return {
       healthy: true,
       detail: userTokenReady
-        ? "凭证已配置（用户身份 + 应用身份可用）"
+        ? `凭证已配置（用户身份 + 应用身份可用${expiryNote}）`
         : "凭证已配置（仅应用身份；用户身份需先完成 OAuth 授权）",
       checkedAt: new Date().toISOString(),
     };
