@@ -1,0 +1,51 @@
+{
+  "_说明": "角色能力注册表模板（复制为同目录 roles.json 后填本机值；roles.json 已被 .gitignore 忽略，勿入库）。skills 为技能目录（相对路径以本文件所在目录为基准，也支持绝对路径）；mcpServers 每项对应一个 @deepseek-ai/dsh-mcp-client 实例（stdio: command/args/env/cwd，或 streamable-http: url/headers）。timem 为太忆空间长期记忆（search_memories/create_memory/delete_memory）：url 用 https://test.space.timem.cloud/mcp/ ，X-API-Key 用 Space 密钥（tmk_ 开头，与 timem.cloud 正式服的 sk- 密钥不通用）。routes 把渠道身份（chatId/userId/appId）映射到角色，未命中走 default。",
+  "skillsRoot": "skills",
+  "roles": {
+    "default": {
+      "label": "zcode 默认角色",
+      "skills": [
+        "phase2-skill"
+      ],
+      "mcpServers": [
+        {
+          "serverName": "demo",
+          "command": "node",
+          "args": [
+            "<仓库绝对路径>/examples/feishu-dsh/mcp-test-server.mjs"
+          ]
+        },
+        {
+          "serverName": "timem",
+          "url": "https://test.space.timem.cloud/mcp/",
+          "headers": {
+            "X-API-Key": "<tmk_ 开头的 Space 密钥，勿提交>"
+          },
+          "toolCallTimeoutMs": 60000,
+          "failOnStartupError": false
+        }
+      ]
+    },
+    "readonly": {
+      "label": "只读访客（无任何 skill/MCP）",
+      "skills": [],
+      "mcpServers": []
+    },
+    "zy-mui8eu02": {
+      "label": "周会待办督办员",
+      "skills": [],
+      "mcpServers": [
+        {
+          "serverName": "timem",
+          "url": "https://test.space.timem.cloud/mcp/",
+          "headers": {
+            "X-API-Key": "<tmk_ 开头的 Space 密钥，勿提交>"
+          },
+          "toolCallTimeoutMs": 60000,
+          "failOnStartupError": false
+        }
+      ]
+    }
+  },
+  "routes": {}
+}

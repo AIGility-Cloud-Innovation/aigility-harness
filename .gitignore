@@ -4,6 +4,10 @@ dist/
 .DS_Store
 *.log
 .env
+# env 备份/变体同样含真实凭证（.env 规则只精确匹配 .env 本身，备份会漏网）
+.env.*
+!.env.example
+*.bak.20*
 .turbo/
 coverage/
 
@@ -49,6 +53,10 @@ examples/fde-workbench/.tmp/
 # feishu 本地凭证仓（整个目录不入库；首次授权引导脚本在 packages/layer-action/authorize-feishu.ts）
 config/feishu/
 
+# feishu-dsh 角色能力注册表：本地环境配置（含本机绝对路径与 MCP 密钥），不入库
+# 模板: examples/feishu-dsh/roles.example.json
+examples/feishu-dsh/roles.json
+
 # IM 中继会话历史等运行时状态
 examples/*/.state/
 
@@ -63,3 +71,4 @@ config/*.local.jsonl
 # 临时工作目录（截图/草稿，不入库）
 .tmp-baojing/
 gui-test-screenshots/
+*.tmp
