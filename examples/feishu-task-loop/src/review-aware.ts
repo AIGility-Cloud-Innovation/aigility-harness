@@ -14,6 +14,10 @@
  * 设计取向：要素抽取用确定性正则 + 项目别名表（不烧 LLM、不猜），
  * 判定复用 task-release-gate（LLM 判现状/方法/目标），回复用确定性文案——
  * 固定的不是"格式"而是"事实"，宁可平实不可编造。
+ *
+ * 2026-10-07 句式扩展（真实事故 R42）：①归属抽取认「项目是 X」「仓库是 X」
+ * 并支持 org/repo 全名；②带 R 码但码表没有 → 确定性提示，不再漏给单轮兜底。
+ * 无编号/无短码的纯指代回复由 @persona/feishu-task-assistant 的短时记忆窗口兜。
  */
 import {
   LayerId,
@@ -205,8 +209,13 @@ function extractExecutor(text: string): string | undefined {
   return m?.[1];
 }
 
-function extractProjectToken(text: string): string | undefined {
-  const m = text.match(/归属(?:项目)?(?:是|为|[:：])?\s*([\w\u4e00-\u9fa5-]{2,64})/);
+/** 归属抽取（2026-10-07 句式扩展）：真实事故「R42 项目是 timem_console_frontend」
+ *  旧正则只认「归属(项目)是」，用户说「项目是 X」被当成补充材料、机器人仍回
+ *  「还差归属」；现把 项目/仓库 也认作归属引导词，并支持 org/repo 全名（含 /）。
+ *  注意「归属\s*(项目|仓库)?」必须整体可选链——否则「归属项目：X」会把「项目」
+ *  吞成值。 */
+export function extractProjectToken(text: string): string | undefined {
+  const m = text.match(/(?:归属\s*(?:项目|仓库)?|项目|仓库)(?:是|为|[:：])?\s*([\w\u4e00-\u9fa5/-]{2,64})/);
   return m?.[1];
 }
 
@@ -786,7 +795,15 @@ export async function handleReviewMessage(
     .map((m) => m[0].toUpperCase())
     .filter((c) => c in codes);
   const wantsList = /复核清单|待复核|复核列表/.test(text) && matchedCodes.length === 0;
-  if (matchedCodes.length === 0 && !wantsList) return null;
+  if (matchedCodes.length === 0 && !wantsList) {
+    // 2026-10-07：消息带 R 码但码表里没有（已放行/已刷新/写错）→ 确定性提示，
+    // 不再静默漏给单轮兜底瞎答（真实事故：R42 那条问归属落兜底答非所问）
+    const unknownCode = text.match(/[Rr]\d{2}/)?.[0]?.toUpperCase();
+    if (unknownCode) {
+      return `「${unknownCode}」不在当前复核清单里（可能已放行或清单刷新过）。发「复核清单」看现有短码。`;
+    }
+    return null;
+  }
 
   if (wantsList) {
     const pending = registry.list({ status: ["planned"] });
@@ -817,10 +834,11 @@ export async function handleReviewMessage(
   }
   // 除短码/结构要素外的正文 = 用户补充的材料（现状/目标/方法…），原样记入描述，
   // 检查单重跑时 LLM 判定的是"补过的描述"——这是"回复了还问"问题的修复核心。
+  // （2026-10-07 与 extractProjectToken 同步扩展：归属/项目/仓库 三种引导词都要剥掉）
   const residual = text
     .replace(/R\d{2}/gi, "")
     .replace(/执行人?[：:]?\s*[@]?[\w\u4e00-\u9fa5·\-]{2,32}/, "")
-    .replace(/归属(?:项目)?(?:是|为|[:：])?\s*[\w\u4e00-\u9fa5-]{2,64}/, "")
+    .replace(/(?:归属\s*(?:项目|仓库)?|项目|仓库)(?:是|为|[:：])?\s*[\w\u4e00-\u9fa5/-]{2,64}/, "")
     .trim();
   const hasSupplement = residual.length >= 4;
 
