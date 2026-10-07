@@ -16,6 +16,7 @@
     "@aigility-harness/layer-persona": "workspace:*",
     "@aigility-harness/layer-orchestration": "workspace:*",
     "@aigility-harness/layer-action": "workspace:*",
+    "@aigility-harness/appbase": "workspace:*",
     "prototype-mode": "workspace:*"
   },
   "devDependencies": {

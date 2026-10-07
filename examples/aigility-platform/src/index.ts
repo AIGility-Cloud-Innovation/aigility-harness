@@ -1210,14 +1210,62 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
         if (!requireUser(req, res)) return;
         await ensureLlmNodeReady();
         try {
-          json(res, 200, { ok: true, resolved: await resolveLLMNode(llmNodeStore, llmNodeResolve[1]) });
-        } catch (e) { json(res, 404, { ok: false, error: String(e) }); }
+          const resolved = await resolveLLMNode(llmNodeStore, llmNodeResolve[1]);
+          if (!resolved) {
+            json(res, 404, { ok: false, error: `LLM 节点不存在或已停用: ${llmNodeResolve[1]}` });
+            return;
+          }
+          json(res, 200, { ok: true, resolved });
+        } catch (e) { json(res, 500, { ok: false, error: String(e) }); }
+        return;
+      }
+      // 试调用：真发一次极短请求（max_tokens:16）—— 配错立刻可见，不必等生产日志里冒出空响应
+      const llmNodeProbe = path.match(/^\/api\/aigility\/llm\/nodes\/([\w.-]+)\/probe$/);
+      if (llmNodeProbe && req.method === "POST") {
+        if (!requireUser(req, res)) return;
+        if (!(await llmAdminGate())) { json(res, 403, { ok: false, error: "需要 model:manage 权限" }); return; }
+        await ensureLlmNodeReady();
+        const probeName = llmNodeProbe[1];
+        try {
+          const resolved = await resolveLLMNode(llmNodeStore, probeName);
+          if (!resolved) { json(res, 404, { ok: false, error: `LLM 节点不存在或已停用: ${probeName}` }); return; }
+          const upstream = resolved.baseUrl && resolved.apiKey
+            ? { url: resolved.baseUrl, key: resolved.apiKey }
+            : undefined;
+          const t0 = Date.now();
+          const r = await seamCall<{ text: string; finish_reason?: string; usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } }>(
+            "@cognitive/llm-inference",
+            {
+              ...(resolved.parameter ?? {}),
+              model: resolved.model,
+              messages: [{ role: "user", content: "请回复两个字：正常" }],
+              max_tokens: 16,
+              temperature: 0,
+              ...(upstream ? { upstream } : {}),
+            },
+          );
+          const ms = Date.now() - t0;
+          if (!r.ok || !r.value) {
+            void writeAudit(sessionUserId(req) ?? "unknown", "llm.node.probe", `${probeName} → 失败`);
+            json(res, 200, { ok: false, model: resolved.model, baseUrl: resolved.baseUrl, ms, error: String(r.error ?? "调用失败（检查上游可达性与密钥）") });
+            return;
+          }
+          void writeAudit(sessionUserId(req) ?? "unknown", "llm.node.probe", `${probeName} → ok ${ms}ms`);
+          json(res, 200, {
+            ok: true, model: resolved.model, baseUrl: resolved.baseUrl, ms,
+            finishReason: r.value.finish_reason,
+            sample: (r.value.text ?? "").slice(0, 80),
+            usage: r.value.usage,
+          });
+        } catch (e) {
+          json(res, 200, { ok: false, error: String(e) });
+        }
         return;
       }
       if (path === "/api/aigility/llm/nodes" && req.method === "POST") {
         if (!requireUser(req, res)) return;
         if (!(await llmAdminGate())) { json(res, 403, { ok: false, error: "需要 model:manage 权限" }); return; }
-        const body = JSON.parse((await readBody(req)) || "{}") as { name?: string; description?: string; serviceModule?: string; functionName?: string; modelName?: string; parameter?: Record<string, unknown>; providerId?: number; isStream?: boolean };
+        const body = JSON.parse((await readBody(req)) || "{}") as { name?: string; description?: string; serviceModule?: string; functionName?: string; modelName?: string; parameter?: Record<string, unknown>; providerId?: number; isStream?: boolean; enabled?: boolean };
         if (!body.name?.trim() || !body.modelName?.trim() || !body.providerId) {
           json(res, 400, { ok: false, error: "需要 name、modelName 与 providerId" });
           return;
@@ -1227,7 +1275,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
           const node = await llmNodeStore.createNode({
             name: body.name.trim(), description: body.description ?? "", serviceModule: body.serviceModule ?? "",
             functionName: body.functionName ?? "", modelName: body.modelName.trim(),
-            parameter: body.parameter ?? {}, providerId: body.providerId, isStream: body.isStream ?? true,
+            parameter: body.parameter ?? {}, providerId: body.providerId, isStream: body.isStream ?? true, enabled: body.enabled ?? true,
           });
           void writeAudit(sessionUserId(req) ?? "unknown", "llm.node.create", node.name);
           json(res, 200, { ok: true, node });
@@ -1238,7 +1286,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       if (llmNodePut && req.method === "PUT") {
         if (!requireUser(req, res)) return;
         if (!(await llmAdminGate())) { json(res, 403, { ok: false, error: "需要 model:manage 权限" }); return; }
-        const body = JSON.parse((await readBody(req)) || "{}") as { description?: string; serviceModule?: string; functionName?: string; modelName?: string; parameter?: Record<string, unknown>; providerId?: number; isStream?: boolean };
+        const body = JSON.parse((await readBody(req)) || "{}") as { description?: string; serviceModule?: string; functionName?: string; modelName?: string; parameter?: Record<string, unknown>; providerId?: number; isStream?: boolean; enabled?: boolean };
         await llmNodeStore.updateNode(Number(llmNodePut[1]), body);
         void writeAudit(sessionUserId(req) ?? "unknown", "llm.node.update", llmNodePut[1]);
         json(res, 200, { ok: true });

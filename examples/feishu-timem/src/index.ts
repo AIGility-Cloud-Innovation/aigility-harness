@@ -35,6 +35,7 @@ import { plugin as personaPlugin } from "@aigility-harness/layer-persona";
 import { plugin as orchestrationPlugin, enableTimemProjectTask, timemProjectTaskService, timemProjectTaskProvider } from "@aigility-harness/layer-orchestration";
 import { feishuIngressProvider } from "@aigility-harness/layer-infrastructure";
 import { loadEnv } from "./env.js";
+import { wireLlmNodes } from "@aigility-harness/appbase/llm-node-store";
 
 /**
  * 飞书机器人 → 人格角色 映射表（gateway 识别配置）
@@ -102,6 +103,8 @@ async function main(): Promise<void> {
     socketPath: process.env["TIMEM_AGENTD_SOCK"],
     token: process.env["TIMEM_AGENTD_TOKEN"],
   });
+  // 4.6 接线 LLM 节点解析器（页面可按节点改模型/参数；DB 不可达自动退回 env 兜底）
+  await wireLlmNodes();
   const timemReg = await kernel.registry.register(timemProjectTaskService, timemProjectTaskProvider);
   if (timemReg.ok) {
     console.log("[timem-project-task] 真实执行桥接已注册 (UDS → agentd)");

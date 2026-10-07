@@ -15,6 +15,7 @@
     "@aigility-harness/layer-cognitive": "workspace:*",
     "@aigility-harness/layer-persona": "workspace:*",
     "@aigility-harness/layer-orchestration": "workspace:*",
+    "@aigility-harness/appbase": "workspace:*",
     "@larksuiteoapi/node-sdk": "^1.73.1",
     "prototype-mode": "workspace:*"
   },

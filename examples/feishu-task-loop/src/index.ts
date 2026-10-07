@@ -64,6 +64,7 @@ import {
   createGiteaIssueProvider,
 } from "@aigility-harness/layer-orchestration";
 import { getSharedRegistry, getReviewCodes, assignReviewCodes } from "./review-aware.js";
+import { wireLlmNodes } from "@aigility-harness/appbase/llm-node-store";
 import { syncGiteaCompletions } from "./completion-sync.js";
 import { remindPendingTasks } from "./review-reminder.js";
 import { syncBoardAlignment } from "./board-sync.js";
@@ -189,6 +190,9 @@ async function main(): Promise<void> {
   }
   // 群播报函数注入流水线（建单播报 / PR 提醒）
   setNotifySend(start.value.send);
+
+  // 模型节点解析器注入（页面上按节点改模型/参数；节点缺失或 DB 不可达 → 退回 env 兜底）
+  await wireLlmNodes();
 
   // 4. 启动任务流水线（定时：分群汇总判定 → 归属/澄清 → 去重建工单 → PR 提醒）
   // 数据面工作流：一批消息的处理过程与功能开关（建单节点 enabled）都在 YAML 里，
