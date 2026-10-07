@@ -1,14 +1,15 @@
 {
   "$schema": "./timem-team-registry.schema.md",
   "version": 2,
-  "updated_at": "2026-10-05T03:06:06.288Z",
+  "updated_at": "2026-10-07T07:14:12.448Z",
   "notes": [
     "本文件是「人员对齐」登记表 (single source of truth)：同一个人在飞书 / Gitea / 太忆云中是同一个人。",
     "身份轴：timem_user_ids（太忆云 user_id，space_uuid 格式，可多个）、feishu_open_ids（飞书 open_id，ou_ 开头）、gitea_usernames（git.aigility.cloud 用户名）。",
     "每条身份轴配套 match_source（manual=人工在智悦平台确认 / auto=自动匹配待确认）。自动匹配永不覆盖 manual 绑定。",
     "aliases 用于自然语言查询时的模糊匹配：中文名、英文名、花名、拼音、IM 显示名都可填。",
     "member_id 用稳定英文短横线 id，不要用中文；个人任务快照的 timem user_id 取 timem_user_ids[0]，缺失时回退 member_id。",
-    "自动匹配入口：智悦平台「身份对齐」页（POST /api/aigility/identity/auto-match）；未登记的 timem user_id 用 `pnpm --filter team-memory-console cli unknown` 发现并补录。"
+    "自动匹配入口：智悦平台「身份对齐」页（POST /api/aigility/identity/auto-match）；未登记的 timem user_id 用 `pnpm --filter team-memory-console cli unknown` 发现并补录。",
+    "2026-10-07 Gitea 绑定确认（负责人拍板）：人名按拼音对应 Gitea 用户名，特例 LJY=lanjinyu；刘晓=liuxiao 另有邮箱佐证 lucios@foxmail.com。全部标记 match_source.gitea=manual。"
   ],
   "members": [
     {
@@ -21,8 +22,12 @@
         "space_418cd47d-0577-4819-a97f-33dfb16a160b"
       ],
       "feishu_open_ids": [],
-      "gitea_usernames": [],
-      "match_source": {}
+      "gitea_usernames": [
+        "shahongbin"
+      ],
+      "match_source": {
+        "gitea": "manual"
+      }
     },
     {
       "member_id": "member-johnny",
@@ -62,8 +67,12 @@
         "space_45931d7f-b231-4f37-be93-4d23289cf87d"
       ],
       "feishu_open_ids": [],
-      "gitea_usernames": [],
-      "match_source": {}
+      "gitea_usernames": [
+        "lanjinyu"
+      ],
+      "match_source": {
+        "gitea": "manual"
+      }
     },
     {
       "member_id": "member-anlei",
@@ -75,8 +84,12 @@
         "space_c398da06-14bc-4299-b7c1-1b4eb920b7f5"
       ],
       "feishu_open_ids": [],
-      "gitea_usernames": [],
-      "match_source": {}
+      "gitea_usernames": [
+        "anlei"
+      ],
+      "match_source": {
+        "gitea": "manual"
+      }
     },
     {
       "member_id": "member-liutuo",
@@ -88,8 +101,12 @@
         "space_f633f568-00a8-4e69-8300-7a99f47303a2"
       ],
       "feishu_open_ids": [],
-      "gitea_usernames": [],
-      "match_source": {}
+      "gitea_usernames": [
+        "liutuo"
+      ],
+      "match_source": {
+        "gitea": "manual"
+      }
     },
     {
       "member_id": "member-xubincheng",
@@ -99,8 +116,12 @@
       ],
       "timem_user_ids": [],
       "feishu_open_ids": [],
-      "gitea_usernames": [],
-      "match_source": {}
+      "gitea_usernames": [
+        "xubincheng"
+      ],
+      "match_source": {
+        "gitea": "manual"
+      }
     },
     {
       "member_id": "member-task-assistant",
@@ -125,7 +146,9 @@
       ],
       "timem_user_ids": [],
       "feishu_open_ids": [],
-      "gitea_usernames": [],
+      "gitea_usernames": [
+        "liuxiao"
+      ],
       "wecom_user_ids": [],
       "web_emails": [],
       "match_source": {
