@@ -61,6 +61,22 @@ import {
   type ZcodeAgentResponse,
 } from "./zcode-agent.js";
 import {
+  piAgentService,
+  piAgentProvider,
+  piAgentRef,
+  buildPiArgs,
+  type PiAgentRequest,
+  type PiAgentResponse,
+} from "./pi-agent.js";
+export {
+  piAgentService,
+  piAgentProvider,
+  piAgentRef,
+  buildPiArgs,
+  type PiAgentRequest,
+  type PiAgentResponse,
+};
+import {
   claudeAgentService,
   claudeAgentProvider,
   claudeAgentRef,
@@ -207,7 +223,7 @@ export const manifest: PluginManifest = {
   layer: LayerId.Action,
   description: "行动执行层：工具执行占位 + 文本转语音（msedge + MiniMax 双 Provider 热替换）+ 语音转文本（vosk/whisper 运行时可选）+ 编码代理工人(codex/zcode/claude) + 文档工人(docx) + TiMEM 记忆检索/写入 + 飞书 Open API 直连(用户/应用身份, 含用户 OAuth 授权引导) + Gitea v1 API 直连(git.aigility.cloud 工单, DNS 绕行)",
   version: "0.7.0",
-  provides: [toolExecutionService, textToSpeechService, speechToTextService, codexAgentService, zcodeAgentService, claudeAgentService, docWorkerService, timemMemoryService, timemMemoryWriteService, feishuApiService, giteaApiService],
+  provides: [toolExecutionService, textToSpeechService, speechToTextService, codexAgentService, zcodeAgentService, piAgentService, claudeAgentService, docWorkerService, timemMemoryService, timemMemoryWriteService, feishuApiService, giteaApiService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
 };
@@ -268,6 +284,8 @@ class EnvTimemClient implements TimemMemoryClientLike {
   addMemory(opts: Parameters<TimemClient["addMemory"]>[0]) {
     return this.ensure().addMemory(opts);
   }
+
+
 }
 
 let pluginState: PluginState = PluginState.Registered;
@@ -295,6 +313,7 @@ export const plugin: LayerPlugin = {
       whisperSttProvider,
       codexAgentProvider,
       zcodeAgentProvider,
+      piAgentProvider,
       claudeAgentProvider,
       docWorkerProvider,
       createTimemMemoryProvider(timemClient),

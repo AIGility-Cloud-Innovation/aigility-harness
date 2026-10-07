@@ -76,6 +76,7 @@ export const codexAgentRef: CapabilityRef = {
 const agentRefs: Record<string, CapabilityRef> = {
   zcode: { id: "@action/zcode-agent", versionRange: "^1.0.0" },
   claude: { id: "@action/claude-agent", versionRange: "^1.0.0" },
+  pi: { id: "@action/pi-agent", versionRange: "^1.0.0" },
 };
 
 /** 驱动选择: 请求级 driver > 环境变量 AGENT_DRIVER > 默认 codex */
@@ -83,6 +84,14 @@ function agentDriverRef(requestDriver?: string): CapabilityRef {
   const drv = requestDriver ?? process.env.AGENT_DRIVER ?? "codex";
   return agentRefs[drv] ?? codexAgentRef;
 }
+
+/** 驱动显示名（人格标注用；2026-10-07 补 claude/pi——此前 claude 被误标为 Codex） */
+const DRIVER_DISPLAY_NAMES: Record<string, string> = {
+  codex: "Codex",
+  zcode: "ZCode",
+  claude: "Claude",
+  pi: "pi",
+};
 
 // ── 可操作目录白名单 ──────────────────────────────────────────────
 // app-dev 委托 codex-agent 时, 工作目录必须落在允许的沙箱目录内,
@@ -226,8 +235,8 @@ const appDevProvider: Provider<AppDevRequest, AppDevResponse> = {
     request: AppDevRequest,
     ctx: SeamContext,
   ): Promise<Result<AppDevResponse>> {
-    // 1. 角色形象: 网页应用开发员 (驱动可切换: codex / zcode, 按 AGENT_DRIVER 标注)
-    const driverName = process.env.AGENT_DRIVER === "zcode" ? "ZCode" : "Codex";
+    // 1. 角色形象: 网页应用开发员 (驱动可切换: codex / zcode / claude / pi, 按 AGENT_DRIVER 标注)
+    const driverName = DRIVER_DISPLAY_NAMES[process.env.AGENT_DRIVER ?? "codex"] ?? "Codex";
     const agentName = `网页应用开发员 (${driverName} 驱动)`;
 
     // 2. 校验工作目录在沙箱白名单内 (防任意目录写文件/执行命令)
