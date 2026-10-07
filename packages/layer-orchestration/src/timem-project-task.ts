@@ -30,6 +30,7 @@ import type {
 } from "@aigility-harness/core";
 // (UDS transport 已抽至 agentd-client.ts)
 import { execFile } from "node:child_process";
+import { nodeRequest, withNodeDefaults } from "./llm-node-port.js";
 import { RequirementStore } from "./requirement-store.js";
 import type { Consolidation, Requirement } from "./requirement-store.js";
 import {
@@ -157,15 +158,19 @@ async function classifyWithLlm(
   input: string,
 ): Promise<ClassifyResult> {
   try {
-    const req: LlmInferenceRequest = {
-      model: process.env.LLM_MODEL ?? "glm-4.6",
+    // 节点优先（页面上可改模型/参数），节点缺失/停用/未装配 → 退回 env 兜底。
+    // withNodeDefaults 保证：节点 parameter 只是默认值，下方 temperature: 0 显式压过它。
+    const parts = await nodeRequest("task-classify");
+    const model = parts?.model ?? process.env.LLM_MODEL ?? "glm-4.6";
+    const req: LlmInferenceRequest = withNodeDefaults(parts, {
       messages: [
         { role: "system", content: CLASSIFY_SYSTEM_PROMPT },
         { role: "user", content: input },
       ],
-      temperature: 0,
-    };
-    console.log(`[timem-project-task] classifyWithLlm start: model=${process.env.LLM_MODEL ?? "glm-4.6"} input="${input.slice(0, 40)}"`);
+      temperature: 0, // 判定要确定性：显式值优先于节点默认
+      model,
+    });
+    console.log(`[timem-project-task] classifyWithLlm start: model=${model} source=${parts ? `node:${parts.node}` : "env"} input="${input.slice(0, 40)}"`);
     const t0 = Date.now();
     const res = (await ctx.call<LlmInferenceRequest, LlmInferenceResponse>(
       llmInferenceRef,

@@ -42,6 +42,10 @@
     "./dsh-host": {
       "types": "./src/dsh-host.ts",
       "default": "./src/dsh-host.ts"
+    },
+    "./llm-node-store": {
+      "types": "./src/llm-node-store.ts",
+      "default": "./src/llm-node-store.ts"
     }
   }
 }

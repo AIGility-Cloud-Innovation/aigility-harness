@@ -38,6 +38,11 @@ export interface LLMNodeConfig {
   parameter: Record<string, unknown>;
   providerId: number;
   isStream: boolean;
+  /**
+   * 停用 = 不参与解析（resolveLLMNode 返回 null → 业务侧退回 env 兜底）。
+   * 与「删除」的区别：停用保留配置，改错了能一键回滚。
+   */
+  enabled: boolean;
 }
 
 /** 节点解析产物：可直接发起 OpenAI 兼容请求 */
@@ -49,6 +54,23 @@ export interface ResolvedLLMNode {
   apiKey: string;
   isStream: boolean;
   parameter: Record<string, unknown>;
+  /** 透传节点停用态；resolveLLMNode 已据此返回 null，此处仅供 UI/诊断 */
+  enabled: boolean;
+}
+
+/**
+ * 节点请求桥产物：业务侧把它展开进 LlmInferenceRequest 即可
+ * （model 必填；upstream/parameter 可选，缺省表示「按全局 env 走」）。
+ */
+export interface LlmNodeRequestParts {
+  /** 来源节点名（未解析出节点时为 undefined，便于日志区分「节点」与「env 兜底」） */
+  node?: string;
+  model?: string;
+  /** 站点自带上游（url+key 都非空才给）；缺省走 LLM_PROVIDER/env 全局 */
+  upstream?: { url: string; key: string };
+  /** 节点级默认参数（temperature/max_tokens/…）；调用点显式字段应覆盖它 */
+  parameter?: Record<string, unknown>;
+  isStream?: boolean;
 }
 
 // ── 存储接口（站点适配：PG / 内存）──────────────────────────────
@@ -76,16 +98,18 @@ export function resolveEnvPlaceholder(value: string, env: Record<string, string 
 
 // ── 节点解析 ────────────────────────────────────────────────────
 
-/** node_name → 可执行配置（供应商 base/key + 模型 + 参数） */
+/** node_name → 可执行配置（供应商 base/key + 模型 + 参数）；节点或供应商缺失 → null（业务侧回退 env） */
 export async function resolveLLMNode(
   store: LLMNodeStore,
   name: string,
   env: Record<string, string | undefined> = process.env,
-): Promise<ResolvedLLMNode> {
+): Promise<ResolvedLLMNode | null> {
   const node = await store.getNodeByName(name);
-  if (!node) throw new Error(`LLM 节点不存在: ${name}`);
+  if (!node) return null;
+  // 停用节点视同不存在：业务侧统一走「节点缺失 → env 兜底」这一条路径
+  if (node.enabled === false) return null;
   const provider = await store.getProvider(node.providerId);
-  if (!provider) throw new Error(`LLM 节点 ${name} 的供应商不存在 (provider_id=${node.providerId})`);
+  if (!provider) return null;
   return {
     node: node.name,
     model: node.modelName,
@@ -93,7 +117,41 @@ export async function resolveLLMNode(
     apiKey: resolveEnvPlaceholder(provider.apiKey, env),
     isStream: node.isStream,
     parameter: node.parameter,
+    enabled: node.enabled,
   };
+}
+
+/**
+ * 节点名 → LlmInferenceRequest 三件套（业务侧唯一入口；纯函数，无 IO）。
+ *
+ * 失败语义是**有意的**：节点不存在 / 供应商缺失 / 该节点被停用 → 返回 null，
+ * 业务侧必须回退到 env 默认值。配错一个名字不能让整条链路断掉。
+ *
+ * 优先级语义：本函数只给「默认值」，调用点之后显式写的 model/temperature 等
+ * 字段自然覆盖（业务侧展开顺序：...parts.parameter 在前，显式字段在后）。
+ */
+export function buildNodeRequest(resolved: ResolvedLLMNode | null): LlmNodeRequestParts | null {
+  if (!resolved) return null;
+  const upstream =
+    resolved.baseUrl && resolved.apiKey
+      ? { url: resolved.baseUrl, key: resolved.apiKey }
+      : undefined;
+  return {
+    node: resolved.node,
+    model: resolved.model || undefined,
+    ...(upstream ? { upstream } : {}),
+    parameter: resolved.parameter ?? {},
+    isStream: resolved.isStream,
+  };
+}
+
+/** buildNodeRequest ∘ resolveLLMNode 的组合便捷入口（查库失败/节点缺失一律 null，不抛） */
+export async function resolveNodeRequest(
+  store: LLMNodeStore,
+  name: string,
+  env: Record<string, string | undefined> = process.env,
+): Promise<LlmNodeRequestParts | null> {
+  return buildNodeRequest(await resolveLLMNode(store, name, env));
 }
 
 /** DDL（站点库执行；幂等） */
@@ -117,6 +175,9 @@ CREATE TABLE IF NOT EXISTS llm_node (
   parameter JSONB NOT NULL DEFAULT '{}'::jsonb,
   provider_id BIGINT NOT NULL REFERENCES llm_provider(id),
   is_stream BOOLEAN NOT NULL DEFAULT true,
+  is_enabled BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- 既有库补列（CREATE TABLE IF NOT EXISTS 不会给老表加列）
+ALTER TABLE llm_node ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN NOT NULL DEFAULT true;
 `;

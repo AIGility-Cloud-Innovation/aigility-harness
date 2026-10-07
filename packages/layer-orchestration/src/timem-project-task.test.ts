@@ -31,6 +31,7 @@ import {
   resetTimemTaskHooks,
   resetRequirementStoreForTest,
 } from "./timem-project-task.js";
+import { setLlmNodeResolver } from "./llm-node-port.js";
 
 /** 最小 SeamContext 测试替身(LLM 调用可注入; 汇总器 prompt 可单独给响应, 支持按 user content 动态生成) */
 function mockContext(
@@ -103,6 +104,7 @@ afterEach(() => {
   // 还原 enableTimemProjectTask 注入的 socket/token(避免跨测试泄漏)
   enableTimemProjectTask({ socketPath: undefined, token: undefined });
   resetRequirementStoreForTest();
+  setLlmNodeResolver(undefined); // 节点解析器不跨测试泄漏
 });
 
 describe("timem-task", () => {
@@ -212,7 +214,7 @@ describe("classify LLM 兜底", () => {
     expect(result.value.type).toBe("collected");
     expect(llmCalls.length).toBe(1);
     const req = llmCalls[0] as LlmInferenceRequest;
-    expect(req.model).toBe("glm-4.6"); // 跟随 LLM_MODEL 默认, 不再写死 qwen2.5:7b
+    expect(req.model).toBe(process.env.LLM_MODEL ?? "glm-4.6"); // 未装配节点解析器 → 跟随 LLM_MODEL 默认
     expect(req.messages[0].content).toContain("is_task");
   });
 
@@ -749,5 +751,79 @@ describe("需求缓冲区工作流", () => {
       mockContext('{"is_task": true}'),
     );
     expect(r.ok && r.value.type).toBe("error");
+  });
+});
+
+/**
+ * LLM 节点端口：节点优先、env 兜底。
+ * classifyWithLlm 与 classify 的规则层无关 —— 这里用「无关键词、必须走 LLM」的输入。
+ */
+describe("classifyWithLlm 的节点优先 / env 兜底", () => {
+  /** 捕获 llm-inference 请求的 ctx 替身 */
+  function captureContext(): { reqs: LlmInferenceRequest[]; ctx: SeamContext } {
+    const reqs: LlmInferenceRequest[] = [];
+    const ctx = {
+      sessionId: "it-session",
+      traceId: "it-trace",
+      callerLayer: LayerId.Orchestration,
+      addEffect: () => "e",
+      emit: () => {},
+      getState: () => undefined,
+      setState: () => {},
+      call: (async (ref: { id?: string }, req: unknown) => {
+        if (ref.id !== "@cognitive/llm-inference") throw new Error(`未预期的 capability: ${ref.id}`);
+        reqs.push(req as LlmInferenceRequest);
+        return ok({
+          text: '{"is_task": true, "project": "demo", "reason": "x"}',
+          message: { role: "assistant", content: "{}" },
+          model: "m", finish_reason: "stop",
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        });
+      }) as SeamContext["call"],
+    } as SeamContext;
+    return { reqs, ctx };
+  }
+
+  it("装配节点 → 用节点模型，且把节点 parameter 当默认值（调用点 temperature 覆盖）", async () => {
+    setLlmNodeResolver(async (name) =>
+      name === "task-classify"
+        ? { node: "task-classify", model: "qwen3.5", parameter: { temperature: 0.9, max_tokens: 200 }, upstream: { url: "http://127.0.0.1:48724", key: "sk-1" } }
+        : null,
+    );
+    const { reqs, ctx } = captureContext();
+    await timemProjectTaskProvider.execute({ user_input: "帮我看看这个接口怎么回事", session_id: "n1" }, ctx);
+
+    expect(reqs.length).toBe(1);
+    expect(reqs[0].model).toBe("qwen3.5");          // 节点优先于 LLM_MODEL=glm-4.6
+    expect(reqs[0].temperature).toBe(0);            // 调用点显式值压过节点默认 0.9
+    expect(reqs[0].max_tokens).toBe(200);           // 节点默认值生效
+    expect(reqs[0].upstream).toEqual({ url: "http://127.0.0.1:48724", key: "sk-1" }); // 站点自带上游
+  });
+
+  it("节点缺失(null) → 退回 LLM_MODEL 兜底，不传 upstream", async () => {
+    setLlmNodeResolver(async () => null);
+    const { reqs, ctx } = captureContext();
+    await timemProjectTaskProvider.execute({ user_input: "帮我看看这个接口怎么回事", session_id: "n2" }, ctx);
+
+    expect(reqs[0].model).toBe(process.env.LLM_MODEL ?? "glm-4.6");
+    expect(reqs[0].upstream).toBeUndefined();
+  });
+
+  it("解析器抛异常 → 不冒泡，仍退回 env 兜底（配错节点不断链路）", async () => {
+    setLlmNodeResolver(async () => {
+      throw new Error("db down");
+    });
+    const { reqs, ctx } = captureContext();
+    const r = await timemProjectTaskProvider.execute({ user_input: "帮我看看这个接口怎么回事", session_id: "n3" }, ctx);
+
+    expect(r.ok).toBe(true);
+    expect(reqs[0].model).toBe(process.env.LLM_MODEL ?? "glm-4.6");
+  });
+
+  it("未装配解析器 → env 兜底", async () => {
+    setLlmNodeResolver(undefined);
+    const { reqs, ctx } = captureContext();
+    await timemProjectTaskProvider.execute({ user_input: "帮我看看这个接口怎么回事", session_id: "n4" }, ctx);
+    expect(reqs[0].model).toBe(process.env.LLM_MODEL ?? "glm-4.6");
   });
 });

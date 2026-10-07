@@ -297,6 +297,10 @@ export type {
 // 配置外置共用件 ({{占位符}} 渲染 + config/ 目录 YAML 加载)
 export { renderTemplate, loadConfigSection } from "./prompts.js";
 
+// LLM 节点解析端口（装配层注入站点实现；与 setNotifySend 同款约定）
+export { setLlmNodeResolver, nodeRequest, withNodeDefaults } from "./llm-node-port.js";
+export type { LlmNodeParts, LlmNodeResolver } from "./llm-node-port.js";
+
 // 群聊→任务→工单→PR提醒 流水线（只管理不执行）
 export {
   taskPipelineService,

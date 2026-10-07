@@ -48,6 +48,7 @@ import { YamlWorkflow, parseWorkflowYaml, loadWorkflowFile } from "./workflow-dr
 import type { TaskRegistry } from "./task-registry.js";
 import type { WorkflowDoc } from "./workflow-driver.js";
 import { resolveChatName } from "./task-issue-sync.js";
+import { nodeRequest, withNodeDefaults } from "./llm-node-port.js";
 import { getIdentityRegistry, identityMembers } from "./identity-registry.js";
 
 // ── 消费引用 ─────────────────────────────────────────────────────
@@ -890,7 +891,13 @@ export const taskPipelineProvider: Provider<TaskPipelineRequest, TaskPipelineRes
       const repos = request.repos;
       const chatRepoMap = request.chatRepoMap ?? {};
       const threshold = request.dedupThreshold ?? 0.5;
-      const model = request.model ?? process.env.TASK_PIPELINE_MODEL ?? "qwen-turbo";
+      // 判定模型优先级：请求显式 model > 节点 task-judge > env TASK_PIPELINE_MODEL > 内置默认。
+      // 首次对拍建议节点与 env 配成同款模型，确认「走节点」与「走 env」行为一致后再于页面切模型。
+      const judgeParts = await nodeRequest("task-judge");
+      const model = request.model ?? judgeParts?.model ?? process.env.TASK_PIPELINE_MODEL ?? "qwen-turbo";
+      if (judgeParts) {
+        console.log(`[task-pipeline] 判定模型来源节点 task-judge: model=${judgeParts.model}${request.model ? "（被请求显式 model 覆盖）" : ""}`);
+      }
       const workflowFile = request.workflowFile;
 
       if (runtime.timer) clearInterval(runtime.timer);
@@ -922,12 +929,12 @@ export const taskPipelineProvider: Provider<TaskPipelineRequest, TaskPipelineRes
             const texts = msgs.map(
               (m) => `${new Date(m.ts).toISOString().slice(11, 16)} ${m.text}`,
             );
-            const llm = (await ctx.call(llmInferenceRef, {
+            const llm = (await ctx.call(llmInferenceRef, withNodeDefaults(judgeParts, {
               model,
               messages: buildJudgeMessages(texts, pool.length > 0 ? pool : repos),
               temperature: 0.2,
               max_tokens: 2000,
-            })) as { ok: boolean; value?: { text?: string }; error?: string };
+            }))) as { ok: boolean; value?: { text?: string }; error?: string };
             if (!llm.ok || !llm.value?.text) {
               // LLM 不可用：该群消息放回缓冲头部，等下个 tick 重试
               requeue.push(...msgs);
