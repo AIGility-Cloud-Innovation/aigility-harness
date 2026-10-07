@@ -186,15 +186,21 @@ export interface DshRunOptions {
   extraEnv?: Record<string, string>;
   /** 追加的 patch overlay 文件（--patch 可重复，与用户补丁层叠加） */
   patchFiles?: string[];
-  /** 整体超时（默认 900s = 15 分钟，可用 DSH_RELAY_TIMEOUT_MS 覆盖：agent 干活可能较久） */
+  /** 单轮最长无输出容忍时间（毫秒），即「真空闲」阈值；有任何一个 chunk 到达就重新计时。默认 300s，可用 DSH_RELAY_TIMEOUT_MS 覆盖 */
   timeoutMs?: number;
 }
 
-/** 默认 headless 超时：优先读环境变量 DSH_RELAY_TIMEOUT_MS（毫秒），缺省 15 分钟。 */
-function resolveDefaultTimeoutMs(): number {
+/**
+ * 默认 idle 阈值：优先读环境变量 DSH_RELAY_TIMEOUT_MS（毫秒），缺省 5 分钟。
+ *
+ * 语义是「多久没有任何输出」而不是「一轮最长跑多久」——只要模型/工具还在产出，
+ * 计时器就不断被刷新，跑多久都不会被杀；只有真正卡死才会命中。
+ * 变量名沿用 DSH_RELAY_TIMEOUT_MS 以保持向后兼容，但它的含义已从总时长改为空闲阈值。
+ */
+function resolveDefaultIdleMs(): number {
   const raw = process.env["DSH_RELAY_TIMEOUT_MS"];
   const parsed = raw ? Number(raw) : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 900_000;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 300_000;
 }
 
 export interface DshRunResult {
@@ -202,6 +208,12 @@ export interface DshRunResult {
   output: string;
   error?: string;
   durationMs: number;
+  /**
+   * 因 idle 超时被 SIGKILL 终止（长时间无任何 stdout/stderr 输出）。
+   * 此时 output 保留终止前已产出的部分内容，调用方可选择降级使用。
+   * 注意：这不是「一轮跑太久」，而是「中途卡死」——正常运行多久都不会命中。
+   */
+  timedOut?: boolean;
 }
 
 /** 官方 CLI 的 bin.js 绝对路径（直接用 node 跑，跨平台无 .cmd shim 问题） */
@@ -239,25 +251,50 @@ export function dshRunCli(opts: DshRunOptions): Promise<DshRunResult> {
     );
     let out = "";
     let errText = "";
-    const timer = setTimeout(
-      () => child.kill("SIGKILL"),
-      opts.timeoutMs ?? resolveDefaultTimeoutMs(),
-    );
-    child.stdout.on("data", (d: Buffer) => { out += d.toString("utf8"); });
-    child.stderr.on("data", (d: Buffer) => { errText += d.toString("utf8"); });
+    let timedOut = false;
+
+    // ── idle watchdog（取代「总时长硬杀」）─────────────────────────────
+    // 只要子进程还有任何 stdout/stderr 产出，就说明它活着，计时器不断重置；
+    // 只有当连续 idleMs 内一个字节都没有时，才判定为真卡死并 SIGKILL。
+    // 这样「一轮跑 40 分钟」不再被杀，「一次网络挂死 5 分钟」照样被收割。
+    const idleMs = opts.timeoutMs ?? resolveDefaultIdleMs();
+    let idleTimer: NodeJS.Timeout | undefined;
+    const clearIdle = () => {
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = undefined;
+      }
+    };
+    const bumpIdle = () => {
+      clearIdle();
+      idleTimer = setTimeout(() => {
+        idleTimer = undefined;
+        timedOut = true;
+        console.warn(
+          `[relay] idle ${Math.round(idleMs / 1000)}s 无任何输出，判定卡死，SIGKILL（已产出 ${out.length} 字符将被保留）`,
+        );
+        child.kill("SIGKILL");
+      }, idleMs);
+      // 不阻塞事件循环退出（watchdog 只是保险丝，不该让进程悬着）
+      idleTimer.unref?.();
+    };
+    bumpIdle();
+
+    child.stdout.on("data", (d: Buffer) => { out += d.toString("utf8"); bumpIdle(); });
+    child.stderr.on("data", (d: Buffer) => { errText += d.toString("utf8"); bumpIdle(); });
     child.on("close", (code) => {
-      clearTimeout(timer);
+      clearIdle();
       const durationMs = Date.now() - started;
       if (code === 0) {
         resolve({ ok: true, output: out.trim(), durationMs });
       } else {
         const tail = (errText || out).trim().split(/\r?\n/).slice(-6).join("\n");
-        resolve({ ok: false, output: out.trim(), error: tail || `exit ${code}`, durationMs });
+        resolve({ ok: false, output: out.trim(), error: tail || `exit ${code}`, durationMs, timedOut });
       }
     });
     child.on("error", (e) => {
-      clearTimeout(timer);
-      resolve({ ok: false, output: "", error: String(e), durationMs: Date.now() - started });
+      clearIdle();
+      resolve({ ok: false, output: "", error: String(e), durationMs: Date.now() - started, timedOut });
     });
   });
 }
@@ -345,7 +382,7 @@ export interface DshSessionRelayOptions {
   roleRegistryFile?: string;
   /** 角色 patch overlay 的输出目录（缺省与 transcriptFile 同目录） */
   patchDir?: string;
-  /** headless 整体超时 ms，默认 900s（15 分钟，可用 DSH_RELAY_TIMEOUT_MS 覆盖） */
+  /** headless 单轮最长无输出时间（idle 阈值）ms，默认 300s（5 分钟），可用 DSH_RELAY_TIMEOUT_MS 覆盖 */
   timeoutMs?: number;
 }
 
@@ -409,6 +446,20 @@ export function createDshSessionRelayExecute(
     });
 
     if (!result.ok) {
+      // idle 超时被杀的这一路：不丢产出。把已产出的部分正文交给用户，并明确标注未完成。
+      // 注意：此路不计入 transcript（半截产出不得污染后续轮次的滚动上下文）。
+      if (result.timedOut && result.output) {
+        console.log(
+          `[relay] chat=${chatId} idle 超时中断，保留部分产出 ${result.output.length} 字符（不入 transcript）`,
+        );
+        let partial = result.output;
+        if (partial.length > maxReply) {
+          partial = partial.slice(0, 800) + "\n\n…(中间略)…\n\n" + partial.slice(-maxReply + 800);
+        }
+        return ok({
+          response: `${partial}\n\n---\n⚠️ 本轮未完成（idle ${(result.durationMs / 1000).toFixed(0)}s 内无输出，判定卡死已中断）。以上为中断前已产出的内容，仅供参考；本条未计入对话上下文。`,
+        });
+      }
       return ok({
         response: `⚠️ agent 执行失败 (${(result.durationMs / 1000).toFixed(0)}s):\n${result.error ?? "未知错误"}`,
       });
