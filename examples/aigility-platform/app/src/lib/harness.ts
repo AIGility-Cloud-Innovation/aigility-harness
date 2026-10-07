@@ -506,32 +506,68 @@ export async function fetchCredit(): Promise<CreditPayload> {
 }
 
 export interface DocBlock {
-  type: 'heading' | 'paragraph' | 'bullets'
+  type: 'heading' | 'paragraph' | 'bullets' | 'table'
   text?: string
   level?: number
   items?: string[]
+  /** table 块 */
+  header?: string[]
+  rows?: string[][]
 }
 
-/** 服务端 /api/aigility/doc（@action/doc-worker）生成真实 .docx 并下载 */
-export async function generateDoc(doc: { title: string; subtitle?: string; blocks: DocBlock[] }): Promise<{ filename: string; bytes: number }> {
-  const j = await authJsonFetch<{ ok?: boolean; filename?: string; base64?: string; bytes?: number; error?: string }>(
+export type DocFormat = 'docx' | 'pdf' | 'xlsx' | 'html'
+
+const DOC_MIME: Record<DocFormat, string> = {
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  pdf: 'application/pdf',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  html: 'text/html; charset=utf-8',
+}
+
+export interface DocArtifact {
+  filename: string
+  bytes: number
+  base64: string
+  mime: string
+  format: DocFormat
+}
+
+/** base64 → Blob（预览/下载共用） */
+export function base64ToBlob(base64: string, mime: string): Blob {
+  const bin = atob(base64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return new Blob([bytes], { type: mime })
+}
+
+/** 服务端 /api/aigility/doc（@action/doc-worker）：结构化块 → 四格式文档，返回 base64+mime 供预览/下载 */
+export async function generateDocRaw(doc: { title: string; subtitle?: string; blocks: DocBlock[]; format?: DocFormat }): Promise<DocArtifact> {
+  const j = await authJsonFetch<{ ok?: boolean; filename?: string; base64?: string; bytes?: number; error?: string; mime?: string; format?: string }>(
     '/api/aigility/doc',
     { method: 'POST', body: JSON.stringify({ ...doc, creator: getCurrentUser()?.email }) },
   )
   if (!j.ok || !j.base64 || !j.filename) throw new Error(j.error ?? 'doc-worker 返回为空')
-  const bin = atob(j.base64)
-  const bytes = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-  const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = j.filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
+  const format = (j.format ?? doc.format ?? 'docx') as DocFormat
+  return { filename: j.filename, bytes: j.bytes ?? 0, base64: j.base64, mime: j.mime ?? DOC_MIME[format], format }
+}
+
+/** 触发浏览器下载一份文档产物 */
+export function downloadArtifact(artifact: DocArtifact): void {
+  const url = URL.createObjectURL(base64ToBlob(artifact.base64, artifact.mime))
+  const el = document.createElement('a')
+  el.href = url
+  el.download = artifact.filename
+  document.body.appendChild(el)
+  el.click()
+  el.remove()
   setTimeout(() => URL.revokeObjectURL(url), 3000)
-  return { filename: j.filename, bytes: j.bytes ?? blob.size }
+}
+
+/** 既有便捷：生成 .docx 并直接下载 */
+export async function generateDoc(doc: { title: string; subtitle?: string; blocks: DocBlock[] }): Promise<{ filename: string; bytes: number }> {
+  const a0 = await generateDocRaw({ ...doc, format: 'docx' })
+  downloadArtifact(a0)
+  return { filename: a0.filename, bytes: a0.bytes }
 }
 
 // ── 任务板（真 · task 表 + 执行器路由）────────────────────────────
@@ -1284,6 +1320,8 @@ export interface LlmProviderInfo { id: number; name: string; tag: string; apiKey
 export interface LlmNodeInfo {
   id: number; name: string; description: string; serviceModule: string; functionName: string;
   modelName: string; parameter: Record<string, unknown>; providerId: number; isStream: boolean;
+  /** 停用 = 业务侧解析不到该节点，自动退回 env 兜底（改错了可一键回滚） */
+  enabled: boolean;
 }
 
 export async function fetchLlmNodes(): Promise<{ nodes: LlmNodeInfo[]; providers: LlmProviderInfo[] }> {
@@ -1318,6 +1356,23 @@ export async function resolveLlmNode(name: string): Promise<{ node: string; mode
   const j = await authJsonFetch<{ ok: boolean; resolved: { node: string; model: string; baseUrl: string; apiKey: string; isStream: boolean; parameter: Record<string, unknown> } }>(`/api/aigility/llm/nodes/${encodeURIComponent(name)}/resolve`)
   if (!j.ok) throw new Error('解析失败')
   return j.resolved
+}
+
+export interface LlmNodeProbeResult {
+  ok: boolean
+  model?: string
+  baseUrl?: string
+  ms?: number
+  finishReason?: string
+  sample?: string
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number }
+  error?: string
+}
+
+/** 试调用：真发一次极短请求（max_tokens 很小），用于配错立刻可见，而非等生产日志冒出空响应 */
+export async function probeLlmNode(name: string): Promise<LlmNodeProbeResult> {
+  const j = await authJsonFetch<LlmNodeProbeResult>(`/api/aigility/llm/nodes/${encodeURIComponent(name)}/probe`, { method: 'POST' })
+  return j
 }
 
 // ── 项目小助理数据面工作流（chat-briefing.yaml 可视化编排数据源）──

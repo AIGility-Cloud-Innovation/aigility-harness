@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { centerApps, meetingDetail, type CenterApp } from '../mock/data'
 import {
-  generateDoc, fetchReportTemplates, saveReportTemplate, deleteReportTemplate,
+  generateDocRaw, fetchReportTemplates, saveReportTemplate, deleteReportTemplate,
   fetchTaskLoopStatus, startTaskLoop, stopTaskLoop,
-  type ReportTemplate, type DocBlock, type TaskLoopOpResult,
+  type ReportTemplate, type DocBlock, type DocFormat, type DocArtifact, type TaskLoopOpResult,
 } from '../lib/harness'
-import { ArrowLeft, PlusCircle, CheckCircle2, Clock, Loader2, FileText, CalendarClock, BarChart3, Workflow, ClipboardList, Headset, FileBarChart, MessageSquareText, FolderOpen, Sparkles, Bot, BookOpenCheck, ScanSearch } from 'lucide-react'
+import { ArtifactPreview } from '../components/ArtifactPreview'
+import { ArrowLeft, PlusCircle, CheckCircle2, Clock, Loader2, FileText, CalendarClock, BarChart3, Workflow, ClipboardList, Headset, FileBarChart, MessageSquareText, FolderOpen, Sparkles, Bot, BookOpenCheck, ScanSearch, Eye } from 'lucide-react'
 
 const appIcon: Record<string, any> = {
   'app-qa': MessageSquareText, 'app-doc': FolderOpen, 'app-meeting': CalendarClock, 'app-data': BarChart3,
@@ -251,17 +252,26 @@ function MeetingApp({ back }: { back: () => void }) {
 }
 
 
-// ── 报告中心（真）：D3 @action/doc-worker，结构化块 → 服务端 docx 下载 ──
+// ── 报告中心（真）：D3 @action/doc-worker，结构化块 → 四格式产物 + 内嵌预览 ──
 
-/** 文本行 → 文档块："# " 标题 / "- " 项目符号 / 其余段落 */
+/** 文本行 → 文档块："# " 标题 / "- " 项目符号 / "|a|b|…" 连续行为表格 / 其余段落 */
 function parseBlocks(text: string): DocBlock[] {
   const blocks: DocBlock[] = []
   let bullets: string[] = []
-  const flush = () => { if (bullets.length) { blocks.push({ type: 'bullets', items: bullets }); bullets = [] } }
+  let tableRows: string[][] = []
+  const flush = () => {
+    if (bullets.length) { blocks.push({ type: 'bullets', items: bullets }); bullets = [] }
+    if (tableRows.length) { blocks.push({ type: 'table', header: tableRows[0]!, rows: tableRows.slice(1) }); tableRows = [] }
+  }
   for (const raw of text.split('\n')) {
     const line = raw.trim()
     if (!line) { flush(); continue }
-    if (line.startsWith('- ')) { bullets.push(line.slice(2)); continue }
+    if (line.startsWith('- ')) { flush(); bullets.push(line.slice(2)); continue }
+    if (line.startsWith('|') && line.endsWith('|')) {
+      flush()
+      tableRows.push(line.slice(1, -1).split('|').map(c => c.trim()))
+      continue
+    }
     flush()
     if (line.startsWith('# ')) blocks.push({ type: 'heading', text: line.slice(2), level: 2 })
     else blocks.push({ type: 'paragraph', text: line })
@@ -270,13 +280,22 @@ function parseBlocks(text: string): DocBlock[] {
   return blocks
 }
 
+const DOC_FORMATS: Array<{ value: DocFormat; label: string }> = [
+  { value: 'docx', label: 'Word (.docx)' },
+  { value: 'pdf', label: 'PDF (.pdf)' },
+  { value: 'xlsx', label: 'Excel (.xlsx)' },
+  { value: 'html', label: '网页 (.html)' },
+]
+
 function ReportApp({ back }: { back: () => void }) {
   const [title, setTitle] = useState('周运行报告')
   const [subtitle, setSubtitle] = useState('Aigility 智悦智能平台 · 文档工人自动生成')
   const [templates, setTemplates] = useState<ReportTemplate[]>([])
   const [activeTpl, setActiveTpl] = useState('')
   const [content, setContent] = useState(
-    '# 一、运行摘要\n本周平台对话与 MCP 工具调用运行正常。\n- 数字员工对话链路全通\n- MCP 工具总线 13 个工具可用\n\n# 二、下一步\n- 挂载更多客户系统工具\n- 审批沉淀规则入库')
+    '# 一、运行摘要\n本周平台对话与 MCP 工具调用运行正常。\n- 数字员工对话链路全通\n- MCP 工具总线 13 个工具可用\n\n# 二、费用明细\n|费用项|金额（元）|状态|\n|基础一体机|200000|已确认|\n|运维托管|12000|待评审|\n\n# 三、下一步\n- 挂载更多客户系统工具\n- 审批沉淀规则入库')
+  const [format, setFormat] = useState<DocFormat>('pdf')
+  const [artifact, setArtifact] = useState<DocArtifact | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState('')
@@ -303,10 +322,11 @@ function ReportApp({ back }: { back: () => void }) {
 
   const gen = async () => {
     if (busy || !title.trim()) return
-    setBusy(true); setError(''); setDone('')
+    setBusy(true); setError(''); setDone(''); setArtifact(null)
     try {
-      const r = await generateDoc({ title: title.trim(), subtitle: subtitle.trim(), blocks: parseBlocks(content) })
-      setDone(`已生成 ${r.filename}（${(r.bytes / 1024).toFixed(1)} KB）并开始下载`)
+      const r = await generateDocRaw({ title: title.trim(), subtitle: subtitle.trim(), blocks: parseBlocks(content), format })
+      setArtifact(r)
+      setDone(`已生成 ${r.filename}（${(r.bytes / 1024).toFixed(1)} KB），下方可直接预览或下载`)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -324,7 +344,7 @@ function ReportApp({ back }: { back: () => void }) {
             <h1 className="text-lg font-semibold text-slate-800">报告中心</h1>
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600">真 · D3 @action/doc-worker</span>
           </div>
-          <p className="text-xs text-slate-400 mt-0.5">结构化块 → 服务端确定性渲染 docx（非 LLM 生成文件内容），base64 回传下载</p>
+          <p className="text-xs text-slate-400 mt-0.5">结构化块 → 服务端确定性渲染 docx / pdf / xlsx / html（非 LLM 生成文件内容），内嵌预览 + 下载</p>
         </div>
       </div>
 
@@ -355,17 +375,29 @@ function ReportApp({ back }: { back: () => void }) {
           </div>
         </div>
         <div>
-          <label className="text-xs text-slate-400 block mb-1.5">正文块（每行一块：# 小标题 / - 项目符号 / 其余为段落）</label>
+          <label className="text-xs text-slate-400 block mb-1.5">正文块（"# " 小标题 / "- " 项目符号 / "|a|b|c|" 连续行为表格 / 其余为段落）</label>
           <textarea value={content} onChange={e => setContent(e.target.value)} rows={10}
             className="w-full text-xs font-mono border border-slate-200 rounded-lg px-3 py-2.5 leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-100" />
         </div>
         {error && <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</div>}
         {done && <div className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 flex items-center gap-1.5"><CheckCircle2 size={13} />{done}</div>}
-        <button onClick={() => void gen()} disabled={busy || !title.trim()}
-          className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5">
-          {busy ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}{busy ? '生成中…' : '生成 .docx 并下载'}
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <select value={format} onChange={e => setFormat(e.target.value as DocFormat)}
+            className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-100">
+            {DOC_FORMATS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+          </select>
+          <button onClick={() => void gen()} disabled={busy || !title.trim()}
+            className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5">
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <Eye size={14} />}{busy ? '生成中…' : '生成并预览'}
+          </button>
+        </div>
       </div>
+
+      {artifact && (
+        <div className="max-w-5xl">
+          <ArtifactPreview artifact={artifact} height={560} />
+        </div>
+      )}
     </div>
   )
 }
