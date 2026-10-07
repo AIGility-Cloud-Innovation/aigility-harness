@@ -1,9 +1,11 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import {
   extractRepoSpec,
   parseTaskIntent,
   feishuTaskAssistantProvider,
   llmInferenceRefForPersona,
+  recordAssistantTurn,
+  resetAssistantConversationBuffers,
 } from "./feishu-task-assistant.js";
 
 describe("parseTaskIntent — 飞书任务意图", () => {
@@ -256,7 +258,7 @@ describe("feishuTaskAssistantProvider — LLM 兜底", () => {
     }
   });
 
-  it("兜底请求形状：模型/消息/max_tokens/userId 完整", async () => {
+  it("兜底请求形状：模型/消息/max_tokens/userId 完整（RSI 召回/沉淀在外围，LLM 请求形状不变）", async () => {
     const ctx = mockCtx({
       "@cognitive/llm-inference": () => ({
         ok: true,
@@ -264,14 +266,16 @@ describe("feishuTaskAssistantProvider — LLM 兜底", () => {
       }),
     });
     await feishuTaskAssistantProvider.execute({ user_input: "嗨" }, ctx);
-    expect(ctx.calls.length).toBe(1);
-    const { id, req } = (ctx.calls as unknown[])[0] as {
-      id: string;
-      req: Record<string, unknown>;
-    };
-    expect(id).toBe(llmInferenceRefForPersona.id);
+    // RSI 开启下的调用序列：规则召回 + 记忆召回（无 handler 降级）→ LLM → 问答沉淀
+    expect(ctx.calls.length).toBe(4);
+    const llm = (ctx.calls as Array<{ id: string; req: Record<string, unknown> }>).find(
+      (c) => c.id === llmInferenceRefForPersona.id,
+    );
+    expect(llm).toBeDefined();
+    const req = llm!.req;
     expect(req["model"]).toBeTypeOf("string");
-    expect(req["max_tokens"]).toBe(500);
+    // 1500：推理型模型的思考 tokens 计入 max_tokens，500 会被思考耗尽致正文为空
+    expect(req["max_tokens"]).toBe(1500);
     expect(req["userId"]).toBe("feishu-task-assistant-fallback");
     const messages = req["messages"] as Array<{ role: string; content: string }>;
     expect(messages[0].role).toBe("system");
@@ -458,14 +462,17 @@ describe("feishuTaskAssistantProvider — 兜底防编造集成", () => {
     if (r.ok) expect(r.value.response).toBe(pass);
   });
 
-  it("兜底模型默认 qwen-turbo、温度 0.2（deepseek-v4-flash 在部分输入下返回空响应）", async () => {
+  it("兜底模型默认 deepseek-v4-flash、温度 0.2（.env 可覆盖；空响应根因是推理耗尽 max_tokens，已配套提到 1500）", async () => {
     const ctx = mockCtx({
       "@cognitive/llm-inference": () => ({ ok: true, value: { text: "好的，可以聊聊" } }),
     });
     await feishuTaskAssistantProvider.execute({ user_input: "随便聊聊" }, ctx);
-    const { req } = (ctx.calls as unknown[])[0] as { req: Record<string, unknown> };
-    expect(req["model"]).toBe("qwen-turbo");
-    expect(req["temperature"]).toBe(0.2);
+    const llm = (ctx.calls as Array<{ id: string; req: Record<string, unknown> }>).find(
+      (c) => c.id === llmInferenceRefForPersona.id,
+    );
+    expect(llm).toBeDefined();
+    expect(llm!.req["model"]).toBe("deepseek-v4-flash");
+    expect(llm!.req["temperature"]).toBe(0.2);
   });
 
   it("免@群消息仅指令模式：未命中意图 → 空回复静默，不调 LLM 兜底", async () => {
@@ -491,6 +498,209 @@ describe("feishuTaskAssistantProvider — 兜底防编造集成", () => {
     );
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.value.response).toContain("已记录 #1");
+  });
+});
+
+// ── RSI 递归自我改进：召回注入 / 对话沉淀 / 反馈学规则 ──────────────
+
+describe("feishuTaskAssistantProvider — RSI 召回/沉淀", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const llmCallOf = (ctx: { calls: Array<{ id: string; req: Record<string, unknown> }> }) =>
+    // 取最后一次 LLM 调用（多轮 execute 时前面的调用属于历史轮次）
+    [...ctx.calls].reverse().find((c) => c.id === llmInferenceRefForPersona.id)!;
+
+  it("召回命中 → 经验规则与相关记忆注入 system 提示词，user_id 按人透传", async () => {
+    const ctx = mockCtx({
+      "@action/timem-rule-recall": () => ({
+        ok: true,
+        value: {
+          rules: [{ name: "仓库归属", lesson: "「nx」仓库指 AIGility-Cloud-Innovation/nx-telecom-opc-platform" }],
+          total: 1,
+        },
+      }),
+      "@action/timem-memory": () => ({
+        ok: true,
+        value: { results: [{ content: "用户偏好把周会安排在上午" }], total: 1 },
+      }),
+      "@cognitive/llm-inference": () => ({ ok: true, value: { text: "好的" } }),
+    });
+    const r = await feishuTaskAssistantProvider.execute(
+      { user_input: "nx 是哪个仓库", user_id: "ou_rsi" },
+      ctx,
+    );
+    expect(r.ok).toBe(true);
+    const rulesCall = ctx.calls.find((c) => c.id === "@action/timem-rule-recall");
+    expect(rulesCall).toBeDefined();
+    expect((rulesCall!.req as Record<string, unknown>)["user_id"]).toBe("ou_rsi");
+    expect((rulesCall!.req as Record<string, unknown>)["agent_id"]).toBe("feishu-task-assistant");
+    const sys = ((llmCallOf(ctx)!.req["messages"] as Array<{ role: string; content: string }>)[0])
+      .content;
+    expect(sys).toContain("【本次召回的团队经验与记忆】");
+    expect(sys).toContain("nx-telecom-opc-platform");
+    expect(sys).toContain("周会");
+    // 无 handler 的记忆写半边降级不报错，回复正常返回
+    if (r.ok) expect(r.value.response).toBe("好的");
+  });
+
+  it("召回无 handler/失败 → 静默降级：提示词无召回块，LLM 照常作答", async () => {
+    const ctx = mockCtx({
+      "@cognitive/llm-inference": () => ({ ok: true, value: { text: "你好呀" } }),
+    });
+    const r = await feishuTaskAssistantProvider.execute({ user_input: "嗨" }, ctx);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.response).toBe("你好呀");
+    const sys = ((llmCallOf(ctx)!.req["messages"] as Array<{ role: string; content: string }>)[0])
+      .content;
+    expect(sys).not.toContain("【本次召回的团队经验与记忆】");
+  });
+
+  it("TASK_ASSISTANT_RSI=0 → 不召回不沉淀，只调 LLM", async () => {
+    vi.stubEnv("TASK_ASSISTANT_RSI", "0");
+    const ctx = mockCtx({
+      "@cognitive/llm-inference": () => ({ ok: true, value: { text: "好" } }),
+    });
+    await feishuTaskAssistantProvider.execute({ user_input: "嗨" }, ctx);
+    expect(ctx.calls.length).toBe(1);
+    expect(ctx.calls[0].id).toBe(llmInferenceRefForPersona.id);
+  });
+
+  it("作答成功 → 本轮问答沉淀 @action/timem-memory-write（含问/答与用户标识）", async () => {
+    const ctx = mockCtx({
+      "@cognitive/llm-inference": () => ({ ok: true, value: { text: "可以发「建任务：标题」" } }),
+    });
+    await feishuTaskAssistantProvider.execute(
+      { user_input: "怎么建任务", user_id: "ou_w" },
+      ctx,
+    );
+    const write = ctx.calls.find((c) => c.id === "@action/timem-memory-write");
+    expect(write).toBeDefined();
+    const req = write!.req as Record<string, unknown>;
+    expect(req["agent_id"]).toBe("feishu-task-assistant");
+    expect(req["user_id"]).toBe("ou_w");
+    expect(String(req["content"])).toContain("用户问：怎么建任务");
+    expect(String(req["content"])).toContain("小助理答：可以发「建任务：标题」");
+  });
+
+  it("LLM 失败回帮助文本 → 不沉淀（垃圾轮不进记忆）", async () => {
+    const ctx = mockCtx({
+      "@cognitive/llm-inference": () => ({ ok: false, error: "网关不可用" }),
+    });
+    await feishuTaskAssistantProvider.execute({ user_input: "嗨" }, ctx);
+    expect(ctx.calls.find((c) => c.id === "@action/timem-memory-write")).toBeUndefined();
+  });
+
+  it("「反馈：以后…」→ briefing 记忆沉淀外追加经验规则固化并提示", async () => {
+    const ctx = mockCtx({
+      "@orchestration/project-briefing": () => ({ ok: true, value: { response: "已记下" } }),
+      "@action/timem-rule-create": () => ({ ok: true, value: { rule_id: "rule_1" } }),
+    });
+    const r = await feishuTaskAssistantProvider.execute(
+      { user_input: "反馈：以后工单默认建到 nx 仓库", user_id: "ou_f" },
+      ctx,
+    );
+    expect(r.ok).toBe(true);
+    const create = ctx.calls.find((c) => c.id === "@action/timem-rule-create");
+    expect(create).toBeDefined();
+    const req = create!.req as Record<string, unknown>;
+    expect(req["lesson"]).toBe("以后工单默认建到 nx 仓库");
+    expect(req["agent_id"]).toBe("feishu-task-assistant");
+    if (r.ok) expect(r.value.response).toContain("经验规则");
+  });
+
+  it("「反馈：…」非「以后」开头 → 只走 briefing，不建规则", async () => {
+    const ctx = mockCtx({
+      "@orchestration/project-briefing": () => ({ ok: true, value: { response: "已记下" } }),
+    });
+    await feishuTaskAssistantProvider.execute({ user_input: "反馈：今天上线很顺利" }, ctx);
+    expect(ctx.calls.find((c) => c.id === "@action/timem-rule-create")).toBeUndefined();
+  });
+});
+
+// ── 短时记忆：per-chat 滚动上下文窗口 ─────────────────────────────
+
+describe("feishuTaskAssistantProvider — 短时记忆窗口", () => {
+  beforeEach(() => {
+    resetAssistantConversationBuffers();
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const llmCallOf = (ctx: { calls: Array<{ id: string; req: Record<string, unknown> }> }) =>
+    // 取最后一次 LLM 调用（多轮 execute 时前面的调用属于历史轮次）
+    [...ctx.calls].reverse().find((c) => c.id === llmInferenceRefForPersona.id)!;
+  const messagesOf = (ctx: { calls: Array<{ id: string; req: Record<string, unknown> }> }) =>
+    (llmCallOf(ctx)!.req["messages"] as Array<{ role: string; content: string }>);
+
+  it("同群第二轮兜底 → 上一轮 user/assistant 进入 messages 历史", async () => {
+    const ctx = mockCtx({
+      "@cognitive/llm-inference": () => ({ ok: true, value: { text: "可以发「建任务：标题」" } }),
+    });
+    await feishuTaskAssistantProvider.execute(
+      { user_input: "任务怎么建", session_id: "oc_mem" },
+      ctx,
+    );
+    await feishuTaskAssistantProvider.execute(
+      { user_input: "就是刚才那个事", session_id: "oc_mem" },
+      ctx,
+    );
+    const messages = messagesOf(ctx);
+    expect(messages).toHaveLength(4);
+    expect(messages[1]).toEqual({ role: "user", content: "任务怎么建" });
+    expect(messages[2]).toEqual({ role: "assistant", content: "可以发「建任务：标题」" });
+    expect(messages[3]).toEqual({ role: "user", content: "就是刚才那个事" });
+  });
+
+  it("帮助文本兜底轮不记 assistant 半边（垃圾轮不进短时记忆）", async () => {
+    const ctx = mockCtx({
+      "@cognitive/llm-inference": () => ({ ok: false, error: "网关不可用" }),
+    });
+    await feishuTaskAssistantProvider.execute(
+      { user_input: "第一条", session_id: "oc_help" },
+      ctx,
+    );
+    await feishuTaskAssistantProvider.execute(
+      { user_input: "第二条", session_id: "oc_help" },
+      ctx,
+    );
+    const messages = messagesOf(ctx);
+    // 第一轮 user 进了窗口，但 HELP_TEXT 没有以 assistant 身份进
+    expect(messages).toHaveLength(3);
+    expect(messages[1]).toEqual({ role: "user", content: "第一条" });
+    expect(messages.map((m) => m.role)).not.toContain("assistant");
+  });
+
+  it("群与群隔离：不同 session_id 互不可见", async () => {
+    const ctx = mockCtx({
+      "@cognitive/llm-inference": () => ({ ok: true, value: { text: "好" } }),
+    });
+    recordAssistantTurn("oc_a", "A群的话", "A群的回复");
+    await feishuTaskAssistantProvider.execute({ user_input: "B群提问", session_id: "oc_b" }, ctx);
+    const messages = messagesOf(ctx);
+    expect(messages).toHaveLength(2);
+    expect(messages[1]).toEqual({ role: "user", content: "B群提问" });
+  });
+
+  it("TASK_ASSISTANT_CONTEXT=0 → 不注入历史，行为回到单轮", async () => {
+    vi.stubEnv("TASK_ASSISTANT_CONTEXT", "0");
+    const ctx = mockCtx({
+      "@cognitive/llm-inference": () => ({ ok: true, value: { text: "好" } }),
+    });
+    recordAssistantTurn("oc_off", "上一句", "上一答");
+    await feishuTaskAssistantProvider.execute({ user_input: "新问题", session_id: "oc_off" }, ctx);
+    const messages = messagesOf(ctx);
+    expect(messages).toHaveLength(2);
+    expect(messages[1]).toEqual({ role: "user", content: "新问题" });
+  });
+
+  it("防编造过滤补「已记录/已登记」：推理模型的口头禅也算操作声称", async () => {
+    const { isFabricatedReply } = await import("./feishu-task-assistant.js");
+    expect(isFabricatedReply("收到✅ 已记录：R42 项目 = timem_console_frontend")).toBe(true);
+    expect(isFabricatedReply("已登记为待办任务")).toBe(true);
+    expect(isFabricatedReply("你说的我记下来了，可以发「建任务：标题」正式立条")).toBe(false);
   });
 });
 

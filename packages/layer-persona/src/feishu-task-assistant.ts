@@ -20,6 +20,17 @@
  *   汇总（@orchestration/project-briefing）：我的任务=人视角全景（工单/PR/任务/记忆）
  *         | 项目进展 [名称] —— 项目四源进展 | 反馈：<内容> —— 沉淀进 timem
  *   其他：LLM 自然语言兜底回复（TASK_ASSISTANT_LLM_FALLBACK=0 关闭；失败回退帮助文本；输出过防编造过滤）
+ *
+ * RSI 递归自我改进（2026-10-07 接入，「小助理太笨」治理）：
+ *   读半边——兜底回复前经 @action/timem-rule-recall + @action/timem-memory 召回
+ *   经验规则与相关记忆注入系统提示词（召回失败/超时静默降级，绝不阻断回复）；
+ *   写半边——兜底对话轮 (问, 答) 异步沉淀 @action/timem-memory-write，供后续召回；
+ *   「反馈：以后…」在原记忆沉淀外追加 @action/timem-rule-create 固化为经验规则。
+ *   闭环：答错→用户纠正→成规则→下次召回→不再错。
+ *
+ * 短时记忆（2026-10-07 接入，「缺少短时记忆」治理）：per-chat 滚动窗口记录最近
+ * 16 轮对话（TTL 2h，纯内存），兜底回复时注入 messages——单轮兜底从此能接住
+ * 「刚才说的」。TASK_ASSISTANT_CONTEXT=0 关闭。
  */
 
 import {
@@ -102,6 +113,30 @@ export const projectBriefingRef: CapabilityRef = {
 /** 消费认知层 LLM 推理（正则未命中时的自然语言兜底回复） */
 export const llmInferenceRefForPersona: CapabilityRef = {
   id: "@cognitive/llm-inference",
+  versionRange: "^1.0.0",
+};
+
+/** 消费行动层 TiMEM 记忆检索（RSI 读半边：兜底前召回相关记忆） */
+export const timemMemoryRefForAssistant: CapabilityRef = {
+  id: "@action/timem-memory",
+  versionRange: "^1.0.0",
+};
+
+/** 消费行动层 TiMEM 记忆写入（RSI 写半边：兜底对话轮沉淀） */
+export const timemMemoryWriteRefForAssistant: CapabilityRef = {
+  id: "@action/timem-memory-write",
+  versionRange: "^1.0.0",
+};
+
+/** 消费行动层 TiMEM 经验规则召回（RSI 读半边：兜底前召回可复用经验） */
+export const timemRuleRecallRefForAssistant: CapabilityRef = {
+  id: "@action/timem-rule-recall",
+  versionRange: "^1.0.0",
+};
+
+/** 消费行动层 TiMEM 经验规则沉淀（「反馈：以后…」固化为规则） */
+export const timemRuleCreateRefForAssistant: CapabilityRef = {
+  id: "@action/timem-rule-create",
   versionRange: "^1.0.0",
 };
 
@@ -462,12 +497,12 @@ function llmFallbackEnabled(): boolean {
   return process.env.TASK_ASSISTANT_LLM_FALLBACK !== "0";
 }
 
-/** 兜底回复模型（可 env 覆盖；默认 deepseek-v4-flash——2026-10-04 实测：
- * 旧默认 sensenova-deepseek-v4-flash 在网关返回空内容（每次兜底必失败回退帮助
- * 文本）；现名 deepseek-v4-flash 可用且服从禁编造约束（诱饵实测通过）。
- * qwen-turbo 同样通过诱饵测试，可作备选） */
+/** 兜底回复模型（可 env 覆盖；2026-10-07 起 .env 显式配 deepseek-v4-flash——LiteLLM
+ *  别名，实路由 glm-5.3-flash 推理模型。历史教训修正：所谓「部分输入返回空响应」
+ *  的根因是推理 tokens 耗尽 max_tokens（finish_reason=length，正文 0 token），
+ *  配套把兜底 max_tokens 提到 1500 后实测稳定；qwen-turbo 仍可作备选） */
 function fallbackModel(): string {
-  return process.env.TASK_ASSISTANT_MODEL ?? "qwen-turbo";
+  return process.env.TASK_ASSISTANT_MODEL ?? "deepseek-v4-flash";
 }
 
 /**
@@ -480,7 +515,8 @@ function fallbackModel(): string {
  */
 export function isFabricatedReply(text: string): boolean {
   if (/#\d+/.test(text)) return true;
-  const VERBS = "(?:创建|建立|建好|建了|建|执行|完成|处理|派发|关闭|重开|评论|更新)";
+  // 2026-10-07 补 记录/记下：deepseek-v4-flash（推理模型）实测爱说「已记录：R42 项目 = x」
+  const VERBS = "(?:创建|建立|建好|建了|建|执行|完成|处理|派发|关闭|重开|评论|更新|记录|记下|登记)";
   // 已然声称第一式：已/已经/刚刚 + 动词（「已创建」「刚刚处理」自身即完成态）
   if (new RegExp(`(?:已(?!知)(?:经)?|刚刚|刚)[^。；！？\\n]{0,12}${VERBS}`).test(text)) return true;
   // 已然声称第二式：为你/帮你 + 动词 + 完成态后缀（「帮你建好了」）；
@@ -489,16 +525,100 @@ export function isFabricatedReply(text: string): boolean {
   return false;
 }
 
+// ── RSI 递归自我改进：召回注入 + 对话沉淀（TASK_ASSISTANT_RSI=0 整体关闭） ──
+
+/** 兜底对话轮沉淀/规则固化的 agent 标识（服务端按 agent 隔离记忆与规则） */
+const ASSISTANT_AGENT_ID = "feishu-task-assistant";
+
+function rsiEnabled(): boolean {
+  return process.env.TASK_ASSISTANT_RSI !== "0";
+}
+
+/** 跨层软调用：拒绝/超时一律返回 undefined——RSI 两个半边都是增益，不是依赖，
+ *  任何故障都不允许拖慢或阻断兜底回复主链路 */
+async function softCall<T>(
+  ctx: SeamContext,
+  ref: CapabilityRef,
+  req: unknown,
+  timeoutMs: number,
+): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return (await Promise.race([
+      ctx.call(ref, req) as Promise<T>,
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), timeoutMs);
+      }),
+    ])) as T | undefined;
+  } catch {
+    return undefined;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** 兜底前召回（RSI 读半边）：经验规则 + 相关记忆 → 提示词注入块；两手都空返回 "" */
+async function recallContextBlock(
+  userText: string,
+  ctx: SeamContext,
+  userId?: string,
+): Promise<string> {
+  const [rulesRes, memoryRes] = await Promise.all([
+    softCall<{ ok?: boolean; value?: { rules?: Array<{ name?: string; lesson?: string }> } }>(
+      ctx,
+      timemRuleRecallRefForAssistant,
+      {
+        query: userText,
+        judge_scene_text: userText,
+        user_id: userId,
+        agent_id: ASSISTANT_AGENT_ID,
+        mode: "auto",
+        top_k: 3,
+      },
+      8_000,
+    ),
+    softCall<{ ok?: boolean; value?: { results?: Array<{ content?: string }> } }>(
+      ctx,
+      timemMemoryRefForAssistant,
+      { query: userText, user_id: userId, agent_id: ASSISTANT_AGENT_ID, limit: 3 },
+      8_000,
+    ),
+  ]);
+  const clip = (s: string) => (s.length > 160 ? `${s.slice(0, 160)}…` : s);
+  const rules = (rulesRes?.ok ? (rulesRes.value?.rules ?? []) : [])
+    .map((r) => (r.lesson ?? "").trim())
+    .filter(Boolean)
+    .slice(0, 3)
+    .map((l, i) => `${i + 1}. ${clip(l)}`);
+  const memories = (memoryRes?.ok ? (memoryRes.value?.results ?? []) : [])
+    .map((m) => (m.content ?? "").trim())
+    .filter(Boolean)
+    .slice(0, 3)
+    .map((c, i) => `${i + 1}. ${clip(c)}`);
+  if (!rules.length && !memories.length) return "";
+  const parts: string[] = [];
+  if (rules.length) parts.push(`【经验规则——团队沉淀的既定经验，与其冲突时以规则为准】\n${rules.join("\n")}`);
+  if (memories.length) parts.push(`【相关记忆——过往交互沉淀的背景】\n${memories.join("\n")}`);
+  return parts.join("\n");
+}
+
 /**
  * LLM 兜底回复：正则意图未命中时，以「项目小助理」身份生成自然回复。
  * 输出过防编造过滤（isFabricatedReply），失败/关闭时回退帮助文本（不比改动前差）。
+ * RSI：回复前注入召回的经验规则/记忆（读半边），成功作答后把本轮问答沉淀进
+ * TiMEM（写半边）——两半边均 best-effort，失败静默降级为原行为。
+ * 短时记忆：注入 per-chat 最近对话窗口（conversationWindow），让「刚才说的」可接。
  */
 async function generateFallbackReply(
   userText: string,
   ctx: SeamContext,
+  userId?: string,
+  chatKey?: string,
 ): Promise<string> {
   if (!llmFallbackEnabled()) return HELP_TEXT;
   try {
+    const recallBlock = rsiEnabled() ? await recallContextBlock(userText, ctx, userId) : "";
+    const history = conversationWindow(chatKey ?? "");
     const r = (await ctx.call(llmInferenceRefForPersona, {
       model: fallbackModel(),
       messages: [
@@ -508,12 +628,18 @@ async function generateFallbackReply(
             "你是飞书群里的「项目小助理」，一个真实、好打交道的协作同事，负责管理飞书任务与 Gitea 工单（git.aigility.cloud）：建任务/工单（须 @仓库）、查列表、关闭/重开/评论、项目概览、任务派发确认（「确认派发 #N」/「取消派发 #N」）。\n" +
             "【对话方式】像正常群聊同事一样说话：先理解对方到底想干什么（包括纠正、补充、确认、闲聊、情绪），再决定怎么回。可用口语化中文，2-4 句为主，不堆砌格式。\n" +
             "【场景应对】① 用户在纠正或补充之前的信息（如「项目错了」「是 XX 仓库的」）：先接住纠正（「收到，是我认错了仓库」），再确认正确信息，最后引导补一条正确指令（如「可以再发一次：建工单 @正确的仓库：<标题>」）。② 用户描述了一个需求但没带 @仓库：给出「你想要的应该是：建工单 @某仓库：<标题>」，并主动问一句仓库归属（不知道就别猜）。③ 闲聊/感谢/吐槽：简短自然回应即可，不强行导流到指令。④ 问「你能干什么」：用一两句话概括职责，别把整张指令清单倒出来，对方要细节再给。⑤ 用户报告缺陷/进展或转发讨论片段（内容常为多人对话）：先接住内容、用一两句确认理解（能看出像待办的点就点出来）；如实告知「这段已进入我的自动汇总，稍后会同步到机器人群」；对方想立刻立条目时引导「建任务：<标题>」（工单则「建工单 @仓库：<标题>」），缺仓库就问一句。\n" +
-            "【硬约束】你没有连接任何系统、没有任何工具，永远不可能替用户执行操作：严禁声称已创建/已执行/已完成任何任务或工单，严禁给出具体的任务或工单编号（#数字 也不行）；提议时用「可以发『建任务：<标题>』」这类引导句式，不要说「我帮你建/我来建」（那是你做不到的事）；不确定时引导用户用指令表达。不要输出 markdown 标题或代码块。",
+            "【硬约束】你没有连接任何系统、没有任何工具，永远不可能替用户执行操作：严禁声称已创建/已执行/已完成/已记录任何任务或工单，严禁给出具体的任务或工单编号（#数字 也不行）；提议时用「可以发『建任务：<标题>』」这类引导句式，不要说「我帮你建/我来建」（那是你做不到的事）；不确定时引导用户用指令表达。不要输出 markdown 标题或代码块。" +
+            (recallBlock
+              ? `\n【本次召回的团队经验与记忆】\n${recallBlock}\n回答时优先依据以上内容；以上内容没有的信息不要编造。`
+              : ""),
         },
+        ...history,
         { role: "user", content: userText },
       ],
       temperature: 0.2,
-      max_tokens: 500,
+      // 1500 而非 500：推理型模型的思考 tokens 计入 max_tokens，500 会被思考
+      // 耗尽导致正文为空（2026-10-07 实测定位，「部分输入空响应」的真因）
+      max_tokens: 1500,
       userId: "feishu-task-assistant-fallback",
     })) as { ok: boolean; value?: { text?: string }; error?: string };
     const text = r.ok ? (r.value?.text ?? "").trim() : "";
@@ -524,6 +650,23 @@ async function generateFallbackReply(
         );
         return HELP_TEXT;
       }
+      // RSI 写半边：真实问答轮沉淀进 TiMEM（回退帮助文本的轮次不沉淀）
+      if (rsiEnabled()) {
+        const saved = await softCall<{ ok?: boolean }>(
+          ctx,
+          timemMemoryWriteRefForAssistant,
+          {
+            content: `用户问：${clipForMemory(userText)}\n小助理答：${clipForMemory(text)}`,
+            user_id: userId,
+            agent_id: ASSISTANT_AGENT_ID,
+            domain: "feishu-task-assistant",
+          },
+          6_000,
+        );
+        if (!saved?.ok) {
+          console.error("[feishu-task-assistant] 兜底问答沉淀失败（忽略，不影响回复）");
+        }
+      }
       return text;
     }
     console.error(
@@ -533,6 +676,71 @@ async function generateFallbackReply(
     console.error(`[feishu-task-assistant] LLM 兜底异常，回退帮助文本: ${String(e)}`);
   }
   return HELP_TEXT;
+}
+
+/** 沉淀内容截断：问/答各留前 400 字，避免长转发刷爆记忆条目 */
+function clipForMemory(s: string): string {
+  return s.length > 400 ? `${s.slice(0, 400)}…` : s;
+}
+
+// ── 短时记忆：per-chat 滚动上下文窗口（TASK_ASSISTANT_CONTEXT=0 关闭） ──
+//
+// 兜底此前是严格单轮（messages=[system, user]），「刚才说的」「你发的那个」一律
+// 接不住（2026-10-07 日志实锤：省略编号的批量纠正、R 码回填都掉兜底且无上下文）。
+// 本窗口按群记录最近 N 轮 user/assistant 消息（含指令回执；帮助文本兜底不记
+// assistant 半边），生成兜底回复时作为对话历史注入。纯内存 + TTL，重启即清——
+// 它就是短时记忆；跨会话的稳定事实仍归 TiMEM（RSI 长期记忆半边）。
+
+interface ContextTurn {
+  role: "user" | "assistant";
+  content: string;
+  at: number;
+}
+
+const CONTEXT_TTL_MS = 2 * 60 * 60_000;
+const CONTEXT_MAX_TURNS = 16;
+const CONTEXT_TURN_CHARS = 300;
+const conversationBuffers = new Map<string, ContextTurn[]>();
+
+function contextWindowEnabled(): boolean {
+  return process.env.TASK_ASSISTANT_CONTEXT !== "0";
+}
+
+function pruneContext(chatKey: string): ContextTurn[] {
+  const now = Date.now();
+  const buf = (conversationBuffers.get(chatKey) ?? []).filter((t) => now - t.at <= CONTEXT_TTL_MS);
+  conversationBuffers.set(chatKey, buf);
+  return buf;
+}
+
+/** 记一轮对话；assistant 半边仅在真实回复时记（帮助文本/空回复不进短时记忆） */
+export function recordAssistantTurn(chatKey: string, userText: string, assistantReply: string): void {
+  if (!contextWindowEnabled() || !chatKey) return;
+  const buf = pruneContext(chatKey);
+  const now = Date.now();
+  buf.push({ role: "user", content: userText.slice(0, CONTEXT_TURN_CHARS), at: now });
+  if (assistantReply && assistantReply !== HELP_TEXT) {
+    buf.push({ role: "assistant", content: assistantReply.slice(0, CONTEXT_TURN_CHARS), at: now });
+  }
+  while (buf.length > CONTEXT_MAX_TURNS) buf.shift();
+  // 内存护栏：群数量破百时淘汰最久无动静的群（正常规模远达不到）
+  if (conversationBuffers.size > 100) {
+    const oldest = [...conversationBuffers.entries()]
+      .filter(([k]) => k !== chatKey)
+      .sort((a, b) => (a[1][a[1].length - 1]?.at ?? 0) - (b[1][b[1].length - 1]?.at ?? 0))[0]?.[0];
+    if (oldest) conversationBuffers.delete(oldest);
+  }
+}
+
+/** 取对话历史（不含本轮，调用方在其后拼接当前 user 消息） */
+export function conversationWindow(chatKey: string): Array<{ role: "user" | "assistant"; content: string }> {
+  if (!contextWindowEnabled() || !chatKey) return [];
+  return pruneContext(chatKey).map(({ role, content }) => ({ role, content }));
+}
+
+/** 测试辅助：清空全部短时记忆 */
+export function resetAssistantConversationBuffers(): void {
+  conversationBuffers.clear();
 }
 
 export const feishuTaskAssistantProvider: Provider<
@@ -566,8 +774,8 @@ export const feishuTaskAssistantProvider: Provider<
           "引用单条摘要回复时编号可省略；多条指令可分行或直接连写。";
       } else {
         // 正则未命中（含显式问「帮助」，均落 help 意图）：LLM 自然语言兜底
-        // （输出过防编造过滤，失败/关闭回退帮助文本）
-        response = await generateFallbackReply(rawText, ctx);
+        // （输出过防编造过滤，失败/关闭回退帮助文本；RSI 召回注入+沉淀；短时记忆窗口）
+        response = await generateFallbackReply(rawText, ctx, request.user_id, request.session_id);
       }
     } else if (intent.kind === "list") {
       // 「我的任务」升级为人视角全景汇总（工单 + PR + 飞书任务 + timem 记忆）；
@@ -602,6 +810,31 @@ export const feishuTaskAssistantProvider: Provider<
         b?.ok && b.value?.response
           ? b.value.response
           : `❌ 处理失败：${b?.error ?? "编排层无响应"}`;
+      // RSI 写半边加强：「反馈：以后…」是用户显式给出的长期约定，在 briefing 的
+      // 记忆沉淀之外固化为经验规则（best-effort，失败不改变原回复语义）
+      if (
+        intent.kind === "feedback" &&
+        b?.ok &&
+        rsiEnabled() &&
+        /^以后/.test(intent.text)
+      ) {
+        const rc = await softCall<{ ok?: boolean }>(
+          ctx,
+          timemRuleCreateRefForAssistant,
+          {
+            name: intent.text.replace(/^以后/, "").trim().slice(0, 60) || intent.text.slice(0, 60),
+            situation: `用户在飞书群对「项目小助理」说：${clipForMemory(intent.text)}`,
+            lesson: clipForMemory(intent.text),
+            user_id: request.user_id,
+            agent_id: ASSISTANT_AGENT_ID,
+            trigger_tags: ["项目小助理", "群反馈"],
+          },
+          8_000,
+        );
+        if (rc?.ok) {
+          response += "\n（这条已固化为经验规则，以后类似场景我会优先照办）";
+        }
+      }
     } else {
       // 业务全部委托编排层（含概览；need-repo 反问也在编排层做——
       // 需要实时拉可访问仓库列表）
@@ -613,6 +846,11 @@ export const feishuTaskAssistantProvider: Provider<
         r.ok && r.value?.response
           ? r.value.response
           : `❌ 业务处理失败：${r.error ?? "编排层无响应"}`;
+    }
+
+    // 短时记忆：把本轮 (用户消息, 回复) 记进该群的滚动窗口（空回复=免@静默，不记）
+    if (response) {
+      recordAssistantTurn(request.session_id ?? "", request.user_input ?? "", response);
     }
 
     return ok({
@@ -638,9 +876,17 @@ export const manifest: PluginManifest = {
   name: "@persona/feishu-task-assistant",
   layer: LayerId.Persona,
   description:
-    "角色人格层：「项目小助理」交互形象（意图解析+帮助+兜底防编造过滤），任务/工单业务下沉 @orchestration/task-issue-sync（双建同步），我的任务/项目进展/反馈走 @orchestration/project-briefing（多源汇总+timem 沉淀）",
-  version: "1.5.0",
+    "角色人格层：「项目小助理」交互形象（意图解析+帮助+兜底防编造过滤+RSI 召回/沉淀），任务/工单业务下沉 @orchestration/task-issue-sync（双建同步），我的任务/项目进展/反馈走 @orchestration/project-briefing（多源汇总+timem 沉淀）",
+  version: "1.6.0",
   provides: [feishuTaskAssistantService],
-  consumes: [taskIssueSyncRef, projectBriefingRef, llmInferenceRefForPersona],
+  consumes: [
+    taskIssueSyncRef,
+    projectBriefingRef,
+    llmInferenceRefForPersona,
+    timemMemoryRefForAssistant,
+    timemMemoryWriteRefForAssistant,
+    timemRuleRecallRefForAssistant,
+    timemRuleCreateRefForAssistant,
+  ],
   preferredCarrier: CarrierKind.Thread,
 };
