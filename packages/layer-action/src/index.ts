@@ -38,11 +38,34 @@ export {
   whisperSttProvider,
   VOSK_MODEL_PATH,
   WHISPER_MODEL_ID,
+  WHISPER_REMOTE_HOST,
+  normalizeRemoteHost,
+  applyWhisperRemoteHost,
+  whisperModelCacheDir,
+  normalizeVoskText,
 } from "./speech-to-text.js";
 export type {
   SpeechToTextRequest,
   SpeechToTextResponse,
 } from "./speech-to-text.js";
+import {
+  audioTranscodeService,
+  audioTranscodeProvider,
+} from "./audio-transcode.js";
+export {
+  audioTranscodeService,
+  audioTranscodeProvider,
+  ffmpegBin,
+  buildFfmpegArgs,
+  defaultSampleRate,
+  parseOggOpusDurationMs,
+  pcmDurationMs,
+} from "./audio-transcode.js";
+export type {
+  AudioTranscodeRequest,
+  AudioTranscodeResponse,
+  AudioFormat,
+} from "./audio-transcode.js";
 import {
   codexAgentService,
   codexAgentProvider,
@@ -231,7 +254,7 @@ export const manifest: PluginManifest = {
   layer: LayerId.Action,
   description: "行动执行层：工具执行占位 + 文本转语音（msedge + MiniMax 双 Provider 热替换）+ 语音转文本（vosk/whisper 运行时可选）+ 编码代理工人(codex/zcode/claude) + 文档工人(docx) + TiMEM 记忆检索/写入 + 飞书 Open API 直连(用户/应用身份, 含用户 OAuth 授权引导) + Gitea v1 API 直连(git.aigility.cloud 工单, DNS 绕行)",
   version: "0.7.0",
-  provides: [toolExecutionService, textToSpeechService, speechToTextService, codexAgentService, zcodeAgentService, piAgentService, claudeAgentService, docWorkerService, timemMemoryService, timemMemoryWriteService, timemRuleRecallService, timemRuleCreateService, feishuApiService, giteaApiService],
+  provides: [toolExecutionService, textToSpeechService, speechToTextService, audioTranscodeService, codexAgentService, zcodeAgentService, piAgentService, claudeAgentService, docWorkerService, timemMemoryService, timemMemoryWriteService, timemRuleRecallService, timemRuleCreateService, feishuApiService, giteaApiService],
   consumes: [],
   preferredCarrier: CarrierKind.Subprocess,
 };
@@ -325,6 +348,7 @@ export const plugin: LayerPlugin = {
       minimaxTtsProvider,
       voskSttProvider,
       whisperSttProvider,
+      audioTranscodeProvider,
       codexAgentProvider,
       zcodeAgentProvider,
       piAgentProvider,
