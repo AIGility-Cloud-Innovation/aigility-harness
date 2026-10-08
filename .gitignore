@@ -68,6 +68,10 @@ examples/*/.state/
 config/*.local.json
 config/*.local.jsonl
 
+# team-memory-console 一次性探查脚本（probe/audit 调试残骸，不入库）
+# 注: 文件保留在磁盘上，仅不纳入版本控制
+examples/team-memory-console/scripts/tmp/
+
 # 临时工作目录（截图/草稿，不入库）
 .tmp-baojing/
 gui-test-screenshots/
