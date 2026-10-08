@@ -463,6 +463,36 @@ describe("feishuTaskAssistantProvider — 兜底防编造集成", () => {
   });
 
   it("兜底模型默认 deepseek-v4-flash、温度 0.2（.env 可覆盖；空响应根因是推理耗尽 max_tokens，已配套提到 1500）", async () => {
+    // 本用例断言的是「无 env 覆盖时的硬编码默认值」，因此必须先真删掉
+    // TASK_ASSISTANT_MODEL——否则宿主/CI 导出的同名变量会顶掉默认值，
+    // 测试变成在读环境而失败（2026-10-07 定位：注入点即 process.env 本身）。
+    // 注意不能用 vi.stubEnv(name, "")：空串仍算「已定义」，而 fallbackModel()
+    // 用的是 ??（nullish），空串不会回落默认值，反而断言得到 ""。
+    const had = Object.prototype.hasOwnProperty.call(process.env, "TASK_ASSISTANT_MODEL");
+    const prev = process.env.TASK_ASSISTANT_MODEL;
+    delete process.env.TASK_ASSISTANT_MODEL;
+    try {
+      const ctx = mockCtx({
+        "@cognitive/llm-inference": () => ({ ok: true, value: { text: "好的，可以聊聊" } }),
+      });
+      await feishuTaskAssistantProvider.execute({ user_input: "随便聊聊" }, ctx);
+      const llm = (ctx.calls as Array<{ id: string; req: Record<string, unknown> }>).find(
+        (c) => c.id === llmInferenceRefForPersona.id,
+      );
+      expect(llm).toBeDefined();
+      expect(llm!.req["model"]).toBe("deepseek-v4-flash");
+      expect(llm!.req["temperature"]).toBe(0.2);
+    } finally {
+      if (had) process.env.TASK_ASSISTANT_MODEL = prev;
+      else delete process.env.TASK_ASSISTANT_MODEL;
+    }
+  });
+
+  it("TASK_ASSISTANT_MODEL 覆盖默认值（.env 生效路径）", async () => {
+    // 补上被上一条用例遗漏的另一半：env 覆盖确实生效。
+    // 上一条只验证默认值，一旦有人误删 fallbackModel() 的 env 读取，
+    // 上一条仍会通过而无人发现——两条合起来才锁住「默认 + 可覆盖」契约。
+    vi.stubEnv("TASK_ASSISTANT_MODEL", "ksyun-deepseek-v4.1-flash");
     const ctx = mockCtx({
       "@cognitive/llm-inference": () => ({ ok: true, value: { text: "好的，可以聊聊" } }),
     });
@@ -471,8 +501,7 @@ describe("feishuTaskAssistantProvider — 兜底防编造集成", () => {
       (c) => c.id === llmInferenceRefForPersona.id,
     );
     expect(llm).toBeDefined();
-    expect(llm!.req["model"]).toBe("deepseek-v4-flash");
-    expect(llm!.req["temperature"]).toBe(0.2);
+    expect(llm!.req["model"]).toBe("ksyun-deepseek-v4.1-flash");
   });
 
   it("免@群消息仅指令模式：未命中意图 → 空回复静默，不调 LLM 兜底", async () => {

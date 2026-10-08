@@ -34,7 +34,20 @@ describe("@action/pi-agent 契约", () => {
   });
 
   it("buildPiArgs：print + no-session（工人临态），cwd 不经 CLI（spawn 选项决定）", () => {
-    expect(buildPiArgs("任务提示词", "/tmp/any")).toEqual(["--print", "--no-session", "任务提示词"]);
+    // 本用例断言「无任何 model 来源时不传 --model」，前提是 PI_AGENT_MODEL
+    // 真的不存在——否则宿主/CI 导出的同名变量会注入 --model 而假性失败
+    // （2026-10-07 定位：注入点即 process.env 本身，与 persona 同一类问题）。
+    // 不能用 vi.stubEnv(name, "")：空串仍是「已定义」，而 pi-agent 用 ?? 判空，
+    // 空串会被当成合法模型名传下去。
+    const had = Object.prototype.hasOwnProperty.call(process.env, "PI_AGENT_MODEL");
+    const prev = process.env.PI_AGENT_MODEL;
+    delete process.env.PI_AGENT_MODEL;
+    try {
+      expect(buildPiArgs("任务提示词", "/tmp/any")).toEqual(["--print", "--no-session", "任务提示词"]);
+    } finally {
+      if (had) process.env.PI_AGENT_MODEL = prev;
+      else delete process.env.PI_AGENT_MODEL;
+    }
   });
 
   it("buildPiArgs：请求级 model 透传为 --model", () => {
