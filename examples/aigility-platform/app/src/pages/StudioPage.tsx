@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react'
 import { studioSeed, agentCats, type StudioAgent } from '../mock/data'
 import RoleDshEditor from '../components/RoleDshEditor'
 import RolePackageEditor from '../components/RolePackageEditor'
-import { publishSkill, deleteSkill, fetchRegistry, createDshSkill, fetchLlmModels, fetchRolePackages, revertRolePackage, fetchFlows, fetchFlowYaml, saveFlowYaml, fetchTaskLoopWorkflow, saveTaskLoopWorkflow, saveRolePackage, fetchRoleEliza, importRoleFile, fetchMarketConfig, saveMarketConfig, setSkillVisibility, type RolePackageInfo, type FlowInfo, type MarketDataMode } from '../lib/harness'
+import { publishSkill, deleteSkill, fetchRegistry, createDshSkill, fetchLlmModels, fetchRolePackages, revertRolePackage, promoteRolePackage, fetchFlows, fetchFlowYaml, saveFlowYaml, fetchTaskLoopWorkflow, saveTaskLoopWorkflow, saveRolePackage, fetchRoleEliza, importRoleFile, fetchMarketConfig, saveMarketConfig, setSkillVisibility, type RolePackageInfo, type FlowInfo, type MarketDataMode } from '../lib/harness'
 import { getCurrentUser } from '../lib/api'
 import WorkflowYamlEditor from '../components/WorkflowYamlEditor'
 import { X } from 'lucide-react'
-import { Plus, Bot, Rocket, Trash2, PenLine, CheckCircle2, Loader, Store, SearchX, User, Wrench, Radio, Send, Cpu, ListTree, Package, Terminal, CalendarClock, Save, Download, Upload, Undo2 } from 'lucide-react'
+import { Plus, Bot, Rocket, Trash2, PenLine, CheckCircle2, Loader, Store, SearchX, User, Wrench, Radio, Send, Cpu, ListTree, Package, Terminal, CalendarClock, Save, Download, Upload, Undo2, ArrowUpFromLine } from 'lucide-react'
 
 const blank: Omit<StudioAgent, 'id' | 'status' | 'updatedAt'> = {
   name: '', category: '知识服务', description: '', tags: [],
@@ -446,6 +446,19 @@ export default function StudioPage() {
     setEditId(null); setView('edit')
   }
 
+  /** 提升回流（M-C）：站点定制版 → 出厂模板（仅管理员；服务端写回工作区未提交，走 git PR 人审） */
+  const [promoteBusy, setPromoteBusy] = useState<string | null>(null)
+  const promote = async (p: RolePackageInfo) => {
+    if (!window.confirm(`将「${p.name}」的站点定制版提升为出厂模板？\n\n该操作会写回 packages/role-kit/roles/${p.id}/SKILL.md（工作区未提交），需经 git PR 人审后随版本分发所有站点。`)) return
+    setPromoteBusy(p.id); setPubError('')
+    try {
+      const r = await promoteRolePackage(p.id)
+      if (!r.ok) throw new Error(r.error ?? (r.issues?.join('；') ?? '提升失败'))
+      setBanner(`已写回出厂模板：${r.target}（${r.bodyLength} 字符）——请在仓库 git diff 审阅后走 PR 合入。`)
+      refreshPkgs()
+    } catch (e) { setPubError(String((e as Error).message ?? e)) } finally { setPromoteBusy(null) }
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -572,6 +585,13 @@ export default function StudioPage() {
                   <button title="删除站点定制版：模板来源回落底座模板，市场安装的回落引擎虚拟卡"
                     onClick={() => { if (window.confirm(`删除「${p.name}」的站点定制版？`)) void revertRolePackage(p.id).then(() => { refreshPkgs(); setBanner(`「${p.name}」站点定制版已删除`) }).catch((err) => setPubError(String((err as Error).message ?? err))) }}
                     className="text-xs py-1.5 px-3 rounded-lg border border-slate-200 text-slate-400 hover:text-amber-600 hover:border-amber-200"><Undo2 size={12} /></button>
+                )}
+                {p.origin === 'site' && isAdmin && (
+                  <button title="提升为出厂模板（M-C）：把站点定制版正文写回 packages/role-kit/roles/<id>/SKILL.md，需 git PR 人审后随版本分发"
+                    onClick={() => void promote(p)} disabled={promoteBusy === p.id}
+                    className="flex-1 text-xs py-1.5 rounded-lg border border-fuchsia-200 text-fuchsia-600 hover:bg-fuchsia-50 disabled:opacity-50 flex items-center justify-center gap-1">
+                    {promoteBusy === p.id ? <Loader size={12} className="animate-spin" /> : <ArrowUpFromLine size={12} />}提升为模板
+                  </button>
                 )}
                 {p.origin !== 'engine' && (
                   <button title="导出 ElizaOS character file（官方 schema，settings.aigility 携带回转字段）"

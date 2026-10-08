@@ -1578,3 +1578,16 @@ export async function revertRolePackage(id: string): Promise<void> {
   const j = await authJsonFetch<{ ok: boolean; error?: string }>(`/api/aigility/role-packages/${encodeURIComponent(id)}`, { method: 'DELETE' })
   if (!j.ok) throw new Error(j.error ?? '恢复失败')
 }
+
+/** 提升回流（M-C）：站点定制版 → 出厂模板（权限 isAdmin；写回工作区未提交，走 git PR 人审） */
+export interface PromoteResult {
+  ok: boolean
+  error?: string
+  issues?: string[]
+  target?: string
+  bodyLength?: number
+  note?: string
+}
+export async function promoteRolePackage(id: string): Promise<PromoteResult> {
+  return authJsonFetch<PromoteResult>(`/api/aigility/role-packages/${encodeURIComponent(id)}/promote`, { method: 'POST' })
+}

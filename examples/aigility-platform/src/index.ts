@@ -85,7 +85,7 @@ import {
 import type { DshToolBridgeResponse } from "./dsh-tool.js";
 import { planTask, WORKFLOW_DIR } from "./planner.js";
 import { buildAggregatorPlanFromConfig, SITE_ROLES_DIR } from "./channel-aggregator.js";
-import { loadRolePackage, loadRolePackages, validateRoleManifest, validateSitePersona, bundledRolesDir, toElizaCharacter, fromElizaCharacter, type RoleManifest } from "@aigility-harness/role-kit";
+import { loadRolePackage, loadRolePackages, validateRoleManifest, validateSitePersona, buildPromotion, bundledRolesDir, toElizaCharacter, fromElizaCharacter, type RoleManifest } from "@aigility-harness/role-kit";
 import { checkPermissions, resolveUserPermissionKeys, assignRoleToUser, revokeRoleFromUser, setRolePermissionGroups } from "@aigility-harness/rbac";
 import { ensureRbacReady, rbacStore } from "./rbac-store.js";
 import { ensureLlmNodeReady, llmNodeStore } from "./llm-node-store.js";
@@ -1541,6 +1541,49 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
         rmSync(siteDir, { recursive: true, force: true });
         void writeAudit(sessionUserId(req) ?? "unknown", "role-package.revert", rolePkgDel[1]);
         json(res, 200, { ok: true });
+        return;
+      }
+      const rolePkgPromote = path.match(/^\/api\/aigility\/role-packages\/([\w-]+)\/promote$/);
+      if (rolePkgPromote && req.method === "POST") {
+        // M-C 提升回流（站点 → 出厂模板）：权限 isAdmin + 非退化校验 + 审计。
+        // 动作 = 把站点副本正文写回 packages/role-kit/roles/<id>/SKILL.md（工作区未提交），
+        // 由维护者 git diff 审阅后走 PR 合入、随版本分发所有站点（§5-2 负责人拍板）。
+        const uid = requireUser(req, res);
+        if (!uid) return;
+        if (!(await isUserAdmin(uid))) {
+          json(res, 403, { ok: false, error: "仅平台管理员可提升为出厂模板" });
+          return;
+        }
+        const sitePkg = loadRolePackage(rolePkgPromote[1], { publicDir: bundledRolesDir(), siteDirs: [SITE_ROLES_DIR] });
+        if (!sitePkg || sitePkg.layer !== "site") {
+          json(res, 400, { ok: false, error: "仅站点定制版可提升（公共模板本身已是出厂模板）" });
+          return;
+        }
+        // 出厂模板原文（含 frontmatter）：同 id 公共角色存在时用于"非退化"比对与 frontmatter 复用
+        const tplPkg = loadRolePackage(rolePkgPromote[1], { publicDir: bundledRolesDir(), siteDirs: [] });
+        const tplSkillMd = tplPkg && fileExists(join(tplPkg.dir, "SKILL.md"))
+          ? readFileSync(join(tplPkg.dir, "SKILL.md"), "utf8")
+          : undefined;
+        const built = buildPromotion(sitePkg.id, sitePkg.prompt, tplSkillMd, bundledRolesDir());
+        if (!built.ok) { json(res, 400, { ok: false, error: built.issues.join("；"), issues: built.issues }); return; }
+        const { promotion } = built;
+        try {
+          mkdirSync(dirname(promotion.target), { recursive: true });
+          const tmp = `${promotion.target}.promote-tmp`;
+          writeFileSync(tmp, promotion.content, "utf8");
+          renameSync(tmp, promotion.target);
+        } catch (err) {
+          json(res, 500, { ok: false, error: `写回出厂模板失败: ${err}` });
+          return;
+        }
+        void writeAudit(uid, "role.promote", promotion.roleId,
+          `${promotion.bodyLength} 字符 → ${promotion.target}（未提交，待 git PR 人审）`);
+        json(res, 200, {
+          ok: true,
+          target: promotion.target,
+          bodyLength: promotion.bodyLength,
+          note: "已写回出厂模板（工作区未提交）。请在仓库执行 git diff 审阅后走 PR 合入，合入后随版本分发所有站点。",
+        });
         return;
       }
       // ── 模块装配（真 · app_modules/app_module_presets 持久化, 设计见 docs/platform-module-plugin-design.md）──
