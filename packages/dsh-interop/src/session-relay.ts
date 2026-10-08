@@ -170,6 +170,9 @@ export function buildRolePatchFile(
   reg: RoleRegistry,
   role: { id: string; config: RoleCapabilityConfig },
   outFile: string,
+  /** 会话工作目录：AGENTS 快照落盘处（DSH 在该目录下按文件名扫描候选）。
+   *  缺省回落到 patch 文件所在目录（向后兼容旧调用方/单测）。 */
+  cwd?: string,
 ): string | null {
   const entries: Array<Record<string, unknown>> = [];
   const skillDirs = (role.config.skills ?? [])
@@ -222,14 +225,25 @@ export function buildRolePatchFile(
     ? undefined
     : pkg?.body;
   if (personaFile) {
-    // patch 目录先就位：快照文件与 patch 文件同目录（调用方可能尚未创建）
-    mkdirSync(path.dirname(outFile), { recursive: true });
-    const agentsCopy = path.join(path.dirname(outFile), `AGENTS-${role.id}.md`);
+    // 落盘位置按 DSH 扫描语义：候选文件名必须在「会话 cwd 或它的祖先目录」下。
+    // 缺省 cwd 回落到 patch 目录（旧行为，仅供单测/无 cwd 场景）。
+    const snapshotDir = cwd ?? path.dirname(outFile);
+    mkdirSync(snapshotDir, { recursive: true });
+    const agentsCopy = path.join(snapshotDir, `AGENTS-${role.id}.md`);
     // 角色包路径：只写正文快照（原文已剥 frontmatter，避免 YAML 元数据污染 system prompt）
     if (personaText !== undefined) writeFileSync(agentsCopy, `${personaText}\n`, "utf8");
     else copyFileSync(personaFile, agentsCopy);
-    // maxBytes 必填（dsh-base schema 校验）：与官方缺省 65536 对齐，防止超长指令被截断
-    entries.push({ id: "agent-instructions", config: { instructionFileCandidates: [agentsCopy], maxBytes: 65536 } });
+    // ⚠️ DSH 语义（实测 2026-10-08）：instructionFileCandidates 是「在每个祖先目录下
+    // 依次查找的相对文件名」，不能含路径分隔符——dsh-agent-instructions 的
+    // resolveInstructionFileCandidates() 会静默丢弃含 [\\/] 的候选（不报错、不告警）。
+    // 因此这里只传文件名，由调用方把快照落到会话 cwd（见 roleDirs → cwd 投递约定）。
+    entries.push({
+      id: "agent-instructions",
+      config: {
+        instructionFileCandidates: [`AGENTS-${role.id}.md`],
+        maxBytes: 65536,
+      },
+    });
   }
   if (entries.length === 0) return null;
   mkdirSync(path.dirname(outFile), { recursive: true });
@@ -493,7 +507,8 @@ export function createDshSessionRelayExecute(
       if (reg) {
         const role = resolveRole(reg, chatId);
         const patchDir = opts.patchDir ?? path.dirname(opts.transcriptFile);
-        const patch = buildRolePatchFile(reg, role, path.join(patchDir, `patch-${role.id}.yml`));
+        // cwd 必传：AGENTS-<id>.md 快照要落到会话 cwd，DSH 才能按文件名扫到（见 M-A 注释）
+        const patch = buildRolePatchFile(reg, role, path.join(patchDir, `patch-${role.id}.yml`), cwd);
         patchFiles = patch ? [patch] : undefined;
         console.log(
           `[relay] role=${role.id} skills=${role.config.skills?.length ?? 0} mcp=${role.config.mcpServers?.length ?? 0} patch=${patch ? "on" : "off"}`,

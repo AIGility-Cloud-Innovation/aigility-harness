@@ -104,11 +104,26 @@ describe("M-A 引擎级投递：SKILL.md → AGENTS-<id>.md patch", () => {
     const snapshot = readFileSync(join(root, "patch", "AGENTS-sales-chat.md"), "utf8");
     expect(snapshot).toBe("你是「销售客服」，解答系统使用问题后委托 L4。\n");
     expect(snapshot).not.toContain("description:");
-    // patch 覆盖 agent-instructions，候选表收窄为快照文件
+    // patch 覆盖 agent-instructions，候选表收窄为【纯文件名】（DSH 语义：相对各祖先目录查找，
+    // 含 / 的候选会被 resolveInstructionFileCandidates 静默丢弃 → 人设零注入）
     const yml = readFileSync(out, "utf8");
     expect(yml).toContain(`id: "agent-instructions"`);
-    expect(yml).toContain(`- ${JSON.stringify(join(root, "patch", "AGENTS-sales-chat.md"))}`);
+    expect(yml).toContain(`- ${JSON.stringify("AGENTS-sales-chat.md")}`);
+    expect(yml).not.toMatch(/instructionFileCandidates:[\s\S]*AGENTS-sales-chat\.md[^\n]*\//);
     expect(yml).toContain("maxBytes: 65536");
+  });
+
+  it("传入 cwd → 快照落到会话 cwd（DSH 在 cwd 按文件名扫描候选）", () => {
+    const { root, rolesDir } = makeTree(
+      `---\nname: sales-chat\n---\n\n你是「销售客服」。\n`,
+    );
+    const ws = join(root, "ws");
+    mkdirSync(ws, { recursive: true });
+    const out = join(root, "patch", "patch-sales-chat.yml");
+    buildRolePatchFile(reg(root, rolesDir), { id: "sales-chat", config: {} }, out, ws);
+    expect(readFileSync(join(ws, "AGENTS-sales-chat.md"), "utf8")).toBe("你是「销售客服」。\n");
+    const yml = readFileSync(out, "utf8");
+    expect(yml).toContain(`- ${JSON.stringify("AGENTS-sales-chat.md")}`);
   });
 
   it("角色包缺失/正文为空 → 不出该分支（零开销，不产文件）", () => {

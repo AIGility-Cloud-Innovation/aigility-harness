@@ -68,9 +68,19 @@ examples/*/.state/
 config/*.local.json
 config/*.local.jsonl
 
-# team-memory-console 一次性探查脚本（probe/audit 调试残骸，不入库）
-# 注: 文件保留在磁盘上，仅不纳入版本控制
-examples/team-memory-console/scripts/tmp/
+# 一次性探查脚本（probe/audit 调试残骸，不入库）
+# 规则: 任何位置的 tmp/ 目录、以及声明「读完即删/用后即删」的残骸文件均不入库
+#      不针对具体路径点名；文件保留在磁盘上，仅不纳入版本控制
+tmp/
+.tmp-*
+*-scan-*.ts
+debug-fields.ts
+debug-unknown.ts
+probe_models.py
+# DSH 环境配置备份（外部工具生成的环境快照，含本机路径，不入库）
+backup-dsh-config-*/
+tests/debug-import.py
+tests/run-debug.py
 
 # 临时工作目录（截图/草稿，不入库）
 .tmp-baojing/
