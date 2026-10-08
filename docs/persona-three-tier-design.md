@@ -6,8 +6,9 @@
 > 结论先行：**不引入外部包**（Langfuse/Dify/Coze 均不匹配，见 §7），复用既有 role-kit 双层 +
 > ElizaOS 交换格式，只补三段小改动 + 一个生效验证面板。
 >
-> **实施进度（2026-10-08）**：分支 `feat/persona-three-tier`；**M-A ✅ / M-B ✅ 已实现**，
-> M-C、M-D 未开始。落地口径与初稿偏差见 §3 各节「实施记录」，交付清单见 §7。
+> **实施进度（2026-10-08）**：分支 `feat/persona-three-tier`；**M-A ✅ / M-B ✅ / M-C ✅ 已实现**，
+> M-D 未开始（生效验证面板，一期/二期均未闭合项）。落地口径与初稿偏差见 §3 各节「实施记录」，
+> 交付清单见 §7。
 
 ---
 
@@ -110,7 +111,7 @@ roles/<role-id>/
 ## 3. 设计：四段改动
 
 > 实现状态（2026-10-08 实施记录，分支 `feat/persona-three-tier`）：
-> **M-A ✅ 已实现 · M-B ✅ 已实现 · M-C ⬜ 未开始 · M-D ⬜ 未开始**。
+> **M-A ✅ 已实现 · M-B ✅ 已实现 · M-C ✅ 已实现 · M-D ⬜ 未开始**。
 > 下面每节末尾的「实施记录」写明落地口径与偏差。
 
 ### M-A 引擎级投递（dsh patch 第三分支）✅
@@ -177,11 +178,31 @@ roles/<role-id>/
 （`writeAudit("role.promote", ...)`）。提升动作 = 把站点副本正文写回
 `packages/role-kit/roles/<id>/SKILL.md`，走 **git PR 人审**后随版本分发所有站点。
 
-### M-D 生效验证（不可省）
+> **实施记录（2026-10-08 落地）**：按上述口径实现，`role-kit 23 passed`。
+>
+> - `packages/role-kit/src/index.ts`：`checkPromotion` / `renderPromotedSkillMd` /
+>   `buildPromotion` 纯函数（无 IO），`PROMOTION_IDENTICAL_ISSUE` 文案常量化。
+> - `examples/aigility-platform/src/index.ts`：`POST /api/aigility/role-packages/:id/promote`，
+>   isAdmin 门禁 + 仅 `layer === 'site'` 可提升 + 审计；写盘先写 `.promote-tmp` 再 rename（原子）。
+> - 工厂页入口仅对 `origin === 'site'` 且 isAdmin 显示，confirm 写明影响面。
+>
+> **两处口径偏差（均为收紧，非放宽）**：
+> ① 设计只写"非退化校验"，实做额外要求**出厂模板必须已存在且正文确有差异**——
+> 否则一次误点就在 git 里产生一个空 PR；
+> ② 提升时**复用目标模板的 frontmatter**，不用站点副本的：出厂 `name` 是英文 `role.id`，
+> 站点副本可能仍是中文显示名（§1 迁移项 ① 未全量闭合），沿用站点 frontmatter 会把
+> 中文显示名带进公共层，构成该迁移项的回归。
+
+### M-D 生效验证（不可省）⬜ 未开始
 
 解析 dsh 会话 jsonl 的 `agent-instructions` 注入事件，在工厂角色页展示：
 **实际注入 N 字节 · 来源文件 · 候选表**。没有这一步，"AGENTS.md 首候选就位却常年零字节"
 这类静默失效无法察觉（本轮 DSH 能拿到硬证据，正是因为做了这一步）。
+
+> **实施记录（2026-10-08）**：**未做**。已核验当前工作区与提交中均无 `agent-instructions`
+> 的 jsonl 解析代码（`grep -rn "agent-instructions" --include=*.ts` 只命中
+> `packages/dsh-interop/src/session-relay.ts` 的 patch **生成**侧与对应单测，
+> 即 M-A 的投递端；**解析/展示端不存在**）。M-A 的投递在 UI 上仍**不可观测**。
 
 ### ~~M-E 分节解析器~~（已取消）
 
@@ -223,13 +244,13 @@ roles/<role-id>/
 
 ## 7. 里程碑
 
-> **进度（2026-10-08）**：一期 ✅ 完成 · 二期 ⏳ **进行中（M-B 完成，M-C 未开始）**
+> **进度（2026-10-08）**：一期 ✅ 完成 · 二期 ✅ **完成（M-B + M-C 均已落地）**
 > · 三期 ⬜ 未开始 · 四期 ⬜ 未开始。分支 `feat/persona-three-tier`。
 
 | 期 | 内容 | 量级 | 状态 |
 |---|---|---|---|
 | 一 | M-A dsh patch 第三分支（角色包 SKILL.md 正文 → AGENTS.md）+ 单测 | ~50 行 | ✅ 完成（实做 ~75 行含注释 + 4 例单测） |
-| 二 | M-B 应用副本校验 ✅ ／ M-C 管理员提升 + 审计 ⬜ | ~120 行 | ⏳ 进行中（M-B 已完成） |
+| 二 | M-B 应用副本校验 ✅ ／ M-C 管理员提升 + 审计 ✅ | ~120 行 | ✅ 完成（实做 ~160 行含注释；M-C 底座 +7 例、接线端点与 UI） |
 | 三 | M-D 生效验证面板（jsonl 解析 → 工厂页展示） | ~150 行 | ⬜ 未开始 |
 | 四 | pi/codex AGENTS.md 投递扩展 | ~40 行 | ⬜ 未开始 |
 
@@ -238,14 +259,18 @@ roles/<role-id>/
 | 项 | 落点 | 验证 |
 |---|---|---|
 | M-A 角色包 → patch 投递 | `packages/dsh-interop/src/session-relay.ts` | `npx vitest run packages/dsh-interop`（54 passed） |
-| M-B 三重校验（共享机制） | `packages/role-kit/src/index.ts`（`validateSitePersona` / `normalizePersonaBody`） | `npx vitest run packages/role-kit`（16 passed） |
+| M-B 三重校验（共享机制） | `packages/role-kit/src/index.ts`（`validateSitePersona` / `normalizePersonaBody`） | `npx vitest run packages/role-kit`（23 passed，含 M-C +7） |
 | M-B 接线（保存 + 导入两路径） | `examples/aigility-platform/src/index.ts` | `tsc --noEmit` 通过 |
+| M-C 提升底座（校验 + 渲染 + 组装） | `packages/role-kit/src/index.ts`（`checkPromotion` / `renderPromotedSkillMd` / `buildPromotion`） | `npx vitest run packages/role-kit`（23 passed） |
+| M-C 接线（端点 + 审计 + 工厂页入口） | `examples/aigility-platform/src/index.ts`、`app/src/pages/StudioPage.tsx` | `tsc --noEmit` 通过 |
+| 环境变量泄漏假红灯修复 | `packages/layer-persona/src/feishu-task-assistant.test.ts`、`packages/layer-action/src/pi-agent.test.ts` | 全量 exit 0；敌意环境（三个 env 注入 bogus）同样全绿 |
 | sales-chat 存根旧账清理 | `examples/aigility-platform/data/roles/sales-chat/SKILL.md` | `validateSitePersona` 返回 ok |
 
 **未做/待办**（避免误以为本期已闭合）：
 
-- **M-C 提升回流整段未实现**：无 `role.promote` 端点、无 `writeAudit("role.promote")`、
-  无「提升为出厂模板」的 UI 入口；
+- **M-C 已落地，但未经真实站点端到端冒烟**：端点与 UI 走 `tsc --noEmit` + 底座单测，
+  但"管理员在工厂页点提升 → 工作区 `roles/<id>/SKILL.md` 实际被改写 → git diff 可审"
+  这条端到端链路**未在真实运行实例上走过**（同 M-A，属一期末尾同类待办）；
 - **M-D 生效验证面板未实现**：目前仍靠人工解压 session jsonl 看注入事件；
   即 M-A 的投递在 UI 上**不可观测**；
 - **M-A 未经真实 DSH 冒烟**：单测覆盖 patch 生成逻辑，但"真实会话中
