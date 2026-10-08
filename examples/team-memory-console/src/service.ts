@@ -73,8 +73,15 @@ export class TeamMemoryService {
    * 按成员查记忆。memberRef 支持: 姓名 / 别名 / member_id / user_id / "all"(全员)。
    * 多账号成员: 逐 user_id 搜索后合并 (按 score 排序)。
    * pages > 1 时对同一查询翻页取回更多候选 (语义搜索按相关度排序, 翻页扩大日期过滤前的池子)。
+   *
+   * 2026-10-07 修复三处检索缺陷 (实测: LJY 同一 query 全层 9 条 / L2 仅 6 条, L1 层占多数):
+   *   1. 不再传 level —— 原硬编码 level:2 把 L1 原始层整层丢弃, 而 L1 恰是当日记忆最丰富的一层。
+   *      全层检索在客户端按 level 分层保留/标注 (L1 原始 / L2 提炼 / L3 日聚合语义不同, 不该只留一层)。
+   *   2. 不再用返回值 slice(0, limit) 截断 —— 那会把翻页辛苦扩大的候选池砍回单页量, 让 pages 参数形同虚设。
+   *      limit 退化为"每页请求条数"(服务端实际返回量由服务端决定, 实测调大 limit 对返回条数无稳定影响)。
+   *   3. 翻页终止条件改为"服务端已无更多" —— 原 items.length === 0 才 break, 配合 limit 截断永远取不满。
    */
-  async query(memberRef: string, text: string, limit = 8, pages = 1): Promise<MemberQueryResult> {
+  async query(memberRef: string, text: string, limit = 8, pages = 1, opts?: { level?: number | string }): Promise<MemberQueryResult> {
     const errors: string[] = [];
     let member: TeamMember | null = null;
     let user_ids: string[];
@@ -120,8 +127,16 @@ export class TeamMemoryService {
       const seenIds = new Set<string>();
       for (let page = 1; page <= Math.max(1, pages); page++) {
         try {
-          // 检索限定 L2 提炼层：过滤 L1 原始层（个人快照等碎片噪音，2026-10-05）
-          const res = await this.client.searchMemory({ user_id: uid, query: text, limit, domain: this.defaultDomain, page, level: 2 });
+          // 全层检索 (不传 level): L1 原始 / L2 提炼 / L3 日聚合都要, 靠客户端按 level 分层标注
+          const res = await this.client.searchMemory({
+            user_id: uid,
+            query: text,
+            limit,
+            domain: this.defaultDomain,
+            page,
+            // 显式传 null 会覆盖客户端默认值, 故仅在调用方指定 level 时才带上
+            ...(opts?.level !== undefined ? { level: opts.level } : {}),
+          });
           const items = res.memories ?? res.results ?? res.items ?? [];
           for (const it of items) {
             const attributed = this.attribute(it, uid);
@@ -130,7 +145,10 @@ export class TeamMemoryService {
             if (id) seenIds.add(id);
             merged.push(attributed);
           }
+          // 终止条件: 本页为空 即服务端已无更多; 不再因为"本页不足 limit"提前退出
           if (items.length === 0) break;
+          // 服务端会回传 total: 已达总量就不必再翻页 (省一次往返)
+          if (typeof res.total === "number" && seenIds.size >= res.total) break;
         } catch (e) {
           errors.push(`user_id ${uid} 搜索失败: ${(e as Error).message}`);
           break;
@@ -138,6 +156,7 @@ export class TeamMemoryService {
       }
     }
     merged.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+    // 注意: 这里截断的是"单次查询"的返回条数, 调用方 (日报) 需传足够大的 limit 以保留多查询合并池
     return { member, user_ids, memories: merged.slice(0, limit), errors };
   }
 

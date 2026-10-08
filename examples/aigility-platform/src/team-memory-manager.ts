@@ -4,7 +4,7 @@
  * 把 examples/team-memory-console 已有的「日报 / 晨报」总结能力收编为平台内可配置模块
  * （与「项目小助理」task-loop-manager 同构）：
  *   - 配置持久化：examples/aigility-platform/data/team-memory.json
- *   - 调度：进程内定时器按 HH:MM 触发日报（默认 18:30）/ 晨报（默认 08:30），每类每天最多一次
+ *   - 调度：进程内定时器按 HH:MM 触发日报（默认 21:30）/ 晨报（默认 10:00，qwen3.5 窗口内），每类每天最多一次
  *   - 执行：spawn `pnpm --filter team-memory-console cli report|morning --send`，
  *     配置翻译为子进程 env（TIMEM_API_KEY / FEISHU_* / LITELLM_* / REPORT_SUMMARY_MODEL 等）；
  *     子进程自身 loadEnvFiles 会兜底加载仓库 .env，且不覆盖已注入的 env —— 页面配置优先
@@ -62,8 +62,11 @@ export type TeamMemoryJobKind = "report" | "morning";
 
 const DEFAULT_CONFIG: TeamMemoryJobConfig = {
   enabled: false,
-  dailyReportTime: "18:30",
-  morningReportTime: "08:30",
+  // 2026-10-07: 18:30 → 21:30（docs/token-mechanism-plan.md M2）——摘要模型换本机
+  // qwen3.5 免费资源，21:30 在常驻窗口外按需拉起（~30s 冷启动，批量任务可忍）
+  dailyReportTime: "21:30",
+  // 2026-10-07: 08:30 → 10:00——移进 qwen3.5 上午常驻窗口（10:00-11:00，09:58 预热）
+  morningReportTime: "10:00",
   env: {},
 };
 

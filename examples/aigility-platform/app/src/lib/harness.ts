@@ -1379,7 +1379,9 @@ export interface ChannelPlan {
 // ── 模型池（真 · 网关 /v1/models 代理）与工作流清单（D4 编排委托）──
 
 /** 平台可用模型池（网关上游模型列表；不可达时返回空 + 说明） */
-export async function fetchLlmModels(): Promise<{ ok: boolean; models: string[]; error?: string }> {
+export interface GatewayModelEntry { id: string; provider: string; maxIn?: number; maxOut?: number }
+
+export async function fetchLlmModels(): Promise<{ ok: boolean; models: string[]; entries?: GatewayModelEntry[]; health?: { healthy: number; unhealthy: number }; error?: string }> {
   return authJsonFetch('/api/aigility/llm/models')
 }
 

@@ -100,6 +100,47 @@ const DIST_DIR = resolve(__dirname, "../app/dist");
 // 仓库根 = examples/aigility-platform/(src|dist) → ../../ (examples → aigility-harness)
 const REPO_ROOT = resolve(__dirname, "../../..");
 
+/** 网关模型 id → 供应商标签（按 ~/.local/litellm-venv/config.yaml 的 model_name 前缀分组约定） */
+function gatewayProviderOf(id: string): string {
+  if (id.startsWith("ksyun-")) return "金山云 KSyun";
+  if (id.startsWith("bigmodel-")) return "智谱 BigModel";
+  if (id.startsWith("sensenova-")) return "商汤 SenseNova";
+  if (id.startsWith("claude-")) return "Claude 兼容别名";
+  if (id.startsWith("qwen2.5")) return "本机 Ollama";
+  if (id === "qwen3.5") return "本机 Ollama";   // 本机 ollama/qwen3.5:latest（云端全挂兜底）
+  if (id.startsWith("qwen")) return "阿里云 DashScope";
+  if (id === "deepseek-v4-flash") return "阿里云 DashScope";
+  if (id.startsWith("deepseek")) return "DeepSeek";
+  return "其他";
+}
+
+// 网关路由健康缓存：/health 会逐路由探测（38 条、分钟级，ollama 冷启动更慢），
+// 不能阻塞模型池接口（对话页三件套共用）——后台低频刷新（5min TTL）+ 内存缓存。
+let gatewayHealthCache = { healthy: 0, unhealthy: 0, at: 0 };
+const GATEWAY_HEALTH_TTL_MS = 5 * 60_000;
+
+function refreshGatewayHealth(gatewayKey: string): void {
+  if (Date.now() - gatewayHealthCache.at < GATEWAY_HEALTH_TTL_MS) return;
+  gatewayHealthCache.at = Date.now();
+  // 健康计数取 LiteLLM 本体（LITELLM_URL=:48724）——AIGILITY_GATEWAY_PORT(:1237) 是
+  // AppBase 网关（OpenAI 兼容代理），没有 /health；模型池两边等价，健康只有 litellm 有
+  const litellmBase = (process.env.LITELLM_URL ?? "http://127.0.0.1:48724").replace(/\/$/, "");
+  void fetch(`${litellmBase}/health`, {
+    // litellm 的 master key（.env LITELLM_KEY），不是 AppBase 侧的 platform gatewayKey
+    headers: { Authorization: `Bearer ${process.env.LITELLM_KEY ?? gatewayKey}` },
+    signal: AbortSignal.timeout(120_000),
+  })
+    .then((x) => x.json() as Promise<{ healthy_count?: number; unhealthy_count?: number }>)
+    .then((j) => {
+      gatewayHealthCache = {
+        healthy: Number(j.healthy_count ?? 0),
+        unhealthy: Number(j.unhealthy_count ?? 0),
+        at: Date.now(),
+      };
+    })
+    .catch(() => { gatewayHealthCache.at = 0; });
+}
+
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -1079,13 +1120,29 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       // ── 模型池（真 · 网关 /v1/models 代理, 主密钥仅服务端）与工作流清单（D4 编排委托数据源）──
       if (path === "/api/aigility/llm/models" && req.method === "GET") {
         try {
+          const gh = { Authorization: `Bearer ${gatewayKey}` };
           const r = await fetch(`http://127.0.0.1:${GATEWAY_PORT}/v1/models`, {
-            headers: { Authorization: `Bearer ${gatewayKey}` },
+            headers: gh,
             signal: AbortSignal.timeout(5000),
           });
           const j = await r.json() as { data?: Array<{ id: string }> };
           const models = (j.data ?? []).map((m) => m.id).sort();
-          json(res, 200, { ok: true, models, source: "gateway" });
+          // 模型管理页（2026-10-07）：合并 /v1/model/info（上下文/输出上限），把演示矩阵换成真数据。
+          // /health 逐路由探测分钟级、不能阻塞本接口（对话页模型池共用）→ 后台刷新 + 缓存。
+          const infoR = await fetch(`http://127.0.0.1:${GATEWAY_PORT}/v1/model/info`, { headers: gh, signal: AbortSignal.timeout(8000) }).then((x) => x.json() as Promise<{ data?: Array<{ model_name?: string; model_info?: Record<string, unknown> }> }>).catch(() => null);
+          refreshGatewayHealth(gatewayKey);
+          const infoMap = new Map<string, { maxIn?: number; maxOut?: number }>();
+          for (const m of infoR?.data ?? []) {
+            if (!m.model_name) continue;
+            const mi = m.model_info ?? {};
+            infoMap.set(m.model_name, {
+              maxIn: Number(mi.max_input_tokens) || undefined,
+              maxOut: Number(mi.max_output_tokens) || Number(mi.max_tokens) || undefined,
+            });
+          }
+          const entries = models.map((id) => ({ id, provider: gatewayProviderOf(id), ...(infoMap.get(id) ?? {}) }));
+          const health = { ...gatewayHealthCache };
+          json(res, 200, { ok: true, models, entries, health, source: "gateway" });
         } catch (err) {
           json(res, 200, { ok: false, models: [], error: `网关模型池不可达: ${String(err)}` });
         }
