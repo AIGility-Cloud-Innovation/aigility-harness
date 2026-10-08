@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
-import { bundledRolesDir, fromElizaCharacter, loadRolePackage, loadRolePackages, normalizePersonaBody, toElizaCharacter, validateRoleManifest, validateSitePersona } from "./index.js";
+import { buildPromotion, bundledRolesDir, checkPromotion, fromElizaCharacter, loadRolePackage, loadRolePackages, normalizePersonaBody, PROMOTION_IDENTICAL_ISSUE, renderPromotedSkillMd, toElizaCharacter, validateRoleManifest, validateSitePersona } from "./index.js";
 
 // 临时双层目录：公共层 + 站点层（站点覆盖公共的同 id）
 const root = `/tmp/role-kit-test-${process.pid}-${Math.random().toString(36).slice(2)}`;
@@ -192,5 +192,72 @@ describe("M-B 站点副本写入前校验（validateSitePersona）", () => {
 
   it("normalizePersonaBody 剥离 frontmatter 并压缩空白", () => {
     expect(normalizePersonaBody(`---\nname: a\n---\n\n  正文  \n\n`)).toBe("正文");
+  });
+});
+
+describe("M-C 提升回流（buildPromotion / renderPromotedSkillMd）", () => {
+  const tplBody = "你是「销售客服」，负责解答系统使用问题：先判断问题类型，再给出结论与操作步骤；遇到复杂问题委托 L4 处理。回复要求：先结论、后步骤，语气专业友好，不承诺未确认的功能与时间点，保持克制。";
+  const siteBody = `${tplBody}\n\n本站点额外要求：涉及报价必须附上价目表链接。`;
+  const tplFull = `---\nname: sales-chat\ndescription: 销售客服（出厂）\n---\n\n${tplBody}\n`;
+  const tplDir = "/repo/packages/role-kit/roles";
+
+  it("差异化站点副本 → 提升物就位（target 指向出厂模板）", () => {
+    const r = buildPromotion("sales-chat", siteBody, tplFull, tplDir);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.promotion.roleId).toBe("sales-chat");
+    expect(r.promotion.target).toBe("/repo/packages/role-kit/roles/sales-chat/SKILL.md");
+    expect(r.promotion.content).toContain("本站点额外要求");
+    expect(r.promotion.bodyLength).toBeGreaterThan(80);
+  });
+
+  it("复用目标模板 frontmatter（不把站点中文显示名带进公共层）", () => {
+    const withSiteFm = `---\nname: 销售客服\ndescription: 中文站点名\n---\n\n${siteBody}`;
+    const r = buildPromotion("sales-chat", withSiteFm, tplFull, tplDir);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.promotion.content).toContain("name: sales-chat");
+    expect(r.promotion.content).not.toContain("中文站点名");
+    // 正文里不应残留站点 frontmatter
+    expect(r.promotion.content.split("\n").filter((l) => l.startsWith("---")).length).toBe(2);
+  });
+
+  it("与出厂模板无差异 → 拒绝提升（且文案稳定可复用）", () => {
+    const r = buildPromotion("sales-chat", tplBody, tplFull, tplDir);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.issues.join()).toContain(PROMOTION_IDENTICAL_ISSUE);
+  });
+
+  it("模板不存在（首次沉淀）→ 放行并生成最小 frontmatter", () => {
+    const r = buildPromotion("brand-new", siteBody, undefined, tplDir);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.promotion.content).toContain("name: brand-new");
+    expect(r.promotion.content).toContain("本站点额外要求");
+  });
+
+  it("存根正文 → 仍被 M-B 三重校验拦下（提升不能绕过校验）", () => {
+    const stub = "（人设待补：在智能体工厂「人设」区编辑后保存）";
+    const r = buildPromotion("sales-chat", stub, tplFull, tplDir);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.issues.join()).toContain("占位标记");
+  });
+
+  it("校验结果暴露 identicalToTemplate / templateExists 供 UI 提示", () => {
+    const same = checkPromotion(tplBody, tplBody);
+    expect(same.identicalToTemplate).toBe(true);
+    expect(same.templateExists).toBe(true);
+    const fresh = checkPromotion(siteBody, undefined);
+    expect(fresh.templateExists).toBe(false);
+    expect(fresh.ok).toBe(true);
+  });
+
+  it("renderPromotedSkillMd 归一化正文（去除多余空行与行尾空格）", () => {
+    const md = renderPromotedSkillMd("sales-chat", `---\nname: 销售客服\n---\n\n  ${tplBody}  \n\n\n`, tplFull);
+    expect(md.endsWith("\n")).toBe(true);
+    expect(md).toContain("name: sales-chat");
+    expect(md).not.toContain("  \n");
   });
 });

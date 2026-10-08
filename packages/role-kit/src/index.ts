@@ -210,6 +210,117 @@ export function validateSitePersona(body: string, templateBody?: string): Person
   return { ok: issues.length === 0, issues, bodyLength };
 }
 
+// ── M-C 提升回流（站点 → 出厂模板）──────────────────────────────
+// 三级生命周期的收口环节：站点副本（应用级）调好之后，管理员把它提升回
+// 出厂模板（packages/role-kit/roles/<id>/SKILL.md），走 git PR 人审后随版本分发。
+//
+// 纪律（负责人 §4-2 拍板）：
+//   - 权限：平台 isAdmin（非框架维护者通道，维护者在 git PR 合入时把关）；
+//   - 校验：沿用 M-B 的非退化/非空/非占位（提升物不能是存根或模板的复制品）；
+//   - 留痕：写审计 role.promote。
+// 本模块只产出"待写回内容"（纯函数，无 IO），写盘与权限由调用方（平台端点）负责。
+
+/** 站点副本提升为出厂模板所需的素材 */
+export interface RolePromotion {
+  roleId: string;
+  /** 待写回的完整 SKILL.md 文本（保留站点副本的 frontmatter，正文以站点为准） */
+  content: string;
+  /** 提升后入库的 SKILL.md 相对路径（仓库内，供审计与 PR 说明展示） */
+  target: string;
+  /** 归一化后的正文字符数 */
+  bodyLength: number;
+}
+
+/** 提升前置校验结果：issues 非空即拒绝提升 */
+export interface PromotionCheck extends PersonaValidation {
+  /** 站点副本与出厂模板正文归一化后是否相同（相同 = 无提升价值/退化） */
+  identicalToTemplate: boolean;
+  /** 出厂模板是否已存在该角色（不存在 = 首次沉淀，非"提升"） */
+  templateExists: boolean;
+}
+
+/**
+ * 提升前置校验（M-C）：站点副本相对出厂模板必须是"实质推进"。
+ *
+ * 与 M-B 的差别：M-B 拦"写入站点的存根"，M-C 拦"把无差异的东西提升回模板"。
+ * 因此这里**强制要求存在出厂模板且正文确有差异**——没有差异就没有可回流的信息，
+ * 否则一次误点就会在 git 里产生一个空 PR。
+ */
+export function checkPromotion(siteBody: string, templateBody: string | undefined): PromotionCheck {
+  const base = validateSitePersona(siteBody, templateBody);
+  const issues = [...base.issues];
+  const templateExists = templateBody !== undefined && normalizePersonaBody(templateBody).length > 0;
+  const identicalToTemplate =
+    templateExists && normalizePersonaBody(siteBody) === normalizePersonaBody(templateBody);
+  if (identicalToTemplate && !issues.includes(PROMOTION_IDENTICAL_ISSUE)) {
+    issues.push(PROMOTION_IDENTICAL_ISSUE);
+  }
+  return { ...base, ok: issues.length === 0, issues, identicalToTemplate, templateExists };
+}
+
+/** 「无差异」问题的稳定文案（端点与 UI 共用，避免两处漂移） */
+export const PROMOTION_IDENTICAL_ISSUE =
+  "站点副本与出厂模板正文无差异：没有可回流的内容（请先定制再提升）";
+
+/**
+ * 渲染待提升的 SKILL.md（M-C）：站点正文 + 目标角色包的既有 frontmatter。
+ *
+ * 为何复用**目标模板**的 frontmatter 而非站点副本的：出厂模板的 `name` 是英文
+ * role.id（§1 迁移口径），站点副本可能仍是中文显示名；提升回模板时必须落回
+ * 出厂口径，否则会把站点显示名带进公共层（§1 迁移项 ① 的回归）。
+ * 模板不存在时（首次沉淀）用 role.id 生成最小 frontmatter。
+ *
+ * @param roleId       角色 id（= 目录名 = 模板文件名基准）
+ * @param siteBody     站点副本正文（可含 frontmatter，内部只取正文）
+ * @param templateSkillMd 目标模板现有 SKILL.md 全文（不存在传 undefined）
+ */
+export function renderPromotedSkillMd(
+  roleId: string,
+  siteBody: string,
+  templateSkillMd?: string,
+): string {
+  const body = normalizePersonaBody(siteBody);
+  const fm = templateSkillMd
+    ? /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(templateSkillMd)?.[0]?.trimEnd()
+    : undefined;
+  const frontmatter = fm ?? `---\nname: ${roleId}\ndescription: 出厂模板（管理员提升）\n---`;
+  return `${frontmatter}\n\n${body}\n`;
+}
+
+/**
+ * 组装提升物（M-C）：校验通过才返回，否则返回 issues 供端点回 400。
+ *
+ * @param roleId 角色 id
+ * @param siteBody 站点副本正文
+ * @param templateSkillMd 目标出厂模板 SKILL.md 全文（不存在传 undefined）
+ * @param templatesDir 出厂模板根目录绝对路径（bundledRolesDir() 或调用方自定；仅用于拼 target 展示路径）
+ */
+export function buildPromotion(
+  roleId: string,
+  siteBody: string,
+  templateSkillMd: string | undefined,
+  templatesDir: string,
+): { ok: true; promotion: RolePromotion } | { ok: false; issues: string[] } {
+  const templateBody = templateSkillMd
+    ? (() => {
+        const m = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(templateSkillMd);
+        return (m ? templateSkillMd.slice(m[0].length) : templateSkillMd).trim();
+      })()
+    : undefined;
+  const check = checkPromotion(siteBody, templateBody);
+  if (!check.ok) return { ok: false, issues: check.issues };
+  const content = renderPromotedSkillMd(roleId, siteBody, templateSkillMd);
+  return {
+    ok: true,
+    promotion: {
+      roleId,
+      content,
+      target: join(templatesDir, roleId, "SKILL.md"),
+      bodyLength: normalizePersonaBody(siteBody).length,
+    },
+  };
+}
+
 // ── 出厂模板目录 ────────────────────────────────────────────────
 // 随 role-kit 包分发的公共角色模板（packages/role-kit/roles/，git 版本化）；
 // 站点事实源在各站 data/roles/（siteDirs，同 id 站点优先），模板永远只读分发。
