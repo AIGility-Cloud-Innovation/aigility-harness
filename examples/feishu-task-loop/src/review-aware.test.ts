@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractProjectToken } from "./review-aware.js";
+import { extractProjectToken, resolveProjectRef, isAgentExecutor } from "./review-aware.js";
 
 // 2026-10-07 句式扩展的回归：真实事故「R42 项目是 timem_console_frontend」
 // 旧正则只认「归属(项目)是」，用户明明说了项目却被当补充材料、机器人仍回「还差归属」。
@@ -31,8 +31,73 @@ describe("review-aware extractProjectToken — 归属句式", () => {
     );
   });
 
+  // 2026-10-08 四连败回归（引导词后紧跟 R 码，R 码曾被当成归属值吞掉）
+  it("「任务归属 R42 timem-ai/timem_console_frontend」——R 码不再吞掉归属值", () => {
+    expect(extractProjectToken("任务归属 R42 timem-ai/timem_console_frontend")).toBe(
+      "timem-ai/timem_console_frontend",
+    );
+  });
+
+  it("「任务归属 R42 console」", () => {
+    expect(extractProjectToken("任务归属 R42 console")).toBe("console");
+  });
+
+  it("「任务归属 R45 timem-ai/timem_console_frontend」", () => {
+    expect(extractProjectToken("任务归属 R45 timem-ai/timem_console_frontend")).toBe(
+      "timem-ai/timem_console_frontend",
+    );
+  });
+
   it("无归属要素 → undefined", () => {
     expect(extractProjectToken("R08 执行人 张三")).toBeUndefined();
     expect(extractProjectToken("R09 这条先放着")).toBeUndefined();
+  });
+});
+
+// 仓库直配（-/_ 归一化 + 唯一命中）：对照 config/project-registry.json 真实登记
+describe("review-aware resolveProjectRef — 仓库名模糊匹配", () => {
+  it("全名小写直配（R45 事故写法）", () => {
+    expect(resolveProjectRef("timem-ai/timem_console_frontend")).toEqual({
+      repo: "TiMEM-AI/timem_console_frontend",
+      candidates: ["TiMEM-AI/timem_console_frontend"],
+    });
+  });
+
+  it("连字符写法归一化后同样命中（R42 事故写法）", () => {
+    expect(resolveProjectRef("timem-ai/timem-console-frontend")?.repo).toBe(
+      "TiMEM-AI/timem_console_frontend",
+    );
+  });
+
+  it("短片段 console 唯一命中", () => {
+    expect(resolveProjectRef("console")?.repo).toBe("TiMEM-AI/timem_console_frontend");
+  });
+
+  it("原有别名 opc 保持命中", () => {
+    expect(resolveProjectRef("opc")).toEqual({
+      repo: "AIGility-Cloud-Innovation/nx-telecom-opc-platform",
+      candidates: ["AIGility-Cloud-Innovation/nx-telecom-opc-platform"],
+    });
+  });
+
+  it("宽泛 token 多命中 → 不猜", () => {
+    const r = resolveProjectRef("timem");
+    expect(r.repo).toBeUndefined();
+    expect(r.candidates.length).toBeGreaterThan(1);
+  });
+});
+
+// 执行人 = 编码代理（2026-10-08）："执行人 agent" 是让 agent 直接做的合法表达
+describe("review-aware isAgentExecutor — 编码代理执行人", () => {
+  it("agent/AI/智能体/编码代理 都是编码代理执行人", () => {
+    for (const t of ["agent", "Agent", "AI", "ai", "智能体", "编码代理", " AI "]) {
+      expect(isAgentExecutor(t)).toBe(true);
+    }
+  });
+
+  it("人类姓名不是编码代理执行人", () => {
+    for (const t of ["张三", "yuxuanqing", "吉翰云", "agents", "代理服务器"]) {
+      expect(isAgentExecutor(t)).toBe(false);
+    }
   });
 });

@@ -608,6 +608,8 @@ async function recallContextBlock(
  * RSI：回复前注入召回的经验规则/记忆（读半边），成功作答后把本轮问答沉淀进
  * TiMEM（写半边）——两半边均 best-effort，失败静默降级为原行为。
  * 短时记忆：注入 per-chat 最近对话窗口（conversationWindow），让「刚才说的」可接。
+ * 前缀缓存（M1）：system prompt 全静态，动态召回块在历史之后作第二条 system——
+ * 前缀逐字节稳定以命中上游缓存（docs/token-mechanism-plan.md M1）。
  */
 async function generateFallbackReply(
   userText: string,
@@ -619,23 +621,31 @@ async function generateFallbackReply(
   try {
     const recallBlock = rsiEnabled() ? await recallContextBlock(userText, ctx, userId) : "";
     const history = conversationWindow(chatKey ?? "");
-    const r = (await ctx.call(llmInferenceRefForPersona, {
-      model: fallbackModel(),
-      messages: [
+    // M1 前缀缓存（2026-10-07，合订版铁律「不改前缀」）：system prompt 保持全静态，
+    // 动态召回块挪到历史之后作第二条 system 消息——静态前缀逐字节稳定，上游前缀
+    // 缓存（ksyun-deepseek-v4.1 实测命中 90%）才能命中；召回块在历史后不影响理解。
+    const messages: Array<{ role: string; content: string }> = [
         {
           role: "system",
           content:
             "你是飞书群里的「项目小助理」，一个真实、好打交道的协作同事，负责管理飞书任务与 Gitea 工单（git.aigility.cloud）：建任务/工单（须 @仓库）、查列表、关闭/重开/评论、项目概览、任务派发确认（「确认派发 #N」/「取消派发 #N」）。\n" +
             "【对话方式】像正常群聊同事一样说话：先理解对方到底想干什么（包括纠正、补充、确认、闲聊、情绪），再决定怎么回。可用口语化中文，2-4 句为主，不堆砌格式。\n" +
             "【场景应对】① 用户在纠正或补充之前的信息（如「项目错了」「是 XX 仓库的」）：先接住纠正（「收到，是我认错了仓库」），再确认正确信息，最后引导补一条正确指令（如「可以再发一次：建工单 @正确的仓库：<标题>」）。② 用户描述了一个需求但没带 @仓库：给出「你想要的应该是：建工单 @某仓库：<标题>」，并主动问一句仓库归属（不知道就别猜）。③ 闲聊/感谢/吐槽：简短自然回应即可，不强行导流到指令。④ 问「你能干什么」：用一两句话概括职责，别把整张指令清单倒出来，对方要细节再给。⑤ 用户报告缺陷/进展或转发讨论片段（内容常为多人对话）：先接住内容、用一两句确认理解（能看出像待办的点就点出来）；如实告知「这段已进入我的自动汇总，稍后会同步到机器人群」；对方想立刻立条目时引导「建任务：<标题>」（工单则「建工单 @仓库：<标题>」），缺仓库就问一句。\n" +
-            "【硬约束】你没有连接任何系统、没有任何工具，永远不可能替用户执行操作：严禁声称已创建/已执行/已完成/已记录任何任务或工单，严禁给出具体的任务或工单编号（#数字 也不行）；提议时用「可以发『建任务：<标题>』」这类引导句式，不要说「我帮你建/我来建」（那是你做不到的事）；不确定时引导用户用指令表达。不要输出 markdown 标题或代码块。" +
-            (recallBlock
-              ? `\n【本次召回的团队经验与记忆】\n${recallBlock}\n回答时优先依据以上内容；以上内容没有的信息不要编造。`
-              : ""),
+            "【硬约束】你没有连接任何系统、没有任何工具，永远不可能替用户执行操作：严禁声称已创建/已执行/已完成/已记录任何任务或工单，严禁给出具体的任务或工单编号（#数字 也不行）；提议时用「可以发『建任务：<标题>』」这类引导句式，不要说「我帮你建/我来建」（那是你做不到的事）；不确定时引导用户用指令表达。不要输出 markdown 标题或代码块。",
         },
         ...history,
-        { role: "user", content: userText },
-      ],
+    ];
+    if (recallBlock) {
+      // 动态召回必须在稳定前缀之后：否则每条消息前缀都变，前缀缓存全废
+      messages.push({
+        role: "system",
+        content: `【本次召回的团队经验与记忆】\n${recallBlock}\n回答时优先依据以上内容；以上内容没有的信息不要编造。`,
+      });
+    }
+    messages.push({ role: "user", content: userText });
+    const r = (await ctx.call(llmInferenceRefForPersona, {
+      model: fallbackModel(),
+      messages,
       temperature: 0.2,
       // 1500 而非 500：推理型模型的思考 tokens 计入 max_tokens，500 会被思考
       // 耗尽导致正文为空（2026-10-07 实测定位，「部分输入空响应」的真因）

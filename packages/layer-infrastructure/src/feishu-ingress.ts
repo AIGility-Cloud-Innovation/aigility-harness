@@ -78,6 +78,12 @@ export interface FeishuIngressRequest {
   /** 处理中占位文案（暂未启用流式占位，保留字段） */
   thinkingText?: string;
 
+  /**
+   * 语音能力接线（TTS/STT）。不配则语音消息按旧行为只透传资源、
+   * 不做转写（向后兼容：装配方不显式开启，行为完全不变）。
+   */
+  voice?: FeishuVoiceConfig;
+
   // ── 通用过滤配置（不含业务语义，纯消息层规则） ──
   /** 白名单会话 ID 列表；空数组或未设=不限制 */
   allowedConversationIds?: string[];
@@ -131,6 +137,47 @@ export interface FeishuIngressResponse {
   stop: () => Promise<void>;
   /** 主动发消息（供编排层做群播报，如任务汇总/PR 提醒）；返回消息 id（引用定位用） */
   send: (chatId: string, text: string) => Promise<string | void>;
+  /**
+   * 主动发语音消息（TTS → Opus → 飞书 audio 消息）；返回消息 id。
+   * 未装配 voice.tts 时抛错（调用方应判空后再用）。
+   */
+  sendVoice?: (chatId: string, text: string) => Promise<string | void>;
+}
+
+/**
+ * 语音收发配置。
+ *
+ * 为什么要显式开关而不是默认探测引擎：
+ *   语音链路会**改变 user_input 的语义**（音频 → 转写文本），
+ *   并且引入外部进程（ffmpeg）与模型下载。这类副作用不该在装配方
+ *   毫不知情时发生——默认关闭，由 task-loop 这类明确的消费方开启。
+ */
+export interface FeishuVoiceConfig {
+  /** 入站：语音消息 → STT 转写文本（作为 user_input 进角色链路） */
+  stt?: {
+    enabled: boolean;
+    /** 转写语言提示（whisper 用），如 "zh"；vosk 忽略 */
+    language?: string;
+    /** 转写失败时的兜底文案；缺省则不回复（只留日志） */
+    onErrorText?: string;
+  };
+  /** 出站：角色回复文本 → TTS → 语音消息 */
+  tts?: {
+    enabled: boolean;
+    /** 音色 ShortName，默认交给 TTS Provider 决定（zh-CN-XiaoxiaoNeural） */
+    voice?: string;
+    /**
+     * 发言触发模式：
+     *   "always" —— 每条回复都发语音（默认）
+     *   "prefix" —— 回复以 voicePrefix 开头时才发语音，否则发文本
+     *               前缀会被剥离后送入 TTS（如 "语音：今天..."）
+     */
+    mode?: "always" | "prefix";
+    /** mode="prefix" 时的触发前缀，默认 "语音：" */
+    voicePrefix?: string;
+    /** 超过该字符数的回复不发语音（TTS 长文本又慢又贵），默认 200 */
+    maxChars?: number;
+  };
 }
 
 /**
@@ -145,7 +192,10 @@ export function shouldPassiveCollect(
   if (!passive?.enabled || msg.mentionedBot) return false;
   if (msg.chatType !== "group" && msg.chatType !== "p2p") return false;
   const text = messageText(msg);
-  if (!text) return false;
+  // 语音消息的 content 是 `<audio .../>` 占位串而非文本；不做这层放行的话，
+  // 免@群里的语音发言会被静默丢弃（连收集机会都没有）。
+  const isVoice = isAudioContent(text) || firstAudioResource(msg) !== null;
+  if (!text && !isVoice) return false;
   const excluded = passive.excludeSenderIds ?? [];
   if (msg.senderId && excluded.includes(msg.senderId)) return false;
   if (msg.chatType === "p2p") return passive.collectP2p === true;
@@ -193,6 +243,34 @@ export function messageText(msg: NormalizedMessage): string {
     text = text.replace(/^@\S+\s*/, "");
   }
   return text.trim();
+}
+
+/**
+ * 飞书语音消息在归一化后 content 形如 `<audio key="file_v2_xxx" duration="3200"/>`。
+ * 这个 XML 串**不是用户说的话**——它是 SDK 的占位表示。若不识别，它会
+ * 被原样当成 user_input 喂给角色层（人格看到一堆尖括号，意图正则全落空）。
+ *
+ * 同时兜住另一种形态：SDK 在 file_key 缺失时吐的 `[audio]` 字面量。
+ */
+export function isAudioContent(content: string): boolean {
+  const c = (content ?? "").trim();
+  return /^<audio\b/i.test(c) || c === "[audio]";
+}
+
+/** 从归一化消息中取出第一个 audio 资源（无则 null） */
+export function firstAudioResource(msg: NormalizedMessage): ResourceDescriptor | null {
+  return msg.resources?.find((r) => r.type === "audio") ?? null;
+}
+
+/**
+ * 从 `<audio key="..." duration="..."/>` 里抠出 duration（毫秒）。
+ * 飞书 audio 消息自带时长，能省一次解码探测；缺失返回 null。
+ */
+export function audioContentDurationMs(content: string): number | null {
+  const m = (content ?? "").match(/<audio\b[^>]*\bduration="(\d+)"/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 /** 通用过滤器：按黑白名单/关键词/mention 规则判定是否处理消息 */
@@ -320,44 +398,173 @@ function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
  * 必须走 messageResource（消息内资源）端点：im.v1.image.get 仅支持
  * 应用自己上传的图片，用户消息里的图片用它取会报 400 —— 需要
  * message_id + file_key 成对传给 im.v1.messageResource.get。
+ *
+ * 该端点同样支持音频（文档口径：「包括音频、视频、图片和文件」），
+ * 所以语音消息走同一个 path，只是 params.type="audio"。
+ * 注意 **不要** 用 channel.downloadResource()（SDK 便捷方法）——它内部
+ * 走 im.v1.file.get，只认应用自己上传的文件，用户消息必 400。
  */
 async function downloadResources(
   channel: LarkChannel,
   messageId: string,
   resources: ResourceDescriptor[],
+  opts?: { includeAudio?: boolean },
 ): Promise<Array<{ type: string; data: string; fileName?: string }>> {
   const results: Array<{ type: string; data: string; fileName?: string }> = [];
   for (const res of resources) {
-    if (res.type === "image") {
-      try {
-        if (!messageId) {
-          throw new Error("messageId 为空，无法走消息资源端点");
-        }
-        const resp = await channel.rawClient.im.v1.messageResource.get({
-          path: { message_id: messageId, file_key: res.fileKey },
-          params: { type: "image" },
-        });
-        const buffer = await streamToBuffer(resp.getReadableStream());
-        const base64 = buffer.toString("base64");
-        results.push({
-          type: "image",
-          data: `data:image/png;base64,${base64}`, // 默认 png，实际类型可后续扩展
-          fileName: res.fileName,
-        });
-      } catch (e) {
-        console.warn(
-          `[feishu-ingress] resource download failed: fileKey=${res.fileKey}`,
-          e,
-        );
-        // 下载失败不阻塞，跳过该资源
+    const wanted =
+      res.type === "image" || (res.type === "audio" && opts?.includeAudio === true);
+    if (!wanted) continue;
+    try {
+      if (!messageId) {
+        throw new Error("messageId 为空，无法走消息资源端点");
       }
+      const resp = await channel.rawClient.im.v1.messageResource.get({
+        path: { message_id: messageId, file_key: res.fileKey },
+        params: { type: res.type },
+      });
+      const buffer = await streamToBuffer(resp.getReadableStream());
+      const base64 = buffer.toString("base64");
+      results.push({
+        type: res.type,
+        data:
+          res.type === "image"
+            ? `data:image/png;base64,${base64}` // 默认 png，实际类型可后续扩展
+            : base64, // 音频：原始字节 base64（后续转码为 PCM 再识别）
+        fileName: res.fileName,
+      });
+    } catch (e) {
+      console.warn(
+        `[feishu-ingress] resource download failed: type=${res.type} fileKey=${res.fileKey}`,
+        e,
+      );
+      // 下载失败不阻塞，跳过该资源
     }
-    // 其他资源类型（file/audio/video）暂不处理，可按需扩展
   }
+  // 其他资源类型（file/video）暂不处理，可按需扩展
   return results;
 }
 
+/**
+ * 下载消息内的音频资源原始字节（Opus/OGG）。
+ * 与 image 同走 messageResource 端点（见上），返回 null 表示失败（不抛）。
+ */
+async function downloadAudio(
+  channel: LarkChannel,
+  messageId: string,
+  fileKey: string,
+): Promise<Buffer | null> {
+  try {
+    if (!messageId) throw new Error("messageId 为空");
+    const resp = await channel.rawClient.im.v1.messageResource.get({
+      path: { message_id: messageId, file_key: fileKey },
+      params: { type: "audio" },
+    });
+    const buf = await streamToBuffer(resp.getReadableStream());
+    if (buf.length === 0) throw new Error("下载到 0 字节");
+    return buf;
+  } catch (e) {
+    console.warn(`[feishu-ingress] audio download failed: fileKey=${fileKey}`, e);
+    return null;
+  }
+}
+
+/**
+ * 语音入站转写：飞书 Opus → PCM 16k mono → STT → 文本。
+ *
+ * 三步缺一不可，每步都可能失败，所以逐段降级并给出可读日志：
+ *   1. ffmpeg 转码（飞书语音是 Opus/OGG，两个 STT 引擎都只吃 PCM）
+ *   2. @action/speech-to-text（内核按健康度选 provider，vosk 优先）
+ *   3. 失败返回 null，由调用方决定是兜底文案还是不回复
+ *
+ * 为什么不直接给 STT 引擎喂 Opus：
+ *   vosk 的 acceptWaveform 期待的是 PCM 裸流，喂 Ogg 容器会识别出
+ *   乱码或空串；whisper 的 pipeline 同样只接受 Float32 采样序列。
+ */
+async function transcribeFeishuAudio(
+  ctx: SeamContext,
+  audioBytes: Buffer,
+  cfg: NonNullable<FeishuVoiceConfig["stt"]>,
+): Promise<{ text: string; engine: string } | null> {
+  const t0 = Date.now();
+  const tr = (await ctx.call(
+    { id: "@action/audio-transcode", versionRange: "^1.0.0" },
+    { audio: audioBytes, from: "opus", to: "pcm16", toSampleRate: 16000, toChannels: 1 },
+  )) as {
+    ok: boolean;
+    value?: { audio: Buffer; sampleRate: number };
+    error?: string;
+  };
+  if (!tr.ok || !tr.value) {
+    console.warn(`[feishu-ingress] voice transcode failed: ${tr.error ?? "unknown"}`);
+    return null;
+  }
+
+  const st = (await ctx.call(
+    { id: "@action/speech-to-text", versionRange: "^1.0.0" },
+    {
+      audio: tr.value.audio,
+      sampleRate: tr.value.sampleRate,
+      ...(cfg.language ? { language: cfg.language } : {}),
+    },
+  )) as { ok: boolean; value?: { text: string; engine: string }; error?: string };
+  if (!st.ok || !st.value?.text) {
+    console.warn(`[feishu-ingress] voice STT failed: ${st.error ?? "empty text"}`);
+    return null;
+  }
+  console.log(
+    `[feishu-ingress] voice transcribed (${st.value.engine}, ${Date.now() - t0}ms): "${st.value.text.slice(0, 60)}"`,
+  );
+  return st.value;
+}
+
 const deduper = new MessageDeduper();
+
+/**
+ * 语音出站合成：回复文本 → TTS（MP3 落盘）→ ffmpeg 转 Opus/OGG。
+ *
+ * 为什么必须经 ffmpeg 中转而不能直接把 MP3 丢给飞书：
+ *   飞书 audio 消息的 file_type 只认 opus（SDK 的 MediaUploader 对
+ *   kind:"audio" 硬编码 uploadFile(buffer, "opus", ...)），MP3 上去
+ *   会播放失败。而 msedge-tts 只会吐 MP3 —— 中间这一跳是刚需。
+ *
+ * 失败返回 null：语音是**增强**而非必需，TTS/转码挂了不能吞掉文本回复。
+ */
+async function synthesizeReplyVoice(
+  ctx: SeamContext,
+  text: string,
+  cfg: NonNullable<FeishuVoiceConfig["tts"]>,
+): Promise<{ opus: Buffer; durationMs?: number } | null> {
+  try {
+    const tts = (await ctx.call(
+      { id: "@action/text-to-speech", versionRange: "^1.0.0" },
+      { text, ...(cfg.voice ? { voice: cfg.voice } : {}) },
+    )) as {
+      ok: boolean;
+      value?: { audioFilePath: string };
+      error?: string;
+    };
+    if (!tts.ok || !tts.value?.audioFilePath) {
+      console.warn(`[feishu-ingress] voice TTS failed: ${tts.error ?? "no file"}`);
+      return null;
+    }
+    const { readFile } = await import("node:fs/promises");
+    const mp3 = await readFile(tts.value.audioFilePath);
+
+    const tr = (await ctx.call(
+      { id: "@action/audio-transcode", versionRange: "^1.0.0" },
+      { audio: mp3, from: "mp3", to: "opus" },
+    )) as { ok: boolean; value?: { audio: Buffer; durationMs?: number }; error?: string };
+    if (!tr.ok || !tr.value?.audio?.length) {
+      console.warn(`[feishu-ingress] voice opus encode failed: ${tr.error ?? "empty"}`);
+      return null;
+    }
+    return { opus: tr.value.audio, durationMs: tr.value.durationMs };
+  } catch (e) {
+    console.warn(`[feishu-ingress] voice synthesize error: ${String(e)}`);
+    return null;
+  }
+}
 
 export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngressResponse> = {
   service: feishuIngressService,
@@ -414,6 +621,30 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
     };
     const channel = createLarkChannel(options);
 
+    /**
+     * 语音装配前置校验：出站语音依赖 @action/audio-transcode（ffmpeg），
+     * 它是**独立能力**——装配方可能只装了 STT 没装转码，或 ffmpeg 不在 PATH。
+     * 提前探一次并置位错误标记，让「每条回复都 TTS 再到转码失败」退化
+     * 成「启动时一条明确警告 + 文本链路照常」。
+     */
+    let voiceCfgError = false;
+    if (request.voice?.tts?.enabled) {
+      const h = (await ctx.call(
+        { id: "@action/audio-transcode", versionRange: "^1.0.0" },
+        { audio: Buffer.from([0]), to: "pcm16", timeoutMs: 5_000 },
+      )) as { ok: boolean; error?: string };
+      // 上面这次调用**必然失败**（1 字节 PCM 不足以成帧），我们只看它是
+      // 「能力不存在」还是「能力存在但输入不合法」：后者说明装配正常。
+      const capabilityMissing =
+        typeof h.error === "string" && /未知|not found|no provider|未注册|unresolved/i.test(h.error);
+      if (capabilityMissing) {
+        voiceCfgError = true;
+        console.warn(
+          `[feishu-ingress] voice.tts 已开启但 @action/audio-transcode 不可用：${h.error}；语音回复已停用，文本链路不受影响`,
+        );
+      }
+    }
+
     // 收消息 → 过滤/去重/资源下载 → 路由角色 → 回复
     activeUnsubscribe = channel.on({
       message: async (msg: NormalizedMessage) => {
@@ -457,11 +688,33 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
           return;
         }
 
-        const text = messageText(msg);
-        console.log(`[feishu-ingress] message received: chat=${msg.chatId} sender=${msg.senderId} text="${text}"`);
-        if (!text) return;
+        let text = messageText(msg);
+        const isVoice = isAudioContent(text) || firstAudioResource(msg) !== null;
+        // 语音消息：content 是 <audio .../> 占位串，需要先转写才有真正的 user_input
+        let audioTranscribed = false;
+        if (isVoice && request.voice?.stt?.enabled) {
+          const audioRes = firstAudioResource(msg);
+          if (audioRes?.fileKey) {
+            const audioBytes = await downloadAudio(channel, msg.messageId, audioRes.fileKey);
+            if (audioBytes) {
+              const t = await transcribeFeishuAudio(ctx, audioBytes, request.voice.stt);
+              if (t?.text) {
+                text = t.text;
+                audioTranscribed = true;
+              }
+            }
+          } else {
+            console.warn(`[feishu-ingress] voice message without fileKey: messageId=${msg.messageId}`);
+          }
+        } else if (isVoice) {
+          console.log(
+            `[feishu-ingress] voice received but voice.stt disabled (content="${text.slice(0, 40)}")`,
+          );
+        }
+        console.log(`[feishu-ingress] message received: chat=${msg.chatId} sender=${msg.senderId} text="${text}"${isVoice ? " [voice]" : ""}`);
+        if (!text || isAudioContent(text)) return; // 无文本且未转写成功 → 无从处理
 
-        // 3. 资源下载（image → base64，失败不阻塞）
+        // 3. 资源下载（image → base64，失败不阻塞；语音已在上面处理过）
         const resources = await downloadResources(channel, msg.messageId, msg.resources);
 
         // 路由：按会话来源 → 通配兜底
@@ -482,6 +735,7 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
               {
                 user_input: text,
                 user_id: msg.senderId || "feishu-unknown",
+                session_id: msg.chatId,   // 短时记忆窗口按会话（群/私聊）分桶（2026-10-08 补——此前 persona 拿不到，记忆窗口整段失效）
                 conversation_id: msg.chatId,
                 message_id: msg.messageId,
                 root_id: msg.rootId,
@@ -509,6 +763,7 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
               {
                 user_input: text,
                 user_id: msg.senderId || "feishu-unknown",
+                session_id: msg.chatId,   // 短时记忆窗口按会话（群/私聊）分桶（2026-10-08 补）
                 conversation_id: msg.chatId,
                 message_id: msg.messageId,
                 root_id: msg.rootId,
@@ -524,12 +779,47 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
           } catch (e) {
             finalText = `处理异常: ${e instanceof Error ? e.message : String(e)}`;
           }
+          // 语音出站：命中触发模式 → TTS + Opus + 发 audio 消息（文本照发，语音是增强）
+          let voiceSent = false;
+          if (request.voice?.tts?.enabled && !voiceCfgError) {
+            const ttsCfg = request.voice.tts;
+            const prefix = ttsCfg.voicePrefix ?? "语音：";
+            const mode = ttsCfg.mode ?? "always";
+            const maxChars = ttsCfg.maxChars ?? 200;
+            const wantsVoice =
+              mode === "always" ? true : finalText.startsWith(prefix);
+            const speakText =
+              mode === "prefix" && finalText.startsWith(prefix)
+                ? finalText.slice(prefix.length).trim()
+                : finalText;
+            if (wantsVoice && speakText.length > 0 && speakText.length <= maxChars) {
+              const voice = await synthesizeReplyVoice(ctx, speakText, ttsCfg);
+              if (voice) {
+                try {
+                  await channel.send(
+                    to,
+                    {
+                      audio: {
+                        source: voice.opus,
+                        ...(voice.durationMs ? { duration: voice.durationMs } : {}),
+                      },
+                    },
+                    anchorSendOptions(threadAnchor),
+                  );
+                  voiceSent = true;
+                } catch (e) {
+                  console.warn(`[feishu-ingress] voice send failed: ${String(e)}`);
+                }
+              }
+            }
+          }
           try {
             await channel.editMessage(placeholder.messageId, finalText);
           } catch {
             // 编辑失败（罕见）→ 占位消息已在话题串里，直接补发最终内容（同样锚定话题）
             await channel.send(to, { text: finalText }, anchorSendOptions(threadAnchor));
           }
+          if (voiceSent) console.log(`[feishu-ingress] voice reply sent: chat=${to} chars=${finalText.length}`);
         } catch (e) {
           // 占位消息发送失败 → 直接发最终回复
           const errText = `处理异常: ${e instanceof Error ? e.message : String(e)}`;
@@ -589,6 +879,21 @@ export const feishuIngressProvider: Provider<FeishuIngressRequest, FeishuIngress
       stop: activeStop,
       send: async (chatId: string, text: string) => {
         const sent = await channel.send(chatId, { text });
+        return sent?.messageId;
+      },
+      sendVoice: async (chatId: string, text: string) => {
+        const ttsCfg = request.voice?.tts;
+        if (!ttsCfg?.enabled) {
+          throw new Error("sendVoice: 未装配 voice.tts（ingress request 里开启后可用）");
+        }
+        const voice = await synthesizeReplyVoice(ctx, text, ttsCfg);
+        if (!voice) throw new Error("sendVoice: 合成失败（详见服务日志）");
+        const sent = await channel.send(chatId, {
+          audio: {
+            source: voice.opus,
+            ...(voice.durationMs ? { duration: voice.durationMs } : {}),
+          },
+        });
         return sent?.messageId;
       },
     });

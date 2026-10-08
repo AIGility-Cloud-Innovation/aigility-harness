@@ -536,11 +536,15 @@ describe("feishuTaskAssistantProvider — RSI 召回/沉淀", () => {
     expect(rulesCall).toBeDefined();
     expect((rulesCall!.req as Record<string, unknown>)["user_id"]).toBe("ou_rsi");
     expect((rulesCall!.req as Record<string, unknown>)["agent_id"]).toBe("feishu-task-assistant");
-    const sys = ((llmCallOf(ctx)!.req["messages"] as Array<{ role: string; content: string }>)[0])
-      .content;
-    expect(sys).toContain("【本次召回的团队经验与记忆】");
-    expect(sys).toContain("nx-telecom-opc-platform");
-    expect(sys).toContain("周会");
+    const messages = (llmCallOf(ctx)!.req["messages"] as Array<{ role: string; content: string }>);
+    // M1 前缀缓存：静态 system 在前（不含召回块），召回块是历史之后的独立 system 消息
+    expect(messages[0].content).not.toContain("【本次召回的团队经验与记忆】");
+    const recallMsg = messages.find((m) => m.role === "system" && m.content.includes("【本次召回的团队经验与记忆】"));
+    expect(recallMsg).toBeDefined();
+    expect(recallMsg!.content).toContain("nx-telecom-opc-platform");
+    expect(recallMsg!.content).toContain("周会");
+    // 召回块之后是当前 user 消息（动态内容全部在稳定前缀之后）
+    expect(messages[messages.length - 1]).toEqual({ role: "user", content: "nx 是哪个仓库" });
     // 无 handler 的记忆写半边降级不报错，回复正常返回
     if (r.ok) expect(r.value.response).toBe("好的");
   });

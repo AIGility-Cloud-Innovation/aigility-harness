@@ -156,8 +156,34 @@ async function main(): Promise<void> {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+  // 2026-10-08 负责人定稿：监听所有群聊、不监听人对人的私聊——
+  // TASK_LISTEN_CHAT_IDS 留空（= 所有群）+ TASK_LISTEN_P2P=0（私聊不采集）。
+  // 若要彻底关闭监听：配一个不存在的群 id 并设 P2P=0（空清单不是关闭开关）。
   const ctx = kernel.createContext("feishu-task-loop", LayerId.Infrastructure);
   const persona = FEISHU_AGENT_ROUTES[appId] ?? "@persona/feishu-task-assistant";
+  // 语音收发（TTS/STT）：默认关闭，TASK_VOICE=1 打开。
+  // 打开后：群里发语音 → ffmpeg 转 PCM → vosk 转写 → 当文本指令处理；
+  //        回复按 TASK_VOICE_REPLY 决定是否附一条语音。
+  const voiceEnabled = !["0", "false", "off", ""].includes(
+    (process.env["TASK_VOICE"] ?? "").toLowerCase(),
+  );
+  const voiceReplyMode = (process.env["TASK_VOICE_REPLY"] ?? "prefix") as
+    | "always"
+    | "prefix";
+  const voiceConfig = voiceEnabled
+    ? {
+        stt: {
+          enabled: true,
+          language: process.env["TASK_VOICE_LANG"] ?? "zh",
+        },
+        tts: {
+          enabled: true,
+          mode: voiceReplyMode,
+          voicePrefix: process.env["TASK_VOICE_PREFIX"] ?? "语音：",
+          ...(process.env["TASK_VOICE_NAME"] ? { voice: process.env["TASK_VOICE_NAME"] } : {}),
+        },
+      }
+    : undefined;
   const start = await feishuIngressProvider.execute(
     {
       appId,
@@ -166,6 +192,7 @@ async function main(): Promise<void> {
       perceptionId: persona,
       // 摘要播报群（机器人群）免@指令：回复「确认 N」等核验指令不用 @机器人
       mentionExemptChatIds: notifyChatId ? [notifyChatId] : undefined,
+      voice: voiceConfig,
       passive: {
         enabled: true,
         chatIds: listenChatIds.length > 0 ? listenChatIds : undefined,

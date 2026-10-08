@@ -185,18 +185,27 @@ function loadProjects(): ProjectEntry[] {
   }
 }
 
-/** "opc" → 命中的 org/repo；多命中/零命中返回 undefined 并给出候选 */
-function resolveProjectRef(token: string): { repo?: string; candidates: string[] } {
+/** "opc" → 命中的 org/repo；多命中/零命中返回 undefined 并给出候选
+ *  2026-10-08 增强：别名表不含 org/repo 全名——「timem-ai/timem_console_frontend」
+ *  这类全名/片段以前会在别名门被拦死；且用户常把下划线写成连字符。现对仓库名做
+ *  -/_ 归一化直配（唯一命中才采纳，多命中不猜）。导出供回归测试。 */
+export function resolveProjectRef(token: string): { repo?: string; candidates: string[] } {
   const t = token.trim().toLowerCase();
   if (!t) return { candidates: [] };
+  const norm = (s: string): string => s.toLowerCase().replace(/[-_]/g, "");
+  const tn = norm(t);
   const hits = new Set<string>();
   for (const p of loadProjects()) {
     const hay = [p.project_id, p.name, ...(p.aliases ?? [])].join("\n").toLowerCase();
+    const repos = p.gitea_repos ?? [];
     if (hay.includes(t)) {
-      for (const repo of p.gitea_repos ?? []) {
-        if (repo.toLowerCase().includes(t) || (p.gitea_repos ?? []).length === 1) hits.add(repo);
+      for (const repo of repos) {
+        if (repo.toLowerCase().includes(t) || repos.length === 1) hits.add(repo);
       }
     }
+    // 仓库直配：别名没中但某个仓库名（归一化后）包含 token → 唯一命中才采纳
+    const repoHits = repos.filter((r) => norm(r).includes(tn));
+    if (repoHits.length === 1) repoHits.forEach((r) => hits.add(r));
   }
   const candidates = [...hits];
   return candidates.length === 1 ? { repo: candidates[0], candidates } : { candidates };
@@ -209,13 +218,22 @@ function extractExecutor(text: string): string | undefined {
   return m?.[1];
 }
 
+/** 执行人 = 编码代理（2026-10-08）：用户说「执行人 agent/AI/智能体」意为让 agent
+ *  直接做，不指派人类——合法值，不触发人员台账匹配与私信提醒。 */
+export function isAgentExecutor(token: string | undefined): boolean {
+  return /^(agent|ai|ai代理|智能体|编码代理|代理)$/.test((token ?? "").trim().toLowerCase());
+}
+
 /** 归属抽取（2026-10-07 句式扩展）：真实事故「R42 项目是 timem_console_frontend」
  *  旧正则只认「归属(项目)是」，用户说「项目是 X」被当成补充材料、机器人仍回
  *  「还差归属」；现把 项目/仓库 也认作归属引导词，并支持 org/repo 全名（含 /）。
  *  注意「归属\s*(项目|仓库)?」必须整体可选链——否则「归属项目：X」会把「项目」
- *  吞成值。 */
+ *  吞成值。
+ *  2026-10-08 再修（四连败事故）：「任务归属 R42 console」里 R 紧跟归属词，
+ *  捕获组把 R42 当成归属值 → 永远解析失败。抽取前先剥短码。 */
 export function extractProjectToken(text: string): string | undefined {
-  const m = text.match(/(?:归属\s*(?:项目|仓库)?|项目|仓库)(?:是|为|[:：])?\s*([\w\u4e00-\u9fa5/-]{2,64})/);
+  const stripped = text.replace(/R\d{2}/gi, " ");
+  const m = stripped.match(/(?:归属\s*(?:项目|仓库)?|项目|仓库)(?:是|为|[:：])?\s*([\w\u4e00-\u9fa5/-]{2,64})/);
   return m?.[1];
 }
 
@@ -575,6 +593,7 @@ async function notifyExecutorQueued(doc: ReleaseDoc, call: FeishuCallLike, recor
   const resolved = findMemberFuzzyUnique(executor);
   const member = resolved.member;
   const openId = member?.feishu_open_ids?.[0];
+  if (isAgentExecutor(executor)) return "执行人是编码代理（agent），不发人工私信。";
   if (!member || !openId) {
     if (resolved.candidates && resolved.candidates.length > 1) {
       return `私信提醒没发出去：「${executor}」对上了几个人（${resolved.candidates.map((m) => m.name).join("、")}），写全名或补台账别名后重发。`;
@@ -815,7 +834,7 @@ export async function handleReviewMessage(
         .join("、");
       return `${code}｜${r.title.slice(0, 36)}${missing ? `（缺${missing}）` : ""}`;
     });
-    return `现在挂着 ${pending.length} 条待复核：\n${lines.join("\n")}\n直接回复就行，比如「R01 执行人 张三 归属 opc」。`;
+    return `现在挂着 ${pending.length} 条待复核：\n${lines.join("\n")}\n直接回复就行，比如「R01 执行人 张三 归属 opc」；想让编码代理直接做就写「R01 执行人 agent」。`;
   }
 
   // 要素抽取 + 落库

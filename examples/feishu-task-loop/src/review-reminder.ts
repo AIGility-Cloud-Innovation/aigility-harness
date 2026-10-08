@@ -15,6 +15,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getIdentityRegistry, identityMembers } from "@aigility-harness/layer-orchestration";
 import { getSharedRegistry, getReviewCodes } from "./review-aware.js";
 import { getProjectedSection } from "./board-sync.js";
 
@@ -71,13 +72,25 @@ const PDCA_OF: Record<string, string> = {
   done: "已完成",
 };
 
-function taskLine(code: string, r: { uid: string; status: string; title: string; projectRef?: string }): string {
+/** 执行人解析：结构化外键优先（人员台账反查姓名），历史描述文本兜底 */
+function executorNameOf(r: { assignee_member_id?: string; description?: string }): string | undefined {
+  if (r.assignee_member_id) {
+    const m = identityMembers(getIdentityRegistry()).find((x) => x.member_id === r.assignee_member_id);
+    if (m) return m.name;
+  }
+  return (r.description ?? "").match(/执行者：(\S+)/)?.[1];
+}
+
+function taskLine(code: string, r: { uid: string; status: string; title: string; projectRef?: string; description?: string; assignee_member_id?: string }): string {
   // PDCA 以看板实际截面为优先（人工挪组已反向同步），无截面记录时回退台账状态
   const sec = getProjectedSection(r.uid);
   const pdca = (sec && ({ P: "P·规划中", D: "D·执行中", C: "C·待测试", A: "A·待修复" } as Record<string, string>)[sec]) || PDCA_OF[r.status] || r.status;
   const repo = r.projectRef ?? "（未定仓库）";
   const title = r.title.replace(/^\[[^\]]+\]\s*/, "").replace(/^【[^】]+】/, "").slice(0, 36);
-  return `  - ${code}［${pdca}｜${repo}］${title}`;
+  // 执行人（2026-10-08，负责人反馈）：已知就带上——放行/缺归属条目能看到责任人，
+  // 「缺执行人」分区天然没有，不显示
+  const executor = executorNameOf(r);
+  return `  - ${code}［${pdca}｜${repo}］${title}${executor ? ` · 执行人 ${executor}` : ""}`;
 }
 
 export async function remindPendingTasks(ctx: ReminderContext): Promise<void> {
@@ -115,7 +128,7 @@ export async function remindPendingTasks(ctx: ReminderContext): Promise<void> {
     for (const r of released) lines.push(taskLine(codeOf(r.uid), r));
   }
   if (missingExecutor.length) {
-    lines.push("", `缺执行人 ${missingExecutor.length} 条（回复「R0x 执行人 姓名」）：`);
+    lines.push("", `缺执行人 ${missingExecutor.length} 条（回复「R0x 执行人 姓名」；让编码代理做就写「R0x 执行人 agent」）：`);
     for (const r of missingExecutor.slice(0, 5)) lines.push(taskLine(codeOf(r.uid), r));
     if (missingExecutor.length > 5) lines.push(`  …另有 ${missingExecutor.length - 5} 条`);
   }

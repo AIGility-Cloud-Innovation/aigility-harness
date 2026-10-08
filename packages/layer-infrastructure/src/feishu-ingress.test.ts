@@ -271,3 +271,119 @@ describe("shouldProcessMessage — mentionExemptChatIds", () => {
     ).toBe(true);
   });
 });
+
+// ── 语音消息识别（audio content 占位串回归）─────────────────────────
+// SDK 把语音消息归一化成 `<audio key="..." duration="..."/>` 占位串，
+// 不识别的话它会被原样当 user_input 喂给角色层，意图正则全落空。
+
+describe("isAudioContent — 语音占位串识别", () => {
+  it("标准 audio XML 占位串", async () => {
+    const { isAudioContent } = await import("./feishu-ingress.js");
+    expect(isAudioContent('<audio key="file_v2_abc" duration="3200"/>')).toBe(true);
+  });
+
+  it("SDK file_key 缺失时的 [audio] 字面量", async () => {
+    const { isAudioContent } = await import("./feishu-ingress.js");
+    expect(isAudioContent("[audio]")).toBe(true);
+  });
+
+  it("普通文本不是语音", async () => {
+    const { isAudioContent } = await import("./feishu-ingress.js");
+    expect(isAudioContent("建任务：修复导出")).toBe(false);
+    expect(isAudioContent("")).toBe(false);
+  });
+
+  it("不含 audio 的富文本不是语音", async () => {
+    const { isAudioContent } = await import("./feishu-ingress.js");
+    expect(isAudioContent("Audio 质量不错")).toBe(false);
+  });
+});
+
+describe("audioContentDurationMs — 时长提取", () => {
+  it("从占位串抠 duration", async () => {
+    const { audioContentDurationMs } = await import("./feishu-ingress.js");
+    expect(audioContentDurationMs('<audio key="k" duration="3200"/>')).toBe(3200);
+  });
+
+  it("缺失或非法返回 null", async () => {
+    const { audioContentDurationMs } = await import("./feishu-ingress.js");
+    expect(audioContentDurationMs('<audio key="k"/>')).toBeNull();
+    expect(audioContentDurationMs('<audio key="k" duration="0"/>')).toBeNull();
+    expect(audioContentDurationMs('<audio key="k" duration="abc"/>')).toBeNull();
+  });
+});
+
+describe("firstAudioResource — 资源描述符提取", () => {
+  it("命中 type=audio 的资源", async () => {
+    const { firstAudioResource } = await import("./feishu-ingress.js");
+    const msg = {
+      resources: [
+        { type: "file", fileKey: "f1" },
+        { type: "audio", fileKey: "f2", durationMs: 1500 },
+      ],
+    };
+    expect(firstAudioResource(msg as never)?.fileKey).toBe("f2");
+  });
+
+  it("无 audio 资源返回 null（不抛异常）", async () => {
+    const { firstAudioResource } = await import("./feishu-ingress.js");
+    expect(firstAudioResource({ resources: [] } as never)).toBeNull();
+    expect(firstAudioResource({} as never)).toBeNull();
+  });
+});
+
+describe("shouldPassiveCollect — 语音消息放行", () => {
+  const asMsg = (over: Record<string, unknown>) => over as never;
+  const passiveCfg = { enabled: true, onCollect: () => {} };
+
+  it("语音消息（content 为占位串但有 audio 资源）→ 收集而非静默丢弃", async () => {
+    const { shouldPassiveCollect } = await import("./feishu-ingress.js");
+    expect(
+      shouldPassiveCollect(
+        asMsg({
+          chatType: "group",
+          mentionedBot: false,
+          chatId: "oc_x",
+          senderId: "ou_u",
+          content: '<audio key="k" duration="1200"/>',
+          resources: [{ type: "audio", fileKey: "k" }],
+        }),
+        passiveCfg as never,
+      ),
+    ).toBe(true);
+  });
+
+  it("无文本且无 audio 资源 → 仍丢弃", async () => {
+    const { shouldPassiveCollect } = await import("./feishu-ingress.js");
+    expect(
+      shouldPassiveCollect(
+        asMsg({
+          chatType: "group",
+          mentionedBot: false,
+          chatId: "oc_x",
+          senderId: "ou_u",
+          content: "",
+          resources: [],
+        }),
+        passiveCfg as never,
+      ),
+    ).toBe(false);
+  });
+
+  it("语音消息仍受 excludeSenderIds 防回声约束", async () => {
+    const { shouldPassiveCollect } = await import("./feishu-ingress.js");
+    expect(
+      shouldPassiveCollect(
+        asMsg({
+          chatType: "group",
+          mentionedBot: false,
+          chatId: "oc_x",
+          senderId: "ou_bot",
+          content: '<audio key="k"/>',
+          resources: [{ type: "audio", fileKey: "k" }],
+        }),
+        { ...passiveCfg, excludeSenderIds: ["ou_bot"] } as never,
+      ),
+    ).toBe(false);
+  });
+});
