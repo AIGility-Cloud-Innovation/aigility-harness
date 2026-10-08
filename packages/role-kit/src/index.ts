@@ -154,6 +154,62 @@ export function validateRoleManifest(m: RoleManifest): string[] {
   return issues;
 }
 
+// ── M-B 应用级人设校验（copy-on-override 写入前）──────────────────
+// 站点副本是应用层事实源：存根/退化副本一旦写入，会以"站点优先"压掉出厂模板
+// （sales-chat 已是历史实例）。故写入前做三重校验，失败即拒绝。
+
+/** 站点副本的占位标记（出厂模板存根曾经用过） */
+const PLACEHOLDER_MARKERS = ["定制副本：在此撰写完整人设", "人设待补", "在此撰写完整人设"];
+
+/** 归一化正文：去 frontmatter 残留、统一换行、压缩空白（比对"是否退化"用） */
+export function normalizePersonaBody(md: string): string {
+  return md
+    .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+/** M-B 校验结果：issues 非空即拒绝写入 */
+export interface PersonaValidation {
+  ok: boolean;
+  issues: string[];
+  /** 归一化后的正文字符数（供 UI 提示） */
+  bodyLength: number;
+}
+
+/**
+ * 站点副本写入前校验（persona 三级 M-B）：非空 / 非退化 / 非占位。
+ *
+ * @param body        拟写入的 SKILL.md 正文（可含 frontmatter，内部会剥离）
+ * @param templateBody 出厂模板正文（同 id 公共角色；无则跳过"非退化"一项）
+ */
+export function validateSitePersona(body: string, templateBody?: string): PersonaValidation {
+  const issues: string[] = [];
+  const normalized = normalizePersonaBody(body);
+  const bodyLength = normalized.length;
+
+  // ① 非空：剥离 frontmatter/空行后正文 ≥ 80 字符
+  if (bodyLength < 80) {
+    issues.push(`人设正文过短（${bodyLength} 字符 < 80）：站点副本必须是可用的完整人设`);
+  }
+  // ② 非占位：不得含存根占位标记
+  const hit = PLACEHOLDER_MARKERS.find((mk) => body.includes(mk));
+  if (hit) issues.push(`人设含占位标记「${hit}」：请撰写完整人设后再保存`);
+  // ③ 非退化：与出厂模板正文归一化后必须不同（禁用"存根/原文原样复制"）
+  if (templateBody !== undefined) {
+    const tpl = normalizePersonaBody(templateBody);
+    if (tpl && normalized === tpl) {
+      issues.push("站点副本与出厂模板正文完全相同（退化复制）：站点化应体现差异化定制");
+    }
+  }
+  return { ok: issues.length === 0, issues, bodyLength };
+}
+
 // ── 出厂模板目录 ────────────────────────────────────────────────
 // 随 role-kit 包分发的公共角色模板（packages/role-kit/roles/，git 版本化）；
 // 站点事实源在各站 data/roles/（siteDirs，同 id 站点优先），模板永远只读分发。

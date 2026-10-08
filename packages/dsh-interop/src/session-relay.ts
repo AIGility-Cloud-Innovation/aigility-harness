@@ -11,7 +11,7 @@
  */
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { LayerId, PluginState, ok, err } from "@aigility-harness/core";
 import type {
@@ -57,12 +57,20 @@ export interface RoleCapabilityConfig {
   skills?: string[];
   /** MCP server 列表 */
   mcpServers?: RoleMcpServer[];
+  /** 角色专属指令源（persona 三级 M-A，2026-10-08）：SKILL.md/AGENTS.md 全文，
+   *  存在时以 agent-instructions patch 覆盖注入（candidates 收窄为该文件）。
+   *  相对路径以 skillsRoot 为基准。缺省 = 按角色包自动解析（见角色包 SKILL.md 约定），
+   *  再缺省才用官方缺省候选。 */
+  instructionsFile?: string;
 }
 
 /** 角色能力注册表文件结构（每条消息重新读取：改完即热生效） */
 export interface RoleRegistry {
   /** 技能根目录（roles.*.skills 的相对基准） */
   skillsRoot: string;
+  /** 角色包目录列表（persona 三级 M-A）：按优先级排列，同 id 站点优先。
+   *  相对路径以注册表文件所在目录为基准；缺省 = 注册表旁的 roles/ 与 data/roles/。 */
+  rolesDirs?: string[];
   /** 角色 id → 能力配置 */
   roles: Record<string, RoleCapabilityConfig>;
   /** 飞书 chatId/userId/appId → 角色 id；未命中走 default */
@@ -80,11 +88,42 @@ export function loadRoleRegistry(file: string): RoleRegistry | null {
     const skillsRoot = raw.skillsRoot
       ? (path.isAbsolute(raw.skillsRoot) ? raw.skillsRoot : path.resolve(base, raw.skillsRoot))
       : path.resolve(base, "skills");
-    return { skillsRoot, roles: raw.roles, routes: raw.routes ?? {} };
+    // 角色包目录（M-A）：相对路径以注册表文件所在目录为基准（与 skillsRoot 同规则）
+    const rolesDirs = raw.rolesDirs
+      ?.filter((d) => typeof d === "string" && d.trim())
+      .map((d) => (path.isAbsolute(d) ? d : path.resolve(base, d)));
+    return { skillsRoot, rolesDirs, roles: raw.roles, routes: raw.routes ?? {} };
   } catch (e) {
     console.warn("[role-registry] 读取失败, 本次不注入角色能力:", e);
     return null;
   }
+}
+
+/** 解析角色包目录候选（M-A）：显式 rolesDirs > 注册表旁 roles/ 与站点 data/roles/ */
+function resolveRolesDirs(reg: RoleRegistry): string[] {
+  if (reg.rolesDirs?.length) return reg.rolesDirs.filter((d) => existsSync(d));
+  const base = path.dirname(path.resolve(reg.skillsRoot));
+  return [path.resolve(base, "../data/roles"), path.resolve(base, "roles")].filter((d) => existsSync(d));
+}
+
+/**
+ * 角色包 SKILL.md 正文解析（M-A）：SKILL.md 是人设唯一事实源。
+ * 返回剥除 frontmatter 后的正文（空/缺失返回 null）。
+ */
+function readRoleSkillBody(roleId: string, reg: RoleRegistry): { file: string; body: string } | null {
+  for (const dir of resolveRolesDirs(reg)) {
+    const file = path.join(dir, roleId, "SKILL.md");
+    if (!existsSync(file)) continue;
+    try {
+      const md = readFileSync(file, "utf8");
+      const m = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(md);
+      const body = (m ? md.slice(m[0].length) : md).trim();
+      if (body) return { file, body };
+    } catch {
+      // 单个角色包损坏不拖垮会话
+    }
+  }
+  return null;
 }
 
 /** 按会话 id 解析角色（routes 精确命中 → default；default 也未配置则给空能力） */
@@ -158,12 +197,39 @@ export function buildRolePatchFile(
               serverName: s.serverName,
               command: s.command,
               ...(s.args ? { args: s.args } : {}),
-              ...(s.env ? { env: s.env } : {}),
               ...(s.cwd ? { cwd: s.cwd } : {}),
+              ...(s.env ? { env: s.env } : {}),
               ...(s.failOnStartupError !== undefined ? { failOnStartupError: s.failOnStartupError } : {}),
             },
       })),
     });
+  }
+  // M-A（2026-10-08）角色专属指令注入：SKILL.md 是人设唯一事实源。
+  // 解析优先级：显式 instructionsFile（逃生舱）> 角色包 <rolesDir>/<role.id>/SKILL.md。
+  // patch 覆盖 agent-instructions 候选表收窄为该文件——DSH 实测：覆盖后 baseline
+  // identity 的 candidates 收窄、注入字节数即为生效硬证据。
+  // 快照复制到 patch 目录（与会话同生命周期，避免源文件后续变动影响本次会话）。
+  const explicitFile = role.config.instructionsFile
+    ? path.isAbsolute(role.config.instructionsFile)
+      ? role.config.instructionsFile
+      : path.resolve(reg.skillsRoot, role.config.instructionsFile)
+    : undefined;
+  // 角色包解析：SKILL.md 全文即引擎级 AGENTS.md 正文来源（§1 单文本投递）
+  const pkg = !explicitFile && role.id !== "default" ? readRoleSkillBody(role.id, reg) : null;
+  const personaFile = explicitFile && existsSync(explicitFile) ? explicitFile : pkg?.file;
+  // 无显式配置、且角色包无有效人设（正文为空/缺失）→ 不产出该分支（零开销）
+  const personaText = explicitFile && existsSync(explicitFile)
+    ? undefined
+    : pkg?.body;
+  if (personaFile) {
+    // patch 目录先就位：快照文件与 patch 文件同目录（调用方可能尚未创建）
+    mkdirSync(path.dirname(outFile), { recursive: true });
+    const agentsCopy = path.join(path.dirname(outFile), `AGENTS-${role.id}.md`);
+    // 角色包路径：只写正文快照（原文已剥 frontmatter，避免 YAML 元数据污染 system prompt）
+    if (personaText !== undefined) writeFileSync(agentsCopy, `${personaText}\n`, "utf8");
+    else copyFileSync(personaFile, agentsCopy);
+    // maxBytes 必填（dsh-base schema 校验）：与官方缺省 65536 对齐，防止超长指令被截断
+    entries.push({ id: "agent-instructions", config: { instructionFileCandidates: [agentsCopy], maxBytes: 65536 } });
   }
   if (entries.length === 0) return null;
   mkdirSync(path.dirname(outFile), { recursive: true });

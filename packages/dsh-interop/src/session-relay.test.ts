@@ -3,10 +3,10 @@
  * headless 调用本身不 mock 进程（有 CLI 依赖），只测不触 CLI 的分支。
  */
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TranscriptStore, createDshSessionRelayExecute } from "./session-relay.js";
+import { TranscriptStore, buildRolePatchFile, createDshSessionRelayExecute } from "./session-relay.js";
 
 describe("TranscriptStore", () => {
   it("按 chatId 隔离并落盘 JSON", () => {
@@ -74,5 +74,64 @@ describe("createDshSessionRelayExecute 指令路径（不触 headless CLI）", (
     const r = await execute({ user_input: "/new" });
     expect(r.value?.response).toContain("已清空");
     expect(new TranscriptStore(f).get("default")).toHaveLength(0);
+  });
+});
+
+describe("M-A 引擎级投递：SKILL.md → AGENTS-<id>.md patch", () => {
+  /** 造一个最小角色包目录树：<root>/data/roles/<id>/SKILL.md */
+  const makeTree = (skillMd?: string) => {
+    const root = mkdtempSync(join(tmpdir(), "m-a-"));
+    const rolesDir = join(root, "data", "roles");
+    mkdirSync(join(rolesDir, "sales-chat"), { recursive: true });
+    if (skillMd !== undefined) writeFileSync(join(rolesDir, "sales-chat", "SKILL.md"), skillMd, "utf8");
+    return { root, rolesDir };
+  };
+  const reg = (root: string, rolesDir: string) => ({
+    skillsRoot: join(root, "skills"),
+    rolesDirs: [rolesDir],
+    roles: {},
+    routes: {},
+  });
+
+  it("角色包有 SKILL.md → 产出 agent-instructions 单候选 patch，且正文剥除 frontmatter", () => {
+    const { root, rolesDir } = makeTree(
+      `---\nname: sales-chat\ndescription: 销售客服\n---\n\n你是「销售客服」，解答系统使用问题后委托 L4。\n`,
+    );
+    const out = join(root, "patch", "patch-sales-chat.yml");
+    const ret = buildRolePatchFile(reg(root, rolesDir), { id: "sales-chat", config: {} }, out);
+    expect(ret).toBe(out);
+    // 快照文件只含正文（frontmatter 不污染 system prompt）
+    const snapshot = readFileSync(join(root, "patch", "AGENTS-sales-chat.md"), "utf8");
+    expect(snapshot).toBe("你是「销售客服」，解答系统使用问题后委托 L4。\n");
+    expect(snapshot).not.toContain("description:");
+    // patch 覆盖 agent-instructions，候选表收窄为快照文件
+    const yml = readFileSync(out, "utf8");
+    expect(yml).toContain(`id: "agent-instructions"`);
+    expect(yml).toContain(`- ${JSON.stringify(join(root, "patch", "AGENTS-sales-chat.md"))}`);
+    expect(yml).toContain("maxBytes: 65536");
+  });
+
+  it("角色包缺失/正文为空 → 不出该分支（零开销，不产文件）", () => {
+    const { root, rolesDir } = makeTree(); // 无 SKILL.md
+    const out = join(root, "patch", "patch-sales-chat.yml");
+    expect(buildRolePatchFile(reg(root, rolesDir), { id: "sales-chat", config: {} }, out)).toBeNull();
+    const { root: r2, rolesDir: d2 } = makeTree(`---\nname: sales-chat\n---\n\n   \n`);
+    expect(buildRolePatchFile(reg(r2, d2), { id: "sales-chat", config: {} }, join(r2, "p.yml"))).toBeNull();
+  });
+
+  it("default 角色不走角色包解析（无专属人设）", () => {
+    const { root, rolesDir } = makeTree(`---\nname: sales-chat\n---\n\n正文\n`);
+    mkdirSync(join(rolesDir, "default"), { recursive: true });
+    writeFileSync(join(rolesDir, "default", "SKILL.md"), `---\nname: default\n---\n\n不该被注入\n`, "utf8");
+    expect(buildRolePatchFile(reg(root, rolesDir), { id: "default", config: {} }, join(root, "p.yml"))).toBeNull();
+  });
+
+  it("显式 instructionsFile 优先于角色包，且原样快照（逃生舱保留）", () => {
+    const { root, rolesDir } = makeTree(`---\nname: sales-chat\n---\n\n角色包正文\n`);
+    const custom = join(root, "custom-persona.md");
+    writeFileSync(custom, "手工指定的正文", "utf8");
+    const out = join(root, "patch", "patch-sales-chat.yml");
+    buildRolePatchFile(reg(root, rolesDir), { id: "sales-chat", config: { instructionsFile: custom } }, out);
+    expect(readFileSync(join(root, "patch", "AGENTS-sales-chat.md"), "utf8")).toBe("手工指定的正文");
   });
 });

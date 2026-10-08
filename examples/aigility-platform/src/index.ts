@@ -85,7 +85,7 @@ import {
 import type { DshToolBridgeResponse } from "./dsh-tool.js";
 import { planTask, WORKFLOW_DIR } from "./planner.js";
 import { buildAggregatorPlanFromConfig, SITE_ROLES_DIR } from "./channel-aggregator.js";
-import { loadRolePackage, loadRolePackages, validateRoleManifest, bundledRolesDir, toElizaCharacter, fromElizaCharacter, type RoleManifest } from "@aigility-harness/role-kit";
+import { loadRolePackage, loadRolePackages, validateRoleManifest, validateSitePersona, bundledRolesDir, toElizaCharacter, fromElizaCharacter, type RoleManifest } from "@aigility-harness/role-kit";
 import { checkPermissions, resolveUserPermissionKeys, assignRoleToUser, revokeRoleFromUser, setRolePermissionGroups } from "@aigility-harness/rbac";
 import { ensureRbacReady, rbacStore } from "./rbac-store.js";
 import { ensureLlmNodeReady, llmNodeStore } from "./llm-node-store.js";
@@ -1398,6 +1398,15 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
         }
         const issues = validateRoleManifest(body.manifest);
         if (issues.length) { json(res, 400, { ok: false, error: issues.join("；") }); return; }
+        // M-B 应用级校验（copy-on-override 写入前）：站点副本以"站点优先"压掉出厂模板，
+        // 故存根/退化副本必须在落盘前拦下（sales-chat 存根坑即历史实例）。
+        // 仅在"实际写入正文"时校验：不传 prompt（只改编排字段）视为保留原人设，放行。
+        if (typeof body.prompt === "string" && body.prompt.trim()) {
+          // 出厂模板正文：同 id 公共角色存在时用于"非退化"比对（站点已是事实源时不比对）
+          const tplPkg = loadRolePackage(rolePkgPut[1], { publicDir: bundledRolesDir(), siteDirs: [] });
+          const val = validateSitePersona(body.prompt, tplPkg?.prompt);
+          if (!val.ok) { json(res, 400, { ok: false, error: val.issues.join("；"), issues: val.issues }); return; }
+        }
         // 不存在的包 = 工厂角色首次声明 → 直接创建站点包（data/roles/<id>，含生成的 SKILL.md 存根）
         let targetDir: string;
         let siteOverride = false;
@@ -1449,6 +1458,12 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
         const issues = validateRoleManifest(r.manifest);
         if (issues.length) { json(res, 400, { ok: false, error: issues.join("；") }); return; }
         const existing = loadRolePackage(r.manifest.role_id, { publicDir: bundledRolesDir(), siteDirs: [SITE_ROLES_DIR] });
+        // M-B 同款校验：导入也是"写站点副本"，退化/存根同样要拦（无 prompt 视为仅声明，放行）
+        if (r.prompt.trim()) {
+          const tplPkg = loadRolePackage(r.manifest.role_id, { publicDir: bundledRolesDir(), siteDirs: [] });
+          const val = validateSitePersona(r.prompt, tplPkg?.prompt);
+          if (!val.ok) { json(res, 400, { ok: false, error: val.issues.join("；"), issues: val.issues }); return; }
+        }
         const targetDir = existing && existing.layer === "site" ? existing.dir : join(SITE_ROLES_DIR, r.manifest.role_id);
         try {
           mkdirSync(targetDir, { recursive: true });

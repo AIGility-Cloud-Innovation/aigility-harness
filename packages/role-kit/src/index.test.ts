@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
-import { bundledRolesDir, fromElizaCharacter, loadRolePackage, loadRolePackages, toElizaCharacter, validateRoleManifest } from "./index.js";
+import { bundledRolesDir, fromElizaCharacter, loadRolePackage, loadRolePackages, normalizePersonaBody, toElizaCharacter, validateRoleManifest, validateSitePersona } from "./index.js";
 
 // 临时双层目录：公共层 + 站点层（站点覆盖公共的同 id）
 const root = `/tmp/role-kit-test-${process.pid}-${Math.random().toString(36).slice(2)}`;
@@ -150,5 +150,47 @@ describe("ElizaOS 兼容层与记忆策略声明位", () => {
 
   it("导入：非 character JSON（缺 name）拒绝", () => {
     expect(fromElizaCharacter({ foo: 1 })).toBeNull();
+  });
+});
+
+describe("M-B 站点副本写入前校验（validateSitePersona）", () => {
+  const good = "你是「销售客服」，负责解答系统使用问题：先判断问题类型，再给出结论与操作步骤；遇到复杂问题委托 L4 处理，最终以文字回复用户。回复要求：先结论、后步骤，语气专业友好，不承诺未确认的功能与时间点。";
+
+  it("合格人设放行", () => {
+    const v = validateSitePersona(good);
+    expect(v.ok).toBe(true);
+    expect(v.bodyLength).toBeGreaterThanOrEqual(80);
+  });
+
+  it("① 非空：正文 < 80 字符拒绝（frontmatter 与空行不计）", () => {
+    const v = validateSitePersona(`---\nname: sales-chat\ndescription: 站点角色\n---\n\n太短了。\n`);
+    expect(v.ok).toBe(false);
+    expect(v.issues.join()).toContain("过短");
+  });
+
+  it("② 非占位：含存根占位标记拒绝", () => {
+    const stub = `---\nname: sales-chat\n---\n\n你是「销售客服」。\n\n（定制副本：在此撰写完整人设；capability_ref 指向引擎原生人格。）\n`;
+    const v = validateSitePersona(stub);
+    expect(v.ok).toBe(false);
+    expect(v.issues.join()).toContain("占位标记");
+  });
+
+  it("③ 非退化：与出厂模板正文归一化后相同则拒绝", () => {
+    const tpl = good; // 出厂模板正文 = 站点副本（供"退化复制"比对）
+    expect(validateSitePersona(tpl, tpl).ok).toBe(false);
+    // 纯空白差异（frontmatter 包裹 + 行首尾空格 + 多余空行）→ 仍判退化
+    const cosmetic = `---\nname: sales-chat\ndescription: 销售客服\n---\n\n   ${good}   \n\n\n`;
+    expect(validateSitePersona(cosmetic, tpl).ok).toBe(false);
+    // 真正差异化 → 放行
+    const custom = `${good}\n\n本站点额外要求：回复时必须先给出结论，再给操作步骤。`;
+    expect(validateSitePersona(custom, tpl).ok).toBe(true);
+  });
+
+  it("无出厂模板时不比对退化（仅非空+非占位）", () => {
+    expect(validateSitePersona(good).ok).toBe(true);
+  });
+
+  it("normalizePersonaBody 剥离 frontmatter 并压缩空白", () => {
+    expect(normalizePersonaBody(`---\nname: a\n---\n\n  正文  \n\n`)).toBe("正文");
   });
 });
