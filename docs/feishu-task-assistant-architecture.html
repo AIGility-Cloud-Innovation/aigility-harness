@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>项目小助理 · 架构图</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #020617;
+    color: #e2e8f0;
+    font-family: 'JetBrains Mono', monospace;
+    padding: 32px;
+    min-height: 100vh;
+  }
+  .header { margin-bottom: 24px; }
+  .title-row { display: flex; align-items: center; gap: 12px; }
+  .pulse {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #34d399;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.85); }
+  }
+  h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+  .subtitle { font-size: 11px; color: #64748b; margin-top: 6px; margin-left: 22px; }
+  .diagram-card {
+    border: 1px solid #1e293b;
+    border-radius: 12px;
+    background: #0b1220;
+    padding: 16px;
+    margin-bottom: 28px;
+    overflow-x: auto;
+  }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .card {
+    border: 1px solid #1e293b;
+    border-radius: 10px;
+    background: #0b1220;
+    padding: 16px;
+  }
+  .card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .card-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .card-dot.cyan { background: #22d3ee; }
+  .card-dot.emerald { background: #34d399; }
+  .card-dot.violet { background: #a78bfa; }
+  .card-dot.amber { background: #fbbf24; }
+  .card h3 { font-size: 12px; font-weight: 700; color: #f1f5f9; }
+  .card ul { list-style: none; }
+  .card li { font-size: 10px; color: #94a3b8; line-height: 1.9; }
+  .footer { margin-top: 24px; font-size: 9px; color: #475569; text-align: center; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="title-row">
+    <div class="pulse"></div>
+    <h1>项目小助理 · 架构图</h1>
+  </div>
+  <div class="subtitle">feishu-task-assistant · 飞书任务 + Gitea 工单协调（只管理协调，不执行具体工作）</div>
+</div>
+
+<div class="diagram-card">
+<svg viewBox="0 0 1240 1120" width="100%" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+    </pattern>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrow-em" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#34d399"/>
+    </marker>
+    <marker id="arrow-cy" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#22d3ee"/>
+    </marker>
+    <marker id="arrow-am" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#fbbf24"/>
+    </marker>
+    <marker id="arrow-vi" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#a78bfa"/>
+    </marker>
+  </defs>
+
+  <rect width="1240" height="1120" fill="url(#grid)"/>
+
+  <!-- ============ 连接线（先画，置于底层） ============ -->
+  <!-- 用户 → 飞书 -->
+  <line x1="620" y1="60" x2="620" y2="104" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <!-- 飞书 → ingress -->
+  <line x1="620" y1="172" x2="620" y2="230" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow-cy)"/>
+  <!-- ingress → persona 路由 -->
+  <line x1="620" y1="298" x2="620" y2="352" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-em)"/>
+  <!-- persona → 编排 -->
+  <line x1="620" y1="440" x2="620" y2="494" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-em)"/>
+  <!-- review-aware 旁路 -->
+  <line x1="880" y1="395" x2="700" y2="395" stroke="#fbbf24" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow-am)"/>
+  <!-- 编排 → 数据面工作流 -->
+  <line x1="620" y1="610" x2="620" y2="660" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrow-vi)"/>
+  <!-- 工作流 → 外部系统 -->
+  <line x1="620" y1="870" x2="620" y2="920" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <!-- 执行面 → agentd -->
+  <line x1="330" y1="870" x2="330" y2="920" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+  <!-- codex -->
+  <line x1="330" y1="985" x2="330" y2="1025" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+
+  <!-- ============ 用户 ============ -->
+  <rect x="530" y="16" width="180" height="44" rx="6" fill="#0f172a"/>
+  <rect x="530" y="16" width="180" height="44" rx="6" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="620" y="35" fill="#f1f5f9" font-size="12" font-weight="700" text-anchor="middle">真人用户</text>
+  <text x="620" y="50" fill="#64748b" font-size="9" text-anchor="middle">飞书 @项目小助理 / 私聊</text>
+
+  <!-- ============ D1 基础设施 ============ -->
+  <rect x="440" y="104" width="360" height="68" rx="6" fill="#0f172a"/>
+  <rect x="440" y="104" width="360" height="68" rx="6" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="460" y="125" fill="#22d3ee" font-size="9" font-weight="700">D1 基础设施</text>
+  <text x="460" y="142" fill="#f1f5f9" font-size="12" font-weight="700">@infrastructure/feishu</text>
+  <text x="460" y="158" fill="#94a3b8" font-size="9">WebSocket 长连接收消息 · 群聊 replyTo 锚定</text>
+
+  <!-- ============ D5 人格 ============ -->
+  <rect x="360" y="230" width="520" height="210" rx="12" fill="none" stroke="#34d399" stroke-width="1.5" stroke-dasharray="8,4"/>
+  <text x="380" y="252" fill="#34d399" font-size="9" font-weight="700">D5 人格层（L3 layer-persona）</text>
+
+  <rect x="380" y="262" width="230" height="70" rx="6" fill="#0f172a"/>
+  <rect x="380" y="262" width="230" height="70" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="398" y="283" fill="#f1f5f9" font-size="12" font-weight="700">@persona/feishu-task-assistant</text>
+  <text x="398" y="299" fill="#94a3b8" font-size="9">「项目小助理」交互形象</text>
+  <text x="398" y="314" fill="#94a3b8" font-size="9">正则意图解析 + LLM 兜底回复</text>
+  <text x="398" y="327" fill="#64748b" font-size="8">只留脸：业务全下沉编排层</text>
+
+  <rect x="640" y="262" width="220" height="70" rx="6" fill="#0f172a"/>
+  <rect x="640" y="262" width="220" height="70" rx="6" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+  <text x="658" y="283" fill="#fbbf24" font-size="12" font-weight="700">review-aware</text>
+  <text x="658" y="299" fill="#94a3b8" font-size="9">「复核感知」包装人格</text>
+  <text x="658" y="314" fill="#94a3b8" font-size="9">自然语言抽要素（确定性正则）</text>
+  <text x="658" y="327" fill="#64748b" font-size="8">ingress 人格路由入口</text>
+
+  <rect x="380" y="348" width="480" height="36" rx="6" fill="#0f172a"/>
+  <rect x="380" y="348" width="480" height="36" rx="6" fill="rgba(6,78,59,0.25)" stroke="#34d399" stroke-width="1"/>
+  <text x="398" y="364" fill="#94a3b8" font-size="9">其余消息原样透传</text>
+  <text x="398" y="377" fill="#64748b" font-size="8">短时记忆窗口兜无编号纯指代回复 · 要素抽取不烧 LLM</text>
+
+  <text x="880" y="400" fill="#fbbf24" font-size="8">复核短码 R01… / 「复核清单」</text>
+
+  <!-- ============ D4 编排 ============ -->
+  <rect x="360" y="494" width="520" height="116" rx="6" fill="#0f172a"/>
+  <rect x="360" y="494" width="520" height="116" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="380" y="516" fill="#a78bfa" font-size="9" font-weight="700">D4 编排层（L4 layer-orchestration）</text>
+  <text x="380" y="535" fill="#f1f5f9" font-size="11" font-weight="700">@orchestration/task-issue-sync</text>
+  <text x="380" y="550" fill="#94a3b8" font-size="9">飞书任务 + Gitea 工单全部业务域 · 双建同步 · 派发执行域</text>
+  <text x="380" y="572" fill="#f1f5f9" font-size="11" font-weight="700">@orchestration/project-briefing</text>
+  <text x="380" y="587" fill="#94a3b8" font-size="9">我的任务/项目进展/反馈写入（多源汇总）</text>
+  <text x="380" y="603" fill="#64748b" font-size="8">@orchestration/task-pipeline（被动归纳闸门，feishu-task-loop 装配时挂载）</text>
+
+  <!-- ============ 数据面工作流 ============ -->
+  <rect x="360" y="660" width="520" height="210" rx="6" fill="#0f172a"/>
+  <rect x="360" y="660" width="520" height="210" rx="6" fill="rgba(8,51,68,0.35)" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="380" y="682" fill="#22d3ee" font-size="9" font-weight="700">数据面工作流（YAML 节点 enabled = 功能开关，改完即生效）</text>
+
+  <text x="380" y="703" fill="#f1f5f9" font-size="11" font-weight="700">① chat-briefing.yaml</text>
+  <text x="380" y="718" fill="#94a3b8" font-size="8">collect → summarize → memory_precipitate → dedupe → create_task* → create_issue* → digest → notify</text>
+  <text x="380" y="732" fill="#fb7185" font-size="8">* create_task / create_issue = enabled:false（2026-09-30 digest-only：只整理发摘要）</text>
+
+  <text x="380" y="757" fill="#f1f5f9" font-size="11" font-weight="700">② task-release.yaml</text>
+  <text x="380" y="772" fill="#94a3b8" font-size="8">project_check → executor_check → notify_executor → llm_elements</text>
+  <text x="380" y="786" fill="#94a3b8" font-size="8">五要素：项目/执行人（结构） + 现状/过程方法/目标（LLM 只判是否交代清楚）</text>
+
+  <text x="380" y="812" fill="#64748b" font-size="8">节点函数体在 layer-orchestration/task-pipeline.ts · task-release-gate.ts，不进 YAML</text>
+  <text x="380" y="830" fill="#64748b" font-size="8">状态队列扫描 P→D→C→A（TASK_STATE_SCAN 开关）</text>
+  <text x="380" y="848" fill="#64748b" font-size="8">board-sync（人工挪卡跟随） · completion-sync（完成核对）</text>
+
+  <!-- ============ 外部系统 ============ -->
+  <rect x="440" y="920" width="360" height="90" rx="6" fill="#0f172a"/>
+  <rect x="440" y="920" width="360" height="90" rx="6" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="460" y="941" fill="#94a3b8" font-size="9" font-weight="700">外部系统（D3 行动层 via @action/*）</text>
+  <text x="460" y="960" fill="#f1f5f9" font-size="11">@action/feishu-api</text>
+  <text x="600" y="960" fill="#64748b" font-size="8">用户身份调 Open API · token 自动续期</text>
+  <text x="460" y="980" fill="#f1f5f9" font-size="11">@action/gitea-api</text>
+  <text x="600" y="980" fill="#64748b" font-size="8">git.aigility.cloud 工单 · 公共 DNS 绕行</text>
+  <text x="460" y="1000" fill="#f1f5f9" font-size="11">飞书任务 / 自定义分组</text>
+  <text x="600" y="1000" fill="#64748b" font-size="8">P计划中 D执行中 C待测试 A待修复 = 状态主源</text>
+
+  <!-- ============ 执行面（虚线，独立进程） ============ -->
+  <rect x="120" y="920" width="230" height="90" rx="6" fill="#0f172a"/>
+  <rect x="120" y="920" width="230" height="90" rx="6" fill="rgba(136,19,55,0.25)" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,4"/>
+  <text x="138" y="941" fill="#fb7185" font-size="9" font-weight="700">执行面（独立进程）</text>
+  <text x="138" y="960" fill="#f1f5f9" font-size="11">timem-project/agentd</text>
+  <text x="138" y="976" fill="#94a3b8" font-size="8">UDS + Bearer token</text>
+  <text x="138" y="990" fill="#94a3b8" font-size="8">create → pending_confirm</text>
+  <text x="138" y="1004" fill="#94a3b8" font-size="8">delayMs=15min → run</text>
+
+  <rect x="120" y="1025" width="230" height="62" rx="6" fill="#0f172a"/>
+  <rect x="120" y="1025" width="230" height="62" rx="6" fill="rgba(136,19,55,0.2)" stroke="#fb7185" stroke-width="1.2" stroke-dasharray="4,4"/>
+  <text x="138" y="1045" fill="#fb7185" font-size="9" font-weight="700">执行工人</text>
+  <text x="138" y="1062" fill="#f1f5f9" font-size="11">codex（可换 claude/zcode）</text>
+  <text x="138" y="1078" fill="#94a3b8" font-size="8">ThreadGateway 是缝 · 多工人已预留</text>
+
+  <!-- ============ 图例 ============ -->
+  <rect x="880" y="920" width="320" height="167" rx="8" fill="rgba(2,6,23,0.9)" stroke="#1e293b" stroke-width="1"/>
+  <text x="898" y="943" fill="#e2e8f0" font-size="10" font-weight="700">图例</text>
+  <rect x="898" y="955" width="12" height="9" rx="2" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1"/>
+  <text x="918" y="963" fill="#94a3b8" font-size="9">D1 基础设施 / 数据面工作流</text>
+  <rect x="898" y="973" width="12" height="9" rx="2" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1"/>
+  <text x="918" y="981" fill="#94a3b8" font-size="9">D5 人格层</text>
+  <rect x="898" y="991" width="12" height="9" rx="2" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1"/>
+  <text x="918" y="999" fill="#94a3b8" font-size="9">D4 编排层</text>
+  <rect x="898" y="1009" width="12" height="9" rx="2" fill="rgba(136,19,55,0.3)" stroke="#fb7185" stroke-width="1"/>
+  <text x="918" y="1017" fill="#94a3b8" font-size="9">执行面（独立进程）</text>
+  <rect x="898" y="1027" width="12" height="9" rx="2" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1"/>
+  <text x="918" y="1035" fill="#94a3b8" font-size="9">复核感知包装</text>
+  <rect x="898" y="1045" width="12" height="9" rx="2" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1"/>
+  <text x="918" y="1053" fill="#94a3b8" font-size="9">外部系统</text>
+  <line x1="898" y1="1070" x2="910" y2="1070" stroke="#fbbf24" stroke-width="1.2" stroke-dasharray="4,3"/>
+  <text x="918" y="1073" fill="#94a3b8" font-size="9">旁路 / 独立进程</text>
+</svg>
+</div>
+
+<div class="cards">
+  <div class="card">
+    <div class="card-header"><div class="card-dot emerald"></div><h3>2 条工作流</h3></div>
+    <ul>
+      <li>• chat-briefing：群聊整理（8 节点）</li>
+      <li>• task-release：五要素放行（4 节点）</li>
+      <li>• 均在 examples/feishu-task-loop/workflows/</li>
+    </ul>
+  </div>
+  <div class="card">
+    <div class="card-header"><div class="card-dot violet"></div><h3>定位与边界</h3></div>
+    <ul>
+      <li>• 只【管理协调】任务与工单</li>
+      <li>• 不执行任务的具体工作</li>
+      <li>• 执行委托 agentd + codex</li>
+    </ul>
+  </div>
+  <div class="card">
+    <div class="card-header"><div class="card-dot amber"></div><h3>架构铁律</h3></div>
+    <ul>
+      <li>• persona 只留脸，业务下沉编排</li>
+      <li>• 跨包 import 禁止（结构化 shape）</li>
+      <li>• YAML 即功能开关，改完即生效</li>
+    </ul>
+  </div>
+  <div class="card">
+    <div class="card-header"><div class="card-dot cyan"></div><h3>当前形态</h3></div>
+    <ul>
+      <li>• digest-only：两建单节点已禁用</li>
+      <li>• 只整理发摘要，不建任务/工单</li>
+      <li>• 改 enabled: true 即恢复</li>
+    </ul>
+  </div>
+</div>
+
+<div class="footer">aigility-harness · feishu-task-loop（飞书单应用 cli_a9e24e913a39dcd6） · 生成于 2026-10-09</div>
+
+</body>
+</html>
