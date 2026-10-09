@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, it, expect, vi, afterEach, beforeAll, afterAll, beforeEach } from "vitest";
 import {
   extractRepoSpec,
   parseTaskIntent,
@@ -266,8 +269,8 @@ describe("feishuTaskAssistantProvider — LLM 兜底", () => {
       }),
     });
     await feishuTaskAssistantProvider.execute({ user_input: "嗨" }, ctx);
-    // RSI 开启下的调用序列：规则召回 + 记忆召回（无 handler 降级）→ LLM → 问答沉淀
-    expect(ctx.calls.length).toBe(4);
+    // 2026-10-10 起：无 user_id（或未绑定花名册）→ 不召回不沉淀，只调 LLM
+    expect(ctx.calls.length).toBe(1);
     const llm = (ctx.calls as Array<{ id: string; req: Record<string, unknown> }>).find(
       (c) => c.id === llmInferenceRefForPersona.id,
     );
@@ -533,6 +536,23 @@ describe("feishuTaskAssistantProvider — 兜底防编造集成", () => {
 // ── RSI 递归自我改进：召回注入 / 对话沉淀 / 反馈学规则 ──────────────
 
 describe("feishuTaskAssistantProvider — RSI 召回/沉淀", () => {
+  // 2026-10-10 契约：RSI 读写两半边 user_id 一律映射到成员 space_*（花名册
+  // feishu_open_ids → timem_user_ids[0]）；未绑定发言人不召回不沉淀。
+  const FIXTURE = join(tmpdir(), `timem-team-registry.fixture.${process.pid}.json`);
+  beforeAll(() => {
+    writeFileSync(FIXTURE, JSON.stringify({
+      version: 1,
+      members: [
+        { member_id: "m1", name: "张三", feishu_open_ids: ["ou_rsi", "ou_w", "ou_f"], timem_user_ids: ["space_zhang"] },
+        { member_id: "m2", name: "李四", feishu_open_ids: [], timem_user_ids: ["space_lisi"] },
+      ],
+    }));
+  });
+  afterAll(() => {
+    rmSync(FIXTURE, { force: true });
+  });
+  const stubBound = () => vi.stubEnv("TEAM_IDENTITY_REGISTRY", FIXTURE);
+
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -541,7 +561,8 @@ describe("feishuTaskAssistantProvider — RSI 召回/沉淀", () => {
     // 取最后一次 LLM 调用（多轮 execute 时前面的调用属于历史轮次）
     [...ctx.calls].reverse().find((c) => c.id === llmInferenceRefForPersona.id)!;
 
-  it("召回命中 → 经验规则与相关记忆注入 system 提示词，user_id 按人透传", async () => {
+  it("召回命中 → 经验规则与相关记忆注入 system 提示词，user_id 映射到成员空间", async () => {
+    stubBound();
     const ctx = mockCtx({
       "@action/timem-rule-recall": () => ({
         ok: true,
@@ -563,7 +584,7 @@ describe("feishuTaskAssistantProvider — RSI 召回/沉淀", () => {
     expect(r.ok).toBe(true);
     const rulesCall = ctx.calls.find((c) => c.id === "@action/timem-rule-recall");
     expect(rulesCall).toBeDefined();
-    expect((rulesCall!.req as Record<string, unknown>)["user_id"]).toBe("ou_rsi");
+    expect((rulesCall!.req as Record<string, unknown>)["user_id"]).toBe("space_zhang");
     expect((rulesCall!.req as Record<string, unknown>)["agent_id"]).toBe("feishu-task-assistant");
     const messages = (llmCallOf(ctx)!.req["messages"] as Array<{ role: string; content: string }>);
     // M1 前缀缓存：静态 system 在前（不含召回块），召回块是历史之后的独立 system 消息
@@ -600,7 +621,22 @@ describe("feishuTaskAssistantProvider — RSI 召回/沉淀", () => {
     expect(ctx.calls[0].id).toBe(llmInferenceRefForPersona.id);
   });
 
-  it("作答成功 → 本轮问答沉淀 @action/timem-memory-write（含问/答与用户标识）", async () => {
+  it("未绑定发言人 → 不召回不沉淀，只调 LLM（与群聊沉淀节点同一口径）", async () => {
+    stubBound();
+    const ctx = mockCtx({
+      "@cognitive/llm-inference": () => ({ ok: true, value: { text: "好" } }),
+    });
+    await feishuTaskAssistantProvider.execute(
+      { user_input: "嗨", user_id: "ou_stranger" },
+      ctx,
+    );
+    expect(ctx.calls.length).toBe(1);
+    expect(ctx.calls[0].id).toBe(llmInferenceRefForPersona.id);
+    expect(ctx.calls.find((c) => c.id === "@action/timem-memory-write")).toBeUndefined();
+  });
+
+  it("作答成功 → 本轮问答沉淀 @action/timem-memory-write（user_id 为成员空间）", async () => {
+    stubBound();
     const ctx = mockCtx({
       "@cognitive/llm-inference": () => ({ ok: true, value: { text: "可以发「建任务：标题」" } }),
     });
@@ -612,7 +648,7 @@ describe("feishuTaskAssistantProvider — RSI 召回/沉淀", () => {
     expect(write).toBeDefined();
     const req = write!.req as Record<string, unknown>;
     expect(req["agent_id"]).toBe("feishu-task-assistant");
-    expect(req["user_id"]).toBe("ou_w");
+    expect(req["user_id"]).toBe("space_zhang");
     expect(String(req["content"])).toContain("用户问：怎么建任务");
     expect(String(req["content"])).toContain("小助理答：可以发「建任务：标题」");
   });
@@ -625,7 +661,8 @@ describe("feishuTaskAssistantProvider — RSI 召回/沉淀", () => {
     expect(ctx.calls.find((c) => c.id === "@action/timem-memory-write")).toBeUndefined();
   });
 
-  it("「反馈：以后…」→ briefing 记忆沉淀外追加经验规则固化并提示", async () => {
+  it("「反馈：以后…」→ briefing 记忆沉淀外追加经验规则固化并提示（规则落成员空间）", async () => {
+    stubBound();
     const ctx = mockCtx({
       "@orchestration/project-briefing": () => ({ ok: true, value: { response: "已记下" } }),
       "@action/timem-rule-create": () => ({ ok: true, value: { rule_id: "rule_1" } }),
@@ -639,6 +676,7 @@ describe("feishuTaskAssistantProvider — RSI 召回/沉淀", () => {
     expect(create).toBeDefined();
     const req = create!.req as Record<string, unknown>;
     expect(req["lesson"]).toBe("以后工单默认建到 nx 仓库");
+    expect(req["user_id"]).toBe("space_zhang");
     expect(req["agent_id"]).toBe("feishu-task-assistant");
     if (r.ok) expect(r.value.response).toContain("经验规则");
   });

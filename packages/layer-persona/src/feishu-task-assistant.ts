@@ -33,6 +33,8 @@
  * 「刚才说的」。TASK_ASSISTANT_CONTEXT=0 关闭。
  */
 
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import {
   LayerId,
   PluginState,
@@ -534,6 +536,52 @@ function rsiEnabled(): boolean {
   return process.env.TASK_ASSISTANT_RSI !== "0";
 }
 
+// ── 发言人 → 太忆空间映射（2026-10-10）：RSI 读写两半边统一用成员 space_*。
+// 此前写半边直接用飞书 open_id 当 user_id，记忆落在 ou_ 名下——日报/晨报按人
+// 检索（按登记空间查）永远看不到；未绑定发言人也不该写出孤儿 id（与群聊沉淀
+// 节点同一口径：只写登记空间）。30s 缓存，身份对齐页改绑定即生效。 ──
+const TIMEM_SPACE_TTL_MS = 30_000;
+/** 按登记表路径缓存：身份对齐页换绑定/TTL 过期才重读（env 换路径立即生效，测试友好） */
+let timemSpaceCache: { at: number; path: string | undefined; byOpenId: Map<string, string> } | null = null;
+
+function timemSpaceFor(senderId?: string): string | undefined {
+  if (!senderId) return undefined;
+  const now = Date.now();
+  const path = teamRegistryPath();
+  if (!timemSpaceCache || timemSpaceCache.path !== path || now - timemSpaceCache.at > TIMEM_SPACE_TTL_MS) {
+    const byOpenId = new Map<string, string>();
+    if (path) {
+      try {
+        const raw = JSON.parse(readFileSync(path, "utf8")) as {
+          members?: Array<{ timem_user_ids?: string[]; feishu_open_ids?: string[] }>;
+        };
+        for (const m of raw.members ?? []) {
+          const space = m.timem_user_ids?.[0];
+          if (!space) continue;
+          for (const oid of m.feishu_open_ids ?? []) byOpenId.set(String(oid), space);
+        }
+      } catch {
+        // 登记表读取失败按全未绑定处理（只影响 RSI，不阻断主链路）
+      }
+    }
+    timemSpaceCache = { at: now, path, byOpenId };
+  }
+  return timemSpaceCache.byOpenId.get(senderId);
+}
+
+function teamRegistryPath(): string | undefined {
+  if (process.env.TEAM_IDENTITY_REGISTRY) return process.env.TEAM_IDENTITY_REGISTRY;
+  let dir = resolve(process.cwd());
+  for (let i = 0; i < 8; i++) {
+    const candidate = resolve(dir, "config", "timem-team-registry.json");
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
+  return undefined;
+}
+
 /** 跨层软调用：拒绝/超时一律返回 undefined——RSI 两个半边都是增益，不是依赖，
  *  任何故障都不允许拖慢或阻断兜底回复主链路 */
 async function softCall<T>(
@@ -563,6 +611,9 @@ async function recallContextBlock(
   ctx: SeamContext,
   userId?: string,
 ): Promise<string> {
+  // 未绑定成员查不到有意义的空间记忆，直接跳过召回（省两次空查）
+  const space = timemSpaceFor(userId);
+  if (!space) return "";
   const [rulesRes, memoryRes] = await Promise.all([
     softCall<{ ok?: boolean; value?: { rules?: Array<{ name?: string; lesson?: string }> } }>(
       ctx,
@@ -570,7 +621,7 @@ async function recallContextBlock(
       {
         query: userText,
         judge_scene_text: userText,
-        user_id: userId,
+        user_id: space,
         agent_id: ASSISTANT_AGENT_ID,
         mode: "auto",
         top_k: 3,
@@ -580,7 +631,7 @@ async function recallContextBlock(
     softCall<{ ok?: boolean; value?: { results?: Array<{ content?: string }> } }>(
       ctx,
       timemMemoryRefForAssistant,
-      { query: userText, user_id: userId, agent_id: ASSISTANT_AGENT_ID, limit: 3 },
+      { query: userText, user_id: space, agent_id: ASSISTANT_AGENT_ID, limit: 3 },
       8_000,
     ),
   ]);
@@ -660,21 +711,28 @@ async function generateFallbackReply(
         );
         return HELP_TEXT;
       }
-      // RSI 写半边：真实问答轮沉淀进 TiMEM（回退帮助文本的轮次不沉淀）
+      // RSI 写半边：真实问答轮沉淀进 TiMEM（回退帮助文本的轮次不沉淀）。
+      // user_id 用成员 space_*（timemSpaceFor）；未绑定发言人不写——避免孤儿
+      // ou_ id 记忆，与群聊沉淀节点同一口径。
       if (rsiEnabled()) {
-        const saved = await softCall<{ ok?: boolean }>(
-          ctx,
-          timemMemoryWriteRefForAssistant,
-          {
-            content: `用户问：${clipForMemory(userText)}\n小助理答：${clipForMemory(text)}`,
-            user_id: userId,
-            agent_id: ASSISTANT_AGENT_ID,
-            domain: "feishu-task-assistant",
-          },
-          6_000,
-        );
-        if (!saved?.ok) {
-          console.error("[feishu-task-assistant] 兜底问答沉淀失败（忽略，不影响回复）");
+        const space = timemSpaceFor(userId);
+        if (!space) {
+          console.log(`[feishu-task-assistant] 发言人未绑定太忆空间，本轮问答不沉淀 (${userId ?? "unknown"})`);
+        } else {
+          const saved = await softCall<{ ok?: boolean }>(
+            ctx,
+            timemMemoryWriteRefForAssistant,
+            {
+              content: `用户问：${clipForMemory(userText)}\n小助理答：${clipForMemory(text)}`,
+              user_id: space,
+              agent_id: ASSISTANT_AGENT_ID,
+              domain: "feishu-task-assistant",
+            },
+            6_000,
+          );
+          if (!saved?.ok) {
+            console.error("[feishu-task-assistant] 兜底问答沉淀失败（忽略，不影响回复）");
+          }
         }
       }
       return text;
@@ -828,19 +886,23 @@ export const feishuTaskAssistantProvider: Provider<
         rsiEnabled() &&
         /^以后/.test(intent.text)
       ) {
-        const rc = await softCall<{ ok?: boolean }>(
-          ctx,
-          timemRuleCreateRefForAssistant,
-          {
-            name: intent.text.replace(/^以后/, "").trim().slice(0, 60) || intent.text.slice(0, 60),
-            situation: `用户在飞书群对「项目小助理」说：${clipForMemory(intent.text)}`,
-            lesson: clipForMemory(intent.text),
-            user_id: request.user_id,
-            agent_id: ASSISTANT_AGENT_ID,
-            trigger_tags: ["项目小助理", "群反馈"],
-          },
-          8_000,
-        );
+        // user_id 同 RSI 写半边：映射到成员 space_*，未绑定不写（无主规则召回不到）
+        const ruleSpace = timemSpaceFor(request.user_id);
+        const rc = ruleSpace
+          ? await softCall<{ ok?: boolean }>(
+            ctx,
+            timemRuleCreateRefForAssistant,
+            {
+              name: intent.text.replace(/^以后/, "").trim().slice(0, 60) || intent.text.slice(0, 60),
+              situation: `用户在飞书群对「项目小助理」说：${clipForMemory(intent.text)}`,
+              lesson: clipForMemory(intent.text),
+              user_id: ruleSpace,
+              agent_id: ASSISTANT_AGENT_ID,
+              trigger_tags: ["项目小助理", "群反馈"],
+            },
+            8_000,
+          )
+          : undefined;
         if (rc?.ok) {
           response += "\n（这条已固化为经验规则，以后类似场景我会优先照办）";
         }
