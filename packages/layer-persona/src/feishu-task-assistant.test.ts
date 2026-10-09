@@ -173,6 +173,14 @@ describe("parseTaskIntent — Gitea 工单意图", () => {
       expect(parseTaskIntent(text)).toEqual({ kind: "overview" });
     }
   });
+
+  it("手动对齐（立即对齐及变体）", () => {
+    for (const text of ["立即对齐", "手动对齐", "马上对齐", "对齐一下", "同步一下"]) {
+      expect(parseTaskIntent(text)).toEqual({ kind: "align-now" });
+    }
+    // 非整条指令不误触发
+    expect(parseTaskIntent("帮我把数据对齐一下格式").kind).toBe("help");
+  });
 });
 
 describe("extractRepoSpec", () => {

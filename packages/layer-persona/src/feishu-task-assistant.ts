@@ -94,6 +94,7 @@ export type TaskIntent =
       >;
     }
   | { kind: "overview" }
+  | { kind: "align-now" }
   | { kind: "help" }
   /** 项目进展：多源汇总某项目（飞书/任务清单/Gitea/运维日志/timem）——走 @orchestration/project-briefing */
   | { kind: "project-status"; project?: string }
@@ -232,6 +233,11 @@ export function parseTaskIntent(input: string): TaskIntent {
   // ── 协调：项目概览 ──
   if (/^(?:项目概览|项目状态|整体概览|概览)$/.test(text)) {
     return { kind: "overview" };
+  }
+
+  // ── 协调：手动对齐（2026-10-10）——不等整点立刻跑对齐器+状态队列一拍 ──
+  if (/^(?:立即对齐|手动对齐|马上对齐|对齐一下|同步一下)$/.test(text)) {
+    return { kind: "align-now" };
   }
 
   // ── Gitea 工单（先剥离 @仓库 片段再匹配触发词） ──
@@ -474,6 +480,7 @@ const HELP_TEXT = `我是「项目小助理」，负责协调你的飞书任务�
 • 评论工单 [@仓库] <#编号> <内容>
 
 📊 项目概览 —— 飞书待办 + 进行中工单一屏汇总
+🔄 立即对齐 —— 不等整点，立刻跑一轮任务台账对齐 + 状态队列扫描
 📈 项目进展 [名称] —— 项目横跨飞书/任务清单/Gitea/运维日志的进展
 
 💬 反馈：<想说的> —— 记进你的长期记忆，作为以后安排任务的参考

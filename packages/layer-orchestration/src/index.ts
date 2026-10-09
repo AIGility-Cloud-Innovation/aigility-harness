@@ -65,6 +65,7 @@ export {
   runDispatchScan,
   stopDispatchScan,
   setDispatchNotifySend,
+  setManualAlignHook,
   feishuApiRef,
 } from "./task-issue-sync.js";
 export type {

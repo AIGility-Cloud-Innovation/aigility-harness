@@ -121,7 +121,9 @@ export type TaskIntent =
       >;
     }
   | { kind: "overview" }
-  | { kind: "help" };
+  | { kind: "help" }
+  /** 手动对齐：「立即对齐」——不等整点，立刻跑一轮对齐器+状态队列（编排层钩子由 loop 装配） */
+  | { kind: "align-now" };
 
 // ── 请求/响应 ────────────────────────────────────────────────────
 
@@ -1154,6 +1156,22 @@ export async function closeIssueForCompletedTask(
 let dispatchNotifySend: ((chatId: string, text: string) => Promise<string | void>) | undefined;
 export function setDispatchNotifySend(fn: ((chatId: string, text: string) => Promise<string | void>) | undefined): void {
   dispatchNotifySend = fn;
+}
+
+/** 手动对齐钩子（装配层 set；loop 把 aligner.runOnce+状态队列一拍接进来） */
+let manualAlignHook: (() => Promise<string>) | undefined;
+export function setManualAlignHook(fn: (() => Promise<string>) | undefined): void {
+  manualAlignHook = fn;
+}
+
+/** 执行手动对齐：钩子未装配（编排层单测/独立运行）返回说明文本 */
+async function runManualAlign(): Promise<string> {
+  if (!manualAlignHook) return "对齐调度器未装配（运行时由小助理进程注入），请稍后再试。";
+  try {
+    return await manualAlignHook();
+  } catch (e) {
+    return `❌ 手动对齐失败：${String((e as Error)?.message ?? e)}`;
+  }
 }
 
 async function dispatchNotify(chatId: string | undefined, text: string): Promise<void> {
@@ -2262,6 +2280,9 @@ const taskIssueSyncProvider: Provider<TaskIssueSyncRequest, TaskIssueSyncRespons
       response = "（帮助文本由 persona 层提供）";
     } else if (intent.kind === "overview") {
       response = await buildOverview(ctx);
+    } else if (intent.kind === "align-now") {
+      // 手动对齐（2026-10-10）：钩子由 loop 装配（对齐器一拍+状态队列一拍），编排层不持有调度器
+      response = await runManualAlign();
     } else if (intent.kind === "dispatch-confirm") {
       response = await handleDispatchConfirm(ctx, intent.ref);
     } else if (intent.kind === "dispatch-cancel") {

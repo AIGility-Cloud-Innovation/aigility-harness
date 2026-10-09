@@ -53,6 +53,7 @@ import {
   parseChatRepoMap,
   setNotifySend,
   setDispatchNotifySend,
+  setManualAlignHook,
   taskIssueSyncProvider,
   taskPipelineProvider,
   projectBriefingProvider,
@@ -360,6 +361,32 @@ async function main(): Promise<void> {
   await scanTick();
   scanTimer = setInterval(() => void scanTick(), intervalMs);
   console.log(`   状态队列: P 加工（去重+目标核对）→ D 派发（15min 闸门）→ 终态回写 (interval=${intervalMs}ms, tasklists=${tasklistNames.join(",")})`);
+
+  // 手动对齐钩子（「立即对齐」指令）：不等整点，立刻跑 对齐器一拍 + 状态队列一拍，回执给发起人。
+  // 简单互斥防重入（对齐器与 scanTick 均为顺序执行，串行化即可）；TASK_STATE_SCAN=0 时只跑对齐器。
+  const manualAlign = async (): Promise<string> => {
+    const rep = await aligner.runOnce();
+    const parts: string[] = [
+      `✅ 对齐完成：收集飞书 ${rep.collected.byProvider["feishu-task"]?.scanned ?? 0}/工单 ${rep.collected.byProvider["gitea-issue"]?.scanned ?? 0}，合并 ${rep.merged.length}，冲突 ${rep.conflicts.length}，独占异常 ${rep.exclusivity.length}`,
+    ];
+    let scanOut = "";
+    if (!["0", "false", "off"].includes((process.env["TASK_STATE_SCAN"] ?? "").toLowerCase())) {
+      try {
+        const r = await taskIssueSyncProvider.execute(
+          { mode: "scan", tasklistNames, notifyChatId: notifyChatId || undefined },
+          ctx,
+        );
+        scanOut = r.ok ? (r.value?.response ?? "") : `⚠️ 状态队列扫描失败：${r.error}`;
+      } catch (e) {
+        scanOut = `⚠️ 状态队列扫描异常：${String((e as Error)?.message ?? e)}`;
+      }
+    }
+    if (scanOut && scanOut !== "（本轮无待处理任务）") parts.push(scanOut);
+    else if (!scanOut) parts.push("状态队列：已停用（TASK_STATE_SCAN=0）");
+    return parts.join("\n");
+  };
+  setManualAlignHook(manualAlign);
+  console.log("   手动对齐: 聊天发「立即对齐」随时触发（对齐器一拍 + 状态队列一拍）");
   }
 
   // 6. 记忆沉淀（timem）：每日定时快照 + 事件补充（建单/工单关闭等显著变化防抖写入）
