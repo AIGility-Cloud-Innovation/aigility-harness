@@ -15,11 +15,12 @@
  */
 import { collectIntoRegistry } from "./task-collector.js";
 import type { CollectRunStats } from "./task-collector.js";
+import { AGENTD_TASK_PROVIDER_ID } from "./agentd-task-provider.js";
 import type { TaskProvider } from "@aigility-harness/core";
 import type { TaskRegistry } from "./task-registry.js";
 
-/** 默认对齐节拍：10 分钟（与 task-pipeline/dispatch-scan 同节奏） */
-export const DEFAULT_ALIGN_INTERVAL_MS = 600_000;
+/** 默认对齐节拍：1 小时（2026-10-10 拍板；对齐=确定性巡检，不烧 LLM，低频即可） */
+export const DEFAULT_ALIGN_INTERVAL_MS = 3_600_000;
 
 /** 标题内嵌双建标记 → 工单 guid（org/repo#N）；与 issueNumberFromTaskSummary 同词汇 */
 export function issueGuidFromTitle(title: string | undefined): string | undefined {
@@ -61,15 +62,19 @@ export async function alignOnce(registry: TaskRegistry, providers: TaskProvider[
   }
 
   // ③ 冲突与执行独占巡检
+  // 独占异常只对「执行侧句柄存在」的记录判定（agentd-task claim 时写入 assigned）。
+  // 看板镜像态（飞书 D 组 → dispatched 投影、agentd 尚未领取）是常态，不报——
+  // 2026-10-10 修正：此前对无执行侧句柄的 dispatched 记录误报「无独占声明」。
   const conflicts = registry.invariantViolations();
   const exclusivity: AlignReport["exclusivity"] = [];
   for (const r of registry.list()) {
-    if (r.status === "dispatched" || r.status === "running") {
-      if (!r.assigned) {
-        exclusivity.push({ uid: r.uid, issue: `激活态（${r.status}）但无独占声明（历史数据或越权写入）` });
-      } else if (!(r.assigned.provider in r.links)) {
-        exclusivity.push({ uid: r.uid, issue: `独占 ${r.assigned.provider} 但 links 缺该 provider 句柄` });
-      }
+    if (r.status !== "dispatched" && r.status !== "running") continue;
+    const executorLinked = AGENTD_TASK_PROVIDER_ID in r.links || r.origin.provider === AGENTD_TASK_PROVIDER_ID;
+    if (!executorLinked) continue;
+    if (!r.assigned) {
+      exclusivity.push({ uid: r.uid, issue: `激活态（${r.status}）但无独占声明（历史数据或越权写入）` });
+    } else if (!(r.assigned.provider in r.links)) {
+      exclusivity.push({ uid: r.uid, issue: `独占 ${r.assigned.provider} 但 links 缺该 provider 句柄` });
     }
   }
 

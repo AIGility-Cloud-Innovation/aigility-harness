@@ -60,6 +60,15 @@ describe("alignOnce 定期对齐", () => {
     expect(report.exclusivity[0].uid).toBe(r.uid);
   });
 
+  it("看板镜像态（飞书 D 组投影、无执行侧句柄）不报独占异常", async () => {
+    const registry = new TaskRegistry();
+    const r = registry.adopt({ title: "飞书先行任务", origin: { provider: "feishu-task", guid: "f-mirror" } });
+    registry.transition(r.uid, "dispatched"); // 收集器投影，agentd 未领取
+
+    const report = await alignOnce(registry, []);
+    expect(report.exclusivity).toHaveLength(0);
+  });
+
   it("collect 统计随对齐一并返回", async () => {
     const registry = new TaskRegistry();
     const report = await alignOnce(registry, [
