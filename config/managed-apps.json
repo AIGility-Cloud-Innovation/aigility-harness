@@ -1,0 +1,13 @@
+{
+  "apps": [
+    {
+      "name": "feishu-task-loop",
+      "cwd": "examples/feishu-task-loop",
+      "command": "./node_modules/.bin/tsx",
+      "args": ["src/index.ts"],
+      "log": "examples/feishu-task-loop/task-loop.log",
+      "lockFile": "/tmp/aigility-feishu-task-loop.lock",
+      "enabled": true
+    }
+  ]
+}

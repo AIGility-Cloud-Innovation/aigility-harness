@@ -74,6 +74,7 @@ import {
   teamMemoryLogs, teamMemoryConfigView, listTeamMemoryChats, startTeamMemoryScheduler,
   type TeamMemoryJobKind,
 } from "./team-memory-manager.js";
+import { startManagedApps } from "./managed-apps.js";
 import {
   fetchLogMonitorStatus, saveLogMonitorConfig, logMonitorLogs,
   startLogMonitor, stopLogMonitor, restartLogMonitor,
@@ -2111,6 +2112,9 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 
   // 团队记忆总结调度器（进程内；是否到点触发由配置 enabled 决定）
   startTeamMemoryScheduler();
+
+  // 托管应用自动拉起（config/managed-apps.json；锁文件幂等，平台重启不重复拉起）
+  startManagedApps();
 
   console.log(`\nAigility 智悦智能平台已就绪:`);
   console.log(`  平台前端:     http://127.0.0.1:${WEB_PORT}/  （登录 → 市场真 persona + 工厂真发布 + 对话同源会话代理）`);
