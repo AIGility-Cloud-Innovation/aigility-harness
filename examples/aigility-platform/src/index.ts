@@ -60,6 +60,7 @@ import { workspaceRoots, browseWorkspace, resolveWorkspace } from "./workspace.j
 import { aigilityAgentPlugin } from "./aigility-agent.js";
 import { siteImproverPlugin, SITE_IMPROVER_PERSONA_ID, SITE_IMPROVER_ROUTE, setTaskFiledHook } from "./site-improver.js";
 import { dshToolBridgePlugin } from "./dsh-tool.js";
+import { fdeLedgerPlugin } from "./fde-ledger.js";
 import { listSkills, visibleSkills, getSkill, upsertSkill, removeSkill, persistOwner, setSkillVisibility, usageSnapshot, type AigilitySkill, type AigilitySkillInput } from "./skill-registry.js";
 import { getMarketConfig, setMarketDataMode, type MarketDataMode } from "./market-config.js";
 import { loadRoles, upsertRole, removeRole, setRoute, checkSkillPaths, listDshSkills, createDshSkill, attachSkillToRole, listMcpShelf, type RoleCapabilityConfig, type RoleMcpServer } from "./role-registry.js";
@@ -270,6 +271,9 @@ async function main(): Promise<void> {
     aigilityAgentPlugin,
     siteImproverPlugin,
     dshToolBridgePlugin,
+    // fde-ledger：FDE 生意台账域包（fde-workbench 核心资产插入智悦，共库直读 + 方案 DOCX；
+    // 自 feat/fde-into-aigility 摘取回归，仅域包 + API + 前端页，不含壳方向裁剪）
+    fdeLedgerPlugin,
   ];
   console.log("装配插件:");
   for (const p of plugins) {
@@ -1792,6 +1796,27 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
           }
           const r = await seamCall("@action/doc-worker", body);
           json(res, 200, r.ok ? (r.value as object) : { ok: false, error: String(r.error ?? "生成失败") });
+        } catch (err) {
+          json(res, 400, { ok: false, error: String(err) });
+        }
+        return;
+      }
+      if (path === "/api/aigility/fde/ledger" && req.method === "GET") {
+        // FDE 生意台账（真，@action/fde-ledger 域包）：共库直读 fde-workbench 台账总览
+        const r = await seamCall("@action/fde-ledger", { action: "summary" });
+        json(res, 200, r.ok ? r.value : { ok: false, error: String(r.error ?? "fde-ledger 调用失败") });
+        return;
+      }
+      if (path === "/api/aigility/fde/proposal-doc" && req.method === "POST") {
+        // FDE 方案 DOCX 导出（真）：@action/fde-ledger 组块 → D3 @action/doc-worker
+        try {
+          const body = JSON.parse((await readBody(req)) || "{}") as { proposalId?: string };
+          if (!body.proposalId?.trim()) {
+            json(res, 400, { ok: false, error: "proposalId 必填" });
+            return;
+          }
+          const r = await seamCall("@action/fde-ledger", { action: "proposal-doc", proposalId: body.proposalId.trim() });
+          json(res, 200, r.ok ? (r.value as object) : { ok: false, error: String(r.error ?? "fde-ledger 调用失败") });
         } catch (err) {
           json(res, 400, { ok: false, error: String(err) });
         }

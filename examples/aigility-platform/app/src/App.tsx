@@ -22,6 +22,7 @@ import TeamMemoryPage from './pages/TeamMemoryPage'
 import OrchestrationPage from './pages/OrchestrationPage'
 import IdentityPage from './pages/IdentityPage'
 import LogMonitorPage from './pages/LogMonitorPage'
+import FdeLedgerApp from './pages/FdeLedgerApp'
 import FloatingImprover from './components/FloatingImprover'
 import LoginGate from './components/LoginGate'
 import { apiMe, apiLogout, getToken, clearToken, type PlatformUser } from './lib/api'
@@ -257,6 +258,7 @@ export default function App() {
       case 'modules': return <ModulePage enabled={enabledModules} toggle={toggleModule} applyFullState={applyFullState} navHidden={navHidden} onToggleNav={toggleNavIfAllowed} navEditable={navEditable} />
       case 'auth': return <AuthPage viewerIsAdmin={navEditable} />
       case 'settings': return <SettingsPage branding={branding} setBranding={setBranding} tenantId={tenantId} />
+      case 'fde': return <FdeLedgerApp back={() => setPage('apps')} />
       default: return <Dashboard go={setPage} branding={branding} />
     }
   }

@@ -134,6 +134,7 @@ export default function AppCenterPage({ openPage, navHidden, onToggleNav, navEdi
                 <button disabled={!isTl && !isNavApp && !a.on} onClick={() => {
                   if (isTl) openPage?.('tasks')  // 项目小助理看板已并入统一台账看板（task-board 路由 = 'tasks'）
                   else if (isNavApp) openPage?.(navPage)
+                  else if (a.id === 'app-fde-ledger') openPage?.('fde')  // FDE 台账应用包：站内页（S3 inline）
                   else if (a.detail || a.id === 'app-report') setOpen(a)
                 }}
                   className={`flex-1 text-xs py-1.5 rounded-lg transition ${(!isTl && !isNavApp && !a.on) ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>打开</button>

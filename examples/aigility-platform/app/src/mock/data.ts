@@ -634,6 +634,8 @@ export const centerApps: CenterApp[] = [
   // 团队记忆总结 / 日志监察员：默认只出现在应用中心，不占左侧导航位；卡片开关 = 是否固定到导航（用户自决）
   { id: 'app-team-memory', name: '团队记忆总结', cat: '办公效率', desc: 'TiMEM 团队记忆日报 / 晨报：调度配置、凭证管理、一键生成与运行日志，按时推送飞书群', users: 0, updated: '10-10', status: '已上线', on: false, detail: true },
   { id: 'app-log-monitor', name: '日志监察员', cat: '流程辅助', desc: '定时拉取目标日志匹配错误关键字并飞书告警：巡检自动化、Webhook、启停运维与运行日志', users: 0, updated: '10-10', status: '已上线', on: false, detail: true },
+  // FDE 台账应用包：fde-workbench 核心资产收编（自 feat/fde-into-aigility 摘取回归）；点击「打开」进站内页
+  { id: 'app-fde-ledger', name: 'FDE 台账', cat: '办公效率', desc: 'fde-workbench 应用包：线索→方案→合同→交付→续费全流程台账 + 数字员工问答 + 方案 DOCX 导出', users: 0, updated: '09-29', status: '已上线', on: true, detail: true },
 ]
 
 export const meetingDetail = {

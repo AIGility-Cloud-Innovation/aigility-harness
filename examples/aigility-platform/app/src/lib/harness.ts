@@ -1591,3 +1591,73 @@ export interface PromoteResult {
 export async function promoteRolePackage(id: string): Promise<PromoteResult> {
   return authJsonFetch<PromoteResult>(`/api/aigility/role-packages/${encodeURIComponent(id)}/promote`, { method: 'POST' })
 }
+// ── FDE 生意台账（真 · @action/fde-ledger 域包：共库直读 + 方案 DOCX）──
+
+export interface FdeLeadLite {
+  id: string; name: string; industry: string; scale: string
+  stage: string; owner: string; lastTouchAt: string
+}
+export interface FdeProposalLite {
+  id: string; leadId: string; title: string; createdAt: string
+  status: string; version: number; total: number
+}
+export interface FdeContractLite {
+  id: string; code: string; customer: string; amount: number
+  status: string; signDate?: string
+}
+export interface FdeRenewalLite {
+  id: string; customer: string; item: string; dueDate: string
+  amount: number; status: string
+}
+export interface FdeLedgerSummary {
+  ok: boolean
+  error?: string
+  source: string
+  updatedAt?: string
+  seeded: boolean
+  fdeWorkbenchUrl: string
+  counts: Record<string, number>
+  leadsByStage: Record<string, number>
+  contractAmount: { total: number; byStatus: Record<string, number> }
+  renewalsDue: { count: number; amount: number }
+  leads: FdeLeadLite[]
+  proposals: FdeProposalLite[]
+  contracts: FdeContractLite[]
+  renewals: FdeRenewalLite[]
+  deliveries: Array<{ id: string; customer: string; name: string; status: string }>
+  deployments: Array<{ id: string; customer: string; site: string; status: string }>
+  knowledge: Array<{ id: string; title: string; status: string; date: string }>
+}
+
+/** FDE 台账总览（fde-workbench 共库数据, 不要求 fde 站点在跑） */
+export async function fetchFdeLedger(): Promise<FdeLedgerSummary> {
+  const j = await authJsonFetch<FdeLedgerSummary>('/api/aigility/fde/ledger')
+  return j
+}
+
+/** base64 docx → 触发浏览器下载（generateDoc 同款落盘方式） */
+function downloadBase64Docx(filename: string, base64: string): number {
+  const bin = atob(base64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 3000)
+  return blob.size
+}
+
+/** 导出 FDE 方案 DOCX（服务端组块 → @action/doc-worker 渲染） */
+export async function exportFdeProposalDoc(proposalId: string): Promise<{ filename: string; bytes: number }> {
+  const j = await authJsonFetch<{ ok?: boolean; filename?: string; base64?: string; bytes?: number; error?: string }>(
+    '/api/aigility/fde/proposal-doc',
+    { method: 'POST', body: JSON.stringify({ proposalId }) },
+  )
+  if (!j.ok || !j.base64 || !j.filename) throw new Error(j.error ?? 'doc-worker 返回为空')
+  return { filename: j.filename, bytes: downloadBase64Docx(j.filename, j.base64) }
+}
