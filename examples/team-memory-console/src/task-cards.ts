@@ -207,6 +207,57 @@ export function loadProjectNames(): Map<string, string> {
   return map;
 }
 
+/** 项目阶段目标（config/project-registry.json 的 stage_goal，可选；缺省省略该行） */
+export function loadProjectGoals(): Map<string, string> {
+  const reg = readJson<{ projects?: Array<{ name?: string; stage_goal?: string; gitea_repos?: string[] }> }>(
+    join(ROOT, "config/project-registry.json"),
+    {},
+  );
+  const map = new Map<string, string>();
+  for (const p of reg.projects ?? []) {
+    const goal = (p.stage_goal ?? "").trim();
+    if (!goal) continue;
+    if (p.name) map.set(p.name, goal);
+    for (const repo of p.gitea_repos ?? []) map.set(repo, goal);
+  }
+  return map;
+}
+
+const RISK_STALE_DAYS = 7;
+const RISK_OVERLOAD_TASKS = 6;
+
+/** 人员块的工作风险（确定性推导，按项目归组，不编造）：
+ *  ① 受阻/失败任务 ② doing 放置超过 7 天 ③ 并行任务过多 */
+export function memberRiskSummary(
+  tks: RegTask[],
+  projectNames: Map<string, string>,
+  now = Date.now(),
+): string | null {
+  if (!tks.length) return null;
+  const parts: string[] = [];
+  const blocked = tks.filter((t) => t.status === "failed" || t.status === "blocked");
+  if (blocked.length) {
+    const head = blocked.slice(0, 2).map((t) => t.title.replace(/^\[[^\]]+\]\s*/, "").replace(/^【[^】]+】/, "").slice(0, 20));
+    parts.push(`受阻/失败 ${blocked.length} 项（${head.join("、")}）`);
+  }
+  const staleByProject = new Map<string, number>();
+  let staleMax = 0;
+  for (const t of tks) {
+    if (!["dispatched", "running", "review"].includes(t.status)) continue;
+    const ts = (t as RegTask & { updatedAt?: number; createdAt?: number }).updatedAt
+      ?? (t as RegTask & { createdAt?: number }).createdAt;
+    if (!ts) continue;
+    const days = Math.floor((now - ts) / 86_400_000);
+    if (days < RISK_STALE_DAYS) continue;
+    const key = projectNames.get(t.projectRef ?? "") ?? t.projectRef ?? "（未定仓库）";
+    staleByProject.set(key, (staleByProject.get(key) ?? 0) + 1);
+    staleMax = Math.max(staleMax, days);
+  }
+  for (const [proj, n] of staleByProject) parts.push(`${proj} ${n} 项 ${staleMax} 天未动`);
+  if (tks.length >= RISK_OVERLOAD_TASKS) parts.push(`并行任务 ${tks.length} 项`);
+  return parts.length ? parts.join("；").slice(0, 90) : null;
+}
+
 const COMPACT_BUCKET: Record<string, "done" | "doing" | "todo"> = {
   done: "done", dispatched: "doing", running: "doing", review: "doing",
   planned: "todo", ready: "todo", failed: "todo", blocked: "todo",
@@ -244,9 +295,10 @@ export function renderCompactDaily(
 ): string {
   const members = loadMembers();
   const projectNames = loadProjectNames();
+  const projectGoals = loadProjectGoals();
 
   // ── 按项目 ──（分组键 = 项目显示名：同一项目的多个仓库合并为一节）
-  const lines: string[] = [`📋 工作日报 · ${date}`, ""];
+  const lines: string[] = [`📋 工作日报 · ${date}（总结已完成的）`, ""];
   lines.push("按项目");
   const byProject = new Map<string, RegTask[]>();
   for (const t of tasks) {
@@ -258,24 +310,28 @@ export function renderCompactDaily(
     const buckets: Record<"done" | "doing" | "todo", RegTask[]> = { done: [], doing: [], todo: [] };
     for (const t of ts) (buckets[COMPACT_BUCKET[t.status] ?? "todo"]).push(t);
     lines.push(`- ${projectNames.get(repo) ?? repo}：`);
+    const goal = projectGoals.get(repo);
+    if (goal) lines.push(`  - 阶段目标：${goal}`);
     lines.push(`  - done：${compactSummarize(buckets.done)}`);
     lines.push(`  - doing：${compactSummarize(buckets.doing)}`);
     lines.push(`  - todo：${compactSummarize(buckets.todo)}`);
   }
 
-  // ── 按人 ──
+  // ── 按人（含按项目归组的工作风险，确定性推导不编造）──
   lines.push("", "按人");
   let personCount = 0;
   for (const m of members) {
     const tks = tasks.filter((t) => memberOfTask(t, [m]));
     const mem = memoriesByMember.find((x) => x.memberName === m.name);
-    if (!tks.length && !(mem && mem.count)) continue;
+    const risk = memberRiskSummary(tks, projectNames);
+    if (!tks.length && !(mem && mem.count) && !risk) continue;
     const done = tks.filter((t) => t.status === "done");
     const doing = tks.filter((t) => ["dispatched", "running", "review"].includes(t.status));
     const todo = tks.filter((t) => !["done", "dispatched", "running", "review"].includes(t.status));
     lines.push(`- ${displayName(m)}：`);
     if (tks.length) lines.push(`  - 任务：${compactSummarize(tks)}（done ${done.length} / doing ${doing.length} / todo ${todo.length}）`);
     if (mem && mem.count) lines.push(`  - 记忆：今日 ${mem.count} 条${mem.sample ? `（${mem.sample}）` : ""}`);
+    if (risk) lines.push(`  - 工作风险：${risk}`);
     personCount += 1;
   }
   if (personCount === 0) lines.push("（今日无人员动态）");
@@ -301,9 +357,10 @@ export function renderCompactMorning(
 ): string {
   const members = loadMembers();
   const projectNames = loadProjectNames();
+  const projectGoals = loadProjectGoals();
 
-  const lines: string[] = [`🌅 工作晨报 · ${date}`, ""];
-  // ── 按项目：今日待办 ──
+  const lines: string[] = [`🌅 工作晨报 · ${date}（计划 · 尚未完成，以今日待办与计划为准）`, ""];
+  // ── 按项目：今日待办（附阶段目标）──
   lines.push("按项目 · 今日待办");
   const todoOf = new Map<string, RegTask[]>();
   for (const t of tasks) {
@@ -314,23 +371,28 @@ export function renderCompactMorning(
   }
   for (const [name, ts] of [...todoOf.entries()].sort((a, b) => b[1].length - a[1].length)) {
     lines.push(`- ${name}：${compactSummarize(ts)}`);
+    const goal = projectGoals.get(name);
+    if (goal) lines.push(`  - 阶段目标：${goal}`);
   }
   if (!todoOf.size) lines.push("（各项目暂无待办）");
 
-  // ── 按人：今日待办 + 近 3 天计划线索 ──
+  // ── 按人：今日待办 + 近 3 天计划线索 + 按项目工作风险 ──
   lines.push("", "按人 · 今日待办");
   let personCount = 0;
   for (const m of members) {
-    const todo = tasks.filter((t) => memberOfTask(t, [m]) && COMPACT_BUCKET[t.status] === "todo");
+    const tks = tasks.filter((t) => memberOfTask(t, [m]));
+    const todo = tks.filter((t) => COMPACT_BUCKET[t.status] === "todo");
     const plan = planMemoriesByMember.find((x) => x.memberName === m.name);
-    if (!todo.length && !(plan && plan.count)) continue;
+    const risk = memberRiskSummary(tks, projectNames);
+    if (!todo.length && !(plan && plan.count) && !risk) continue;
     lines.push(`- ${displayName(m)}：`);
     if (todo.length) lines.push(`  - 待办：${compactSummarize(todo)}`);
     if (plan && plan.count) lines.push(`  - 计划线索：近 3 天 ${plan.count} 条${plan.sample ? `（${plan.sample}）` : ""}`);
+    if (risk) lines.push(`  - 工作风险：${risk}`);
     personCount += 1;
   }
   if (!personCount) lines.push("（暂无人员待办）");
-  lines.push("", "—— 项目小助理 · 数据源：任务台账 + 太忆空间计划记忆");
+  lines.push("", "—— 项目小助理 · 数据源：任务台账 + 太忆空间计划记忆（计划性内容，完成情况见当日日报）");
   return lines.join("\n");
 }
 
@@ -389,11 +451,14 @@ export function renderDailyBriefing(
     byProject.set(key, [...(byProject.get(key) ?? []), t]);
   }
   lines.push("【按项目】");
+  const projectGoals = loadProjectGoals();
   for (const [name, ts] of [...byProject.entries()].sort((a, b) => b[1].length - a[1].length)) {
     const bucket = (b: "done" | "doing" | "todo") => ts.filter((t) => COMPACT_BUCKET[t.status] === b);
     const members = loadMembers();
     const done = bucket("done"), doing = bucket("doing"), todo = bucket("todo");
     lines.push(`- ${name}：`);
+    const goal = projectGoals.get(name);
+    if (goal) lines.push(`  阶段目标：${goal}`);
     if (done.length) lines.push(`  完成：${done.slice(0, 8).map((t) => briefingTaskLine(t, members)).join("；")}`);
     if (doing.length) lines.push(`  进行中：${doing.slice(0, 8).map((t) => briefingTaskLine(t, members)).join("；")}`);
     if (todo.length) lines.push(`  待办：${todo.slice(0, 8).map((t) => briefingTaskLine(t, members)).join("；")}`);
@@ -408,6 +473,14 @@ export function renderDailyBriefing(
     tasks, memoriesByMember,
     (h) => (h.count ? (h.samples ?? [h.sample]).filter(Boolean).slice(0, 2).join(" / ") : null),
   ));
+  // 工作风险（确定性推导，按项目归组，供 LLM 在对应人/项目行尾点出）
+  const projectNamesForRisk = loadProjectNames();
+  const riskLines: string[] = [];
+  for (const m of loadMembers()) {
+    const risk = memberRiskSummary(tasks.filter((t) => memberOfTask(t, [m])), projectNamesForRisk);
+    if (risk) riskLines.push(`- ${displayName(m)}：${risk}`);
+  }
+  if (riskLines.length) lines.push("", "【工作风险】（按项目归组，来自台账状态推导）", ...riskLines);
   lines.push("", "【人名对照】（＝左右是同一人，输出必须合并为一行，姓名统一用＝左边）", ...nameRoster(loadMembers()));
   return lines.join("\n");
 }
@@ -426,15 +499,26 @@ export function renderMorningBriefing(
     todoOf.set(key, [...(todoOf.get(key) ?? []), t]);
   }
   lines.push("【按项目】");
+  const projectGoals = loadProjectGoals();
   for (const [name, ts] of [...todoOf.entries()].sort((a, b) => b[1].length - a[1].length)) {
     const members = loadMembers();
     lines.push(`- ${name}：${ts.slice(0, 8).map((t) => briefingTaskLine(t, members)).join("；")}`);
+    const goal = projectGoals.get(name);
+    if (goal) lines.push(`  阶段目标：${goal}`);
   }
   if (!todoOf.size) lines.push("（各项目暂无待办）");
   lines.push("", "【按人】", ...briefingPeopleSection(
     tasks, planMemoriesByMember,
     (h) => (h.count ? (h.samples ?? [h.sample]).filter(Boolean).slice(0, 3).join(" / ") : null),
   ));
+  // 工作风险（确定性推导，供 LLM 在按人行尾带出）
+  const membersAll = loadMembers();
+  const riskLines: string[] = [];
+  for (const m of membersAll) {
+    const risk = memberRiskSummary(tasks.filter((t) => memberOfTask(t, [m])), loadProjectNames());
+    if (risk) riskLines.push(`- ${displayName(m)}：${risk}`);
+  }
+  if (riskLines.length) lines.push("", "【工作风险】（按项目归组，来自台账状态推导）", ...riskLines);
   lines.push("", "【人名对照】（＝左右是同一人，输出必须合并为一行，姓名统一用＝左边）", ...nameRoster(loadMembers()));
   return lines.join("\n");
 }

@@ -14,36 +14,63 @@
     {
       "project_id": "nx-telecom",
       "name": "NX 电信 OPC 平台",
-      "aliases": ["nx", "nx-telecom", "电信平台", "视频平台"],
+      "aliases": [
+        "nx",
+        "nx-telecom",
+        "电信平台",
+        "视频平台"
+      ],
       "gitea_repos": [
         "AIGility-Cloud-Innovation/nx-telecom-opc-platform",
         "AIGility-Cloud-Innovation/nx-telecom-video-platform"
       ],
-      "feishu_chat_ids": ["oc_83f3a273653e42eb44633b28f8db1391"],
-      "log_sources": []
+      "feishu_chat_ids": [
+        "oc_83f3a273653e42eb44633b28f8db1391"
+      ],
+      "log_sources": [],
+      "stage_goal": "10月：OPC 平台联调验收收尾，视频平台集成演示可运行"
     },
     {
       "project_id": "timem-platform",
       "name": "TiMEM 平台",
-      "aliases": ["timem", "太忆", "太忆平台"],
+      "aliases": [
+        "timem",
+        "太忆",
+        "太忆平台"
+      ],
       "gitea_repos": [
         "TiMEM-AI/timem-platform-backend",
         "TiMEM-AI/timem_frontend",
         "TiMEM-AI/timem_console_frontend",
         "TiMEM-AI/TiMEM-Space"
       ],
-      "feishu_chat_ids": ["oc_50ad2634989246067471f7251b9853a8"],
+      "feishu_chat_ids": [
+        "oc_50ad2634989246067471f7251b9853a8"
+      ],
       "log_sources": [
-        { "host": "http://140.143.155.105:19434", "p": "timem-space_main", "s": "app" }
-      ]
+        {
+          "host": "http://140.143.155.105:19434",
+          "p": "timem-space_main",
+          "s": "app"
+        }
+      ],
+      "stage_goal": "10月：Space/控制台发版节奏稳定，agentd 闭环与计费口径打通"
     },
     {
       "project_id": "timem-ai-org",
       "name": "TiMEM-AI 组织全景",
-      "aliases": ["组织全景", "全部项目"],
-      "gitea_orgs": ["TiMEM-AI"],
-      "feishu_chat_ids": ["oc_4cb8ba33aa96ae5c40a24267c0188cf1"],
-      "log_sources": []
+      "aliases": [
+        "组织全景",
+        "全部项目"
+      ],
+      "gitea_orgs": [
+        "TiMEM-AI"
+      ],
+      "feishu_chat_ids": [
+        "oc_4cb8ba33aa96ae5c40a24267c0188cf1"
+      ],
+      "log_sources": [],
+      "stage_goal": "10月：组织仓库盘点与文档归位（全景索引，不直接产出代码）"
     }
   ]
 }
