@@ -33,6 +33,12 @@ workflow:
       description: 按来源群分桶调 LLM 判定疑似任务（跨群绝不混判）
       output_keys: ["judged"]
 
+    memory_precipitate:
+      type: function_node
+      function_ref: memory_precipitate
+      description: 群聊动态按发言人蒸馏写入各自太忆空间（晨报按人的料；TASK_CHAT_MEMORY=0 关）
+      output_keys: []
+
     dedupe:
       type: function_node
       function_ref: dedupe_candidates
@@ -68,7 +74,8 @@ workflow:
   flow:
     edges:
       - { from: collect, to: summarize }
-      - { from: summarize, to: dedupe }
+      - { from: summarize, to: memory_precipitate }
+      - { from: memory_precipitate, to: dedupe }
       - { from: dedupe, to: create_task }
       - { from: create_task, to: create_issue }
       - { from: create_issue, to: digest }

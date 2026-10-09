@@ -49,7 +49,7 @@ import type { TaskRegistry } from "./task-registry.js";
 import type { WorkflowDoc } from "./workflow-driver.js";
 import { resolveChatName } from "./task-issue-sync.js";
 import { nodeRequest, withNodeDefaults } from "./llm-node-port.js";
-import { getIdentityRegistry, identityMembers } from "./identity-registry.js";
+import { getIdentityRegistry, findMemberByFeishuOpenId, identityMembers } from "./identity-registry.js";
 
 // ── 消费引用 ─────────────────────────────────────────────────────
 
@@ -69,6 +69,12 @@ export const giteaApiRef: CapabilityRef = {
 /** 消费同层编排域的双建同步原语（工单→飞书任务，与 persona 共用单一真相） */
 export const taskIssueSyncRef: CapabilityRef = {
   id: "@orchestration/task-issue-sync",
+  versionRange: "^1.0.0",
+};
+
+/** 群聊动态沉淀：按发言人写回各自太忆空间（@action/timem-memory-write） */
+export const timemMemoryWriteRef: CapabilityRef = {
+  id: "@action/timem-memory-write",
   versionRange: "^1.0.0",
 };
 
@@ -741,6 +747,10 @@ workflow:
       type: function_node
       function_ref: summarize_per_chat
       description: 按来源群分桶调 LLM 判定疑似任务
+    memory_precipitate:
+      type: function_node
+      function_ref: memory_precipitate
+      description: "群聊动态按发言人蒸馏写入各自太忆空间（TASK_CHAT_MEMORY=0 关）"
     dedupe:
       type: function_node
       function_ref: dedupe_candidates
@@ -764,7 +774,8 @@ workflow:
   flow:
     edges:
       - { from: collect, to: summarize }
-      - { from: summarize, to: dedupe }
+      - { from: summarize, to: memory_precipitate }
+      - { from: memory_precipitate, to: dedupe }
       - { from: dedupe, to: create_task }
       - { from: create_task, to: create_issue }
       - { from: create_issue, to: digest }
@@ -952,6 +963,55 @@ export const taskPipelineProvider: Provider<TaskPipelineRequest, TaskPipelineRes
             });
           }
           return { judged, requeue };
+        },
+
+        // 群聊动态 → 太忆空间（2026-10-09）：任务判定之外，把每个发言人
+        // 本窗口的发言蒸馏成一条记忆写回其太忆空间（timem_user_ids[0]）。
+        // 未登记飞书 open_id 的发言人跳过（写入无名空间无法归属，只会污染检索）。
+        // TASK_CHAT_MEMORY=0 可关；失败只记日志不阻断流水线。
+        memory_precipitate: async (s: PipelineState): Promise<Partial<PipelineState>> => {
+          const flag = (process.env["TASK_CHAT_MEMORY"] ?? "1").toLowerCase();
+          if (["0", "false", "off"].includes(flag)) return {};
+          const registryFile = getIdentityRegistry();
+          let written = 0;
+          let skippedUnknown = 0;
+          for (const msgs of groupByChat(s.batch).values()) {
+            // 同一发言人一个窗口一条：去重后按时间拼，限长防刷记忆
+            const bySender = new Map<string, string[]>();
+            for (const m of msgs) {
+              const t = (m.text ?? "").trim();
+              if (!t) continue;
+              const list = bySender.get(m.senderId) ?? [];
+              if (!list.includes(t)) list.push(t);
+              bySender.set(m.senderId, list);
+            }
+            const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+            for (const [senderId, texts] of bySender) {
+              if (written >= 8) break; // 单窗口每人一条还不够就砍，防异常刷屏
+              const member = findMemberByFeishuOpenId(registryFile, senderId);
+              const space = member?.timem_user_ids?.[0];
+              if (!space) {
+                skippedUnknown++;
+                continue;
+              }
+              const body = texts.join("；").slice(0, 600);
+              try {
+                const r = (await ctx.call(timemMemoryWriteRef, {
+                  content: `【群聊动态·${stamp}】${member!.name} 在飞书群聊中提到：${body}`,
+                  user_id: space,
+                  agent_id: "task-pipeline",
+                })) as { ok?: boolean; value?: { ok?: boolean; error?: string }; error?: string };
+                if (r?.ok && r.value?.ok !== false) written++;
+                else console.error(`[task-pipeline] 群聊记忆写入失败 ${member!.name}: ${r?.value?.error ?? r?.error ?? "unknown"}`);
+              } catch (e) {
+                console.error(`[task-pipeline] 群聊记忆写入异常 ${member!.name}: ${String((e as Error)?.message ?? e)}`);
+              }
+            }
+          }
+          if (written || skippedUnknown) {
+            console.log(`[task-pipeline] 群聊记忆沉淀: 写入 ${written} 条${skippedUnknown ? `（跳过未登记发言人 ${skippedUnknown} 人次）` : ""}`);
+          }
+          return {};
         },
 
         dedupe_candidates: async (s: PipelineState): Promise<Partial<PipelineState>> => {
