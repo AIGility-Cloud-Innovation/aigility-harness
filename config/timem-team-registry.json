@@ -16,28 +16,37 @@
       "member_id": "member-shahongbin",
       "name": "shahongbin",
       "aliases": [
-        "沙红彬 hongbin"
+        "沙鸿彬 hongbin"
       ],
       "timem_user_ids": [
+        "member-shahongbin",
         "space_418cd47d-0577-4819-a97f-33dfb16a160b"
       ],
-      "feishu_open_ids": [],
+      "feishu_open_ids": [
+        "ou_aeacf9ebe0f5d0f0b323af1b064df8d9"
+      ],
       "gitea_usernames": [
         "shahongbin"
       ],
       "match_source": {
         "gitea": "manual"
+      },
+      "feishu_bind_meta": {
+        "by": "group-member-api",
+        "at": "2026-10-09T11:51:06.490319Z"
       }
     },
     {
       "member_id": "member-johnny",
       "name": "johnny",
       "aliases": [
+        "吉翰云",
         "主账号",
         "老板"
       ],
       "role": "团队负责人 (监控者本人)",
       "timem_user_ids": [
+        "member-johnny",
         "space_1aa2ac52-9b07-4b87-b946-008cb40b54c4"
       ],
       "feishu_open_ids": [
@@ -59,19 +68,27 @@
       "member_id": "member-ljy",
       "name": "LJY",
       "aliases": [
+        "兰锦宇",
         "ljy",
         "lanjinyu"
       ],
       "notes": "2026-09-23 由用户确认为 LJY (原「待确认-账号3」)",
       "timem_user_ids": [
+        "member-ljy",
         "space_45931d7f-b231-4f37-be93-4d23289cf87d"
       ],
-      "feishu_open_ids": [],
+      "feishu_open_ids": [
+        "ou_8b9f5735ab7a0520f09f97e0bc0c4ec5"
+      ],
       "gitea_usernames": [
         "lanjinyu"
       ],
       "match_source": {
         "gitea": "manual"
+      },
+      "feishu_bind_meta": {
+        "by": "group-member-api",
+        "at": "2026-10-09T11:51:06.490663Z"
       }
     },
     {
@@ -81,14 +98,21 @@
         "安磊 Anlei"
       ],
       "timem_user_ids": [
+        "member-anlei",
         "space_c398da06-14bc-4299-b7c1-1b4eb920b7f5"
       ],
-      "feishu_open_ids": [],
+      "feishu_open_ids": [
+        "ou_1777915b0b5c102460c5a8906b8e8fbc"
+      ],
       "gitea_usernames": [
         "anlei"
       ],
       "match_source": {
         "gitea": "manual"
+      },
+      "feishu_bind_meta": {
+        "by": "group-member-api",
+        "at": "2026-10-09T11:51:06.490669Z"
       }
     },
     {
@@ -98,14 +122,21 @@
         "刘拓 LiuTuo"
       ],
       "timem_user_ids": [
+        "member-liutuo",
         "space_f633f568-00a8-4e69-8300-7a99f47303a2"
       ],
-      "feishu_open_ids": [],
+      "feishu_open_ids": [
+        "ou_7698fcbbb9d7feb2c6c59ecac6b7461c"
+      ],
       "gitea_usernames": [
         "liutuo"
       ],
       "match_source": {
         "gitea": "manual"
+      },
+      "feishu_bind_meta": {
+        "by": "group-member-api",
+        "at": "2026-10-09T11:51:06.490672Z"
       }
     },
     {
@@ -114,13 +145,22 @@
       "aliases": [
         "徐彬程"
       ],
-      "timem_user_ids": [],
-      "feishu_open_ids": [],
+      "timem_user_ids": [
+        "member-xubincheng",
+        "space_8d25953c-a307-441a-ba18-0a0b66f99a84"
+      ],
+      "feishu_open_ids": [
+        "ou_a7fbf870dc5f8f6004f21ee3ef8fed1a"
+      ],
       "gitea_usernames": [
         "xubincheng"
       ],
       "match_source": {
         "gitea": "manual"
+      },
+      "feishu_bind_meta": {
+        "by": "group-member-api",
+        "at": "2026-10-09T11:51:06.490675Z"
       }
     },
     {
@@ -130,7 +170,9 @@
         "AI测试员",
         "小助理测试"
       ],
-      "timem_user_ids": [],
+      "timem_user_ids": [
+        "member-task-assistant"
+      ],
       "feishu_open_ids": [],
       "gitea_usernames": [],
       "wecom_user_ids": [],
@@ -144,8 +186,12 @@
         "lucio",
         "liuxiao"
       ],
-      "timem_user_ids": [],
-      "feishu_open_ids": [],
+      "timem_user_ids": [
+        "member-liuxiao"
+      ],
+      "feishu_open_ids": [
+        "ou_2fbf948ba886e3c0ca27b00a954b83b2"
+      ],
       "gitea_usernames": [
         "liuxiao"
       ],
@@ -155,7 +201,11 @@
         "gitea": "manual"
       },
       "role": "",
-      "notes": "2026-10-05 由负责人登记（执行人 lucio/liuxiao = 刘晓）"
+      "notes": "2026-10-05 由负责人登记（执行人 lucio/liuxiao = 刘晓）",
+      "feishu_bind_meta": {
+        "by": "group-member-api",
+        "at": "2026-10-09T11:51:06.490678Z"
+      }
     }
   ]
 }
