@@ -764,6 +764,14 @@ export function issueNumberFromTaskSummary(summary: string | undefined): number 
   return m ? Number(m[3]) : undefined;
 }
 
+/** 双建任务标题 [org/repo#N] → { repo, issueNo }（解析不出返回 undefined） */
+export function taskIssueRefFromSummary(
+  summary: string | undefined,
+): { repo: string; issueNo: number } | undefined {
+  const m = (summary ?? "").match(/\[([^\]#/]+)\/([^\]#]+)#(\d+)\]/);
+  return m ? { repo: `${m[1]}/${m[2]}`, issueNo: Number(m[3]) } : undefined;
+}
+
 /** 飞书先行任务标题 [org/repo] 前缀（归属已确认标记）→ 仓库 full_name（解析不出 undefined） */
 export function repoFromPlannedSummary(summary: string | undefined): string | undefined {
   const m = (summary ?? "").match(/^\[([^\]#/]+)\/([^\]#/]+)\]/);
@@ -1104,6 +1112,42 @@ export async function syncCompletionFromGitea(
     await dispatchNotify(opts.notifyChatId, msg);
   }
   return reports;
+}
+
+/**
+ * 反向闭环（2026-10-10）：任务完成 → 工单收尾。
+ * 规则（用户拍板）：工单或任务任一侧关闭 = 任务完成 = 双侧收尾。
+ *   - complete 意图关任务后调用：带 [org/repo#N] 标题 → 关工单 + 评论产出说明；
+ *   - runScanForList 对账闸门调用：扫到已完成任务其工单仍 open → 补关（幂等）。
+ * 返回回执文本；工单引用解析不出返回 undefined（纯任务，无工单侧动作）。
+ */
+export async function closeIssueForCompletedTask(
+  ctx: SeamContext,
+  summary: string | undefined,
+  opts: { reason?: string; notifyChatId?: string } = {},
+): Promise<string | undefined> {
+  const ref = taskIssueRefFromSummary(summary);
+  if (!ref) return undefined;
+  const { repo, issueNo } = ref;
+  const r = await callGiteaApi(ctx, {
+    method: "PATCH",
+    path: `${issuesBaseFor(repo)}/${issueNo}`,
+    body: { state: "closed" },
+  });
+  const patched = r.value?.data as { state?: string; number?: number } | undefined;
+  if (!r.ok || !is2xx(r.value?.status ?? 0) || (patched?.state ?? "open") !== "closed") {
+    return `⚠️ 工单 ${repo}#${issueNo} 关闭失败：${r.ok ? `HTTP ${r.value?.status}` : r.error}`;
+  }
+  const reason = opts.reason ?? "飞书任务已完成";
+  await callGiteaApi(ctx, {
+    method: "POST",
+    path: `${issuesBaseFor(repo)}/${issueNo}/comments`,
+    body: { body: `✅ ${reason}，按「任一侧关闭 = 完成」规则同步关闭本工单。` },
+  }).catch(() => undefined);
+  const msg = `🔒 「${(summary ?? "").replace(/^\[[^\]]+\]\s*/, "").slice(0, 40)}」已完成，工单 ${repo}#${issueNo} 已同步关闭。`;
+  notifyRepoActivity(repo, `任务完成，工单 #${issueNo} 同步关闭`);
+  await dispatchNotify(opts.notifyChatId, msg);
+  return msg;
 }
 
 /** 群通知注入（装配层 set；与 task-pipeline.setNotifySend 同款约定） */
@@ -2086,12 +2130,29 @@ async function handleTaskIntent(
   if (!patchR.ok || (patchR.value?.code ?? -1) !== 0) {
     return `❌ 完结任务失败：${patchR.ok ? patchR.value?.msg || `code=${patchR.value?.code}` : patchR.error}`;
   }
-  return `✅ 已完成：${target.summary?.trim()}`;
+  // 反向闭环（2026-10-10 用户拍板：任一侧关闭 = 完成 = 双侧收尾）：任务完结 → 同步关工单
+  const closure = await closeIssueForCompletedTask(ctx, target.summary, { reason: "「完成」指令完结飞书任务" }).catch(() => undefined);
+  return `✅ 已完成：${target.summary?.trim()}${closure ? `\n${closure}` : ""}`;
 }
 
 // ── Provider 实现 ────────────────────────────────────────────────
 
-/** 单清单扫描：收编 → 完成回写 → plan-gate → dispatch-scan（scan 模式对每个 org 清单各跑一遍） */
+/** 拉任务清单的已完成任务（反向对账用：任一侧关闭=完成，扫已完成任务的工单侧是否漏收尾） */
+async function listCompletedTasksWithIssue(
+  ctx: SeamContext,
+  tasklistGuid: string,
+): Promise<Array<{ guid?: string; task_id?: string; summary?: string }>> {
+  const fr = await callFeishuApi(ctx, {
+    method: "GET",
+    path: `/open-apis/task/v2/tasklists/${tasklistGuid}/tasks`,
+    query: { completed: true, page_size: 50, user_id_type: "open_id" },
+    identity: "user",
+  });
+  if (!fr.ok || (fr.value?.code ?? -1) !== 0) return [];
+  return (fr.value?.data as { items?: Array<{ guid?: string; task_id?: string; summary?: string }> })?.items ?? [];
+}
+
+/** 单清单扫描：收编 → 完成回写 → 反向对账 → plan-gate → dispatch-scan（scan 模式对每个 org 清单各跑一遍） */
 async function runScanForList(
   ctx: SeamContext,
   listGuid: string,
@@ -2114,6 +2175,25 @@ async function runScanForList(
     completionReports = await syncCompletionFromGitea(ctx, { tasklistGuid: listGuid, notifyChatId });
   } catch (e) {
     console.error(`[task-issue-sync] 完成回写失败(不阻断): ${String(e)}`);
+  }
+  // ①' 反向对账（2026-10-10 任一侧关闭=完成）：已完结任务若标题带工单且工单仍 open → 补关
+  try {
+    const doneTasks = await listCompletedTasksWithIssue(ctx, listGuid);
+    for (const t of doneTasks) {
+      const ref = taskIssueRefFromSummary(t.summary);
+      if (!ref) continue;
+      const ir = await callGiteaApi(ctx, { method: "GET", path: `${issuesBaseFor(ref.repo)}/${ref.issueNo}` });
+      const issue = ir.value?.data as { state?: string } | undefined;
+      if (ir.ok && is2xx(ir.value?.status ?? 0) && (issue?.state ?? "open") === "open") {
+        const note = await closeIssueForCompletedTask(ctx, t.summary, {
+          reason: "对账发现任务已完结而工单未关",
+          notifyChatId,
+        }).catch(() => undefined);
+        if (note) completionReports.push(note);
+      }
+    }
+  } catch (e) {
+    console.error(`[task-issue-sync] 反向对账失败(不阻断): ${String(e)}`);
   }
   const planReports = await runPlanGate(ctx, { tasklistGuid: listGuid, notifyChatId });
   const dispatchReports = await runDispatchScan(ctx, { tasklistGuid: listGuid, notifyChatId });
