@@ -104,3 +104,43 @@ async function summarizeCore(systemPrompt: string, report: DayReport, cfg: Summa
     clearTimeout(timer);
   }
 }
+
+/**
+ * 通用单轮 LLM 调用 (日报 LLM 综述用)。
+ * 语义同 summarizeCore: 任何失败返回 null, 调用方回退纯结构化文本, 定时任务不断报。
+ * max_tokens 给足 1500: v4.1-flash 是推理模型, 思考 token 也占预算, 给小了会截断成空串。
+ */
+export async function callLlm(cfg: SummarizeConfig, system: string, user: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
+  try {
+    const resp = await fetch(`${cfg.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${cfg.apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: cfg.model,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+        temperature: 0.3,
+        max_tokens: 1500,
+      }),
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "(body unreadable)");
+      console.error(`[summarize] callLlm HTTP ${resp.status}: ${errText.slice(0, 300)}`);
+      return null;
+    }
+    const json = (await resp.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const text = json.choices?.[0]?.message?.content?.trim();
+    if (!text) console.error("[summarize] callLlm 返回空内容");
+    return text || null;
+  } catch (e) {
+    console.error(`[summarize] callLlm 异常: ${String(e)}`);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}

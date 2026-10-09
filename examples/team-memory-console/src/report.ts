@@ -10,8 +10,8 @@
  *   查询组也从 3 组泛词扩到覆盖当日真实话题的探针组 —— 泛词与当日话题系统性不相交。
  */
 
-import type { TeamMemoryService } from "./service.js";
-import type { AttributedMemory } from "./service.js";
+import type { TeamMemoryService, AttributedMemory } from "./service.js";
+import type { TeamMember } from "./registry.js";
 
 /** 通用话题组 (覆盖当日实际工作主题, 而非"最近/工作/进展"这类系统性打不中的空泛词) */
 const QUERY_SETS = [
@@ -51,6 +51,79 @@ const QUERY_PAGES = 4;
 
 /** 晨报召回窗口: 只看 date 往前 windowDays 天内产生的记忆 (本地时区) */
 const PLAN_WINDOW_DAYS = 3;
+
+/**
+ * 并发拉取上限。全串行时 5 uid × 17 query × 4 页 ≈ 7 分钟 (定时任务直接超时),
+ * 并发 8 路后压到 1 分钟内; 也不开满, 避免打爆云端检索。
+ */
+const QUERY_CONCURRENCY = 8;
+/** 单次 query 兜底超时: 云端卡死时放弃该组 (计入 errors), 不拖死整个日报 */
+const QUERY_TIMEOUT_MS = 45_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timeout ${ms}ms: ${label}`)), ms);
+    p.then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
+  });
+}
+
+/** 有界并发 map: 最多 limit 个 fn 同时在跑, 结果顺序与输入一致 */
+async function mapPool<T, R>(items: T[], limit: number, fn: (item: T, i: number) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+/** 日报/晨报共用的拉取核心: (uid, query) 全组合并发执行, 按日期过滤去重归成员 */
+async function collectMemberMemories(
+  svc: TeamMemoryService,
+  date: string,
+  queries: string[],
+  keep: (it: AttributedMemory, date: string) => boolean,
+): Promise<MemberReport[]> {
+  const jobs: Array<{ member: TeamMember; uid: string; q: string }> = [];
+  for (const m of svc.registry.members) {
+    for (const uid of m.timem_user_ids) for (const q of queries) jobs.push({ member: m, uid, q });
+  }
+  const results = await mapPool(jobs, QUERY_CONCURRENCY, async (j) => {
+    try {
+      const res = await withTimeout(
+        svc.query(j.uid, j.q, QUERY_POOL_LIMIT, QUERY_PAGES),
+        QUERY_TIMEOUT_MS,
+        `${j.uid} «${j.q}»`,
+      );
+      return { ...j, res, error: null as string | null };
+    } catch (e) {
+      return { ...j, res: null, error: `${j.uid} «${j.q}»: ${(e as Error).message}` };
+    }
+  });
+  const byMember = new Map<string, MemberReport>();
+  for (const m of svc.registry.members) {
+    byMember.set(m.member_id, { member: { member_id: m.member_id, name: m.name }, memories: [], errors: [] });
+  }
+  for (const r of results) {
+    const rep = byMember.get(r.member.member_id)!;
+    if (r.error) rep.errors.push(r.error);
+    for (const it of r.res?.memories ?? []) {
+      if (keep(it, date) && it.memory_id && !rep.memories.some((x) => x.memory_id === it.memory_id)) {
+        rep.memories.push(it);
+      }
+    }
+  }
+  for (const rep of byMember.values()) {
+    rep.memories.sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
+    rep.levelCounts = countLevels(rep.memories);
+  }
+  return svc.registry.members.map((m) => byMember.get(m.member_id)!);
+}
 
 export interface MemberReport {
   member: { member_id: string; name: string };
@@ -110,32 +183,9 @@ function isWithinWindow(item: AttributedMemory, date: string, windowDays = PLAN_
 
 /** 生成某天晨报候选 (全员): 面向"今天可能要完成什么"的计划类记忆, 近 3 天窗口 */
 export async function buildDayPlan(svc: TeamMemoryService, date: string): Promise<DayReport> {
-  const members: MemberReport[] = [];
-  for (const m of svc.registry.members) {
-    const found = new Map<string, AttributedMemory>();
-    const errors: string[] = [];
-    // 计划语义组 + 当日锚定, 翻页加深召回 (同日报策略)
-    const queries = [...PLAN_QUERY_SETS, `${date} 计划 要做 今天`];
-    for (const uid of m.timem_user_ids) {
-      for (const q of queries) {
-        try {
-          const res = await svc.query(uid, q, QUERY_POOL_LIMIT, QUERY_PAGES);
-          for (const it of res.memories) {
-            if (isWithinWindow(it, date) && it.memory_id && !found.has(it.memory_id)) found.set(it.memory_id, it);
-          }
-        } catch (e) {
-          errors.push(`${uid} «${q}»: ${(e as Error).message}`);
-        }
-      }
-    }
-    const memories = [...found.values()].sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
-    members.push({
-      member: { member_id: m.member_id, name: m.name },
-      memories,
-      errors,
-      levelCounts: countLevels(memories),
-    });
-  }
+  // 计划语义组 + 当日锚定, 翻页加深召回 (同日报策略)
+  const queries = [...PLAN_QUERY_SETS, `${date} 计划 要做 今天`];
+  const members = await collectMemberMemories(svc, date, queries, isWithinWindow);
   return { date, members };
 }
 
@@ -153,33 +203,10 @@ function countLevels(items: AttributedMemory[]): Record<string, number> {
 
 /** 生成某天日报 (全员) */
 export async function buildDayReport(svc: TeamMemoryService, date: string): Promise<DayReport> {
-  const members: MemberReport[] = [];
-  for (const m of svc.registry.members) {
-    const found = new Map<string, AttributedMemory>();
-    const errors: string[] = [];
-    // 话题探针组 + 日期锚定查询: 语义检索按相关度排序、与日期无关,
-    // 直接用日期字符串去匹配 (当日记忆内容通常带日期), 召回远比纯话题词稳
-    const queries = [...QUERY_SETS, `${date} 完成 问题 部署`, `${date} 待办 工单 快照`, date];
-    for (const uid of m.timem_user_ids) {
-      for (const q of queries) {
-        try {
-          const res = await svc.query(uid, q, QUERY_POOL_LIMIT, QUERY_PAGES);
-          for (const it of res.memories) {
-            if (isOnDate(it, date) && it.memory_id && !found.has(it.memory_id)) found.set(it.memory_id, it);
-          }
-        } catch (e) {
-          errors.push(`${uid} «${q}»: ${(e as Error).message}`);
-        }
-      }
-    }
-    const memories = [...found.values()].sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
-    members.push({
-      member: { member_id: m.member_id, name: m.name },
-      memories,
-      errors,
-      levelCounts: countLevels(memories),
-    });
-  }
+  // 话题探针组 + 日期锚定查询: 语义检索按相关度排序、与日期无关,
+  // 直接用日期字符串去匹配 (当日记忆内容通常带日期), 召回远比纯话题词稳
+  const queries = [...QUERY_SETS, `${date} 完成 问题 部署`, `${date} 待办 工单 快照`, date];
+  const members = await collectMemberMemories(svc, date, queries, isOnDate);
   return { date, members };
 }
 

@@ -189,6 +189,14 @@ export interface TeamMemoryRun {
   error?: string;
   /** stdout 尾部（供历史列表预览） */
   outputTail?: string;
+  /** 运行时长 ms —— 健康度基线（后续接 RSI：时长突变 = 采集质量异常信号） */
+  durationMs?: number;
+  /**
+   * 采集健康度（CLI stderr 的 [job-stats] 行解析产物）：
+   * members = 有记忆的人数 / memories = 记忆命中总数 / tasks = 台账任务数。
+   * status=ok 且 memories=0 通常意味着采集侧静默失败，报告是"空壳正常"。
+   */
+  stats?: { members: number; memories: number; tasks: number };
 }
 
 const MAX_RUNS = 50;
@@ -254,10 +262,15 @@ export interface RunNowResult {
 }
 
 /** 立即执行一次日报/晨报（--send 推群）；同步等待完成（超时 5 分钟） */
-export async function runTeamMemoryJob(kind: TeamMemoryJobKind, timeoutMs = 300_000): Promise<RunNowResult> {
+export async function runTeamMemoryJob(
+  kind: TeamMemoryJobKind,
+  timeoutMs = 300_000,
+  trigger: TeamMemoryRun["trigger"] = "manual",
+): Promise<RunNowResult> {
   const cfg = loadTeamMemoryConfig();
   const startedAt = new Date().toISOString();
-  const run: TeamMemoryRun = { kind, startedAt, status: "running", trigger: "manual" };
+  const startedMs = Date.now();
+  const run: TeamMemoryRun = { kind, startedAt, status: "running", trigger };
   appendRun(run);
 
   const out = openSync(STDOUT_LOG, "a");
@@ -315,9 +328,30 @@ export async function runTeamMemoryJob(kind: TeamMemoryJobKind, timeoutMs = 300_
     status = "failed";
     message = `执行失败（exit ${result.code}），请查看 stderr 日志`;
   }
-  updateRun(startedAt, { finishedAt, status, exitCode: result.code ?? undefined, error: status === "ok" ? undefined : message, outputTail: stdoutTail.slice(-800) });
+  updateRun(startedAt, {
+    finishedAt,
+    status,
+    exitCode: result.code ?? undefined,
+    error: status === "ok" ? undefined : message,
+    outputTail: stdoutTail.slice(-800),
+    durationMs: Date.now() - startedMs,
+    stats: parseJobStats(stderrTail),
+  });
 
   return { ok: status === "ok", status, message, exitCode: result.code ?? undefined, stdoutTail, stderrTail };
+}
+
+/** 从 stderr 尾部解析 CLI 产出的 [job-stats] 统计行（缺失/损坏返回 undefined） */
+function parseJobStats(stderrTail: string): TeamMemoryRun["stats"] {
+  const m = /\[job-stats\]\s*(\{[^\n]*\})/.exec(stderrTail);
+  if (!m) return undefined;
+  try {
+    const s = JSON.parse(m[1]) as { members?: number; memories?: number; tasks?: number };
+    if (typeof s.members !== "number" || typeof s.memories !== "number") return undefined;
+    return { members: s.members, memories: s.memories, tasks: s.tasks ?? 0 };
+  } catch {
+    return undefined;
+  }
 }
 
 // ── 调度（进程内定时器）────────────────────────────────────────
@@ -373,7 +407,7 @@ function tick(): void {
       continue;
     }
     console.log(`[team-memory] 定时触发 ${kind}（${hhmm}）`);
-    void runTeamMemoryJob(kind).then((r) => {
+    void runTeamMemoryJob(kind, 300_000, "schedule").then((r) => {
       console.log(`[team-memory] ${kind} ${r.status}: ${r.message}`);
     });
   }

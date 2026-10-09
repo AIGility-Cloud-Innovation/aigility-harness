@@ -22,9 +22,9 @@
 import { readFileSync, existsSync } from "node:fs";
 import { TeamRegistry } from "./registry.js";
 import { TeamMemoryService } from "./service.js";
-import { buildDayReport, buildDayPlan, renderReport, resolveDate } from "./report.js";
-import { buildTaskCards } from "./task-cards.js";
-import { resolveSummarizeConfig, summarizeDayReport, summarizeDayPlan } from "./summarize.js";
+import { buildDayReport, buildDayPlan, resolveDate } from "./report.js";
+import { buildCompactDailyReport, buildCompactMorningReport, buildDailyBriefing, buildMorningBriefing, loadRegistryTasks } from "./task-cards.js";
+import { resolveSummarizeConfig, callLlm } from "./summarize.js";
 import { sendGroupTextChunked, DEFAULT_REPORT_CHAT_ID } from "./feishu.js";
 
 const REGISTRY_PATH = new URL("../../../config/timem-team-registry.json", import.meta.url).pathname.replace(/^\/(\w:)/, "$1");
@@ -60,18 +60,26 @@ function printMemberLine(indent: string, m: import("./registry.js").TeamMember):
   console.log(`${indent}  user_id: ${m.timem_user_ids.length ? m.timem_user_ids.join(", ") : "⚠ 未绑定"}`);
 }
 
+/**
+ * 采集健康度统计行（stderr）：平台调度器解析进 runs.stats（为后续 RSI 自检留数）。
+ * status=ok 但 memories=0 = 采集侧静默失败的信号（"空壳正常"报告）。
+ */
+function printJobStats(kind: string, members: Array<{ member: { name: string }; memories: unknown[] }>): void {
+  try {
+    const stats = {
+      kind,
+      members: members.filter((m) => m.memories.length).length,
+      memories: members.reduce((n, m) => n + m.memories.length, 0),
+      tasks: loadRegistryTasks().filter((t) => t.status !== "cancelled").length,
+    };
+    console.error(`[job-stats] ${JSON.stringify(stats)}`);
+  } catch {
+    // 统计失败不影响主流程
+  }
+}
+
 async function main(argv: string[]): Promise<void> {
   const [cmd, ...args] = argv;
-  const withTaskCards = async (text: string, date: string): Promise<string> => {
-    try {
-      const cards = await buildTaskCards(date);
-      return cards ? `${text}\n\n${cards}` : text;
-    } catch (e) {
-      console.error(`(任务卡片生成失败, 跳过: ${String(e)})`);
-      return text;
-    }
-  };
-
 
   const reg = new TeamRegistry(REGISTRY_PATH);
 
@@ -167,33 +175,49 @@ async function main(argv: string[]): Promise<void> {
       break;
     }
     case "report": {
-      // 用法: report [--send] [--raw] [--date today|yesterday|YYYY-MM-DD]
-      //       默认走 LLM 摘要 (每人概括 + 跨人关联); --raw 回退逐条罗列
+      // 用法: report [--send] [--date today|yesterday|YYYY-MM-DD]
+      //       2026-10-08 改版：紧凑数据 + LLM 综述——
+      //       按项目（done/doing/todo）+ 按人（关键价值），LLM 负责措辞与提炼
       const send = args.includes("--send");
-      const raw = args.includes("--raw");
       const dateIdx = args.indexOf("--date");
       const date = resolveDate(dateIdx >= 0 ? args[dateIdx + 1] : "today");
       const svc = makeService();
       const rep = await buildDayReport(svc, date);
+      const memoriesByMember = rep.members.map((m) => ({
+        memberName: m.member.name,
+        count: m.memories.length,
+        sample: m.memories[0]?.content?.replace(/\s+/g, " ").slice(0, 60),
+        samples: m.memories.slice(0, 2).map((it) => (it.content ?? "").replace(/\s+/g, " ").slice(0, 100)),
+      }));
 
-      let text: string;
-      const cfg = raw ? null : resolveSummarizeConfig();
-      if (cfg) {
-        console.error(`(LLM 摘要中: model=${cfg.model} …)`);
-        const body = await summarizeDayReport(rep, cfg);
-        if (body) {
-          const total = rep.members.reduce((n, m) => n + m.memories.length, 0);
-          const active = rep.members.filter((m) => m.memories.length).length;
-          text = `📋 团队记忆日报 · ${rep.date}\n共 ${total} 条新记忆, ${active} 人有活动\n\n${body}`;
-        } else {
-          console.error("(LLM 摘要不可用, 回退逐条罗列)");
-          text = renderReport(rep);
-        }
-      } else {
-        text = renderReport(rep);
+      // 2026-10-09 改版：正文直接由 LLM 按「按项目/按人」罗列（2026-10-08 的
+      // 「综述段落 + 原始数据附录」两段式里附录价值低，已去掉）。
+      // 输入物料用 briefing（完整标题+执行人+记忆线索），输出失败回退紧凑结构化文本。
+      const [structured, briefing] = await Promise.all([
+        buildCompactDailyReport(date, memoriesByMember),
+        buildDailyBriefing(date, memoriesByMember),
+      ]);
+      let text = structured;
+      const sumCfg = resolveSummarizeConfig();
+      if (sumCfg) {
+        console.error(`(LLM 综述中: model=${sumCfg.model} …)`);
+        const sys = "你是研发团队的日报编辑。根据给定的今日工作数据，直接输出如下格式的纯文本日报正文：\n" +
+          "第一行写「按项目」；之后每个项目一行，格式『- 项目名：完成了什么；正在推进什么；待办/风险』（某小项无内容就省略）。\n" +
+          "然后一行写「按人」；之后每个有动态的人一行，格式『- 姓名：今天做了什么、推进了什么』，有关联或风险可在行尾补半句。\n" +
+          "按人的可靠度规则：输入里「台账指派」的内容是有人明确指派的，直接写成他的任务；\n" +
+          "「记忆线索」只说明与他相关，必须先分拣——他本人承诺/要做的写成他的事，他安排别人的写成『已安排某某做某事』，" +
+          "仅提及或关注的写成『关注/跟进某事』；分不清的末尾标「(推测)」，禁止把安排别人的事写成他自己要做。\n" +
+          "输入末尾的【人名对照】里＝左右是同一人的不同称呼：按人输出必须一人一行，" +
+          "姓名统一用＝左边的显示名（中文名），把同一人的所有内容合并进同一行，禁止同一人拆成两行。\n" +
+          "硬性要求：概括提炼而非逐条罗列，每行不超过 70 字；覆盖数据里所有项目和所有有动态的人；" +
+          "禁止编造数据里没有的内容；不要 markdown 标题、代码块或加粗。";
+        const usr = "今日工作数据：\n" + briefing;
+        const body = await callLlm(sumCfg, sys, usr);
+        if (body) text = `📋 工作日报 · ${date}\n\n${body}`;
       }
-      text = await withTaskCards(text, rep.date);
+
       console.log(text);
+      printJobStats("report", rep.members);
       if (send) {
         const chatId = process.env.FEISHU_REPORT_CHAT_ID ?? DEFAULT_REPORT_CHAT_ID;
         const n = await sendGroupTextChunked(chatId, text);
@@ -203,31 +227,46 @@ async function main(argv: string[]): Promise<void> {
     }
     case "morning": {
       // 用法: morning [--send] [--raw] [--date today|YYYY-MM-DD]
-      //       晨报: 今天可能要完成的内容 (计划类记忆, 近 3 天窗口); LLM 提炼, 失败回退罗列
+      //       2026-10-09 改版（对齐日报风格）：正文由 LLM 按「按项目/按人」罗列，
+      //       重点呈现 todo（按项目今日待办 + 按人待办与近 3 天计划线索）
       const send = args.includes("--send");
       const raw = args.includes("--raw");
       const dateIdx = args.indexOf("--date");
       const date = resolveDate(dateIdx >= 0 ? args[dateIdx + 1] : "today");
       const svc = makeService();
       const rep = await buildDayPlan(svc, date);
+      const planMemories = rep.members.map((m) => ({
+        memberName: m.member.name,
+        count: m.memories.length,
+        sample: m.memories[0]?.content?.replace(/\s+/g, " ").slice(0, 60),
+        samples: m.memories.slice(0, 3).map((it) => (it.content ?? "").replace(/\s+/g, " ").slice(0, 100)),
+      }));
 
-      let text: string;
-      const cfg = raw ? null : resolveSummarizeConfig();
-      if (cfg) {
-        console.error(`(LLM 提炼中: model=${cfg.model} …)`);
-        const body = await summarizeDayPlan(rep, cfg);
-        const total = rep.members.reduce((n, m) => n + m.memories.length, 0);
-        if (body) {
-          text = `🌅 团队晨报 · ${rep.date}\n今天可能要完成的内容 (基于近 3 天 ${total} 条计划类记忆)\n\n${body}`;
-        } else {
-          console.error("(LLM 不可用, 回退逐条罗列)");
-          text = `🌅 团队晨报 · ${rep.date}\n今天可能要完成的内容 (LLM 不可用, 以下为计划类记忆原文)\n\n${renderReport(rep)}`;
-        }
-      } else {
-        text = renderReport(rep);
+      const [structured, briefing] = await Promise.all([
+        buildCompactMorningReport(date, planMemories),
+        buildMorningBriefing(date, planMemories),
+      ]);
+      let text = structured;
+      const sumCfg = raw ? null : resolveSummarizeConfig();
+      if (sumCfg) {
+        console.error(`(LLM 综述中: model=${sumCfg.model} …)`);
+        const sys = "你是研发团队的晨报编辑。根据给定的今日待办数据，直接输出如下格式的纯文本晨报正文：\n" +
+          "第一行写「按项目」；之后每个有待办的项目一行，格式『- 项目名：今天要推进什么（执行人谁）』。\n" +
+          "然后一行写「按人」；之后每个有动态的人一行，格式『- 姓名：今天重点做什么』。\n" +
+          "按人的可靠度规则：输入里「台账指派」的内容是有人明确指派的，直接写成他今天要做；\n" +
+          "「记忆线索」只说明与他相关，必须先分拣——他本人承诺/计划的写成他的任务，他安排别人的写成『已安排某某做某事』，" +
+          "仅提及或关注的写成『关注/跟进某事』；来自记忆线索且分不清的末尾标「(推测)」，禁止把安排别人的事写成他自己要做。\n" +
+          "输入末尾的【人名对照】里＝左右是同一人的不同称呼：按人输出必须一人一行，" +
+          "姓名统一用＝左边的显示名（中文名），把同一人的所有内容合并进同一行，禁止同一人拆成两行。\n" +
+          "硬性要求：概括提炼而非逐条罗列，每行不超过 70 字；覆盖数据里所有项目和所有有动态的人；" +
+          "可在行尾补半句跨人/跨项目的协作顺序或风险提醒；禁止编造数据里没有的内容；不要 markdown 标题、代码块或加粗。";
+        const usr = "今日待办数据：\n" + briefing;
+        const body = await callLlm(sumCfg, sys, usr);
+        if (body) text = `🌅 工作晨报 · ${date}\n\n${body}`;
       }
-      text = await withTaskCards(text, rep.date);
+
       console.log(text);
+      printJobStats("morning", rep.members);
       if (send) {
         const chatId = process.env.FEISHU_REPORT_CHAT_ID ?? DEFAULT_REPORT_CHAT_ID;
         const n = await sendGroupTextChunked(chatId, text);
