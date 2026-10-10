@@ -61,7 +61,7 @@ import {
 // 项目简称解析（config/project-registry.json 的 aliases）与人员别名解析
 // （config/timem-team-registry.json）——「任务归属 1 太忆」「安排执行者 1 hongbin」
 import { getProjectRegistry, resolveProjectRef, projectRepoScope } from "./project-registry.js";
-import { getIdentityRegistry, resolveMemberByName } from "./identity-registry.js";
+import { getIdentityRegistry, resolveMemberByName, findMemberByFeishuOpenId, identityMembers } from "./identity-registry.js";
 // 项目小助理事件快照：建单/完成等显著变化 → 防抖后写入 timem（briefing-events 内部节流）
 import { notifyRepoActivity } from "./briefing-events.js";
 
@@ -216,6 +216,7 @@ interface TaskLike {
   status?: string;
   url?: string;
   due?: { date?: string };
+  members?: TaskMemberLike[];
 }
 
 export interface IssueLike {
@@ -223,6 +224,8 @@ export interface IssueLike {
   title?: string;
   state?: string;
   html_url?: string;
+  body?: string;
+  assignee?: { login?: string; username?: string };
   labels?: { name?: string }[];
 }
 
@@ -551,7 +554,7 @@ async function ensureTasklist(ctx: SeamContext, name: string): Promise<{ guid?: 
 async function syncIssueToTask(
   ctx: SeamContext,
   repo: string,
-  issue: { number?: number; title?: string; html_url?: string },
+  issue: IssueLike,
   sourceChatId?: string,
   executor?: string,
   texts?: string[],
@@ -562,12 +565,21 @@ async function syncIssueToTask(
   if (list.error || !list.guid) {
     return { ok: false, detail: `清单「${listName}」不可用：${list.error}` };
   }
+  // 执行者推导（2026-10-10 规则②）：入参 > 工单 assignee > 工单正文「执行者：」标记。
+  // 执行者是人工任务铁证（护栏+plan-gate 双闸依据），必须写进任务描述。
+  const executorInIssue =
+    executor ??
+    issue.assignee?.login ??
+    issue.assignee?.username ??
+    (typeof issue.body === "string"
+      ? (issue.body.match(/执行者[:：]\s*(\S+)/)?.[1] as string | undefined)
+      : undefined);
   const body: Record<string, unknown> = { summary: syncTaskSummary(repo, issue) };
   const descParts: string[] = [];
   if (issue.html_url) descParts.push(`工单链接：${issue.html_url}`);
   if (sourceChatId) descParts.push(`来源群：${await resolveChatName(ctx, sourceChatId)}`);
   // 执行者是 plan-gate 的 P→D 闸门依据（/执行者：\S+/）
-  if (executor) descParts.push(`执行者：${executor}`);
+  if (executorInIssue) descParts.push(`执行者：${executorInIssue}`);
   if (descParts.length > 0) body.description = descParts.join("\n");
   const tr = await callFeishuApi(ctx, {
     method: "POST",
@@ -582,7 +594,8 @@ async function syncIssueToTask(
   const task = (tr.value?.data as { task?: TaskLike })?.task;
   const taskGuid = task?.guid ?? task?.task_id;
   if (!taskGuid) return { ok: false, detail: "建任务成功但未返回 guid，未挂清单" };
-  // 挂清单（真机验证端点：任务维度 add_tasklist）
+  // 挂清单；执行人=负责人优先：工单带 assignee/正文标记 = 人工任务 → 建任务后设负责人挂 D；
+  // 无执行人 → 挂 P 等执行人确认（2026-10-10 规则②：工单先行路径）
   const ar = await callFeishuApi(ctx, {
     method: "POST",
     path: `/open-apis/task/v2/tasks/${taskGuid}/add_tasklist`,
@@ -595,6 +608,27 @@ async function syncIssueToTask(
       ok: false,
       detail: `任务已建但挂清单「${listName}」失败：${ar.ok ? ar.value?.msg || `code=${ar.value?.code}` : ar.error}`,
     };
+  }
+  // 落分组：工单带执行人 → 设负责人挂 D（人工任务）；无 → 挂 P 等执行人确认（2026-10-10 规则②）
+  if (executorInIssue) {
+    const secs = await ensureSections(ctx, list.guid);
+    // 负责人 open_id：登记表名册反查（工单侧只有名字/login）
+    const mem = identityMembers(getIdentityRegistry()).find(
+      (m) => m.name === executorInIssue || m.gitea_usernames.includes(executorInIssue) || m.aliases.includes(executorInIssue),
+    );
+    const openId = mem?.feishu_open_ids[0];
+    if (openId) {
+      await callFeishuApi(ctx, {
+        method: "POST",
+        path: `/open-apis/task/v2/tasks/${taskGuid}/add_members`,
+        query: { user_id_type: "open_id" },
+        identity: "user",
+        body: { members: [{ id: openId, role: "assignee", type: "user" }] },
+      }).catch(() => undefined);
+    }
+    if (secs.doing) {
+      await moveToSection(ctx, taskGuid, list.guid, secs.doing).catch(() => undefined);
+    }
   }
   return { ok: true, detail: `已同步飞书任务并挂清单「${listName}」` };
 }
@@ -749,15 +783,53 @@ export async function moveToSection(
 async function listSectionTasks(
   ctx: SeamContext,
   sectionGuid: string,
-): Promise<Array<{ guid?: string; task_id?: string; summary?: string; description?: string }>> {
+): Promise<Array<{ guid?: string; task_id?: string; summary?: string; description?: string; members?: TaskMemberLike[] }>> {
+  // 注意：query 里不能带 completed=false —— 实测（2026-10-10）当前租户带该参数恒返回空列表；
+  // 改为不过滤拉全量，再按 completed_at 代码内过滤（completed_at>0 = 已完成）
   const r = await callFeishuApi(ctx, {
     method: "GET",
     path: `/open-apis/task/v2/sections/${sectionGuid}/tasks`,
-    query: { completed: false, page_size: 50, user_id_type: "open_id" },
+    query: { page_size: 100, user_id_type: "open_id" },
     identity: "user",
   });
   if (!r.ok || (r.value?.code ?? -1) !== 0) return [];
-  return (r.value?.data as { items?: Array<{ guid?: string; task_id?: string; summary?: string; description?: string }> })?.items ?? [];
+  const items = (r.value?.data as {
+    items?: Array<{ guid?: string; task_id?: string; summary?: string; description?: string; members?: TaskMemberLike[]; completed_at?: string | number }>;
+  })?.items ?? [];
+  return items.filter((t) => !t.completed_at || Number(t.completed_at) === 0);
+}
+
+/** 飞书任务成员形状（task members[]） */
+export interface TaskMemberLike {
+  id?: string;
+  role?: string;
+  type?: string;
+}
+
+/** 提取飞书任务的负责人（members[].role === "assignee" → 名册成员名或 open_id）。
+ *  负责人=执行人=人工任务铁证：带负责人的 D 组任务绝不派 agent（2026-10-10 用户铁律）。
+ *  执行人写在飞书任务的「负责人」字段（成员），不是任务描述。 */
+export function assigneeFromTask(
+  task: { members?: TaskMemberLike[] } | undefined,
+): string | undefined {
+  const m = (task?.members ?? []).find((x) => x.role === "assignee" && x.id);
+  if (!m?.id) return undefined;
+  const member = findMemberByFeishuOpenId(getIdentityRegistry(), m.id);
+  return member?.name ?? m.id;
+}
+
+/** 统一执行人判定：负责人（members assignee）优先，其次描述「执行者：」标记。
+ *  显式「执行者：agent」= agent 任务（无人工执行人）；其余带执行人 = 人工任务。
+ *  派发护栏、plan-gate 闸门、双建落组共用此判定（判定源一致，行为才一致）。 */
+export function executorOfTask(
+  task: { members?: TaskMemberLike[]; description?: string } | undefined,
+): string | undefined {
+  const byAssignee = assigneeFromTask(task);
+  if (byAssignee) return byAssignee;
+  const m = (task?.description ?? "").match(/执行者[:：]\s*(\S+)/);
+  const marked = m ? m[1] : undefined;
+  if (marked && /^agent$/i.test(marked)) return undefined; // 显式 agent 任务
+  return marked;
 }
 
 /** 双建任务标题 [org/repo#N] 标题 → 工单号（解析不出返回 undefined） */
@@ -1001,13 +1073,15 @@ export async function adoptUnsectionedTasks(
   const fr = await callFeishuApi(ctx, {
     method: "GET",
     path: `/open-apis/task/v2/tasklists/${tasklistGuid}/tasks`,
-    query: { completed: false, page_size: 100, user_id_type: "open_id" },
+    // 不带 completed 参数（实测恒空列表），代码内按 completed_at 过滤
+    query: { page_size: 100, user_id_type: "open_id" },
     identity: "user",
   });
   if (!fr.ok || (fr.value?.code ?? -1) !== 0) return 0;
-  const all = (fr.value?.data as { items?: Array<{ guid?: string; task_id?: string }> })?.items ?? [];
+  const all = (fr.value?.data as { items?: Array<{ guid?: string; task_id?: string; completed_at?: string | number }> })?.items ?? [];
   let adopted = 0;
   for (const t of all) {
+    if (t.completed_at && Number(t.completed_at) !== 0) continue; // 已完成
     const g = t.guid ?? t.task_id;
     if (!g || sectioned.has(g)) continue;
     const planGuid = sections.plan;
@@ -1231,8 +1305,11 @@ export async function runPlanGate(
       continue;
     }
 
-    // ⓪ 执行者闸门（先于回填建单）：未安排执行者的任务不进入执行（需群里「安排执行者」）
-    if (!/执行者：\S+/.test(t.description ?? "")) {
+    // ⓪ 执行人确认闸门（先于回填建单，2026-10-10 规则①：确定好执行人才能建单）：
+    // 负责人/描述标记出人名 = 人工执行；显式「执行者：agent」= agent 执行；两者皆无 = 未定，留 P
+    const humanExecutor = executorOfTask(t);
+    const agentDecided = /执行者[:：]\s*agent\b/i.test(t.description ?? "");
+    if (!humanExecutor && !agentDecided) {
       const tagged = `【待安排执行者】${summary.replace(/^【待安排执行者】/, "")}`;
       if (tagged !== summary) {
         await callFeishuApi(ctx, {
@@ -1396,6 +1473,13 @@ export async function runDispatchScan(
     const summary = t.summary ?? "";
     const issueNo = issueNumberFromTaskSummary(summary);
     if (issueNo === undefined) continue; // 非双建任务不自动派发（人工在工单侧补建后重挪）
+    // 负责人=执行人（2026-10-10 铁律）：带执行人的 D 组任务是人工任务——
+    // 留在 D、不派 agent（执行人自己干）。判定=executorOfTask（负责人>描述标记）
+    const executor = executorOfTask(t);
+    if (executor) {
+      reports.push(`👤 「${summary.slice(0, 40)}」执行人「${executor}」，人工任务不派 agent，留在「${SECTION_NAMES.doing}」。`);
+      continue;
+    }
     const repoFromTitle = summary.match(/^\[([^\]#/]+)\/([^\]#]+)#\d+\]/);
     const repo = repoFromTitle ? `${repoFromTitle[1]}/${repoFromTitle[2]}` : giteaRepo();
     if (dispatchRuntime.inflight.size >= 3) {
@@ -1468,6 +1552,19 @@ async function handleDispatchConfirm(ctx: SeamContext, ref: string): Promise<str
     (t) => (t.sourceMessageId ?? "") === marker && ["pending_confirm", "queued"].includes(t.status ?? ""),
   );
   if (!target?.id) return `没有找到工单 #${issueNo} 的待确认派发任务。`;
+  // 执行者铁律（2026-10-10）：任务带执行人=人工任务，确认派发也拒绝（防误手把人工任务交给 agent）
+  const fr = await callFeishuApi(ctx, {
+    method: "GET",
+    path: "/open-apis/task/v2/tasks",
+    query: { page_size: 100, user_id_type: "open_id" },
+    identity: "user",
+  });
+  const items = (fr.value?.data as { items?: Array<{ guid?: string; task_id?: string; summary?: string; description?: string; members?: TaskMemberLike[] }> })?.items ?? [];
+  const ft = items.find((x) => issueNumberFromTaskSummary(x.summary ?? "") === issueNo);
+  const executor = executorOfTask(ft);
+  if (executor) {
+    return `👤 工单 #${issueNo} 的任务执行人「${executor}」（负责人），是人工任务，不派 agent（确认被拒绝）。`;
+  }
   const run = await agentdRunTask(endpoint, target.id).catch((e: Error) => e);
   if (run instanceof Error) return `❌ 立即执行失败：${run.message}`;
   return `🚀 工单 #${issueNo} 已立即安排执行（跳过剩余等待时间）。完成后我会汇报并回写工单。`;
@@ -1727,10 +1824,10 @@ async function handleAssignExecutor(
   const num = raw.match(/^#?(\d+)$/);
   const name = executor.replace(/^@/, "").trim();
   if (!name) return "❌ 请带上执行者姓名，如：安排执行者 #12 @张三";
-
+  // 「agent」是执行方式声明（不查人册）：写描述标记，不设负责人
   // 人员别名 → 登记表规范名（hongbin → shahongbin；中文名/花名/拼音同表）。
   // 登记表非空且解析不到 → 反问列出成员（不写任何数据）；歧义同样反问。
-  const resolvedName = resolveExecutorName(name);
+  const resolvedName = /^agent$/i.test(name) ? name : resolveExecutorName(name);
   if (resolvedName === false) {
     const members = (getIdentityRegistry().members ?? []).filter((m) => m.name);
     return (
@@ -1782,7 +1879,7 @@ async function handleAssignExecutor(
   if (!fr.ok || (fr.value?.code ?? -1) !== 0) {
     return `❌ 任务查询失败：${fr.ok ? fr.value?.msg : fr.error}`;
   }
-  const items = (fr.value?.data as { items?: Array<{ guid?: string; task_id?: string; summary?: string; description?: string }> })?.items ?? [];
+  const items = (fr.value?.data as { items?: Array<{ guid?: string; task_id?: string; summary?: string; description?: string; members?: TaskMemberLike[] }> })?.items ?? [];
   const target = guidFilter
     ? items.find((t) => (t.guid ?? t.task_id) === guidFilter)
     : items.find((t) => issueNumberFromTaskSummary(t.summary ?? "") === issueNo);
@@ -1793,22 +1890,87 @@ async function handleAssignExecutor(
   }
   const guid = (target.guid ?? target.task_id) as string;
   const marker = `执行者：${executorName}`;
-  if ((target.description ?? "").includes(marker)) {
-    return `⏭️ ${pendingNo !== undefined ? `澄清任务 #${pendingNo}` : `工单 #${issueNo}`} 的执行者已是「${executorName}」，无需重复安排。`;
+  if (assigneeFromTask(target) === executorName && (target.description ?? "").includes(marker)) {
+    return `⏭️ ${pendingNo !== undefined ? `澄清任务 #${pendingNo}` : `工单 #${issueNo}`} 的执行人已是「${executorName}」（负责人已设置），无需重复安排。`;
   }
 
-  // 飞书任务描述追加执行者（plan-gate 闸门依据）
-  const desc = (target.description ?? "").trimEnd();
-  const pr = await callFeishuApi(ctx, {
-    method: "PATCH",
-    path: `/open-apis/task/v2/tasks/${guid}`,
-    query: { user_id_type: "open_id" },
-    identity: "user",
-    // 飞书 v2 更新接口要求 update_fields 声明 + task 包装（否则 99992402）
-    body: { update_fields: ["description"], task: { description: desc ? `${desc}\n${marker}` : marker } },
-  });
-  if (!pr.ok || (pr.value?.code ?? -1) !== 0) {
-    return `❌ 记录执行者失败（任务侧）：${pr.ok ? pr.value?.msg : pr.error}`;
+  // 执行人写入（2026-10-10 修正）：agent = 写描述标记「执行者：agent」（闸门放行、D 组派 agent）；
+  // 人名 = 设飞书负责人（members assignee，主判据）+ 描述标记双保险。
+  if (/^agent$/i.test(executorName)) {
+    const desc0 = (target.description ?? "").trimEnd();
+    const markerAgent = "执行者：agent";
+    if (!(target.description ?? "").includes(markerAgent)) {
+      const ar = await callFeishuApi(ctx, {
+        method: "PATCH",
+        path: `/open-apis/task/v2/tasks/${guid}`,
+        query: { user_id_type: "open_id" },
+        identity: "user",
+        body: { update_fields: ["description"], task: { description: desc0 ? `${desc0}\n${markerAgent}` : markerAgent } },
+      });
+      if (!ar.ok || (ar.value?.code ?? -1) !== 0) {
+        return `❌ 标记 agent 执行失败：${ar.ok ? ar.value?.msg : ar.error}`;
+      }
+    }
+    return pendingNo !== undefined
+      ? `🤖 澄清任务 #${pendingNo} 已标记 agent 执行。请再回复「任务归属 ${pendingNo} 仓库/项目简称」确认归属；齐备后自动建单。`
+      : `🤖 工单 #${issueNo} 已标记 agent 执行（不设负责人）。归属/建单齐备后由 agent 自动执行。`;
+  }
+
+  // 执行人=飞书任务「负责人」（members assignee，2026-10-10 修正）：
+  // ① open_id 速查登记表（别名→open_id），命中直接设负责人
+  // ② 未命中 open_id → 用用户身份搜索换 open_id；仍失败则退回描述标记（不阻断）
+  const reg = getIdentityRegistry();
+  const member = resolveMemberByName(reg, executorName);
+  let assigneeSet = false;
+  let assigneeNote = "";
+  const openId =
+    member.kind === "exact"
+      ? member.member.feishu_open_ids[0]
+      : undefined;
+  let resolvedOpenId = openId;
+  if (!resolvedOpenId) {
+    // 登记表没存 open_id：用用户身份搜索按名字找（search_user_id_type=open_id）
+    const sr = await callFeishuApi(ctx, {
+      method: "POST",
+      path: "/open-apis/search/v1/user",
+      query: { query: executorName, page_size: 5 },
+      identity: "user",
+    }).catch(() => undefined);
+    const users = ((sr?.value?.data as { users?: Array<{ open_id?: string; name?: string }> })?.users ?? []);
+    const hit = users.find((u) => (u.name ?? "").includes(executorName)) ?? users[0];
+    if (hit?.open_id) resolvedOpenId = hit.open_id;
+  }
+  if (resolvedOpenId) {
+    const am = await callFeishuApi(ctx, {
+      method: "POST",
+      path: `/open-apis/task/v2/tasks/${guid}/add_members`,
+      query: { user_id_type: "open_id" },
+      identity: "user",
+      body: { members: [{ id: resolvedOpenId, role: "assignee", type: "user" }] },
+    });
+    if (am.ok && (am.value?.code ?? -1) === 0) {
+      assigneeSet = true;
+    } else {
+      assigneeNote = `负责人设置失败（${am.ok ? am.value?.msg || `code=${am.value?.code}` : am.error}），已退回描述标记；`;
+    }
+  } else {
+    assigneeNote = "登记表/飞书搜不到该成员的飞书账号，";
+  }
+
+  // 双保险：描述仍记「执行者：」标记（旧判据兼容；负责人为主判据）
+  if (!(target.description ?? "").includes(marker)) {
+    const desc = (target.description ?? "").trimEnd();
+    await callFeishuApi(ctx, {
+      method: "PATCH",
+      path: `/open-apis/task/v2/tasks/${guid}`,
+      query: { user_id_type: "open_id" },
+      identity: "user",
+      // 飞书 v2 更新接口要求 update_fields 声明 + task 包装（否则 99992402）
+      body: { update_fields: ["description"], task: { description: desc ? `${desc}\n${marker}` : marker } },
+    }).catch(() => undefined);
+  }
+  if (!assigneeSet && !resolvedOpenId) {
+    return `⚠️ 已在任务描述记录执行者「${executorName}」，但${assigneeNote}未设为飞书负责人。请在飞书任务里手动添加负责人（后续以负责人判定人工任务）。`;
   }
 
   // 建单后路径：Gitea 工单评论留痕（失败不阻断：任务侧已记录）
@@ -1824,8 +1986,8 @@ async function handleAssignExecutor(
   }
 
   return pendingNo !== undefined
-    ? `👤 澄清任务 #${pendingNo} 已安排执行者「${executorName}」。请再回复「任务归属 ${pendingNo} 仓库/项目简称」确认归属；两者齐备后自动创建 Gitea 工单。`
-    : `👤 工单 #${issueNo} 已安排执行者「${executorName}」${giteaNote}。任务将在下轮目标核对通过后进入「${SECTION_NAMES.doing}」执行队列。`;
+    ? `👤 澄清任务 #${pendingNo} 已设执行人「${executorName}」${assigneeSet ? "（飞书负责人已设置）" : `（描述已标记；${assigneeNote}请在任务里补负责人）`}。请再回复「任务归属 ${pendingNo} 仓库/项目简称」确认归属；两者齐备后自动创建 Gitea 工单。`
+    : `👤 工单 #${issueNo} 已设执行人「${executorName}」${assigneeSet ? "（飞书负责人已设置）" : `（描述已标记；${assigneeNote}请在任务里补负责人）`}${giteaNote}。任务将在下轮目标核对通过后进入「${SECTION_NAMES.doing}」执行队列。`;
 }
 
 // ── 意图处理（自 persona 迁入；建单/建任务接入双建同步） ──────────

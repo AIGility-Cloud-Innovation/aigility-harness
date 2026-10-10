@@ -365,14 +365,16 @@ export async function collectOrgTasks(ctx: SeamContext, orgs: string[]): Promise
       const tr = await feishuApi(ctx, {
         method: "GET",
         path: `/open-apis/task/v2/sections/${sec.guid}/tasks`,
-        query: { completed: false, page_size: 50, user_id_type: "open_id" },
+        // 不带 completed 参数（实测恒空列表），代码内按 completed_at 过滤
+        query: { page_size: 100, user_id_type: "open_id" },
         identity: "user",
       });
       if (!tr.ok) {
         errors.push(`feishu(tasks:${org}/${sec.name}) ${tr.error}`);
         continue;
       }
-      for (const t of (tr.data as { items?: Array<{ guid?: string; task_id?: string; summary?: string; description?: string }> })?.items ?? []) {
+      for (const t of (tr.data as { items?: Array<{ guid?: string; task_id?: string; summary?: string; description?: string; completed_at?: string | number }> })?.items ?? []) {
+        if (t.completed_at && Number(t.completed_at) !== 0) continue; // 已完成
         tasks.push({ guid: t.guid ?? t.task_id, summary: t.summary, description: t.description, section: sec.name, org });
       }
     }

@@ -51,6 +51,7 @@ interface FeishuTaskItem {
   summary?: string;
   url?: string;
   description?: string;
+  completed_at?: string | number;
 }
 
 interface FeishuListRef {
@@ -90,28 +91,30 @@ async function listSections(call: FeishuCall, tasklistGuid: string): Promise<Fei
 }
 
 async function listSectionTasks(call: FeishuCall, sectionGuid: string): Promise<FeishuTaskItem[]> {
+  // 不带 completed 参数（实测当前租户带该参数恒返回空列表），代码内按 completed_at 过滤
   const d = await callData<{ items?: FeishuTaskItem[]; page_token?: string }>(call, {
     path: `/open-apis/task/v2/sections/${sectionGuid}/tasks`,
-    query: { completed: false, page_size: 100, user_id_type: "open_id" },
+    query: { page_size: 100, user_id_type: "open_id" },
     identity: "user",
   });
-  return d?.items ?? [];
+  return (d?.items ?? []).filter((t) => !t.completed_at || Number(t.completed_at) === 0);
 }
 
 async function listTasklistTasks(call: FeishuCall, tasklistGuid: string): Promise<FeishuTaskItem[]> {
   const out: FeishuTaskItem[] = [];
   let token: string | undefined;
   do {
+    // 同上：不带 completed 参数，代码内过滤
     const d = await callData<{ items?: FeishuTaskItem[]; page_token?: string }>(call, {
       path: `/open-apis/task/v2/tasklists/${tasklistGuid}/tasks`,
-      query: { completed: false, page_size: 100, user_id_type: "open_id", ...(token ? { page_token: token } : {}) },
+      query: { page_size: 100, user_id_type: "open_id", ...(token ? { page_token: token } : {}) },
       identity: "user",
     });
     if (!d) break;
     out.push(...(d.items ?? []));
     token = d.page_token;
   } while (token);
-  return out;
+  return out.filter((t) => !t.completed_at || Number(t.completed_at) === 0);
 }
 
 // ── 归属解析 ─────────────────────────────────────────────────────

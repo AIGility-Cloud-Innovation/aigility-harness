@@ -6,6 +6,8 @@ import { describe, it, expect, afterAll, afterEach } from "vitest";
 import {
   SECTION_NAMES,
   issueNumberFromTaskSummary,
+  assigneeFromTask,
+  executorOfTask,
   buildDispatchPrompt,
   dispatchDelayMs,
   taskIssueSyncProvider,
@@ -31,6 +33,23 @@ describe("issueNumberFromTaskSummary", () => {
     expect(issueNumberFromTaskSummary("普通任务标题")).toBeUndefined();
     expect(issueNumberFromTaskSummary("[没有编号] x")).toBeUndefined();
     expect(issueNumberFromTaskSummary(undefined)).toBeUndefined();
+  });
+});
+
+describe("assigneeFromTask/executorOfTask（执行人=负责人，2026-10-10 铁律）", () => {
+  it("负责人（members assignee）解析出执行人", () => {
+    expect(
+      assigneeFromTask({ members: [{ id: "ou_x", role: "assignee", type: "user" }, { id: "ou_y", role: "follower" }] }),
+    ).toBeTypeOf("string");
+    expect(assigneeFromTask({ members: [{ id: "ou_y", role: "follower" }] })).toBeUndefined();
+    expect(assigneeFromTask(undefined)).toBeUndefined();
+  });
+  it("统一判定：负责人 > 描述标记；显式 agent 放行", () => {
+    expect(executorOfTask({ members: [{ id: "ou_x", role: "assignee" }], description: "" })).toBeTypeOf("string");
+    expect(executorOfTask({ members: [], description: "执行者：张三" })).toBe("张三");
+    expect(executorOfTask({ members: [], description: "执行者：agent" })).toBeUndefined();
+    expect(executorOfTask({ members: [], description: "工单链接：x" })).toBeUndefined();
+    expect(executorOfTask(undefined)).toBeUndefined();
   });
 });
 
@@ -452,7 +471,15 @@ describe("安排执行者（飞书先行）— 按澄清编号定位", () => {
         return { ok: true, value: { status: 200, data: [] } };
       }
       if (path === "/open-apis/task/v2/tasks" && method === "GET") {
-        return { ok: true, value: { code: 0, data: { items: [{ guid: "tg-3", summary: "[P1] 修白屏", description: "" }] } } };
+        return { ok: true, value: { code: 0, data: { items: [{ guid: "tg-3", summary: "[P1] 修白屏", description: "", members: [] }] } } };
+      }
+      // 登记表为空 → 名册查不到 open_id → 走飞书用户搜索；mock 命中即设负责人
+      if (path === "/open-apis/search/v1/user") {
+        return { ok: true, value: { code: 0, data: { users: [{ open_id: "ou_zhangsan", name: "张三" }] } } };
+      }
+      if (path === "/open-apis/task/v2/tasks/tg-3/add_members" && method === "POST") {
+        calls.push("add_members assignee");
+        return { ok: true, value: { code: 0, data: {} } };
       }
       if (path === "/open-apis/task/v2/tasks/tg-3" && method === "PATCH") {
         calls.push(`patch ${JSON.stringify((req as { body?: { task?: { description?: string } } }).body?.task?.description)}`);
@@ -467,7 +494,8 @@ describe("安排执行者（飞书先行）— 按澄清编号定位", () => {
     if (!r.ok) throw new Error("execute failed");
     expect(r.value.response).toContain(`澄清任务 #${item.no}`);
     expect(r.value.response).toContain("张三");
-    expect(calls.some((c) => c.includes("执行者：张三"))).toBe(true);
+    expect(calls).toContain("add_members assignee"); // 负责人已设置（主判据）
+    expect(calls.some((c) => c.includes("执行者：张三"))).toBe(true); // 描述标记双保险仍在
     expect(calls.some((c) => c.startsWith("gitea POST"))).toBe(false); // 未建单不评论工单
     if (savedReg === undefined) delete process.env.TEAM_IDENTITY_REGISTRY;
     else process.env.TEAM_IDENTITY_REGISTRY = savedReg;
