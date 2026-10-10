@@ -13,6 +13,20 @@
   ],
   "members": [
     {
+      "member_id": "member-yuxuanqing",
+      "name": "yuxuanqing",
+      "aliases": [
+        "余宣庆 yuxuanqing"
+      ],
+      "timem_user_ids": [
+        "member-yuxuanqing"
+      ],
+      "feishu_open_ids": [
+        "ou_8ff2f93d721179ec290040252b1efc7f"
+      ],
+      "notes": "2026-10-10 由用户确认：缺执行人桶两条 timem cloud 任务（体验中心设计/隔离设计）的飞书负责人 ou_8ff2f93d… = yuxuanqing（余宣庆）"
+    },
+    {
       "member_id": "member-guolin",
       "name": "guolin",
       "aliases": [
