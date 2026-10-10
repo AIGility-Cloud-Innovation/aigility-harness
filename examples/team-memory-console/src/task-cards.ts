@@ -298,7 +298,7 @@ export function renderCompactDaily(
   const projectGoals = loadProjectGoals();
 
   // ── 按项目 ──（分组键 = 项目显示名：同一项目的多个仓库合并为一节）
-  const lines: string[] = [`📋 工作日报 · ${date}（总结已完成的）`, ""];
+  const lines: string[] = [`📋 工作日报 · ${date}（总结）`, ""];
   lines.push("按项目");
   const byProject = new Map<string, RegTask[]>();
   for (const t of tasks) {
@@ -314,7 +314,7 @@ export function renderCompactDaily(
     if (goal) lines.push(`  - 阶段目标：${goal}`);
     lines.push(`  - done：${compactSummarize(buckets.done)}`);
     lines.push(`  - doing：${compactSummarize(buckets.doing)}`);
-    lines.push(`  - todo：${compactSummarize(buckets.todo)}`);
+    lines.push(`  - 与目标差距：还差 ${buckets.todo.length ? compactSummarize(buckets.todo) : "无"}`);
   }
 
   // ── 按人（含按项目归组的工作风险，确定性推导不编造）──
@@ -410,10 +410,17 @@ export async function buildCompactMorningReport(
 
 type MemHint = { memberName: string; count: number; sample?: string; samples?: string[] };
 
+/** 任务状态标签（物料层打标，LLM 据此分「完成/未完成」，与 COMPACT_BUCKET 同源） */
+const BRIEFING_STATUS_TAG: Record<string, string> = {
+  done: "[完成]", dispatched: "[进行中]", running: "[进行中]", review: "[进行中]",
+  planned: "[待办]", ready: "[待办]", failed: "[受阻]", blocked: "[受阻]",
+};
+
 function briefingTaskLine(t: RegTask, members: Member[]): string {
   const who = memberOfTask(t, members);
   const title = t.title.replace(/^\[[^\]]+\]\s*/, "").replace(/^【[^】]+】/, "").replace(/\s+/g, " ").slice(0, 80);
-  return `${title}${who ? `（执行人 ${displayName(who)}）` : ""}`;
+  const tag = BRIEFING_STATUS_TAG[t.status] ?? "";
+  return `${tag ? `${tag} ` : ""}${title}${who ? `（执行人 ${displayName(who)}）` : ""}`;
 }
 
 function briefingPeopleSection(
@@ -437,7 +444,7 @@ function briefingPeopleSection(
   return lines;
 }
 
-/** 日报 LLM 输入：按项目（完成/进行/待办 全行）+ PR 动态 + 按人 */
+/** 日报 LLM 输入：按项目（阶段目标/完成/进行中/待办 全行，任务带状态标签）+ PR 动态 + 按人（台账/记忆分行带状态标签） */
 export function renderDailyBriefing(
   tasks: RegTask[],
   prs: PrItem[],
