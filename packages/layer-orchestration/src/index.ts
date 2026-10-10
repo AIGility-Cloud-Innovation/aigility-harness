@@ -61,6 +61,8 @@ export {
   issueNumberFromTaskSummary,
   buildDispatchPrompt,
   dispatchDelayMs,
+  executorOfTask,
+  assigneeFromTask,
   runPlanGate,
   runDispatchScan,
   stopDispatchScan,

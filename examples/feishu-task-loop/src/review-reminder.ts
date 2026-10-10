@@ -4,10 +4,10 @@
  * 触发顺序（每拍）：完成核对（completion-sync）→ 本提醒。提醒读的是核对后
  * 的最新状态，僵尸任务不可能出现。
  *
- * 分类（负责人 2026-10-04 确认的三类）：
- *   · 待验收：已放行（ready/dispatched/running）的任务；
- *   · 缺执行人：回复「R0x 执行人 姓名」；
+ * 分类（2026-10-10 负责人拍板收缩为两类）：
+ *   · 缺执行人：回复「R0x 执行人 姓名」；让编码代理做就写「R0x 执行人 agent」；
  *   · 缺归属：回复「任务归属 R0x 仓库」。
+ *   （「已放行待验收」不再播：ready/dispatched/running 是正常执行态非待办）
  *
  * 通道：私信负责人（member-johnny 绑定的飞书 open_id）；未绑定则跳过
  * 并打日志（避免把个人提醒发全员群），发「绑定身份 johnny」即开启。
@@ -15,7 +15,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getIdentityRegistry, identityMembers } from "@aigility-harness/layer-orchestration";
+import { getIdentityRegistry, identityMembers, executorOfTask } from "@aigility-harness/layer-orchestration";
 import { getSharedRegistry, getReviewCodes } from "./review-aware.js";
 import { getProjectedSection } from "./board-sync.js";
 
@@ -101,16 +101,22 @@ export async function remindPendingTasks(ctx: ReminderContext): Promise<void> {
   const codeOf = (uid: string): string =>
     Object.entries(codes).find(([, u]) => u === uid)?.[0] ?? "—";
 
+  // 2026-10-10 负责人拍板：不再播「已放行待验收」（ready/dispatched/running 是正常执行态，
+  // 非待办；done 才是完成）。缺执行人判定与执行人闸门同源（负责人字段优先，描述标记兜底）。
   const released = registry.list({ status: ["ready", "dispatched", "running"] });
   const planned = registry.list({ status: ["planned"] });
-  const missingExecutor = planned.filter((t) => !/执行者：\S+/.test(t.description ?? ""));
+  const missingExecutor = planned.filter((t) => {
+    const desc = t.description ?? "";
+    if (/执行者[:：]\s*\S+/.test(desc)) return false; // 描述已定（含「执行者：agent」，agent 执行无需人处理）
+    return !executorOfTask({ members: (t as { members?: unknown[] }).members as never, description: desc });
+  });
   const missingProject = planned.filter((t) => !t.projectRef);
   const counts = {
     released: released.length,
     missingExecutor: missingExecutor.length,
     missingProject: missingProject.length,
   };
-  const total = counts.released + counts.missingExecutor + counts.missingProject;
+  const total = counts.missingExecutor + counts.missingProject;
   if (total === 0) {
     const s = loadState();
     if (s.lastSentDate === today) saveState({ ...s, lastCounts: counts });
@@ -123,10 +129,6 @@ export async function remindPendingTasks(ctx: ReminderContext): Promise<void> {
   if (alreadyToday) return;
 
   const lines: string[] = [`📌 有 ${total} 条任务等你处理：`];
-  if (released.length) {
-    lines.push("", `已放行待验收 ${released.length} 条：`);
-    for (const r of released) lines.push(taskLine(codeOf(r.uid), r));
-  }
   if (missingExecutor.length) {
     lines.push("", `缺执行人 ${missingExecutor.length} 条（回复「R0x 执行人 姓名」；让编码代理做就写「R0x 执行人 agent」）：`);
     for (const r of missingExecutor.slice(0, 5)) lines.push(taskLine(codeOf(r.uid), r));
