@@ -1973,16 +1973,32 @@ async function handleAssignExecutor(
     return `⚠️ 已在任务描述记录执行者「${executorName}」，但${assigneeNote}未设为飞书负责人。请在飞书任务里手动添加负责人（后续以负责人判定人工任务）。`;
   }
 
-  // 建单后路径：Gitea 工单评论留痕（失败不阻断：任务侧已记录）
+  // 建单后路径：Gitea 工单评论留痕 + assignee 回写（失败不阻断：任务侧已记录）
   const repoMatch = (target.summary ?? "").match(/^\[([^\]#/]+)\/([^\]#]+)#\d+\]/);
   let giteaNote = "";
   if (repoMatch && issueNo !== undefined) {
+    const repo = `${repoMatch[1]}/${repoMatch[2]}`;
     const cr = await callGiteaApi(ctx, {
       method: "POST",
-      path: `${issuesBaseFor(`${repoMatch[1]}/${repoMatch[2]}`)}/${issueNo}/comments`,
+      path: `${issuesBaseFor(repo)}/${issueNo}/comments`,
       body: { body: `执行者安排：**${executorName}**（由项目小助理记录）` },
     });
     if (!cr.ok || !is2xx(cr.value?.status ?? 0)) giteaNote = `（工单评论失败：${cr.ok ? `HTTP ${cr.value?.status}` : cr.error}）`;
+    // 负责人回写工单 assignee（2026-10-10 用户确认）：登记表 名字/别名 → gitea_usernames[0]
+    const regMember = identityMembers(reg).find((m) => m.name === executorName || m.aliases.includes(executorName));
+    const giteaUser = regMember?.gitea_usernames[0];
+    if (giteaUser) {
+      const ar2 = await callGiteaApi(ctx, {
+        method: "PATCH",
+        path: `${issuesBaseFor(repo)}/${issueNo}`,
+        body: { assignees: [giteaUser] },
+      });
+      if (ar2.ok && is2xx(ar2.value?.status ?? 0)) {
+        giteaNote += `${giteaNote ? "；" : ""}工单 assignee 已设 ${giteaUser}`;
+      } else {
+        giteaNote += `${giteaNote ? "；" : ""}工单 assignee 设置失败（${ar2.ok ? `HTTP ${ar2.value?.status}` : ar2.error}）`;
+      }
+    }
   }
 
   return pendingNo !== undefined

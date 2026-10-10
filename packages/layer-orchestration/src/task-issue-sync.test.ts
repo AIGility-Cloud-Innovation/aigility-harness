@@ -472,8 +472,7 @@ describe("安排执行者（飞书先行）— 按澄清编号定位", () => {
       }
       if (path === "/open-apis/task/v2/tasks" && method === "GET") {
         return { ok: true, value: { code: 0, data: { items: [{ guid: "tg-3", summary: "[P1] 修白屏", description: "", members: [] }] } } };
-      }
-      // 登记表为空 → 名册查不到 open_id → 走飞书用户搜索；mock 命中即设负责人
+      }      // 登记表为空 → 名册查不到 open_id → 走飞书用户搜索；mock 命中即设负责人
       if (path === "/open-apis/search/v1/user") {
         return { ok: true, value: { code: 0, data: { users: [{ open_id: "ou_zhangsan", name: "张三" }] } } };
       }
@@ -497,6 +496,50 @@ describe("安排执行者（飞书先行）— 按澄清编号定位", () => {
     expect(calls).toContain("add_members assignee"); // 负责人已设置（主判据）
     expect(calls.some((c) => c.includes("执行者：张三"))).toBe(true); // 描述标记双保险仍在
     expect(calls.some((c) => c.startsWith("gitea POST"))).toBe(false); // 未建单不评论工单
+    if (savedReg === undefined) delete process.env.TEAM_IDENTITY_REGISTRY;
+    else process.env.TEAM_IDENTITY_REGISTRY = savedReg;
+  });
+
+  it("工单先行路径：设负责人后回写工单 assignee（登记表有 gitea 用户名）", async () => {
+    const { writeFileSync, mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const regPath = join(mkdtempSync(join(tmpdir(), "reg-")), "team.json");
+    writeFileSync(
+      regPath,
+      JSON.stringify({ version: 2, members: [{ name: "张三", aliases: [], gitea_usernames: ["zhangsan"], feishu_open_ids: ["ou_zhangsan"] }] }),
+      "utf-8",
+    );
+    const savedReg = process.env.TEAM_IDENTITY_REGISTRY;
+    process.env.TEAM_IDENTITY_REGISTRY = regPath;
+    const calls: string[] = [];
+    const ctx = mockCtx((id, req) => {
+      const path = String((req as { path?: string }).path);
+      const method = String((req as { method?: string }).method);
+      if (id.includes("gitea")) {
+        calls.push(`gitea ${method} ${path}`);
+        return { ok: true, value: { status: 200, data: [] } };
+      }
+      if (path === "/open-apis/task/v2/tasks" && method === "GET") {
+        return {
+          ok: true,
+          value: { code: 0, data: { items: [{ guid: "tg-4", summary: "[AIGility/x#7] 修白屏", description: "工单链接：https://g/x/7", members: [] }] } },
+        };
+      }
+      if (path === "/open-apis/task/v2/tasks/tg-4/add_members" && method === "POST") {
+        calls.push("add_members assignee");
+        return { ok: true, value: { code: 0, data: {} } };
+      }
+      return { ok: true, value: { code: 0, data: {} } };
+    });
+    const r = await taskIssueSyncProvider.execute(
+      { mode: "intent", intent: { kind: "assign", ref: "#7", executor: "@张三" } },
+      ctx,
+    );
+    if (!r.ok) throw new Error("execute failed");
+    expect(calls).toContain("add_members assignee"); // 飞书负责人已设
+    expect(calls).toContain("gitea PATCH /api/v1/repos/AIGility/x/issues/7"); // 工单 assignee 回写
+    expect(r.value.response).toContain("工单 assignee 已设 zhangsan");
     if (savedReg === undefined) delete process.env.TEAM_IDENTITY_REGISTRY;
     else process.env.TEAM_IDENTITY_REGISTRY = savedReg;
   });
