@@ -67,6 +67,7 @@ import {
 import { getSharedRegistry, getReviewCodes, assignReviewCodes } from "./review-aware.js";
 import { wireLlmNodes } from "@aigility-harness/appbase/llm-node-store";
 import { syncGiteaCompletions } from "./completion-sync.js";
+import { syncAssignees } from "./assignee-sync.js";
 import { remindPendingTasks } from "./review-reminder.js";
 import { syncBoardAlignment } from "./board-sync.js";
 import { loadEnv, REPO_ROOT } from "./env.js";
@@ -296,6 +297,11 @@ async function main(): Promise<void> {
       const synced = await syncGiteaCompletions(getSharedRegistry(), alignGiteaCall, alignFeishuCall);
       if (synced.length > 0) {
         console.log(`[align] 完成核对: ${synced.join(" / ")}`);
+      }
+      // ①.2 负责人反向同步（2026-10-10 拍板）：体外 assignee 变化 → 台账 assignee_member_id
+      const assigneeChanges = await syncAssignees(getSharedRegistry(), alignFeishuCall, alignGiteaCall);
+      if (assigneeChanges.length > 0) {
+        console.log(`[align] 负责人同步: ${assigneeChanges.join(" / ")}`);
       }
       // ①.5 看板反向对齐：人工挪组 → 台账经合法路径跟随（预期截面防误判）
       const boardChanges = await syncBoardAlignment(getSharedRegistry(), alignFeishuCall);

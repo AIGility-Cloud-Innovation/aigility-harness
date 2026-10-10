@@ -890,13 +890,16 @@ export async function handleReviewMessage(
     const doc = loadReleaseDoc(RELEASE_YAML).doc;
     const llm = async (r: { system: string; user: string }) => {
       const res = (await ctx.call(llmInferenceRef, {
-        model: process.env["TASK_PIPELINE_MODEL"] || process.env["LLM_MODEL"] || "qwen-turbo",
+        // 2026-10-10 负责人拍板：小助理 LLM 切 ksyun-qwen3.7-flash（原 qwen-turbo +
+        // max_tokens 300 回复只剩套话——300 被推理吃光，判定 JSON 截断归 unsure 永远待复核）。
+        // TASK_REVIEW_MODEL 可覆盖；max_tokens 1500 与 persona 兜底同款（推理 token 余量）。
+        model: process.env["TASK_REVIEW_MODEL"] || "ksyun-qwen3.7-flash",
         messages: [
           { role: "system", content: r.system },
           { role: "user", content: r.user },
         ],
         temperature: 0.2,
-        max_tokens: 300,
+        max_tokens: 1500,
       })) as { ok: boolean; value?: { text?: string }; error?: string };
       return res.ok
         ? ({ ok: true, value: { text: res.value?.text ?? "" } } as const)

@@ -94,15 +94,15 @@ export class TaskRegistry {
   /** 复核补齐：更新归属/描述/标题/结构化人员外键（自然语言复核入口落地用），幂等可重放 */
   update(
     uid: string,
-    patch: { projectRef?: string; description?: string; title?: string; assignee_member_id?: string; reviewer_member_id?: string },
+    patch: { projectRef?: string | null; description?: string | null; title?: string; assignee_member_id?: string | null; reviewer_member_id?: string | null },
   ): Result<TaskRecord> {
     const record = this.records.get(uid);
     if (!record) return err(`task-registry: 未知任务 ${uid}`);
-    if (patch.projectRef !== undefined) record.projectRef = patch.projectRef;
-    if (patch.description !== undefined) record.description = patch.description;
+    if (patch.projectRef !== undefined) record.projectRef = patch.projectRef ?? undefined;
+    if (patch.description !== undefined) record.description = patch.description ?? undefined;
     if (patch.title !== undefined) record.title = patch.title;
-    if (patch.assignee_member_id !== undefined) record.assignee_member_id = patch.assignee_member_id;
-    if (patch.reviewer_member_id !== undefined) record.reviewer_member_id = patch.reviewer_member_id;
+    if (patch.assignee_member_id !== undefined) record.assignee_member_id = patch.assignee_member_id ?? undefined;
+    if (patch.reviewer_member_id !== undefined) record.reviewer_member_id = patch.reviewer_member_id ?? undefined;
     record.updatedAt = Date.now();
     this.markDirty();
     return ok(record);
