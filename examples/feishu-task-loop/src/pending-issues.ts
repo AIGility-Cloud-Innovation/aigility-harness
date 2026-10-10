@@ -89,7 +89,13 @@ export function computePendingBuckets(registry: {
   const missingExecutor = planned.filter((t) => {
     const desc = t.description ?? "";
     if (/执行者[:：]\s*\S+/.test(desc)) return false; // 描述已定（含「执行者：agent」）
-    return !executorOfTask({ members: (t as { members?: unknown[] }).members as never, description: desc });
+    // 判定源与执行人闸门同源（executorOfTask）：members 负责人 / assignee_member_id
+    // （①.2 反向同步落库）/ 描述标记，三路任一有 = 不缺（2026-10-10 修：此前漏第二路）
+    return !executorOfTask({
+      members: (t as { members?: unknown[] }).members as never,
+      description: desc,
+      assignee_member_id: t.assignee_member_id,
+    });
   });
   const missingProject = planned.filter((t) => !t.projectRef);
   return { missingExecutor, missingProject };

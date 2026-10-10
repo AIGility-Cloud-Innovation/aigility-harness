@@ -818,16 +818,24 @@ export function assigneeFromTask(
   return member?.name ?? m.id;
 }
 
-/** 统一执行人判定：负责人（members assignee）优先，其次描述「执行者：」标记。
- *  显式「执行者：agent」= agent 任务（无人工执行人）；其余带执行人 = 人工任务。
- *  派发护栏、plan-gate 闸门、双建落组共用此判定（判定源一致，行为才一致）。 */
+/** 统一执行人判定：负责人（members assignee）优先，其次台账结构化负责人
+ *  assignee_member_id（①.2 反向同步落库的体外负责人，2026-10-10 补——此前
+ *  同步写进了字段但判定不认，出现「行里显示执行人、桶里报缺执行人」自相矛盾），
+ *  再次描述「执行者：」标记。显式「执行者：agent」= agent 任务（无人工执行人）；
+ *  其余带执行人 = 人工任务。派发护栏、plan-gate 闸门、双建落组共用此判定
+ * （判定源一致，行为才一致）。 */
 export function executorOfTask(
-  task: { members?: TaskMemberLike[]; description?: string } | undefined,
+  task: { members?: TaskMemberLike[]; description?: string; assignee_member_id?: string } | undefined,
 ): string | undefined {
   const byAssignee = assigneeFromTask(task);
   if (byAssignee) return byAssignee;
-  const m = (task?.description ?? "").match(/执行者[:：]\s*(\S+)/);
-  const marked = m ? m[1] : undefined;
+  if (task?.assignee_member_id) {
+    const m = identityMembers(getIdentityRegistry()).find((x) => x.member_id === task.assignee_member_id);
+    if (m) return m.name;
+    return task.assignee_member_id;
+  }
+  const md = (task?.description ?? "").match(/执行者[:：]\s*(\S+)/);
+  const marked = md ? md[1] : undefined;
   if (marked && /^agent$/i.test(marked)) return undefined; // 显式 agent 任务
   return marked;
 }
