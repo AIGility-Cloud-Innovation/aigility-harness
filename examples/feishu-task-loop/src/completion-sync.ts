@@ -36,7 +36,8 @@ async function callData<T>(call: Call, req: Record<string, unknown>): Promise<T 
 }
 
 async function giteaIssueState(call: Call, repo: string, n: number): Promise<string | undefined> {
-  const d = await callData<{ state?: string }>(call, { method: "GET", path: `/repos/${repo}/issues/${n}` });
+  // path 带 /api/v1 前缀（provider 不自动补；漏了 404/303，静默失效——2026-10-10 修）
+  const d = await callData<{ state?: string }>(call, { method: "GET", path: `/api/v1/repos/${repo}/issues/${n}` });
   return d?.state;
 }
 

@@ -46,7 +46,8 @@ async function feishuAssigneeOpenId(call: Call, taskGuid: string): Promise<strin
 async function giteaAssigneeNames(call: Call, repo: string, n: number): Promise<string[]> {
   const d = await callData<{ assignee?: { login?: string } | null; assignees?: Array<{ login?: string }> | null }>(call, {
     method: "GET",
-    path: `/repos/${repo}/issues/${n}`,
+    // path 带 /api/v1 前缀（provider 不自动补；漏了 404——2026-10-10 修）
+    path: `/api/v1/repos/${repo}/issues/${n}`,
   });
   const names = [d?.assignee?.login, ...(d?.assignees ?? []).map((a) => a.login)].filter((x): x is string => !!x);
   return [...new Set(names)];

@@ -38,11 +38,16 @@ async function searchRepos(giteaCall: GiteaCallLike, token: string): Promise<str
   const tn = normalizeRepo(key);
   const names = new Set<string>();
   // q= 关键词检索（Gitea 服务端匹配 org/repo 名）
+  // path 必须带 /api/v1 前缀（provider 不自动补；漏了会 303 跳登录页→非 JSON→空结果，
+  // 2026-10-10 实测事故：/repos/search 线上全空、career 解析失败）
   const r = await giteaCall({
     method: "GET",
-    path: "/repos/search",
+    path: "/api/v1/repos/search",
     query: { q: key, limit: 20, sort: "updated", order: "desc" },
   });
+  if (!r.ok || (r.value?.status !== undefined && (r.value.status < 200 || r.value.status >= 300))) {
+    console.warn(`[repo-resolver] gitea 检索失败 q=${key}: ok=${r.ok} status=${r.value?.status} err=${r.error ?? "-"}`);
+  }
   const payload = r.ok ? r.value?.data : undefined;
   // gitea-api provider 把 {ok, data:[...]} 整体作为 data 返回，剥一层
   const boxed = payload as { ok?: boolean; data?: Array<{ full_name?: string }> } | undefined;
