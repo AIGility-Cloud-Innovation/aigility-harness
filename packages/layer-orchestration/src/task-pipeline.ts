@@ -1019,8 +1019,14 @@ export const taskPipelineProvider: Provider<TaskPipelineRequest, TaskPipelineRes
             j.candidates.map((c) => ({ chatId: j.chatId, pool: j.pool, texts: j.texts, candidate: c, poolDefinite: j.poolDefinite })),
           );
           if (scoped.length === 0) return { scoped };
-          // 查重基准：Gitea open 工单（覆盖本批涉及的全部仓库）+ 飞书未完成任务
-          const existingTitles: string[] = recentTitlesForDedupe();
+          // 查重基准：台账活跃条目（永久落盘，重启免疫——修复内存 24h 窗口跨重启重复入库）
+          // + Gitea open 工单（覆盖本批涉及的全部仓库）+ 飞书未完成任务
+          const existingTitles: string[] = request.registry
+            ? request.registry
+                .list({ status: ["planned", "ready", "dispatched", "running", "review", "blocked", "failed"] })
+                .map((r) => r.title)
+            : [];
+          existingTitles.push(...recentTitlesForDedupe());
           for (const repo of [...new Set([...repos, ...scoped.flatMap((x) => x.pool)])]) {
             const r = await callGitea(ctx, { action: "list_issues", repo, state: "open", limit: 50 });
             if (r && Array.isArray(r.data)) {
