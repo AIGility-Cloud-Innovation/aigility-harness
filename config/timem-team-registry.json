@@ -33,12 +33,17 @@
         "郭林 guolin"
       ],
       "timem_user_ids": [
-        "member-guolin"
+        "member-guolin",
+        "space_e4935578-6f9f-47ef-868c-61691dcc8d79"
       ],
       "feishu_open_ids": [
         "ou_c6797e52be28d35c8d13957cf34dd0d6"
       ],
-      "notes": "2026-10-10 由用户确认：R49（TiMEM.Space 备案运维任务）的飞书负责人 ou_c6797e52… = guolin"
+      "match_source": {
+        "feishu": "manual",
+        "timem": "manual"
+      },
+      "notes": "2026-10-10 由用户确认：R49（TiMEM.Space 备案运维任务）的飞书负责人 ou_c6797e52… = guolin；timem user_id space_e4935578… 由用户确认登记"
     },
     {
       "member_id": "member-shahongbin",
