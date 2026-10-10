@@ -22,7 +22,11 @@ function giteaRefOf(t: { title: string; links?: Record<string, { guid?: string }
   return (
     t.links?.["gitea-issue"]?.guid ??
     (t.origin?.provider === "gitea-issue" ? t.origin?.guid : undefined) ??
-    t.title.match(/\[([^\]#/]+\/[^\]#/]+)#(\d+)\]/)?.slice(1, 3).join("#")
+    // 标题 [org/repo#N] → "org/repo#N"（slice(1,3).join("#") 会生成 org#repo 丢工单号——2026-10-10 修）
+    (() => {
+      const m = t.title.match(/\[([^\]#/]+)\/([^\]#/]+)#(\d+)\]/);
+      return m ? `${m[1]}/${m[2]}#${m[3]}` : undefined;
+    })()
   );
 }
 

@@ -67,6 +67,7 @@ import {
 import { getSharedRegistry, getReviewCodes, assignReviewCodes } from "./review-aware.js";
 import { wireLlmNodes } from "@aigility-harness/appbase/llm-node-store";
 import { syncGiteaCompletions } from "./completion-sync.js";
+import { backfillIssueLinks } from "./issue-link-backfill.js";
 import { syncAssignees } from "./assignee-sync.js";
 import { remindPendingTasks } from "./review-reminder.js";
 import { syncBoardAlignment } from "./board-sync.js";
@@ -307,6 +308,17 @@ async function main(): Promise<void> {
       const boardChanges = await syncBoardAlignment(getSharedRegistry(), alignFeishuCall);
       if (boardChanges.length > 0) {
         console.log(`[align] 看板反向对齐: ${boardChanges.join(" / ")}`);
+      }
+      // ①.6 工单链接回填（2026-10-10 负责人需求）：带工单的任务描述缺
+      //     「工单链接：」→ 定期补上（幂等；只补不建，建单归 plan-gate 链路）
+      const backfilled = await backfillIssueLinks(
+        getSharedRegistry(),
+        alignGiteaCall,
+        alignFeishuCall,
+        [...new Set(registryRepos.map((r) => r.split("/")[0]))],
+      );
+      if (backfilled.length > 0) {
+        console.log(`[align] 工单链接回填: ${backfilled.join(" / ")}`);
       }
       // ② 「待你处理」提醒：每天最多一次私信负责人（未绑定飞书则跳过）
       await remindPendingTasks({
