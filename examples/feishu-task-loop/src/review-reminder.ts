@@ -15,9 +15,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getIdentityRegistry, identityMembers, executorOfTask } from "@aigility-harness/layer-orchestration";
+import { getIdentityRegistry, identityMembers } from "@aigility-harness/layer-orchestration";
 import { getSharedRegistry, getReviewCodes } from "./review-aware.js";
-import { getProjectedSection } from "./board-sync.js";
+import { computePendingBuckets, pendingTaskLine, codeOfUid, executorNameOf as executorNameOfShared } from "./pending-issues.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const STATE_FILE = process.env["REVIEW_REMINDER_STATE_FILE"] ?? join(ROOT, "config", "review-reminder.local.json");
@@ -72,45 +72,23 @@ const PDCA_OF: Record<string, string> = {
   done: "已完成",
 };
 
-/** 执行人解析：结构化外键优先（人员台账反查姓名），历史描述文本兜底 */
-function executorNameOf(r: { assignee_member_id?: string; description?: string }): string | undefined {
-  if (r.assignee_member_id) {
-    const m = identityMembers(getIdentityRegistry()).find((x) => x.member_id === r.assignee_member_id);
-    if (m) return m.name;
-  }
-  return (r.description ?? "").match(/执行者：(\S+)/)?.[1];
-}
+/** 执行人解析：结构化外键优先（人员台账反查姓名），历史描述文本兜底（2026-10-10 移至 pending-issues 共享） */
+const executorNameOf = (r: { assignee_member_id?: string; description?: string }): string | undefined =>
+  executorNameOfShared(r);
 
-function taskLine(code: string, r: { uid: string; status: string; title: string; projectRef?: string; description?: string; assignee_member_id?: string }): string {
-  // PDCA 以看板实际截面为优先（人工挪组已反向同步），无截面记录时回退台账状态
-  const sec = getProjectedSection(r.uid);
-  const pdca = (sec && ({ P: "P·规划中", D: "D·执行中", C: "C·待测试", A: "A·待修复" } as Record<string, string>)[sec]) || PDCA_OF[r.status] || r.status;
-  const repo = r.projectRef ?? "（未定仓库）";
-  const title = r.title.replace(/^\[[^\]]+\]\s*/, "").replace(/^【[^】]+】/, "").slice(0, 36);
-  // 执行人（2026-10-08，负责人反馈）：已知就带上——放行/缺归属条目能看到责任人，
-  // 「缺执行人」分区天然没有，不显示
-  const executor = executorNameOf(r);
-  return `  - ${code}［${pdca}｜${repo}］${title}${executor ? ` · 执行人 ${executor}` : ""}`;
-}
+const taskLine = (code: string, r: Parameters<typeof pendingTaskLine>[1]): string => pendingTaskLine(code, r);
 
 export async function remindPendingTasks(ctx: ReminderContext): Promise<void> {
   const now = ctx.now ?? (() => new Date());
   const today = now().toISOString().slice(0, 10);
   const registry = getSharedRegistry();
   const codes = getReviewCodes();
-  const codeOf = (uid: string): string =>
-    Object.entries(codes).find(([, u]) => u === uid)?.[0] ?? "—";
+  const codeOf = (uid: string): string => codeOfUid(codes, uid);
 
   // 2026-10-10 负责人拍板：不再播「已放行待验收」（ready/dispatched/running 是正常执行态，
-  // 非待办；done 才是完成）。缺执行人判定与执行人闸门同源（负责人字段优先，描述标记兜底）。
+  // 非待办；done 才是完成）。分桶口径与复核清单同源（pending-issues 单一事实源）。
   const released = registry.list({ status: ["ready", "dispatched", "running"] });
-  const planned = registry.list({ status: ["planned"] });
-  const missingExecutor = planned.filter((t) => {
-    const desc = t.description ?? "";
-    if (/执行者[:：]\s*\S+/.test(desc)) return false; // 描述已定（含「执行者：agent」，agent 执行无需人处理）
-    return !executorOfTask({ members: (t as { members?: unknown[] }).members as never, description: desc });
-  });
-  const missingProject = planned.filter((t) => !t.projectRef);
+  const { missingExecutor, missingProject } = computePendingBuckets(registry);
   const counts = {
     released: released.length,
     missingExecutor: missingExecutor.length,

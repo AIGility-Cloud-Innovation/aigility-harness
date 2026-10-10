@@ -56,6 +56,7 @@ import {
 import type { TaskRecord } from "@aigility-harness/core";
 import type { ReleaseDoc } from "@aigility-harness/layer-orchestration";
 import { resolveProjectRefAsync } from "./repo-resolver.js";
+import { buildPendingIssuesReport } from "./pending-issues.js";
 
 // ── 会话/登记表（与 scripts/review-session.ts 共用同一份文件） ──────
 
@@ -827,16 +828,10 @@ export async function handleReviewMessage(
   }
 
   if (wantsList) {
-    const pending = registry.list({ status: ["planned"] });
-    if (!pending.length) return "当前没有待复核的任务，都清了 🎉";
-    const lines = pending.slice(0, 10).map((r) => {
-      const code = Object.entries(codes).find(([, uid]) => uid === r.uid)?.[0] ?? "—";
-      const missing = [!r.projectRef ? "归属" : null, !/执行者：\S+/.test(r.description ?? "") ? "执行人" : null]
-        .filter(Boolean)
-        .join("、");
-      return `${code}｜${r.title.slice(0, 36)}${missing ? `（缺${missing}）` : ""}`;
-    });
-    return `现在挂着 ${pending.length} 条待复核：\n${lines.join("\n")}\n直接回复就行，比如「R01 执行人 张三 归属 opc」；想让编码代理直接做就写「R01 执行人 agent」。`;
+    // 2026-10-10 合并：与定时提醒共用同一套统计/行格式（pending-issues 单一事实源）——
+    // 修复「复核清单永远只出前 10 条、与『43 条待处理』对不上」；支持翻页与全量。
+    const pageSpec = text.match(/复核清单\s*(\d+|全部|all)/i)?.[1];
+    return buildPendingIssuesReport(registry, codes, pageSpec);
   }
 
   // 要素抽取 + 落库
