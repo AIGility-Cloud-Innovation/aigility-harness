@@ -55,6 +55,7 @@ import {
 } from "@aigility-harness/layer-orchestration";
 import type { TaskRecord } from "@aigility-harness/core";
 import type { ReleaseDoc } from "@aigility-harness/layer-orchestration";
+import { resolveProjectRefAsync } from "./repo-resolver.js";
 
 // ── 会话/登记表（与 scripts/review-session.ts 共用同一份文件） ──────
 
@@ -638,6 +639,7 @@ export const reviewAwareService: ServiceDefinition<AssistantRequest, AssistantRe
 };
 
 const DELEGATE_REF = { id: "@persona/feishu-task-assistant", versionRange: "^1.0.0" };
+const GITEA_API_REF = { id: "@action/gitea-api", versionRange: "^1.0.0" };
 
 export async function handleReviewMessage(
   text: string,
@@ -843,7 +845,10 @@ export async function handleReviewMessage(
   let projectRef: string | undefined;
   let projectAsk: string | undefined;
   if (projectToken) {
-    const resolved = resolveProjectRef(projectToken);
+    // 两级解析（2026-10-10）：登记表未命中 → Gitea /repos/search 回落（「career」
+    // 这类未登记仓库也能唯一命中；0/多命中才反问）
+    const resolved = await resolveProjectRefAsync(projectToken, async (req) =>
+      (await ctx.call(GITEA_API_REF, req)) as never, resolveProjectRef);
     if (resolved.repo) projectRef = resolved.repo;
     else if (resolved.candidates.length > 1) {
       projectAsk = `「${projectToken}」能对上几个仓库：${resolved.candidates.join("、")}，说一个具体的？`;
