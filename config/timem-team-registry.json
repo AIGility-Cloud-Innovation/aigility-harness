@@ -13,6 +13,20 @@
   ],
   "members": [
     {
+      "member_id": "member-guolin",
+      "name": "guolin",
+      "aliases": [
+        "郭林 guolin"
+      ],
+      "timem_user_ids": [
+        "member-guolin"
+      ],
+      "feishu_open_ids": [
+        "ou_c6797e52be28d35c8d13957cf34dd0d6"
+      ],
+      "notes": "2026-10-10 由用户确认：R49（TiMEM.Space 备案运维任务）的飞书负责人 ou_c6797e52… = guolin"
+    },
+    {
       "member_id": "member-shahongbin",
       "name": "shahongbin",
       "aliases": [
