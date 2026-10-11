@@ -389,9 +389,13 @@ export function renderCompactMorning(
   const projectNames = loadProjectNames();
   const projectGoals = loadProjectGoals();
 
-  const lines: string[] = [`🌅 工作晨报 · ${date}（计划 · 尚未完成，以今日待办与计划为准）`, ""];
+  const lines: string[] = [
+    `🌅 工作晨报 · ${date}（计划 · 尚未完成）`,
+    "⚠️ 性质声明：本晨报全部为「计划 / 进行中」状态，不是已完成事项；完成情况以当日《工作日报》为准。",
+    "",
+  ];
   // ── 按项目：台账梳理 = 今日待办 + 进行中（2026-10-12 负责人拍板：晨报按项目补台账进展）──
-  lines.push("按项目 · 台账梳理（进行中 + 今日待办）");
+  lines.push("按项目 · 计划梳理（进行中 + 今日待办，均非已完成）");
   const todoOf = new Map<string, RegTask[]>();
   const doingOf = new Map<string, RegTask[]>();
   for (const t of tasks) {
@@ -416,7 +420,7 @@ export function renderCompactMorning(
   if (!projKeys.length) lines.push("（各项目暂无待办与进行中任务）");
 
   // ── 按人：今日待办 + 近 3 天计划线索 + 按项目工作风险 ──
-  lines.push("", "按人 · 今日待办");
+  lines.push("", "按人 · 计划（今日待办，非已完成）");
   let personCount = 0;
   for (const m of members) {
     const tks = tasks.filter((t) => memberOfTask(t, [m]));
@@ -431,7 +435,7 @@ export function renderCompactMorning(
     personCount += 1;
   }
   if (!personCount) lines.push("（暂无人员待办）");
-  lines.push("", "—— 项目小助理 · 数据源：任务台账 + 太忆空间计划记忆（计划性内容，完成情况见当日日报）");
+  lines.push("", "—— 项目小助理 · 晨报=计划快照（进行中/待办，非已完成） · 数据源：任务台账 + 太忆空间计划记忆（完成情况见当日日报）");
   return lines.join("\n");
 }
 
@@ -549,7 +553,7 @@ export function renderMorningBriefing(
     const map = b === "todo" ? todoOf : doingOf;
     map.set(key, [...(map.get(key) ?? []), t]);
   }
-  lines.push("【按项目 · 台账梳理】");
+  lines.push("【按项目 · 计划梳理】（以下均为进行中/待办，非已完成；[完成] 标记仅供参考，禁止写进晨报正文）");
   const projectGoals = loadProjectGoals();
   const projKeys = [...new Set([...todoOf.keys(), ...doingOf.keys()])]
     .sort((a, b) => ((doingOf.get(b)?.length ?? 0) + (todoOf.get(b)?.length ?? 0)) - ((doingOf.get(a)?.length ?? 0) + (todoOf.get(a)?.length ?? 0)));
@@ -563,7 +567,7 @@ export function renderMorningBriefing(
     if (goal) lines.push(`  阶段目标：${goal}`);
   }
   if (!projKeys.length) lines.push("（各项目暂无待办与进行中任务）");
-  lines.push("", "【按人】", ...briefingPeopleSection(
+  lines.push("", "【按人 · 计划】（以下为各人今日待办/进行中，非已完成）", ...briefingPeopleSection(
     tasks, planMemoriesByMember,
     (h) => (h.count ? (h.samples ?? [h.sample]).filter(Boolean).slice(0, 3).join(" / ") : null),
   ));
