@@ -25,6 +25,8 @@ interface RegTask {
   assignee_member_id?: string;
   links?: Record<string, { guid?: string; url?: string }>;
   origin?: { provider: string; guid: string };
+  /** 落账时间：epoch-ms 数字或 ISO 字符串（台账两种形态并存） */
+  updatedAt?: number | string;
 }
 
 interface Member {
@@ -226,6 +228,30 @@ export function loadProjectGoals(): Map<string, string> {
 const RISK_STALE_DAYS = 7;
 const RISK_OVERLOAD_TASKS = 6;
 
+/** 台账 updatedAt → epoch ms（兼容 epoch 秒/毫秒与 ISO 字符串；缺省/解析失败返回 null） */
+export function taskUpdatedAtMs(t: RegTask): number | null {
+  const v = t.updatedAt;
+  if (v == null) return null;
+  if (typeof v === "number") {
+    if (!Number.isFinite(v)) return null;
+    return v > 1e12 ? v : v * 1000;
+  }
+  const ms = new Date(v).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** 日报任务口径（2026-10-12 负责人拍板）：done 且当天更新过 = 当天完成，不新增 completedAt 字段。
+ *  非 done 状态按当前进展照常呈现；done 但非当天更新（历史完成，前天/更早落账）不进当天日报。 */
+export function filterTasksForDaily(tasks: RegTask[], date: string): RegTask[] {
+  const startMs = new Date(`${date}T00:00:00`).getTime();
+  const endMs = startMs + 86_400_000;
+  return tasks.filter((t) => {
+    if (t.status !== "done") return true;
+    const ms = taskUpdatedAtMs(t);
+    return ms != null && ms >= startMs && ms < endMs;
+  });
+}
+
 /** 人员块的工作风险（确定性推导，按项目归组，不编造）：
  *  ① 受阻/失败任务 ② doing 放置超过 7 天 ③ 并行任务过多 */
 export function memberRiskSummary(
@@ -339,12 +365,16 @@ export function renderCompactDaily(
   return lines.join("\n");
 }
 
-/** 紧凑工作日报入口（异步：内部拉取窗口内 PR） */
+/** 紧凑工作日报入口（异步：内部拉取窗口内 PR）
+ *  done 过滤按日收口（2026-10-12）：只报当天完成，历史 done 不再每天重报。 */
 export async function buildCompactDailyReport(
   date: string,
   memoriesByMember: Array<{ memberName: string; count: number; sample?: string }>,
 ): Promise<string> {
-  const tasks = loadRegistryTasks().filter((t) => t.status !== "cancelled");
+  const tasks = filterTasksForDaily(
+    loadRegistryTasks().filter((t) => t.status !== "cancelled"),
+    date,
+  );
   const prs = await fetchRecentPrs(`${date}T00:00:00`);
   return renderCompactDaily(date, tasks, prs, memoriesByMember);
 }
@@ -531,7 +561,10 @@ export function renderMorningBriefing(
 }
 
 export async function buildDailyBriefing(date: string, memoriesByMember: MemHint[]): Promise<string> {
-  const tasks = loadRegistryTasks().filter((t) => t.status !== "cancelled");
+  const tasks = filterTasksForDaily(
+    loadRegistryTasks().filter((t) => t.status !== "cancelled"),
+    date,
+  );
   const prs = await fetchRecentPrs(`${date}T00:00:00`);
   return renderDailyBriefing(tasks, prs, memoriesByMember);
 }
