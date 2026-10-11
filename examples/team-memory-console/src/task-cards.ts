@@ -390,21 +390,30 @@ export function renderCompactMorning(
   const projectGoals = loadProjectGoals();
 
   const lines: string[] = [`🌅 工作晨报 · ${date}（计划 · 尚未完成，以今日待办与计划为准）`, ""];
-  // ── 按项目：今日待办（附阶段目标）──
-  lines.push("按项目 · 今日待办");
+  // ── 按项目：台账梳理 = 今日待办 + 进行中（2026-10-12 负责人拍板：晨报按项目补台账进展）──
+  lines.push("按项目 · 台账梳理（进行中 + 今日待办）");
   const todoOf = new Map<string, RegTask[]>();
+  const doingOf = new Map<string, RegTask[]>();
   for (const t of tasks) {
-    if (COMPACT_BUCKET[t.status] !== "todo") continue;
+    const b = COMPACT_BUCKET[t.status];
+    if (b !== "todo" && b !== "doing") continue;
     const repo = t.projectRef ?? "（未定仓库）";
     const key = projectNames.get(repo) ?? repo;
-    todoOf.set(key, [...(todoOf.get(key) ?? []), t]);
+    const map = b === "todo" ? todoOf : doingOf;
+    map.set(key, [...(map.get(key) ?? []), t]);
   }
-  for (const [name, ts] of [...todoOf.entries()].sort((a, b) => b[1].length - a[1].length)) {
-    lines.push(`- ${name}：${compactSummarize(ts)}`);
+  const projKeys = [...new Set([...todoOf.keys(), ...doingOf.keys()])]
+    .sort((a, b) => ((doingOf.get(b)?.length ?? 0) + (todoOf.get(b)?.length ?? 0)) - ((doingOf.get(a)?.length ?? 0) + (todoOf.get(a)?.length ?? 0)));
+  for (const name of projKeys) {
+    const ts = todoOf.get(name) ?? [];
+    const doing = doingOf.get(name);
+    if (ts.length) lines.push(`- ${name}：${compactSummarize(ts)}`);
+    else lines.push(`- ${name}：今日无待办${doing?.length ? `，推进中 ${doing.length} 项` : ""}`);
+    if (doing?.length) lines.push(`  - 进行中：${compactSummarize(doing)}`);
     const goal = projectGoals.get(name);
     if (goal) lines.push(`  - 阶段目标：${goal}`);
   }
-  if (!todoOf.size) lines.push("（各项目暂无待办）");
+  if (!projKeys.length) lines.push("（各项目暂无待办与进行中任务）");
 
   // ── 按人：今日待办 + 近 3 天计划线索 + 按项目工作风险 ──
   lines.push("", "按人 · 今日待办");
@@ -522,28 +531,38 @@ export function renderDailyBriefing(
   return lines.join("\n");
 }
 
-/** 晨报 LLM 输入：按项目（今日待办全行）+ 按人（待办 + 近 3 天计划线索） */
+/** 晨报 LLM 输入：按项目（台账梳理=进行中+今日待办 全行）+ 按人（待办 + 近 3 天计划线索） */
 export function renderMorningBriefing(
   tasks: RegTask[],
   planMemoriesByMember: MemHint[],
 ): string {
   const projectNames = loadProjectNames();
   const lines: string[] = [];
+  // 2026-10-12 负责人拍板：晨报按项目补台账梳理——进行中任务与今日待办都给，
+  // 让晨报交代各项目当前推进状态，而非只列今日待办。
+  const doingOf = new Map<string, RegTask[]>();
   const todoOf = new Map<string, RegTask[]>();
   for (const t of tasks) {
-    if (COMPACT_BUCKET[t.status] !== "todo") continue;
+    const b = COMPACT_BUCKET[t.status];
+    if (b !== "todo" && b !== "doing") continue;
     const key = projectNames.get(t.projectRef ?? "") ?? t.projectRef ?? "（未定仓库）";
-    todoOf.set(key, [...(todoOf.get(key) ?? []), t]);
+    const map = b === "todo" ? todoOf : doingOf;
+    map.set(key, [...(map.get(key) ?? []), t]);
   }
-  lines.push("【按项目】");
+  lines.push("【按项目 · 台账梳理】");
   const projectGoals = loadProjectGoals();
-  for (const [name, ts] of [...todoOf.entries()].sort((a, b) => b[1].length - a[1].length)) {
+  const projKeys = [...new Set([...todoOf.keys(), ...doingOf.keys()])]
+    .sort((a, b) => ((doingOf.get(b)?.length ?? 0) + (todoOf.get(b)?.length ?? 0)) - ((doingOf.get(a)?.length ?? 0) + (todoOf.get(a)?.length ?? 0)));
+  for (const name of projKeys) {
     const members = loadMembers();
-    lines.push(`- ${name}：${ts.slice(0, 8).map((t) => briefingTaskLine(t, members)).join("；")}`);
+    const ts = todoOf.get(name) ?? [];
+    const doing = doingOf.get(name) ?? [];
+    lines.push(`- ${name}：今日待办：${ts.length ? ts.slice(0, 8).map((t) => briefingTaskLine(t, members)).join("；") : "无"}`);
+    if (doing.length) lines.push(`  进行中：${doing.slice(0, 8).map((t) => briefingTaskLine(t, members)).join("；")}`);
     const goal = projectGoals.get(name);
     if (goal) lines.push(`  阶段目标：${goal}`);
   }
-  if (!todoOf.size) lines.push("（各项目暂无待办）");
+  if (!projKeys.length) lines.push("（各项目暂无待办与进行中任务）");
   lines.push("", "【按人】", ...briefingPeopleSection(
     tasks, planMemoriesByMember,
     (h) => (h.count ? (h.samples ?? [h.sample]).filter(Boolean).slice(0, 3).join(" / ") : null),
