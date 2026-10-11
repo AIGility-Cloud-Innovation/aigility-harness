@@ -351,19 +351,24 @@ async function renderXlsx(request: DocWorkerRequest): Promise<Buffer> {
   ws.columns = widths.map(w => ({ width: w }));
 
   let row = 1;
-  /** A 列单格写一行（标题/副标题/标题段/正文段/条目） */
-  const setCell = (text: string, font: Partial<ExcelJS.Font>, wrap = false): void => {
+  // 合并列数 = 全文档最大表宽（无表格时 1）。A 列单行内容横跨合并，
+  // 人读美观（标题/副标题居中、章节/正文/条目不再挤在 A 列一条竖线里）。
+  const mergeCols = Math.max(1, ...request.blocks.map((b) => (b.type === "table" ? b.header.length : 1)));
+  /** 写一行并按 mergeCols 横向合并（mergeCols=1 时不合并） */
+  const setCell = (text: string, font: Partial<ExcelJS.Font>, opts?: { wrap?: boolean; center?: boolean }): void => {
     const r = ws.getRow(row);
     const c = r.getCell(1);
     c.value = text;
     c.font = font;
-    if (wrap) c.alignment = { wrapText: true, vertical: "top" };
+    if (opts?.wrap) c.alignment = { wrapText: true, vertical: "top" };
+    else if (opts?.center) c.alignment = { horizontal: "center", vertical: "middle" };
+    if (mergeCols > 1) ws.mergeCells(row, 1, row, mergeCols);
     r.commit();
     row += 1;
   };
 
-  setCell(request.title, { bold: true, size: 14, color: { argb: `FF${DARK}` } });
-  if (request.subtitle) setCell(request.subtitle, { size: 10, color: { argb: `FF${GRAY}` } });
+  setCell(request.title, { bold: true, size: 14, color: { argb: `FF${DARK}` } }, { center: true });
+  if (request.subtitle) setCell(request.subtitle, { size: 10, color: { argb: `FF${GRAY}` } }, { center: true });
   row += 1;
 
   for (const block of request.blocks) {
@@ -373,7 +378,7 @@ async function renderXlsx(request: DocWorkerRequest): Promise<Buffer> {
         break;
       }
       case "paragraph": {
-        setCell(block.text, { size: 10.5, bold: block.bold ?? false, color: { argb: `FF${block.bold ? DARK : BODY}` } }, true);
+        setCell(block.text, { size: 10.5, bold: block.bold ?? false, color: { argb: `FF${block.bold ? DARK : BODY}` } }, { wrap: true });
         break;
       }
       case "bullets": {
