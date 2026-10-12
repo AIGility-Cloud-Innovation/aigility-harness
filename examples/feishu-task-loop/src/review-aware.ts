@@ -223,7 +223,7 @@ function extractExecutor(text: string): string | undefined {
 /** 执行人 = 编码代理（2026-10-08）：用户说「执行人 agent/AI/智能体」意为让 agent
  *  直接做，不指派人类——合法值，不触发人员台账匹配与私信提醒。 */
 export function isAgentExecutor(token: string | undefined): boolean {
-  return /^(agent|ai|ai代理|智能体|编码代理|代理)$/.test((token ?? "").trim().toLowerCase());
+  return /^(agentd|agent|ai|ai代理|智能体|编码代理|代理)$/.test((token ?? "").trim().toLowerCase());
 }
 
 /** 归属抽取（2026-10-07 句式扩展）：真实事故「R42 项目是 timem_console_frontend」
@@ -234,7 +234,7 @@ export function isAgentExecutor(token: string | undefined): boolean {
  *  2026-10-08 再修（四连败事故）：「任务归属 R42 console」里 R 紧跟归属词，
  *  捕获组把 R42 当成归属值 → 永远解析失败。抽取前先剥短码。 */
 export function extractProjectToken(text: string): string | undefined {
-  const stripped = text.replace(/R\d{2}/gi, " ");
+  const stripped = text.replace(/R\d{2,}/gi, " ");
   const m = stripped.match(/(?:归属\s*(?:项目|仓库)?|项目|仓库)(?:是|为|[:：])?\s*([\w\u4e00-\u9fa5/-]{2,64})/);
   return m?.[1];
 }
@@ -813,7 +813,9 @@ export async function handleReviewMessage(
   }
 
   // 查询：复核清单（无短码也可查）
-  const matchedCodes = [...text.matchAll(/R\d{2}/gi)]
+  // 2026-10-12：短码已进三位数时代（R100+），\d{2} 会把 R100 截成 R10 查无此任务
+  //（实测用户发 R100 R101 被回「R10 的台账找不到了」×2）。改 \d{2,} 全兼容。
+  const matchedCodes = [...text.matchAll(/R\d{2,}/gi)]
     .map((m) => m[0].toUpperCase())
     .filter((c) => c in codes);
   const wantsList = /复核清单|待复核|复核列表/.test(text) && matchedCodes.length === 0;
@@ -855,7 +857,7 @@ export async function handleReviewMessage(
   // 检查单重跑时 LLM 判定的是"补过的描述"——这是"回复了还问"问题的修复核心。
   // （2026-10-07 与 extractProjectToken 同步扩展：归属/项目/仓库 三种引导词都要剥掉）
   const residual = text
-    .replace(/R\d{2}/gi, "")
+    .replace(/R\d{2,}/gi, "")
     .replace(/执行人?[：:]?\s*[@]?[\w\u4e00-\u9fa5·\-]{2,32}/, "")
     .replace(/(?:归属\s*(?:项目|仓库)?|项目|仓库)(?:是|为|[:：])?\s*[\w\u4e00-\u9fa5/-]{2,64}/, "")
     .trim();

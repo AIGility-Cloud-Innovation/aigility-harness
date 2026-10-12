@@ -6,6 +6,9 @@ import { extractProjectToken, resolveProjectRef, isAgentExecutor } from "./revie
 describe("review-aware extractProjectToken — 归属句式", () => {
   it("「项目是 X」——R42 事故句式", () => {
     expect(extractProjectToken("R42 项目是 timem_console_frontend")).toBe("timem_console_frontend");
+    // 2026-10-12 三位短码：R100 不得被 \d{2} 截成 R10（剥离失败会把「0」误进归属）
+    expect(extractProjectToken("R100 项目是 timem_console_frontend")).toBe("timem_console_frontend");
+    expect(extractProjectToken("R101 归属 space")).toBe("space");
   });
 
   it("「仓库是 X」", () => {
@@ -89,8 +92,8 @@ describe("review-aware resolveProjectRef — 仓库名模糊匹配", () => {
 
 // 执行人 = 编码代理（2026-10-08）："执行人 agent" 是让 agent 直接做的合法表达
 describe("review-aware isAgentExecutor — 编码代理执行人", () => {
-  it("agent/AI/智能体/编码代理 都是编码代理执行人", () => {
-    for (const t of ["agent", "Agent", "AI", "ai", "智能体", "编码代理", " AI "]) {
+  it("agentd/agent/AI/智能体/编码代理 都是编码代理执行人（agentd 2026-10-12 补：负责人实测『安排执行人 agentd』被当人名）", () => {
+    for (const t of ["agentd", "agent", "Agent", "AI", "ai", "智能体", "编码代理", " AI "]) {
       expect(isAgentExecutor(t)).toBe(true);
     }
   });
