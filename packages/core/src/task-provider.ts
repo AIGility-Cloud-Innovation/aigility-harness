@@ -102,6 +102,8 @@ export interface TaskRecord {
    * member_id=复核人的人员台账外键（解析成功时）。
    */
   review?: { by: string; via: "auto" | "manual"; at: number; note?: string; member_id?: string };
+  /** 执行产出/失败摘要（执行方写：如 worker-team 派发结果） */
+  note?: string;
   createdAt: number;
   updatedAt: number;
 }
