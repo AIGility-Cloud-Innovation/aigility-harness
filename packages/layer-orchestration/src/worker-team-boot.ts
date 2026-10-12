@@ -21,12 +21,28 @@ import { WorkerTeam } from "./worker-team.js";
 import type { WorkerTeamOptions, WorkerMember } from "./worker-team.js";
 import type { TaskRegistry } from "./task-registry.js";
 
-/** 轻型成员名册（P0 硬编码；与 @action 四工人服务对应） */
+/** 轻型成员名册（能力路由默认特色版；与 @action 四工人服务对应）
+ *  特色依据（2026-10-12 负责人确认）：codex 均衡+planning 强（经 @cognitive
+ *  规划链路）；claude 长上下文/文档/深改稳；zcode 启动快适小修；pi print
+ *  模式接网关适机械型数据/脚本任务。 */
 export const LIGHT_ROSTER: WorkerMember[] = [
-  { id: "codex", serviceId: "@action/codex-agent", tier: "light" },
-  { id: "claude", serviceId: "@action/claude-agent", tier: "light" },
-  { id: "zcode", serviceId: "@action/zcode-agent", tier: "light" },
-  { id: "pi", serviceId: "@action/pi-agent", tier: "light" },
+  {
+    id: "codex", serviceId: "@action/codex-agent", tier: "light",
+    strengths: ["planning", "web"],
+  },
+  {
+    id: "claude", serviceId: "@action/claude-agent", tier: "light",
+    strengths: ["docs", "refactor", "planning"],
+    weakAt: ["quick-fix"],
+  },
+  {
+    id: "zcode", serviceId: "@action/zcode-agent", tier: "light",
+    strengths: ["quick-fix"],
+  },
+  {
+    id: "pi", serviceId: "@action/pi-agent", tier: "light",
+    strengths: ["data"],
+  },
 ];
 
 /** 成员 id → CapabilityRef（ctx.call 用） */
@@ -41,11 +57,11 @@ export function makeCallWorker(ctx: SeamContext): WorkerTeamOptions["callWorker"
       prompt: args.prompt,
       ...(args.cwd ? { cwd: args.cwd } : {}),
       ...(args.timeoutMs ? { timeoutMs: args.timeoutMs } : {}),
-      // planning 模型显式化：codex-agent 默认 deepseek-v4-pro 本机网关不存在
-      //（2026-10-12 e2e 实测 HTTP 400）；qwen-turbo 亦仅适用于旧网关。本机
-      // LiteLLM 网关可用模型以 404 报错回显为准，缺省 deepseek-v4-flash（带
-      // fallback）；可用 WORKER_TEAM_PLANNING_MODEL 覆盖。
-      planningModel: process.env["WORKER_TEAM_PLANNING_MODEL"] ?? "deepseek-v4-flash",
+      // planning 模型链：优先 bigmodel-glm-5.3-flash，失败落 ksyun-deepseek-v4.1-flash
+      // （链在网关 config.yaml fallbacks，2026-10-12 负责人指定并已重启生效——实测请求
+      // glm-5.3-flash 返回 model=deepseek-v4.1-flash，链路工作）。注意本机网关无
+      // deepseek-v4-pro/qwen-turbo（旧结论仅适用旧网关）。可用 WORKER_TEAM_PLANNING_MODEL 覆盖。
+      planningModel: process.env["WORKER_TEAM_PLANNING_MODEL"] ?? "bigmodel-glm-5.3-flash",
     } as Record<string, unknown>)) as { ok: boolean; value?: { text?: string }; error?: string };
     if (!r.ok) return { ok: false, text: "", error: r.error ?? "成员调用失败" };
     return { ok: true, text: r.value?.text ?? "" };

@@ -31,9 +31,36 @@ export interface WorkerMember {
   tier: "light";
   /** 项目 shortName → 优先用此成员（分派路由第 2 优先级） */
   projectAffinity?: string[];
+  /** 擅长标签（分派路由能力匹配档；如 planning/refactor/docs/quick-fix/data） */
+  strengths?: string[];
+  /** 不擅长/禁用场景（能力匹配时跳过该成员） */
+  weakAt?: string[];
 }
 
-/** 分派决策（第 3 功能 P0 形态） */
+/** 能力标签词表（pickWorker 关键词 → 标签的匹配规则） */
+export const STRENGTH_KEYWORDS: Record<string, string[]> = {
+  planning: ["方案", "设计", "架构", "评审", "规划", "plan", "design", "review"],
+  refactor: ["重构", "清理", "优化", "refactor", "cleanup", "simplify"],
+  docs: ["文档", "注释", "说明", "readme", "doc", "报告"],
+  "quick-fix": ["修复", "修复", "小改", "fix", "bug", "补"],
+  data: ["数据", "脚本", "报表", "统计", "sql", "csv", "excel"],
+  web: ["网页", "页面", "前端", "html", "web", "页面"],
+};
+
+/** 能力路由（第 3 优先级）：按 description/title 关键词匹配成员擅长标签。
+ *  默认特色（依据各 CLI 驱动器实测特性，2026-10-12 负责人确认）：
+ *  - codex：均衡首选（planning 强——经 @cognitive 规划链路，复杂任务主选）
+ *  - claude：文档/长文与 refactor 深改（长上下文、编辑质量稳）
+ *  - zcode：quick-fix/轻量工程改动（启动快、成本低）
+ *  - pi：data/脚本/批处理（print 模式、models.json 接网关，适合机械型任务） */
+export function inferTaskTags(text: string): string[] {
+  const lower = text.toLowerCase();
+  return Object.entries(STRENGTH_KEYWORDS)
+    .filter(([, kws]) => kws.some((k) => lower.includes(k)))
+    .map(([tag]) => tag);
+}
+
+/** 分派决策（第 3 功能：显式 > 项目绑定 > 能力匹配 > 兜底） */
 export function pickWorker(
   task: TaskRecord,
   roster: WorkerMember[],
@@ -50,7 +77,17 @@ export function pickWorker(
   // 2) 项目绑定
   const byAffinity = roster.find((w) => w.projectAffinity?.includes(shortName));
   if (byAffinity) return byAffinity;
-  // 3) 默认兜底（名册第一位）
+  // 3) 能力匹配：任务关键词命中成员 strengths（weakAt 一票否决）
+  const tags = inferTaskTags(`${task.description ?? ""} ${task.title}`);
+  if (tags.length > 0) {
+    const byStrength = roster.find(
+      (w) =>
+        !(w.weakAt ?? []).some((t) => tags.includes(t)) &&
+        (w.strengths ?? []).some((t) => tags.includes(t)),
+    );
+    if (byStrength) return byStrength;
+  }
+  // 4) 默认兜底（名册第一位）
   return roster[0] ?? null;
 }
 

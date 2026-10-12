@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { TaskRegistry } from "./task-registry.js";
-import { WorkerTeam, pickWorker } from "./worker-team.js";
+import { WorkerTeam, pickWorker, inferTaskTags } from "./worker-team.js";
 import type { WorkerMember } from "./worker-team.js";
 import type { TaskRecord } from "@aigility-harness/core";
 
@@ -48,6 +48,45 @@ describe("pickWorker 分派路由", () => {
   it("显式指定不存在的成员 → null（不静默换人）", () => {
     const t = { description: "[worker:gpt] 干活" } as TaskRecord;
     expect(pickWorker(t, ROSTER)).toBeNull();
+  });
+});
+
+describe("能力路由（第 3 优先级，能力特色名册）", () => {
+  const CAP_ROSTER = [
+    { id: "codex", serviceId: "@action/codex-agent", tier: "light", strengths: ["planning", "web"] } as WorkerMember,
+    { id: "claude", serviceId: "@action/claude-agent", tier: "light", strengths: ["docs", "refactor"], weakAt: ["quick-fix"] } as WorkerMember,
+    { id: "zcode", serviceId: "@action/zcode-agent", tier: "light", strengths: ["quick-fix"] } as WorkerMember,
+    { id: "pi", serviceId: "@action/pi-agent", tier: "light", strengths: ["data"] } as WorkerMember,
+  ];
+
+  it("「写个数据统计脚本」→ pi（data 标签）", () => {
+    const t = { description: "写个数据统计脚本", title: "" } as TaskRecord;
+    expect(pickWorker(t, CAP_ROSTER)?.id).toBe("pi");
+  });
+
+  it("「修复登录页 bug」→ zcode（quick-fix；claude weakAt 否决）", () => {
+    const t = { description: "修复登录页 bug", title: "" } as TaskRecord;
+    expect(pickWorker(t, CAP_ROSTER)?.id).toBe("zcode");
+  });
+
+  it("「重构用户模块」→ claude（refactor）", () => {
+    const t = { description: "重构用户模块", title: "" } as TaskRecord;
+    expect(pickWorker(t, CAP_ROSTER)?.id).toBe("claude");
+  });
+
+  it("「设计方案评审」→ codex（planning）", () => {
+    const t = { description: "设计方案评审", title: "" } as TaskRecord;
+    expect(pickWorker(t, CAP_ROSTER)?.id).toBe("codex");
+  });
+
+  it("无能力关键词 → 兜底第一位 codex", () => {
+    const t = { description: "随便跑一下", title: "" } as TaskRecord;
+    expect(pickWorker(t, CAP_ROSTER)?.id).toBe("codex");
+  });
+
+  it("inferTaskTags 中英混合命中", () => {
+    expect(inferTaskTags("Fix the login bug")).toContain("quick-fix");
+    expect(inferTaskTags("更新 README 文档")).toContain("docs");
   });
 });
 

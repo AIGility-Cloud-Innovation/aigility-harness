@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { err, ok, LayerId, PluginState } from "@aigility-harness/core";
 import type { Result, ServiceDefinition } from "@aigility-harness/core";
 import { InMemoryKernelAdapter } from "prototype-mode/in-memory-kernel";
-import { codexAgentProvider } from "@aigility-harness/layer-action";
+import { codexAgentProvider, claudeAgentProvider, zcodeAgentProvider, piAgentProvider } from "@aigility-harness/layer-action";
 import { llmInferenceService, plugin as llmPlugin } from "@aigility-harness/layer-cognitive";
 import { TaskRegistry, WorkerTeam, LIGHT_ROSTER } from "@aigility-harness/layer-orchestration";
 import { loadEnv } from "../src/env.js";
@@ -30,12 +30,11 @@ async function main() {
     const r = await kernel.registry.register(llmInferenceService, p as never);
     if (!r.ok) return console.error("注册 llm-inference 失败:", r.error);
   }
-  // 注册行动层 codex 工人
-  const rCodex = await kernel.registry.register(
-    codexAgentProvider.service as ServiceDefinition<unknown, unknown>,
-    codexAgentProvider as never,
-  );
-  if (!rCodex.ok) return console.error("注册 codex-agent 失败:", rCodex.error);
+  // 注册行动层四工人（真实 failover 需名册全部可解析；生产 loop 由 action 插件注册）
+  for (const p of [codexAgentProvider, claudeAgentProvider, zcodeAgentProvider, piAgentProvider]) {
+    const r = await kernel.registry.register(p.service as ServiceDefinition<unknown, unknown>, p as never);
+    if (!r.ok) return console.error(`注册 ${p.service.id} 失败:`, r.error);
+  }
 
   // scratch 工作目录（产物落 scratch，不污染仓库）
   const work = mkdtempSync(join(tmpdir(), "worker-team-e2e-"));
@@ -51,7 +50,7 @@ async function main() {
           prompt: args.prompt,
           ...(args.cwd ? { cwd: args.cwd } : {}),
           ...(args.timeoutMs ? { timeoutMs: args.timeoutMs } : {}),
-          planningModel: process.env["WORKER_TEAM_PLANNING_MODEL"] ?? "deepseek-v4-flash",
+          planningModel: process.env["WORKER_TEAM_PLANNING_MODEL"] ?? "bigmodel-glm-5.3-flash",
         } as Record<string, unknown>)) as Result<{ text?: string }>;
         if (!r.ok) return { ok: false, text: "", error: r.error };
         return { ok: true, text: r.value?.text ?? "" };
