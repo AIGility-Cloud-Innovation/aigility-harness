@@ -1,7 +1,7 @@
 {
   "$schema": "./timem-team-registry.schema.md",
   "version": 2,
-  "updated_at": "2026-10-07T07:14:12.448Z",
+  "updated_at": "2026-10-12T23:50:00.000Z",
   "notes": [
     "本文件是「人员对齐」登记表 (single source of truth)：同一个人在飞书 / Gitea / 太忆云中是同一个人。",
     "身份轴：timem_user_ids（太忆云 user_id，space_uuid 格式，可多个）、feishu_open_ids（飞书 open_id，ou_ 开头）、gitea_usernames（git.aigility.cloud 用户名）。",
@@ -18,6 +18,12 @@
       "aliases": [
         "余宣庆 yuxuanqing"
       ],
+      "gitea_usernames": [
+        "yuxuanqing"
+      ],
+      "match_source": {
+        "gitea": "manual"
+      },
       "timem_user_ids": [
         "member-yuxuanqing"
       ],
@@ -32,6 +38,9 @@
       "aliases": [
         "郭林 guolin"
       ],
+      "gitea_usernames": [
+        "guolin"
+      ],
       "timem_user_ids": [
         "member-guolin",
         "space_e4935578-6f9f-47ef-868c-61691dcc8d79"
@@ -41,7 +50,8 @@
       ],
       "match_source": {
         "feishu": "manual",
-        "timem": "manual"
+        "timem": "manual",
+        "gitea": "manual"
       },
       "notes": "2026-10-10 由用户确认：R49（TiMEM.Space 备案运维任务）的飞书负责人 ou_c6797e52… = guolin；timem user_id space_e4935578… 由用户确认登记"
     },

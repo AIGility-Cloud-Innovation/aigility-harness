@@ -43,6 +43,8 @@ interface PrItem {
   state: string;
   merged: boolean;
   author: string;
+  /** author 的归属说明：团队内成员（gitea_usernames 命中）→ "member"，外部作者 → undefined */
+  authorName?: string;
   updatedAt: string;
 }
 
@@ -62,12 +64,60 @@ export function loadRegistryTasks(): RegTask[] {
   return readJson<{ tasks?: RegTask[] }>(join(ROOT, "config/task-registry.local.json"), {}).tasks ?? [];
 }
 
-function loadRepos(): string[] {
-  const reg = readJson<{ projects?: Array<{ gitea_repos?: string[] }> }>(
+function loadProjects(): Array<{ name?: string; gitea_repos?: string[]; gitea_orgs?: string[] }> {
+  const reg = readJson<{ projects?: Array<{ name?: string; gitea_repos?: string[]; gitea_orgs?: string[] }> }>(
     join(ROOT, "config/project-registry.json"),
     {},
   );
-  return (reg.projects ?? []).flatMap((p) => p.gitea_repos ?? []);
+  return reg.projects ?? [];
+}
+
+function loadRepos(): string[] {
+  return loadProjects().flatMap((p) => p.gitea_repos ?? []);
+}
+
+/** 团队成员的 Gitea 账号（timem-team-registry.json 的 gitea_usernames 字段）——PR 按人归属依据 */
+function loadTeamGiteaUsernames(): string[] {
+  return loadMembers().flatMap((m) => m.gitea_usernames ?? []);
+}
+
+function readGiteaToken(): string {
+  const tokenPath = join(process.env["HOME"] ?? "~", ".gitea-token");
+  if (!existsSync(tokenPath)) return "";
+  return readFileSync(tokenPath, "utf-8").trim();
+}
+
+/** 展开 gitea_orgs 为 org/repos（首屏 50 个对当前规模足够；project-registry.json notes 承诺的语义） */
+async function expandOrgRepos(orgs: string[]): Promise<string[]> {
+  const token = readGiteaToken();
+  if (!token || !orgs.length) return [];
+  const out: string[] = [];
+  for (const org of orgs) {
+    try {
+      const resp = await fetch(`https://git.aigility.cloud/api/v1/orgs/${org}/repos?limit=50`, {
+        headers: { authorization: `token ${token}` },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!resp.ok) continue;
+      const items = (await resp.json()) as Array<{ full_name?: string }>;
+      for (const r of items) if (r.full_name) out.push(r.full_name);
+    } catch {
+      // 单 org 失败不拖垮整卡
+    }
+  }
+  return out;
+}
+
+/** PR 拉取范围：显式 gitea_repos + gitea_orgs 展开的仓库（去重）。
+ *  排除 aigility-harness 基础设施仓：框架/插件的日常改动不是业务日报的「成果产出」。 */
+async function resolveFetchRepos(): Promise<string[]> {
+  const projects = loadProjects();
+  const explicit = projects.flatMap((p) => p.gitea_repos ?? []);
+  const orgs = [...new Set(projects.flatMap((p) => p.gitea_orgs ?? []))];
+  const fromOrgs = await expandOrgRepos(orgs);
+  return [...new Set([...explicit, ...fromOrgs])].filter(
+    (r) => r !== "AIGility-Cloud-Innovation/aigility-harness",
+  );
 }
 
 function executorText(t: RegTask): string | undefined {
@@ -85,12 +135,20 @@ function memberOfTask(t: RegTask, members: Member[]): Member | undefined {
   );
 }
 
-async function fetchRecentPrs(windowStartIso: string): Promise<PrItem[]> {
-  const tokenPath = join(process.env["HOME"] ?? "~", ".gitea-token");
-  if (!existsSync(tokenPath)) return [];
-  const token = readFileSync(tokenPath, "utf-8").trim();
+/** 窗口内相关 PR：merged 按北京时间落日（merged_at），其余（open/未合）按 updated_at 兜底。
+ *  口径（2026-10-12 拍板）：merged=成果证据，open=在途预告；评论/审查动态不进日报。
+ *  author 的 Gitea 账号：同时返回团队内归属（registry gitea_usernames 精确匹配）与原文。 */
+async function fetchRecentPrs(
+  windowStartIso: string,
+  teamGiteaUsernames: string[] = loadTeamGiteaUsernames(),
+): Promise<PrItem[]> {
+  const token = readGiteaToken();
+  if (!token) return [];
+  const startMs = new Date(`${windowStartIso}+08:00`).getTime();
+  if (!Number.isFinite(startMs)) return [];
+  const team = new Set(teamGiteaUsernames);
   const out: PrItem[] = [];
-  for (const repo of loadRepos()) {
+  for (const repo of await resolveFetchRepos()) {
     try {
       const resp = await fetch(
         `https://git.aigility.cloud/api/v1/repos/${repo}/pulls?state=all&sort=updated&limit=20`,
@@ -102,11 +160,15 @@ async function fetchRecentPrs(windowStartIso: string): Promise<PrItem[]> {
         title: string;
         state: string;
         merged?: boolean;
+        merged_at?: string;
+        created_at?: string;
         updated_at?: string;
         user?: { login?: string };
       }>;
       for (const p of items) {
-        if ((p.updated_at ?? "") < windowStartIso) continue;
+        // merged 优先用 merged_at 判窗口，避免「几天前合并、今天被评论」误报为今日成果
+        const ts = p.merged && p.merged_at ? p.merged_at : (p.updated_at ?? "");
+        if (!ts || new Date(`${ts.slice(0, 19)}+08:00`).getTime() < startMs) continue;
         out.push({
           repo,
           number: p.number,
@@ -114,6 +176,7 @@ async function fetchRecentPrs(windowStartIso: string): Promise<PrItem[]> {
           state: p.state ?? "open",
           merged: Boolean(p.merged),
           author: p.user?.login ?? "",
+          authorName: team.has(p.user?.login ?? "") ? "member" : undefined,
           updatedAt: p.updated_at ?? "",
         });
       }
@@ -332,14 +395,31 @@ export function renderCompactDaily(
     const key = projectNames.get(repo) ?? repo;
     byProject.set(key, [...(byProject.get(key) ?? []), t]);
   }
-  for (const [repo, ts] of [...byProject.entries()].sort((a, b) => b[1].length - a[1].length)) {
+  const prsByProject = new Map<string, PrItem[]>();
+  for (const p of prs) {
+    const key = projectNames.get(p.repo) ?? p.repo.split("/")[1] ?? p.repo;
+    prsByProject.set(key, [...(prsByProject.get(key) ?? []), p]);
+  }
+  const projKeys = [...new Set([...byProject.keys(), ...prsByProject.keys()])]
+    .sort((a, b) => ((byProject.get(b)?.length ?? 0) + (prsByProject.get(b)?.length ?? 0))
+      - ((byProject.get(a)?.length ?? 0) + (prsByProject.get(a)?.length ?? 0)));
+  for (const name of projKeys) {
+    const ts = byProject.get(name) ?? [];
+    const prsOf = prsByProject.get(name) ?? [];
+    if (!ts.length && !prsOf.length) continue;
     const buckets: Record<"done" | "doing" | "todo", RegTask[]> = { done: [], doing: [], todo: [] };
     for (const t of ts) (buckets[COMPACT_BUCKET[t.status] ?? "todo"]).push(t);
-    lines.push(`- ${projectNames.get(repo) ?? repo}：`);
-    const goal = projectGoals.get(repo);
+    const mergedN = prsOf.filter((p) => p.merged).length;
+    const openN = prsOf.length - mergedN;
+    lines.push(`- ${name}：`);
+    const goal = projectGoals.get(name);
     if (goal) lines.push(`  - 阶段目标：${goal}`);
-    lines.push(`  - done：${compactSummarize(buckets.done)}`);
-    lines.push(`  - doing：${compactSummarize(buckets.doing)}`);
+    const doneParts = [
+      buckets.done.length ? compactSummarize(buckets.done) : null,
+      mergedN ? `合并 PR ${mergedN} 个` : null,
+    ].filter(Boolean);
+    lines.push(`  - done：${doneParts.length ? doneParts.join("；") : "无"}`);
+    lines.push(`  - doing：${buckets.doing.length ? compactSummarize(buckets.doing) : openN ? `在途 PR ${openN} 个` : "无"}`);
     lines.push(`  - 与目标差距：还差 ${buckets.todo.length ? compactSummarize(buckets.todo) : "无"}`);
   }
 
@@ -350,13 +430,25 @@ export function renderCompactDaily(
     const tks = tasks.filter((t) => memberOfTask(t, [m]));
     const mem = memoriesByMember.find((x) => x.memberName === m.name);
     const risk = memberRiskSummary(tks, projectNames);
-    if (!tks.length && !(mem && mem.count) && !risk) continue;
+    // PR 归人：author 的 Gitea 账号精确命中 registry 的 gitea_usernames
+    const myPrs = prs.filter((p) => (m.gitea_usernames ?? []).includes(p.author));
+    const myMerged = myPrs.filter((p) => p.merged).length;
+    const myOpen = myPrs.length - myMerged;
+    if (!tks.length && !(mem && mem.count) && !risk && !myPrs.length) continue;
     const done = tks.filter((t) => t.status === "done");
     const doing = tks.filter((t) => ["dispatched", "running", "review"].includes(t.status));
     const todo = tks.filter((t) => !["done", "dispatched", "running", "review"].includes(t.status));
     lines.push(`- ${displayName(m)}：`);
     if (tks.length) lines.push(`  - 任务：${compactSummarize(tks)}（done ${done.length} / doing ${doing.length} / todo ${todo.length}）`);
     if (mem && mem.count) lines.push(`  - 记忆：今日 ${mem.count} 条${mem.sample ? `（${mem.sample}）` : ""}`);
+    if (myPrs.length) {
+      const parts = [
+        myMerged ? `合并 ${myMerged}` : null,
+        myOpen ? `在途 ${myOpen}` : null,
+      ].filter(Boolean);
+      const head = myPrs.slice(0, 2).map((p) => prLabel(p)).join("；");
+      lines.push(`  - PR：${parts.join("/")}（${head}${myPrs.length > 2 ? " 等" : ""}）`);
+    }
     if (risk) lines.push(`  - 工作风险：${risk}`);
     personCount += 1;
   }
@@ -487,6 +579,14 @@ function briefingPeopleSection(
   return lines;
 }
 
+/** Gitea 账号 → 团队显示名（registry gitea_usernames 精确匹配；未登记返回 null） */
+function memberNameByGiteaLogin(login: string): string | null {
+  for (const m of loadMembers()) {
+    if ((m.gitea_usernames ?? []).includes(login)) return displayName(m);
+  }
+  return null;
+}
+
 /** 日报 LLM 输入：按项目（阶段目标/完成/进行中/待办 全行，任务带状态标签）+ PR 动态 + 按人（台账/记忆分行带状态标签） */
 export function renderDailyBriefing(
   tasks: RegTask[],
@@ -514,9 +614,13 @@ export function renderDailyBriefing(
     if (todo.length) lines.push(`  待办：${todo.slice(0, 8).map((t) => briefingTaskLine(t, members)).join("；")}`);
   }
   if (prs.length) {
-    lines.push("", "【PR 动态】");
-    for (const p of prs.slice(0, 10)) {
-      lines.push(`- ${p.repo}#${p.number} ${p.title.replace(/\s+/g, " ").slice(0, 60)}（${p.author}${p.merged ? "，已合并" : ""}）`);
+    lines.push("", "【PR 动态】（已合并=成果证据；在途=进行中预告，禁止写成已完成）");
+    const projectNamesForPr = loadProjectNames();
+    for (const p of prs.slice(0, 15)) {
+      const proj = projectNamesForPr.get(p.repo) ?? p.repo.split("/")[1] ?? p.repo;
+      const who = memberNameByGiteaLogin(p.author) ?? p.author;
+      const status = p.merged ? "已合并" : "在途";
+      lines.push(`- ${proj} #${p.number} ${p.title.replace(/\s+/g, " ").slice(0, 60)}（${who}，${status}）`);
     }
   }
   lines.push("", "【按人】", ...briefingPeopleSection(
