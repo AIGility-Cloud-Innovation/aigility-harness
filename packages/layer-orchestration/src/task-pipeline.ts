@@ -113,7 +113,7 @@ export interface TaskPipelineRequest {
   notifyChatId?: string;
   /** 查重相似度阈值，默认 0.5 */
   dedupThreshold?: number;
-  /** 判定用模型名，默认读 env TASK_PIPELINE_MODEL，再退 "qwen-turbo" */
+  /** 判定用模型名，默认读 env TASK_PIPELINE_MODEL，再退 ksyun-deepseek-v4.1-flash（2026-10-12 负责人指定；旧值 qwen-turbo 仅适用旧网关） */
   model?: string;
   /**
    * 数据面工作流 YAML 文件路径（节点 + 边 + enabled 开关）。每次触发前重新
@@ -905,7 +905,7 @@ export const taskPipelineProvider: Provider<TaskPipelineRequest, TaskPipelineRes
       // 判定模型优先级：请求显式 model > 节点 task-judge > env TASK_PIPELINE_MODEL > 内置默认。
       // 首次对拍建议节点与 env 配成同款模型，确认「走节点」与「走 env」行为一致后再于页面切模型。
       const judgeParts = await nodeRequest("task-judge");
-      const model = request.model ?? judgeParts?.model ?? process.env.TASK_PIPELINE_MODEL ?? "qwen-turbo";
+      const model = request.model ?? judgeParts?.model ?? process.env.TASK_PIPELINE_MODEL ?? "ksyun-deepseek-v4.1-flash";
       if (judgeParts) {
         console.log(`[task-pipeline] 判定模型来源节点 task-judge: model=${judgeParts.model}${request.model ? "（被请求显式 model 覆盖）" : ""}`);
       }
