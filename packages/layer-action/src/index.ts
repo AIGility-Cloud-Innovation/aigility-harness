@@ -170,7 +170,7 @@ import {
 export { textToSpeechService, textToSpeechProvider, minimaxTtsProvider };
 export type { TextToSpeechRequest, TextToSpeechResponse };
 
-// 编码代理工人（D5：领活 → 执行 → 交产出，spawn CLI 子进程产生真实副作用）
+// 编码代理工人（D3：领活 → 执行 → 交产出，spawn CLI 子进程产生真实副作用）
 export { codexAgentService, codexAgentProvider };
 export type {
   CodexAgentRequest,
