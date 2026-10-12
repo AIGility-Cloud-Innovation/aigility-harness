@@ -44,6 +44,7 @@ examples/appbase/start-dsh-web.sh
 # local workspace helpers (not committed)
 .workbuddy/
 *.bak
+*.bak-*
 examples/wecom-dsh/.state/
 # FDE workbench one-click start script (contains key, not committed); template: start-fde-workbench.cmd.example
 examples/fde-workbench/start-fde-workbench.cmd
