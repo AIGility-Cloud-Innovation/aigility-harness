@@ -195,6 +195,11 @@ export type {
 } from "./requirement-store.js";
 export { TaskRegistry } from "./task-registry.js";
 export type { AdoptTaskInput, TaskListFilter } from "./task-registry.js";
+
+// ── 工人小组（worker-team：接单/分派/派发/回流，D4 编排域） ──────
+export { WorkerTeam, pickWorker, workerTeamService, workerTeamProvider } from "./worker-team.js";
+export type { WorkerMember, DispatchInput, WorkerTeamOptions } from "./worker-team.js";
+export { createWorkerTeam, startWorkerTeamLoop, LIGHT_ROSTER, makeCallWorker, makeResolveCwd } from "./worker-team-boot.js";
 export {
   FEISHU_TASK_PROVIDER_ID,
   SECTION_TO_STATUS,

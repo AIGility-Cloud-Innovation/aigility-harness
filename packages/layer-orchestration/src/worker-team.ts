@@ -130,7 +130,7 @@ export class WorkerTeam {
 
     // 派发（含换人重派）。claim 后任务为 dispatched；开工转 running，
     // 终态 running→done/failed（core 转移表）。产出摘要记入 record.note。
-    let lastError = "";
+    const memberErrors: string[] = [];
     let current = member;
     this.o.registry.transition(task.uid, "running", "dispatched");
     for (let attempt = 0; attempt <= failoverLimit; attempt++) {
@@ -140,16 +140,17 @@ export class WorkerTeam {
         this.o.registry.get(task.uid)!.note = `[worker-team/${current.id}] ${r.text.slice(0, 300)}`;
         return ok(`[${current.id}] ${r.text.slice(0, 200)}`);
       }
-      lastError = r.error ?? "unknown";
+      memberErrors.push(`${current.id}: ${r.error ?? "unknown"}`);
       // 换人：换名册里下一个不同成员（成员间失败切换不回写台账，终态统一记因）
       const next = this.roster.find((w) => w.id !== current.id && w.tier === "light");
       if (!next) break;
       current = next;
     }
-    // 回流：终态 failed + 失败原因
+    // 回流：终态 failed + 各成员失败原因聚合
+    const lastError = memberErrors.join("；");
     this.o.registry.transition(task.uid, "failed", "running");
     this.o.registry.get(task.uid)!.note = `[worker-team] 失败：${lastError.slice(0, 300)}`;
-    return err(`成员 ${member.id} 及重派成员均失败：${lastError}`);
+    return err(`全部尝试失败 → ${lastError}`);
   }
 }
 

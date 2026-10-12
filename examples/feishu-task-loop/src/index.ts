@@ -59,6 +59,8 @@ import {
   projectBriefingProvider,
   startBriefingDigestScheduler,
   setBriefingActivitySink,
+  createWorkerTeam,
+  startWorkerTeamLoop,
   feishuApiRef,
   createPeriodicAligner,
   createFeishuTaskProvider,
@@ -425,6 +427,12 @@ async function main(): Promise<void> {
   });
   console.log("   记忆沉淀: 每日定时快照 + 事件补充 → timem（BRIEFING_DIGEST_TIME 可改触发时刻）");
 
+  // 7. 工人小组（worker-team）：轻型工人接单循环（ready 队列 → claim → @action/*-agent）
+  //    只接轻型即发任务；重型（需闸门/审计）仍走 taskIssueSync → agentd 原链路。
+  //    WORKER_TEAM_INTERVAL_MS=0 停用；成员可用任务 description 里 [worker:claude] 指定。
+  const workerTeam = createWorkerTeam({ ctx, registry: getSharedRegistry() });
+  const teamLoop = startWorkerTeamLoop({ team: workerTeam });
+
   console.log(`\n✅ 飞书机器人已连接 (appId=${appId}) → ${persona}`);
   console.log("   飞书里 @项目小助理：「建任务：xxx」「我的任务」「完成 xxx」");
   console.log("   Gitea 工单：「建工单 @仓库：xxx」「工单列表」「关闭工单 #n」「项目概览」");
@@ -436,6 +444,7 @@ async function main(): Promise<void> {
     pipeline.value.stop();
     if (scanTimer) clearInterval(scanTimer);
     digestScheduler?.stop();
+    teamLoop.stop();
     setBriefingActivitySink(undefined);
     await start.value.stop();
     await shutdown(kernel, scheduler);
