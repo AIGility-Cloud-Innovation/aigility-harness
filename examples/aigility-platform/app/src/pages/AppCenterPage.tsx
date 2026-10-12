@@ -290,7 +290,7 @@ const DOC_FORMATS: Array<{ value: DocFormat; label: string }> = [
 
 function ReportApp({ back }: { back: () => void }) {
   const [title, setTitle] = useState('周运行报告')
-  const [subtitle, setSubtitle] = useState('Aigility 智悦智能平台 · 文档工人自动生成')
+  const [subtitle, setSubtitle] = useState('Aigility 智悦智能平台 · 文档生成器自动生成')
   const [templates, setTemplates] = useState<ReportTemplate[]>([])
   const [activeTpl, setActiveTpl] = useState('')
   const [content, setContent] = useState(

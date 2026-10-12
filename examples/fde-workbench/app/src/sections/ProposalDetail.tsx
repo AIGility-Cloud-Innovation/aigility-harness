@@ -92,16 +92,16 @@ export function ProposalDetail({ id }: { id: string }) {
     setExporting(kind)
     const label = kind === 'ppt' ? '方案 PPT' : kind === 'word' ? '解决方案 Word' : '报价 Excel'
     try {
-      // Word 优先移交 D3 文档工人（服务端 doc-worker 确定性渲染），不可用再回退浏览器引擎
+      // Word 优先移交 D3 文档生成器（服务端 doc-worker 确定性渲染），不可用再回退浏览器引擎
       if (kind === 'word' && harnessOk) {
         try {
           const r = await generateProposalDocx(harnessCfg, buildProposalDoc(p, lead, skus))
-          toast.success(`D3 文档工人已产出 ${r.filename}`, {
+          toast.success(`D3 文档生成器已产出 ${r.filename}`, {
             description: `服务端 doc-worker 渲染 · ${(r.bytes / 1024).toFixed(1)} KB · 内容与方案 v${p.version} 一致`,
           })
           return
         } catch {
-          toast.info('文档工人不可达，本次回退浏览器内置引擎')
+          toast.info('文档生成器不可达，本次回退浏览器内置引擎')
         }
       }
       // 按需加载生成库（pptxgenjs/docx/xlsx 体积大，不进入首屏包）
@@ -110,7 +110,7 @@ export function ProposalDetail({ id }: { id: string }) {
       if (kind === 'word') await exp.exportProposalDocx(p, lead, skus)
       if (kind === 'excel') exp.exportQuoteXlsx(p, lead, skus)
       toast.success(`${label}已生成为真实文件并开始下载`, {
-        description: '由浏览器内置引擎生成 · 接入本地 Harness 后 Word 改由 D5 文档工人产出',
+        description: '由浏览器内置引擎生成 · 接入本地 Harness 后 Word 改由 D3 文档生成器产出',
       })
     } catch {
       toast.error(`${label}生成失败，请重试`)
@@ -291,13 +291,13 @@ export function ProposalDetail({ id }: { id: string }) {
                 harnessOk ? 'border-emerald-200 bg-emerald-50/60' : 'border-slate-200 bg-slate-50/60')}>
                 <span className={cn('font-medium', harnessOk ? 'text-emerald-700' : 'text-slate-500')}>aigility-harness 本地网关</span>
                 {harnessOk
-                  ? <span className="flex items-center gap-1 text-[11px] text-emerald-600"><CheckCircle2 className="h-3 w-3" />已连接 · Word 走 D3 文档工人</span>
+                  ? <span className="flex items-center gap-1 text-[11px] text-emerald-600"><CheckCircle2 className="h-3 w-3" />已连接 · Word 走 D3 文档生成器</span>
                   : <span className="flex items-center gap-1 text-[11px] text-slate-400"><Unplug className="h-3 w-3" />未连接</span>}
               </div>
             </div>
             <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
-              按五域架构预留接缝：D5 人格理解需求 → D4 编排拆解三件套任务 → D2 认知生成内容 → D3 行动域文档工人产出文件。
-              本地启动 Harness 后，Word 导出移交文档工人执行，验收仍由人确认。
+              按五域架构预留接缝：D5 人格理解需求 → D4 编排拆解三件套任务 → D2 认知生成内容 → D3 行动域文档生成器产出文件。
+              本地启动 Harness 后，Word 导出移交文档生成器执行，验收仍由人确认。
             </p>
             <Button size="sm" variant="outline" className="mt-3 w-full text-xs" onClick={() => setHarnessOpen(true)}>
               配置 Harness 网关
@@ -647,13 +647,13 @@ export function ProposalDetail({ id }: { id: string }) {
               <Cpu className="h-4 w-4 text-[#3370ff]" />接入 aigility-harness 本地智能体
             </DialogTitle>
             <DialogDescription>
-              五域可插拔架构：契约是主体，插件是过客。工作台按 Seam 契约对接，本地 Harness 启动后文档生成移交 D3 行动域文档工人。
+              五域可插拔架构：契约是主体，插件是过客。工作台按 Seam 契约对接，本地 Harness 启动后文档生成移交 D3 行动域文档生成器。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="rounded-xl bg-slate-50 border border-slate-100 p-3.5 text-[12px] leading-relaxed text-slate-500">
               <p className="font-semibold text-slate-700">生成链路（五域映射）</p>
-              <p className="mt-1.5">D1 底座 · http-ingress 网关收口 → D5 人格 · fde-assistant 理解需求 → D4 编排 · workflow-engine 拆解三件套 → D2 认知 · llm-inference 生成内容 → D3 行动 · doc-worker 文档工人产出 DOCX</p>
+              <p className="mt-1.5">D1 底座 · http-ingress 网关收口 → D5 人格 · fde-assistant 理解需求 → D4 编排 · workflow-engine 拆解三件套 → D2 认知 · llm-inference 生成内容 → D3 行动 · doc-worker 文档生成器产出 DOCX</p>
               <p className="mt-1.5">工人契约：领活 → 执行 → 交产出 → 受验收判定。产出回到工作台后仍需你在「方案审阅」中确认，人在回路不变。</p>
             </div>
             <Input
@@ -674,7 +674,7 @@ export function ProposalDetail({ id }: { id: string }) {
               <Button className="flex-1 bg-[#3370ff] hover:bg-[#2952cc]" onClick={saveCfg}>保存配置</Button>
             </div>
             <p className="text-[11px] text-slate-400">
-              当前状态：{harnessOk ? '已连接本地网关，Word 导出由 D5 文档工人产出' : '未连接 —— Word 暂由浏览器内置引擎生成'}。本地启动：pnpm install && pnpm example:fde（见 examples/fde-workbench/README）。
+              当前状态：{harnessOk ? '已连接本地网关，Word 导出由 D3 文档生成器产出' : '未连接 —— Word 暂由浏览器内置引擎生成'}。本地启动：pnpm install && pnpm example:fde（见 examples/fde-workbench/README）。
             </p>
           </div>
         </DialogContent>

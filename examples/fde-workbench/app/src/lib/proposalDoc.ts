@@ -1,10 +1,10 @@
-/** 方案三件套 → D5 文档工人块结构映射（纯数据，无重依赖；浏览器引擎见 exporters.ts） */
+/** 方案三件套 → D3 文档生成器块结构映射（纯数据，无重依赖；浏览器引擎见 exporters.ts） */
 import type { DocBlock, FdeDocPayload } from '@/lib/harness'
 import type { Proposal, Lead, StandardSku } from '@/types'
 
 const KIND_LABEL = { proposal: '历史方案', deployment: '已交付案例', knowledge: '知识库' } as const
 
-/** 把方案对象映射为文档工人契约（与 exporters.exportProposalDocx 的章节结构保持一致） */
+/** 把方案对象映射为文档生成器契约（与 exporters.exportProposalDocx 的章节结构保持一致） */
 export function buildProposalDoc(p: Proposal, lead: Lead | undefined, skus: StandardSku[]): FdeDocPayload {
   const blocks: DocBlock[] = []
 

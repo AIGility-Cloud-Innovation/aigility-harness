@@ -185,7 +185,7 @@ export { claudeAgentService, claudeAgentProvider, claudeAgentRef };
 export type { ZcodeAgentRequest, ZcodeAgentResponse };
 export type { ClaudeAgentRequest, ClaudeAgentResponse };
 
-// 文档工人（D5：结构化块 JSON → 服务端 docx 渲染, base64 + 落盘）
+// 文档生成器（D3：结构化块 JSON → 服务端 docx 渲染, base64 + 落盘）
 export { docWorkerService, docWorkerProvider };
 export type { DocWorkerRequest, DocWorkerResponse, DocBlock } from "./doc-worker.js";
 import { docWorkerService, docWorkerProvider } from "./doc-worker.js";
@@ -252,7 +252,7 @@ const toolExecutionProvider: Provider<
 export const manifest: PluginManifest = {
   name: "@action/tool-execution",
   layer: LayerId.Action,
-  description: "行动执行层：工具执行占位 + 文本转语音（msedge + MiniMax 双 Provider 热替换）+ 语音转文本（vosk/whisper 运行时可选）+ 编码代理工人(codex/zcode/claude) + 文档工人(docx) + TiMEM 记忆检索/写入 + 飞书 Open API 直连(用户/应用身份, 含用户 OAuth 授权引导) + Gitea v1 API 直连(git.aigility.cloud 工单, DNS 绕行)",
+  description: "行动执行层：工具执行占位 + 文本转语音（msedge + MiniMax 双 Provider 热替换）+ 语音转文本（vosk/whisper 运行时可选）+ 编码代理工人(codex/zcode/claude) + 文档生成器(docx) + TiMEM 记忆检索/写入 + 飞书 Open API 直连(用户/应用身份, 含用户 OAuth 授权引导) + Gitea v1 API 直连(git.aigility.cloud 工单, DNS 绕行)",
   version: "0.7.0",
   provides: [toolExecutionService, textToSpeechService, speechToTextService, audioTranscodeService, codexAgentService, zcodeAgentService, piAgentService, claudeAgentService, docWorkerService, timemMemoryService, timemMemoryWriteService, timemRuleRecallService, timemRuleCreateService, feishuApiService, giteaApiService],
   consumes: [],

@@ -152,7 +152,7 @@ export async function streamFdeChat(
   return pumpOpenAiSse(res, onToken)
 }
 
-// ── D5 文档工人：结构化块 → 服务端 docx ──────────────────────────
+// ── D3 文档生成器：结构化块 → 服务端 docx ──────────────────────────
 
 export type DocBlock =
   | { type: 'heading'; text: string; level?: 1 | 2 | 3 }

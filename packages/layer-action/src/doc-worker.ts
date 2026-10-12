@@ -1,7 +1,7 @@
 /**
- * L5 行动执行层: 文档工人 (doc-worker)
+ * L5 行动执行层: 文档生成器 (doc-worker)
  *
- * D5 文档工人：领活（结构化文档 JSON）→ 执行（服务端确定性渲染）→ 交产出
+ * D3 文档生成器：领活（结构化文档 JSON）→ 执行（服务端确定性渲染）→ 交产出
  * （base64 + 落盘路径）→ 受验收（调用方/前端人工确认）。
  *
  * 与编码代理工人（codex/zcode/claude/pi）同属行动域"产出真实工件"的工人；
@@ -119,7 +119,7 @@ export const docWorkerService: ServiceDefinition<DocWorkerRequest, DocWorkerResp
   version: "1.1.0",
   layer: LayerId.Action,
   description:
-    "文档工人：结构化块 JSON → 服务端确定性渲染 docx/pdf/xlsx/html（base64 + 落盘），内容创作归 D2 认知域",
+    "文档生成器：结构化块 JSON → 服务端确定性渲染 docx/pdf/xlsx/html（base64 + 落盘），内容创作归 D2 认知域",
 };
 
 // ── 公共版式常量 ─────────────────────────────────────────────────
@@ -527,7 +527,7 @@ export const docWorkerProvider: Provider<DocWorkerRequest, DocWorkerResponse> = 
 export const manifest: PluginManifest = {
   name: "@action/doc-worker",
   layer: LayerId.Action,
-  description: "行动执行层：文档工人（结构化块 → 服务端 docx/pdf/xlsx/html 渲染）",
+  description: "行动执行层：文档生成器（结构化块 → 服务端 docx/pdf/xlsx/html 渲染）",
   version: "1.1.0",
   provides: [docWorkerService],
   consumes: [],

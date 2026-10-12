@@ -522,7 +522,7 @@ export async function callDshTool(name: string, args: Record<string, unknown>): 
   })
 }
 
-// ── 真接口：Token 用量 / 审计 / 团队 / 积分 / 文档工人 ────────────
+// ── 真接口：Token 用量 / 审计 / 团队 / 积分 / 文档生成器 ────────────
 
 export interface UsageGroup {
   key: string

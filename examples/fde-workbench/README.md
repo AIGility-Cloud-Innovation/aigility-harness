@@ -25,7 +25,7 @@ pnpm example:fde
 | 工作台前端 | <http://127.0.0.1:1234/> | 打开即用，对话走同源会话代理（网关主密钥仅服务端持有，不注入前端） |
 | AI 网关 | <http://127.0.0.1:1235/v1/chat/completions> | OpenAI 兼容，Bearer 鉴权，密钥启动时打印 |
 | 数字员工问答 | `POST :1235/api/fde-chat` | → `@persona/fde-assistant` |
-| 文档工人 | `POST :1235/api/fde-doc` | → `@action/doc-worker` |
+| 文档生成器 | `POST :1235/api/fde-doc` | → `@action/doc-worker` |
 
 演示账号：`admin/admin123`、`zhaopeng/fde123`、`chensiyuan/fde123`（角色视角不同）。
 
@@ -40,7 +40,7 @@ pnpm example:fde
                   └─ D2 @cognitive/llm-inference（bigmodel / litellm / stub 降级）
              ← OpenAI 兼容 SSE 帧（网关编码，前端逐字渲染）
 
-方案 Word 导出（文档工人）
+方案 Word 导出（文档生成器）
   前端 ProposalDetail「导出 DOCX」
     └─ POST /api/fde-doc {title, subtitle, blocks[]}
         └─ D3 @action/doc-worker（结构化块 → 服务端 docx 确定性渲染，base64 回传下载）
@@ -65,7 +65,7 @@ fde-workbench/
 │   ├── public/architecture.html  # 完整架构图（自包含 SVG，构建后 /architecture.html 访问）
 │   └── src/
 │       ├── lib/harness.ts       # 网关客户端：SSE 泵 + fde-assistant/doc-worker 调用
-│       ├── lib/proposalDoc.ts   # 方案 → 文档工人块结构映射
+│       ├── lib/proposalDoc.ts   # 方案 → 文档生成器块结构映射
 │       ├── store/AppContext.tsx # 业务状态 + 业务快照组装 + 问答链路
 │       └── ...
 ├── src/index.ts       # 服务端装配：内存内核 + 五域插件 + 网关 + 静态托管
@@ -85,11 +85,11 @@ fde-workbench/
 | `FDE_GATEWAY_PORT` | `1235` | AI 网关端口 |
 | `APPBASE_PG_HOST/PORT/DATABASE/USER/PASSWORD` | `127.0.0.1:5433/appbase` | 平台 PG（账号+台账持久化） |
 | `FDE_PUBLIC_HOST` | `127.0.0.1` | （已废弃，不再使用；网关密钥不再下发前端） |
-| `DOC_WORKER_DIR` | 系统临时目录 | 文档工人落盘目录（同时 base64 回传前端下载） |
+| `DOC_WORKER_DIR` | 系统临时目录 | 文档生成器落盘目录（同时 base64 回传前端下载） |
 | `TIMEM_API_KEY` / `TIMEM_BASE_URL` | — | TiMEM 记忆云（未配置时记忆节点静默跳过） |
 
 ## 与框架的改动点（本示例落地时新增的框架能力）
 
 - `@persona/fde-assistant`（`packages/layer-persona/src/fde-assistant.ts`）：FDE 数字员工角色，业务快照注入 + 记忆节点下沉编排域。
-- `@action/doc-worker`（`packages/layer-action/src/doc-worker.ts`）：D5 文档工人，结构化块 JSON → 服务端 docx（`docx` npm 库确定性渲染，非 LLM 生成文件内容）。
+- `@action/doc-worker`（`packages/layer-action/src/doc-worker.ts`）：D3 文档生成器，结构化块 JSON → 服务端 docx（`docx` npm 库确定性渲染，非 LLM 生成文件内容）。
 - http-ingress agent 链路支持 `stream:true`：角色回复编码为 OpenAI 兼容 SSE（`packages/layer-infrastructure/src/http-ingress.ts`）。

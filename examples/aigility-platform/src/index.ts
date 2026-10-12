@@ -1787,7 +1787,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
         return;
       }
       if (path === "/api/aigility/doc" && req.method === "POST") {
-        // 文档工人（真）：D3 @action/doc-worker，结构化块 → 服务端 docx base64
+        // 文档生成器（真）：D3 @action/doc-worker，结构化块 → 服务端 docx base64
         try {
           const body = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
           if (!String(body.title ?? "").trim()) {

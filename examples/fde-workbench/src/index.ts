@@ -75,7 +75,7 @@ function readBody(req: IncomingMessage): Promise<string> {
 }
 
 async function main(): Promise<void> {
-  console.log("=== TiMEM FDE 工作台（数字员工 + 文档工人 + AI 网关 + 平台账号/持久化）===\n");
+  console.log("=== TiMEM FDE 工作台（数字员工 + 文档生成器 + AI 网关 + 平台账号/持久化）===\n");
 
   // 0. 平台底座（复用 AppBase app-backend）：PG schema + 演示账号/应用/网关 key 种子
   //    必须在内核 bootstrap 前（timem 插件 env 桥先于认知层生效）

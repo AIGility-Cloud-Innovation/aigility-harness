@@ -561,7 +561,7 @@ aigility-harness/
 │   ├── layer-cognitive/           # D2 认知算力层（LLM 推理：stub + litellm + timem-memory-provider）
 │   ├── layer-persona/            # D5 角色人格层（sales-chat / repair-chat / app-dev / coding-coach / plugin-helper / advisory-chat / harness-guide / timem-support / banban-chat / fde-assistant / lesson-prep-chat；模态能力只声明，本体在 layer-action）
 │   ├── layer-orchestration/       # D4 编排规划层（任务规划 + plugin-install + timem-project-task 需求缓冲工作流 + guided-design）
-│   ├── layer-action/              # D3 行动执行层（编码代理工人 codex/zcode/claude + 文档工人 doc-worker(docx) + 模态工具 TTS/STT + 沙箱快照 + TiMEM 记忆检索/写入）
+│   ├── layer-action/              # D3 行动执行层（编码代理工人 codex/zcode/claude + 文档生成器 doc-worker(docx) + 模态工具 TTS/STT + 沙箱快照 + TiMEM 记忆检索/写入）
 │   ├── layer-infrastructure/      # D1 底座基础层（config/logging/protocol-adapter/http-ingress/wecom-ingress/http-relay/PgBusBridge）
 │   │   └── src/
 │   │       ├── protocol-adapter.ts    # 协议翻译（Anthropic/OpenAI/Responses → 内部标准，类型取自 core 契约）
@@ -583,7 +583,7 @@ aigility-harness/
 │   └── prototype-mode/            # 原型演示入口（InMemoryKernel → 五域插件装配）
 ├── examples/                      # 可替换示例装配（各自独立 pnpm 包）
 │   ├── appbase/                   # 产品装配：应用大厅 + 网页应用开发员 + 管理中心(/admin) + AI 网关 + 对话流图 + 内置应用(班主任小本本/教师备课夹)
-│   ├── fde-workbench/             # TiMEM FDE 工作台：数字员工(@persona/fde-assistant) + 文档工人(@action/doc-worker) + AI 网关（Kimi FDE 前端收编深度整合）
+│   ├── fde-workbench/             # TiMEM FDE 工作台：数字员工(@persona/fde-assistant) + 文档生成器(@action/doc-worker) + AI 网关（Kimi FDE 前端收编深度整合）
 │   ├── dsh-timem-demo/            # DSH 内核 TiMEM 插件演示
 │   ├── openai-gateway-composition/ # OpenAI 兼容网关组合示例
 │   ├── wecom-chat/                 # 企微 @机器人 → sales-chat 通用对话（装配示例）

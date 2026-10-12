@@ -337,7 +337,7 @@ async function exportDocx(res: ServerResponse, uid: string, title: string, meta:
   const kernel = getAdminKernel();
   if (!kernel) return json(res, 503, { error: "内核未就绪" });
   const resolved = await kernel.registry.resolve({ id: "@action/doc-worker", versionRange: "^1.0.0" });
-  if (!resolved.ok) return json(res, 503, { error: resolved.error || "文档工人能力未注册" });
+  if (!resolved.ok) return json(res, 503, { error: resolved.error || "文档生成器能力未注册" });
   const email = await safeEmail(uid);
   const req: DocWorkerRequest = {
     title,
