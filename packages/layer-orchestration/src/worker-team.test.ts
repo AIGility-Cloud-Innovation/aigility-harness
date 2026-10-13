@@ -1,11 +1,17 @@
 /**
  * worker-team 单测（P0）：分派路由（显式/项目绑定/兜底/指定不存在成员）、
  * 换人重派、状态回流（claim→running→done/failed + note 摘要）、防重派发。
+ * 决策暂停机制（2026-10-13）：.agent-decision.json → needs-input 暂停（非 failed）、
+ * 群回复写回结论 → resume 同一线程续跑、超时按默认项续跑/转 failed。
  * registry 用真实 TaskRegistry（内存模式）做端到端状态验证。
  */
 import { describe, it, expect } from "vitest";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { TaskRegistry } from "./task-registry.js";
-import { WorkerTeam, pickWorker, inferTaskTags } from "./worker-team.js";
+import { WorkerTeam, pickWorker, inferTaskTags, decisionBroadcast } from "./worker-team.js";
+import { DECISION_FILE, writeDecision } from "./agent-decision.js";
 import type { WorkerMember } from "./worker-team.js";
 import type { TaskRecord } from "@aigility-harness/core";
 
@@ -226,5 +232,165 @@ describe("WorkerTeam 派发与回流", () => {
     );
     await team.takeReady();
     expect(gotCwd).toBe("/repos/org/nx-opc");
+  });
+});
+
+// ── 决策暂停机制（2026-10-13）────────────────────────────────────
+
+describe("决策暂停机制（.agent-decision.json → needs-input → 群回复续跑）", () => {
+  function tmpRepo(): string {
+    return mkdtempSync(join(tmpdir(), "worker-decision-"));
+  }
+
+  function seedInRepo(reg: TaskRegistry, repo: string): TaskRecord {
+    const t = seedTask(reg, { projectRef: "org/decision-repo", title: "决策任务" });
+    return t;
+  }
+
+  it("工人返回带未决策文件 → needs-input（非 failed）+ 群播报结构化决策请求", async () => {
+    const reg = makeRegistry();
+    const repo = tmpRepo();
+    const t = seedInRepo(reg, repo);
+    let broadcast = "";
+    const team = new WorkerTeam(
+      {
+        registry: reg,
+        resolveCwd: (ref) => (ref === "org/decision-repo" ? repo : undefined),
+        callWorker: async () => {
+          writeFileSync(
+            join(repo, DECISION_FILE),
+            JSON.stringify({ question: "A 方案还是 B 方案？", context: "两种都可行", options: ["A 方案", "B 方案"] }),
+            "utf-8",
+          );
+          return { ok: true, text: "问题已就绪，等待决策" };
+        },
+        decision: { notify: async (txt) => { broadcast = txt; }, timeoutMs: 60000 },
+      },
+      ROSTER,
+    );
+    const r = await team.dispatch(reg.get(t.uid)!);
+    expect(r.ok).toBe(true);
+    const rec = reg.get(t.uid)!;
+    expect(rec.status).toBe("needs-input"); // 非 failed
+    expect(rec.note).toContain("需人工决策");
+    expect(broadcast).toContain(t.uid);
+    expect(broadcast).toContain("A 方案还是 B 方案");
+    expect(broadcast).toContain("A 方案（推荐）");
+    expect(broadcast).toContain("决策 "); // 指令提示
+  });
+
+  function childCallPrompts(calls: Array<{ prompt: string }>): string {
+    return calls.map((c) => c.prompt).join("\n---\n");
+  }
+
+  it("决策写回结论后 resume：同一线程（threadId 透传）+ 决策结论注入，不重跑", async () => {
+    const reg = makeRegistry();
+    const repo = tmpRepo();
+    const t = seedInRepo(reg, repo);
+    const calls: Array<{ prompt: string; cwd?: string }> = [];
+    const team = new WorkerTeam(
+      {
+        registry: reg,
+        resolveCwd: (ref) => (ref === "org/decision-repo" ? repo : undefined),
+        callWorker: async (_m, args) => {
+          calls.push({ prompt: args.prompt, cwd: args.cwd });
+          if (calls.length === 1) {
+            writeFileSync(
+              join(repo, DECISION_FILE),
+              JSON.stringify({ question: "选哪个", options: ["A", "B"] }),
+              "utf-8",
+            );
+            return { ok: true, text: "等决策" };
+          }
+          return { ok: true, text: "已按结论完成" };
+        },
+        decision: { notify: async () => {}, timeoutMs: 60000 },
+      },
+      ROSTER,
+    );
+    await team.dispatch(reg.get(t.uid)!);
+    expect(reg.get(t.uid)!.status).toBe("needs-input");
+    // 决策人回「决策 1 2」（B）→ 写回结论 → 重入队 needs-input→ready→dispatch
+    const w = writeDecision(repo, "B", { decidedBy: "johnny", decidedFrom: "决策 tsk 选 B" });
+    expect(w.ok).toBe(true);
+    const ready = reg.reenqueueNeedsInput(t.uid);
+    expect(ready.ok).toBe(true);
+    const r2 = await team.dispatch(reg.get(t.uid)!);
+    expect(r2.ok, `r2.err=${r2.ok ? "" : r2.error}`).toBe(true);
+    expect(calls.length).toBe(2); // 只派两次：首轮 + 续跑（不重跑）
+    expect(reg.get(t.uid)!.status).toBe("done");
+    // 断言两轮回执内容：首轮带决策约定；续跑提示词含决策结论
+    const prompts = calls.map((c) => c.prompt);
+    const first = prompts[0] ?? "";
+    const resumed = prompts[1] ?? "";
+    expect(first).toContain("【决策暂停约定");
+    expect(resumed).toContain("决策续跑：B");
+    expect(reg.get(t.uid)!.note).toContain("已按结论完成");
+    // 决策文件已被清理（续跑完后不残留）
+    expect(existsSync(join(repo, DECISION_FILE))).toBe(false);
+  });
+
+  it("决策超时兜底：按默认项写回 + 重入队 ready（config 缺省 24h → timeoutMs 覆盖）", async () => {
+    const reg = makeRegistry();
+    const repo = tmpRepo();
+    const t = seedInRepo(reg, repo);
+    const team = new WorkerTeam(
+      {
+        registry: reg,
+        resolveCwd: (ref) => (ref === "org/decision-repo" ? repo : undefined),
+        callWorker: async () => {
+          writeFileSync(
+            join(repo, DECISION_FILE),
+            JSON.stringify({ question: "选哪个", options: ["A", "B"], defaultOption: 0 }),
+            "utf-8",
+          );
+          return { ok: true, text: "等决策" };
+        },
+        decision: { notify: async () => {}, timeoutMs: 50, onTimeout: "default" },
+      },
+      ROSTER,
+    );
+    await team.dispatch(reg.get(t.uid)!);
+    expect(reg.get(t.uid)!.status).toBe("needs-input");
+    // 模拟超时：把 updatedAt 直接拨回 24h 前（决策 timeoutMs 用 50ms 的覆盖）
+    const recRef = reg.get(t.uid)!;
+    (recRef as { updatedAt: number }).updatedAt -= 86_400_000;
+    const settled = await team.settleExpiredDecisions(Date.now());
+    expect(settled).toContain(t.uid);
+    const after = reg.get(t.uid)!;
+    expect(after.status).toBe("ready"); // 默认项续跑，重入队
+    const d = JSON.parse(readFileSync(join(repo, DECISION_FILE), "utf-8"));
+    expect(d.decision).toBe("A"); // defaultOption=0 → A
+    expect(d.decidedBy).toBe("system");
+    expect(after.note).toContain("决策超时");
+  });
+
+  it("决策超时兜底：onTimeout=failed → needs-input 转 failed（现场保留）", async () => {
+    const reg = makeRegistry();
+    const repo = tmpRepo();
+    const t = seedInRepo(reg, repo);
+    const team = new WorkerTeam(
+      {
+        registry: reg,
+        resolveCwd: (ref) => (ref === "org/decision-repo" ? repo : undefined),
+        callWorker: async () => {
+          writeFileSync(
+            join(repo, DECISION_FILE),
+            JSON.stringify({ question: "选哪个", options: ["A", "B"] }),
+            "utf-8",
+          );
+          return { ok: true, text: "等决策" };
+        },
+        decision: { notify: async () => {}, timeoutMs: 50, onTimeout: "failed" },
+      },
+      ROSTER,
+    );
+    await team.dispatch(reg.get(t.uid)!);
+    expect(reg.get(t.uid)!.status).toBe("needs-input");
+    (reg.get(t.uid)! as { updatedAt: number }).updatedAt -= 86_400_000;
+    const settled = await team.settleExpiredDecisions(Date.now());
+    expect(settled).toContain(t.uid);
+    expect(reg.get(t.uid)!.status).toBe("failed");
+    expect(reg.get(t.uid)!.note).toContain("决策超时");
   });
 });

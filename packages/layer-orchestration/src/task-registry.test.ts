@@ -90,6 +90,20 @@ describe("TaskRegistry 状态机", () => {
     expect(reg.transition(r.uid, "planned").ok).toBe(true);
   });
 
+  it("决策暂停/续跑：running→needs-input→running（2026-10-13 状态机；不算失败，可同上下文续跑）", () => {
+    const reg = new TaskRegistry();
+    const r = reg.adopt({ title: "决策", origin: feishuTask("guid-d1") });
+    for (const next of ["ready", "dispatched", "running"] as const) reg.transition(r.uid, next);
+    expect(reg.transition(r.uid, "needs-input").ok).toBe(true); // 暂停等人工决策
+    expect(reg.get(r.uid)?.status).toBe("needs-input");
+    // needs-input 不落 failed（failover/提醒口径区分），但可重入 running 续跑
+    expect(reg.transition(r.uid, "running").ok).toBe(true);
+    expect(reg.get(r.uid)?.status).toBe("running");
+    // 非法跳转：needs-input→done 被拒
+    expect(reg.transition(r.uid, "needs-input").ok).toBe(true);
+    expect(reg.transition(r.uid, "done").ok).toBe(false);
+  });
+
   it("验收打回与失败重做回边可用", () => {
     const reg = new TaskRegistry();
     const r = reg.adopt({ title: "回边", origin: feishuTask("guid-7") });

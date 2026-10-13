@@ -176,6 +176,9 @@ export class TaskRegistry {
    * 状态流转：expect 指定时作 CAS 校验（当前状态不符返回 err）；
    * 转移在 TASK_STATUS_TRANSITIONS[from] 表内才生效。
    * 转入 ready/planned/cancelled 时自动清除执行独占（允许重新派发）。
+   * 决策暂停（2026-10-13）：needs-input ↔ running 保留执行独占（同 provider
+   * 同线程续跑，不重新 claim）；needs-input → ready 清除独占后由工人小组
+   * 重新认领（超时按默认项继续）。
    */
   transition(uid: string, to: UnifiedStatus, expect?: UnifiedStatus): Result<TaskRecord> {
     const record = this.records.get(uid);
@@ -193,6 +196,14 @@ export class TaskRegistry {
     record.updatedAt = Date.now();
     this.markDirty();
     return ok(record);
+  }
+
+  /**
+   * 决策重入队（2026-10-13）：needs-input → ready（保留 note 里的决策文件路径），
+   * 供 worker-team 下一拍重新认领续跑。由决策意图处理方调用。
+   */
+  reenqueueNeedsInput(uid: string): Result<TaskRecord> {
+    return this.transition(uid, "ready", "needs-input");
   }
 
   // -- 执行独占（收集全对齐，执行单 provider） --

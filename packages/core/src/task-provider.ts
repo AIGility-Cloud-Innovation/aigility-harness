@@ -29,6 +29,8 @@ import { randomUUID } from "node:crypto";
  *   planned↔飞书P · dispatched↔agentd pending_confirm/pending_project/queued ·
  *   running↔agentd running · review↔agentd needs_review/飞书C ·
  *   failed↔agentd failed/飞书A · done↔agentd completed+工单closed
+ *   needs-input↔执行中暂停等人决策（2026-10-13 决策状态机；不算失败，
+ *   完成决策后回到 running 同上下文续跑）
  */
 export type UnifiedStatus =
   | "planned"
@@ -39,16 +41,23 @@ export type UnifiedStatus =
   | "done"
   | "failed"
   | "blocked"
+  | "needs-input"
   | "cancelled";
 
 /** 合法状态转移表。主链单向: planned→ready→dispatched→running→review→done;
  *  验收打回(review→planned/ready)与失败重做(failed→ready)是仅有的回边。
- *  planned→review：工单在体外已完成（如 Gitea 直接关闭）的完成态同步。 */
+ *  planned→review：工单在体外已完成（如 Gitea 直接关闭）的完成态同步。
+ *  needs-input（2026-10-13 决策状态机）：running 派发中的工人遇方案分叉，
+ *  写 .agent-decision.json 后暂停等人工决策；running→needs-input 暂停、
+ *  needs-input→running 带决策结论续跑（同线程不重跑）、needs-input→ready
+ *  为决策重入队（超时按默认项继续，重新认领）。卡片/提醒按 needs-input
+ *  呈「A 待修复」同组（见 worker-team）。 */
 export const TASK_STATUS_TRANSITIONS: Record<UnifiedStatus, UnifiedStatus[]> = {
   planned: ["ready", "review", "cancelled"],
   ready: ["dispatched", "review", "planned", "cancelled"],
   dispatched: ["running", "review", "ready", "cancelled"],
-  running: ["review", "done", "failed", "blocked", "cancelled"],
+  running: ["review", "done", "failed", "blocked", "needs-input", "cancelled"],
+  "needs-input": ["running", "ready", "failed", "cancelled"],
   review: ["done", "failed", "ready", "planned"],
   done: [],
   failed: ["ready", "cancelled"],

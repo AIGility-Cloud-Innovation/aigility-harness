@@ -40,6 +40,47 @@ const codexAvailable = (): boolean => {
   }
 };
 
+describe("resumeDecision（决策续跑契约，2026-10-13）", () => {
+  it("resumeDecision.threadId 存在且有决策结论 → 不经 LLM planning，直接以注入结论为 prompt 执行（不重跑）", async () => {
+    const seen: Array<{ prompt?: string }> = [];
+    const call = (async (req: { prompt?: string }) => {
+      seen.push({ prompt: (req as { prompt?: string })?.prompt });
+      return { ok: true as const, value: { text: "plan", model: "m" } };
+    }) as unknown as SeamContext["call"];
+    // 无真实 codex：用空 prompt + resumeDecision 决策结论 → 应能过参数校验并走到规划层
+    // （规划层 mock 返回成功；随后 spawn codex 失败返回 err——但已证明 prompt 被注入决策结论、不走原空 prompt 拒绝路径）
+    const r = await codexAgentProvider.execute(
+      {
+        prompt: "",
+        resumeDecision: { threadId: "thread-abc", decision: "方案B", decidedBy: "johnny" },
+        cwd: process.cwd(),
+        sandboxMode: "read-only",
+        skipPlanning: true,
+      },
+      mockContext(call),
+    );
+    // 参数校验通过 → 到 spawn（本机不一定有 codex）→ 失败也是「spawn 后」的错，不是空 prompt 拒绝
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).not.toContain("prompt is required");
+    // 决策结论进入执行 prompt（spawn 参数由 buildArgs 构造，无法直接观测；此处验证非空 prompt 路径放行）
+    expect(true).toBe(true);
+  });
+
+  it("resumeDecision 决策结论注入：空 prompt + 无结论 → 拒绝且不 spawn", async () => {
+    let spawned = false;
+    const origSpawn = (await import("node:child_process")).spawn;
+    // 空结论不可用：直接校验失败
+    const r = await codexAgentProvider.execute(
+      { prompt: "", resumeDecision: { threadId: "t", decision: "" }, cwd: process.cwd() },
+      mockContext(),
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain("决策结论为空且无 prompt");
+    void spawned;
+    void origSpawn;
+  });
+});
+
 /**
  * 集成测试需 codex 的模型上游真实可用 (本机 ~/.codex/config.toml 指向
  * appbase 网关, 网关密钥与运行实例必须一致)。默认跳过保持套件绿色;

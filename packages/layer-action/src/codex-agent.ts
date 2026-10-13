@@ -88,6 +88,12 @@ export interface CodexAgentRequest {
   /** 整体超时（毫秒），默认 300_000（5 分钟） */
   timeoutMs?: number;
   /**
+   * 决策暂停续跑（2026-10-13 决策状态机）：threadId + 决策结论。
+   * 续接历史线程（codex exec resume <threadId>）时不重跑，
+   * 决策结论注入续接提示词（worker-team 已按 .agent-decision.json 写回）。
+   */
+  resumeDecision?: { threadId: string; decision: string; decidedBy?: string };
+  /**
    * 续接历史线程（codex exec resume <threadId>）。
    * 续接时 prompt 仍经 stdin 注入：resume 子命令的 PROMPT 位置参数传 `-`
    * 即从 stdin 读取（codex 0.153+ 语义，拆包实测）。
@@ -184,10 +190,10 @@ function isMetadataFallbackError(item: CodexAgentItem): boolean {
 /** 构造 codex exec / exec resume 命令行参数 */
 function buildArgs(request: CodexAgentRequest): string[] {
   const args: string[] = ["exec"];
-  if (request.threadId) {
+  if (request.threadId || request.resumeDecision?.threadId) {
     // resume 子命令选项集是 exec 的子集 (实测 0.153.4): 无 -s/--sandbox、
     // -C/--cd —— 沙箱/审批/工作目录由原会话恢复; 仅 -c/-m/--json 等可用
-    args.push("resume", request.threadId, "--json");
+    args.push("resume", request.resumeDecision?.threadId ?? request.threadId!, "--json");
     if (request.model) {
       args.push("-m", request.model);
     }
@@ -287,9 +293,26 @@ const codexAgentProviderImpl: Provider<
     ctx: SeamContext,
   ): Promise<Result<CodexAgentResponse>> {
     // 参数校验
-    const prompt = request.prompt?.trim();
+    let prompt = request.prompt?.trim();
+    const resume = request.resumeDecision;
+    if (resume?.threadId) {
+      // 决策续跑：线程 + 决策结论（不重跑）；原 prompt 留痕在决策文件里
+      if (resume.decision?.trim()) {
+        prompt = [
+          `【机器人群决策已拍板（injected_decision）】`,
+          `决策人：${resume.decidedBy ?? "用户"}`,
+          `决策结论：${resume.decision.trim()}`,
+          ``,
+          `请按上述结论继续执行本任务（沿用原线程上下文）；结论已拍板，无需再开决策点。`,
+        ].join("\n");
+      }
+    }
     if (!prompt) {
-      return err("codex-agent: request.prompt is required and must be non-empty");
+      return err(
+        resume?.threadId
+          ? "codex-agent: resumeDecision 决策结论为空且无 prompt"
+          : "codex-agent: request.prompt is required and must be non-empty",
+      );
     }
 
     const timeoutMs = request.timeoutMs ?? DEFAULT_TIMEOUT_MS;
