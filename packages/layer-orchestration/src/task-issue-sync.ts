@@ -1350,8 +1350,11 @@ export async function runPlanGate(
     // 负责人/描述标记出人名 = 人工执行；显式「执行者：agent」= agent 执行；两者皆无 = 未定，留 P
     const humanExecutor = executorOfTask(t);
     // 【agent】标题前缀=agent 任务认定（2026-10-13 用户约定）。对齐器可能已在标题前
-    // 打过【待安排执行者】/【待确认归属】闸门标签（先于本约定运行的历史轮次），匹配前先剥掉。
-    const bareSummary = summary.replace(/^【(待安排执行者|待确认归属)】/, "");
+    // 打过【待安排执行者】/【待确认归属】闸门标签（先于本约定运行的历史轮次），匹配前先剥掉；
+    // [org/repo] 前缀与【agent】顺序不限（先剥归属闸门标签、再剥仓库前缀后测试 agent 标记）。
+    const bareSummary = summary
+      .replace(/^【(待安排执行者|待确认归属)】/, "")
+      .replace(/^\[[^\]#/]+\/[^\]#/]+\]\s*/, "");
     const agentDecided =
       /执行者[:：]\s*agent\b/i.test(t.description ?? "") || /^【agent】/.test(bareSummary);
     if (!humanExecutor && !agentDecided) {
@@ -1486,7 +1489,10 @@ export async function runPlanGate(
         }
         // 【agent】标题任务必须能定位仓库（2026-10-13 拍板：无默认仓库机制）：
         // 无 [org/repo] 前缀 → 留 P 提示补前缀，不放行（工人没有工作目录就不接单）。
-        const agentRepo = repoFromPlannedSummary(summary);
+        // 前缀顺序不限：[org/repo] 在闸门标签/【agent】之后时从剥后标题再解析。
+        const agentRepo =
+          repoFromPlannedSummary(summary) ??
+          repoFromPlannedSummary(summary.replace(/^【(待安排执行者|待确认归属|agent)】\s*/, ""));
         if (!agentRepo) {
           reports.push(
             `🏷️ 「${summary.slice(0, 40)}」agent 任务未带 [org/repo] 前缀，无法定位仓库，留 P。请改标题为「[org/repo] 原标题」（如 [TiMEM-AI/TiMEM-Space] …），下轮自动放行。`,
