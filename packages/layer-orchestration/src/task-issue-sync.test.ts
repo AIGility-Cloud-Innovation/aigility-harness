@@ -610,6 +610,56 @@ describe("plan-gate 顺序（飞书先行）— 先执行者闸门，后回填�
     expect(r.value.response).toContain("已回填工单 AIGility/y#7");
     expect(log).toContain('create-issue:"修白屏"');
   });
+
+  it("回填建单：工单描述带任务链接 + 飞书负责人→工单指派人（2026-10-13 需求）", async () => {
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const regPath = join(mkdtempSync(join(tmpdir(), "reg-link-")), "team.json");
+    writeFileSync(
+      regPath,
+      JSON.stringify({ version: 2, members: [{ name: "王五", aliases: [], gitea_usernames: ["wangwu"], feishu_open_ids: ["ou_wangwu"] }] }),
+      "utf-8",
+    );
+    const savedReg = process.env.TEAM_IDENTITY_REGISTRY;
+    process.env.TEAM_IDENTITY_REGISTRY = regPath;
+    const log: string[] = [];
+    const ctx = mockCtx((id, req) => {
+      const path = String((req as { path?: string }).path);
+      const method = String((req as { method?: string }).method);
+      if (id.includes("llm")) return { ok: true, value: { text: '{"ready":true}' } };
+      if (id.includes("gitea")) {
+        if (method === "POST" && path.endsWith("/issues")) {
+          const body = (req as { body?: { body?: string; assignees?: string[] } }).body;
+          log.push(`create-issue:${JSON.stringify({ assignees: body?.assignees, hasLink: /任务链接：https\:\/\/www\.feishu\.cn\/task\//.test(body?.body ?? "") })}`);
+          return { ok: true, value: { status: 201, data: { number: 9, html_url: "https://g/y/9" } } };
+        }
+        return { ok: true, value: { status: 200, data: [] } };
+      }
+      if (path.endsWith("/sections") && method === "GET") {
+        return { ok: true, value: { code: 0, data: { items: [{ guid: "s-p", name: "P 计划中" }, { guid: "s-d", name: "D 执行中" }, { guid: "s-c", name: "C 待测试" }, { guid: "s-a", name: "A 待修复" }] } } };
+      }
+      if (path === "/open-apis/task/v2/sections/s-p/tasks" && method === "GET") {
+        // 任务带负责人（open_id ou_wangwu）→ 应映射为 gitea 指派人 wangwu
+        return { ok: true, value: { code: 0, data: { items: [{ guid: "tg-link", summary: "[AIGility/y] 加导出功能", description: "执行者：王五", url: "https://www.feishu.cn/task/tg-link", members: [{ id: "ou_wangwu", role: "assignee", type: "user" }] }] } } };
+      }
+      if (path === "/open-apis/task/v2/tasks" && method === "POST") {
+        return { ok: true, value: { code: 0, data: { task: { guid: "tg-new" } } } };
+      }
+      if (path.includes("/add_tasklist")) return { ok: true, value: { code: 0, data: {} } };
+      return { ok: true, value: { code: 0, data: {} } };
+    });
+    try {
+      const r = await taskIssueSyncProvider.execute({ mode: "scan", tasklistGuid: "tl-link1" }, ctx);
+      if (!r.ok) throw new Error("execute failed");
+      expect(r.value.response).toContain("已回填工单 AIGility/y#9");
+      expect(log.some((l) => l.includes('"assignees":["wangwu"]'))).toBe(true);
+      expect(log.some((l) => l.includes('"hasLink":true'))).toBe(true);
+    } finally {
+      if (savedReg === undefined) delete process.env.TEAM_IDENTITY_REGISTRY;
+      else process.env.TEAM_IDENTITY_REGISTRY = savedReg;
+    }
+  });
 });
 
 describe("resolveChatName 群名解析", () => {

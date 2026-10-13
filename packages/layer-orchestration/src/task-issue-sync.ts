@@ -787,7 +787,7 @@ export async function moveToSection(
 async function listSectionTasks(
   ctx: SeamContext,
   sectionGuid: string,
-): Promise<Array<{ guid?: string; task_id?: string; summary?: string; description?: string; members?: TaskMemberLike[] }>> {
+): Promise<Array<{ guid?: string; task_id?: string; summary?: string; description?: string; url?: string; members?: TaskMemberLike[] }>> {
   // 注意：query 里不能带 completed=false —— 实测（2026-10-10）当前租户带该参数恒返回空列表；
   // 改为不过滤拉全量，再按 completed_at 代码内过滤（completed_at>0 = 已完成）
   const r = await callFeishuApi(ctx, {
@@ -798,7 +798,7 @@ async function listSectionTasks(
   });
   if (!r.ok || (r.value?.code ?? -1) !== 0) return [];
   const items = (r.value?.data as {
-    items?: Array<{ guid?: string; task_id?: string; summary?: string; description?: string; members?: TaskMemberLike[]; completed_at?: string | number }>;
+    items?: Array<{ guid?: string; task_id?: string; summary?: string; description?: string; url?: string; members?: TaskMemberLike[]; completed_at?: string | number }>;
   })?.items ?? [];
   return items.filter((t) => !t.completed_at || Number(t.completed_at) === 0);
 }
@@ -1347,7 +1347,7 @@ export async function runPlanGate(
     // ⓪ 执行人确认闸门（先于回填建单，2026-10-10 规则①：确定好执行人才能建单）：
     // 负责人/描述标记出人名 = 人工执行；显式「执行者：agent」= agent 执行；两者皆无 = 未定，留 P
     const humanExecutor = executorOfTask(t);
-    const agentDecided = /执行者[:：]\s*agent\b/i.test(t.description ?? "");
+    const agentDecided = /执行者[:：]\s*agent\b/i.test(t.description ?? "") || /^【agent】/.test(summary);
     if (!humanExecutor && !agentDecided) {
       const tagged = `【待安排执行者】${summary.replace(/^【待安排执行者】/, "")}`;
       if (tagged !== summary) {
@@ -1392,12 +1392,20 @@ export async function runPlanGate(
         reports.push(`⚠️ 「${summary.slice(0, 40)}」标题前缀解析不出仓库，回退默认仓库 ${repo} 回填工单。`);
       }
       const cleanTitle = summary.replace(/^【[^】]+】/, "").replace(/^\[[^\]]+\]\s*/, "").trim();
+      // 工单描述带飞书任务链接 + 飞书负责人 → 工单指派人（2026-10-13 用户需求）：
+      // 双向互链闭环（此前只有「工单链接→飞书描述」单向）；负责人经名册 open_id → gitea_username。
+      const feishuTaskUrl = t.url ?? `https://www.feishu.cn/task/${guid}`;
+      const assigneeOpenId = (t.members ?? []).find((x) => x.role === "assignee" && x.id)?.id;
+      const assigneeGitea = assigneeOpenId
+        ? findMemberByFeishuOpenId(getIdentityRegistry(), assigneeOpenId)?.gitea_usernames[0]
+        : undefined;
       const ir = await callGiteaApi(ctx, {
         method: "POST",
         path: issuesBaseFor(repo),
         body: {
           title: cleanTitle,
-          body: `> 来源：飞书任务（归属+执行者已确认，由项目小助理回填工单）\n>\n> 飞书任务：${summary.slice(0, 80)}`,
+          ...(assigneeGitea ? { assignees: [assigneeGitea] } : {}),
+          body: `> 来源：飞书任务（归属+执行者已确认，由项目小助理回填工单）\n>\n> 飞书任务：${summary.slice(0, 80)}\n> 任务链接：${feishuTaskUrl}${assigneeGitea ? `\n> 负责人：@${assigneeGitea}` : ""}`,
         },
       });
       if (ir.ok && is2xx(ir.value?.status ?? 0)) {
@@ -1458,12 +1466,15 @@ export async function runPlanGate(
           reports.push(`⚠️ 「${summary.slice(0, 40)}」agent 任务未接登记表（setPlanGateRegistry 未注入），留 P。`);
           continue;
         }
+        // 【agent】标题任务可能无 [org/repo] 前缀（2026-10-13 用户实测）：仓库解析不到
+        // 回退默认仓库（与回填路径同策略，不卡队列），⚠️ 一次性提示改标题可指定仓库。
+        const agentRepo = repoFromPlannedSummary(summary);
         const rec = reg.adopt({
           title: summary,
           ...(t.description ? { description: t.description } : {}),
           status: "planned",
           origin: { provider: FEISHU_TASK_PROVIDER, guid },
-          projectRef: repoFromPlannedSummary(summary),
+          projectRef: agentRepo ?? giteaRepo(),
         });
         // 收编可能是旧版（adopt 只补链不更新内容，2026-10-13 实测）：用列表全量描述强制刷新台账
         if (t.description && rec.description !== t.description) {
@@ -1477,7 +1488,10 @@ export async function runPlanGate(
         if (approved.ok) {
           if (!agentReleasedReported.has(guid)) {
             agentReleasedReported.add(guid);
-            reports.push(`🤖 「${summary.slice(0, 40)}」agent 任务完备，免工单放行 ready，工人小组将认领执行。`);
+            reports.push(
+              `🤖 「${summary.slice(0, 40)}」agent 任务完备，免工单放行 ready，工人小组将认领执行。` +
+                (agentRepo ? "" : `（⚠️ 未带 [org/repo] 前缀，仓库回退默认 ${giteaRepo()}；需指定仓库请改标题为「[org/repo] …」）`),
+            );
           }
           continue;
         }
