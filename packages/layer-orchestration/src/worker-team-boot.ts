@@ -149,12 +149,16 @@ export function createWorkerTeam(opts: {
   /** 收尾回程通知（PR 链接/失败原因）；缺省仅日志 */
   notify?: (text: string) => Promise<void> | void;
 }): WorkerTeam {
+  // 研究型 codex 任务 15 分钟常不够（2026-10-13 方案A超时实测）：WORKER_TEAM_TIMEOUT_MS 可调，
+  // 未设保持 15 分钟默认；启动时内联传参即可，无需改 .env。
+  const envTimeout = Number(process.env["WORKER_TEAM_TIMEOUT_MS"]);
+  const timeoutMs = opts.timeoutMs ?? (Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : undefined);
   return new WorkerTeam(
     {
       registry: opts.registry,
       callWorker: makeCallWorker(opts.ctx),
       resolveCwd: makeResolveCwd(),
-      defaultTimeoutMs: opts.timeoutMs,
+      defaultTimeoutMs: timeoutMs,
       finish: createPrFinisher({ ctx: opts.ctx, notify: opts.notify }),
     },
     LIGHT_ROSTER,
