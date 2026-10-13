@@ -66,6 +66,7 @@ import {
   createPeriodicAligner,
   createFeishuTaskProvider,
   createGiteaIssueProvider,
+  SECTION_NAMES,
 } from "@aigility-harness/layer-orchestration";
 import { getSharedRegistry, getReviewCodes, assignReviewCodes } from "./review-aware.js";
 import { wireLlmNodes } from "@aigility-harness/appbase/llm-node-store";
@@ -73,6 +74,7 @@ import { syncGiteaCompletions } from "./completion-sync.js";
 import { backfillIssueLinks } from "./issue-link-backfill.js";
 import { syncAssignees } from "./assignee-sync.js";
 import { remindPendingTasks } from "./review-reminder.js";
+import { syncPrDeliveredTasks } from "./pr-board-sync.js";
 import { syncBoardAlignment } from "./board-sync.js";
 import { loadEnv, REPO_ROOT } from "./env.js";
 import { isAbsolute, resolve as resolvePath } from "node:path";
@@ -314,6 +316,12 @@ async function main(): Promise<void> {
       const boardChanges = await syncBoardAlignment(getSharedRegistry(), alignFeishuCall);
       if (boardChanges.length > 0) {
         console.log(`[align] 看板反向对齐: ${boardChanges.join(" / ")}`);
+      }
+      // ①.55 PR 交付看板正向同步（2026-10-13 拍板）：agent 任务终结于 PR——
+      //     review（PR 已建）的工人小组任务卡片挪「C 待测试」，与台账待验收对齐
+      const prMoved = await syncPrDeliveredTasks(getSharedRegistry(), alignFeishuCall);
+      if (prMoved.length > 0) {
+        console.log(`[align] PR 交付挪卡: ${prMoved.join(" / ")} → 「${SECTION_NAMES.check}」`);
       }
       // ①.6 工单链接回填（2026-10-10 负责人需求）：带工单的任务描述缺
       //     「工单链接：」→ 定期补上（幂等；只补不建，建单归 plan-gate 链路）

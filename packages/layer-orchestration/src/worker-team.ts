@@ -206,7 +206,10 @@ export class WorkerTeam {
         }
         const fin = await this.o.finish({ task, cwd, member: current.id, summary: r.text, preExisting });
         if (fin.ok) {
-          this.o.registry.transition(task.uid, "done", "running");
+          // PR 交付语义（2026-10-13 负责人拍板）：agent 任务终结于 PR——建成才转 review
+          // （待验收），done 留给飞书人工点完成/验收闭环；note 携 PR 链接，
+          // 对齐器 pr-board-sync 据此把卡片挪「C 待测试」。
+          this.o.registry.transition(task.uid, "review", "running");
           this.o.registry.get(task.uid)!.note =
             `[worker-team/${current.id}] ${r.text.slice(0, 160)}${fin.detail ? ` | ${fin.detail}` : ""}`.slice(0, 300);
           return ok(`[${current.id}] ${fin.detail || r.text.slice(0, 200)}`);

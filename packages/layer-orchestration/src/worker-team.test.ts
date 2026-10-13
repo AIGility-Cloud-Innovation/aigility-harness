@@ -160,6 +160,41 @@ describe("WorkerTeam 派发与回流", () => {
     expect(r2.ok).toBe(false);
   });
 
+  it("收尾器成功：PR 建成 → review 待验收（done 留给人工验收，2026-10-13 拍板）", async () => {
+    const reg = makeRegistry();
+    const t = seedTask(reg);
+    const team = new WorkerTeam(
+      {
+        registry: reg,
+        callWorker: async () => ({ ok: true, text: "编码完成" }),
+        finish: async () => ({ ok: true, detail: "https://git.example/pr/146（agent/x → dev，3 文件）" }),
+      },
+      ROSTER,
+    );
+    const r = await team.dispatch(reg.get(t.uid)!);
+    expect(r.ok).toBe(true);
+    const rec = reg.get(t.uid)!;
+    expect(rec.status).toBe("review"); // PR 交付 → review，非 done
+    expect(rec.note).toContain("[worker-team/codex]");
+    expect(rec.note).toContain("pr/146"); // PR 链接在 note（pr-board-sync 识别特征）
+  });
+
+  it("收尾器失败：交付失败=failed 终态（现场保留，不换人重跑）", async () => {
+    const reg = makeRegistry();
+    const t = seedTask(reg);
+    const team = new WorkerTeam(
+      {
+        registry: reg,
+        callWorker: async () => ({ ok: true, text: "编码完成" }),
+        finish: async () => ({ ok: false, detail: "push 被拒" }),
+      },
+      ROSTER,
+    );
+    const r = await team.dispatch(reg.get(t.uid)!);
+    expect(r.ok).toBe(false);
+    expect(reg.get(t.uid)!.status).toBe("failed");
+  });
+
   it("takeReady：只接 ready 队列，派发后不再重复接", async () => {
     const reg = makeRegistry();
     seedTask(reg, { title: "任务一" });
