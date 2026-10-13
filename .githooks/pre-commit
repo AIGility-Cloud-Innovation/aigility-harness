@@ -1,0 +1,17 @@
+#!/bin/bash
+# pre-commit 密钥扫描（gitleaks）—— 2026-10-13 加装
+# 拦截：staged 内容命中已知密钥规则即拒绝提交（--redact 不回显密钥本体）
+# 启用：git config core.hooksPath .githooks（本仓库一次性配置）
+GITLEAKS="$HOME/.local/bin/gitleaks"
+if [ ! -x "$GITLEAKS" ]; then
+  echo "⚠️  gitleaks 未安装（$GITLEAKS），跳过密钥扫描" >&2
+  exit 0
+fi
+"$GITLEAKS" protect --staged --redact -v
+status=$?
+if [ $status -ne 0 ]; then
+  echo "" >&2
+  echo "❌ 提交被拒绝：staged 内容命中密钥规则（见上方 --redact 输出定位文件与行号）" >&2
+  echo "   若为误报，把 finding 的 Fingerprint 加入 .gitleaksignore 后重试" >&2
+fi
+exit $status
