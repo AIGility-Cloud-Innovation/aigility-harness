@@ -61,6 +61,7 @@ import {
   setBriefingActivitySink,
   createWorkerTeam,
   startWorkerTeamLoop,
+  setPlanGateRegistry,
   feishuApiRef,
   createPeriodicAligner,
   createFeishuTaskProvider,
@@ -279,6 +280,9 @@ async function main(): Promise<void> {
     }
   })();
   const alignIntervalMs = Number(process.env["TASK_ALIGN_INTERVAL_MS"] ?? "1800000");
+  // agent 任务免工单链的注入必须在任何扫描启动之前（对齐器 runAtStart=true 且
+  // 状态队列扫描先注册先触发；晚注入会让首拍 agent 任务撞「未接登记表」留 P，等下拍才恢复）。
+  setPlanGateRegistry(getSharedRegistry());
   const aligner = createPeriodicAligner({
     registry: getSharedRegistry(),
     providers: [
@@ -430,8 +434,18 @@ async function main(): Promise<void> {
   // 7. 工人小组（worker-team）：轻型工人接单循环（ready 队列 → claim → @action/*-agent）
   //    只接轻型即发任务；重型（需闸门/审计）仍走 taskIssueSync → agentd 原链路。
   //    WORKER_TEAM_INTERVAL_MS=0 停用；成员可用任务 description 里 [worker:claude] 指定。
-  const workerTeam = createWorkerTeam({ ctx, registry: getSharedRegistry() });
+  //    收尾器（pr-finisher）默认装配：交付=PR 建成才算 done，通知走机器人群（未配则日志）。
+  const workerTeam = createWorkerTeam({
+    ctx,
+    registry: getSharedRegistry(),
+    // send 返回 Promise<string|void>，收尾器 notify 只需 Promise<void>——包装丢弃返回值
+    ...(notifyChatId ? { notify: async (text: string) => { await start.value.send(notifyChatId, text); } } : {}),
+  });
   const teamLoop = startWorkerTeamLoop({ team: workerTeam });
+
+  // 7.5 agent 任务免工单链（2026-10-13 拍板）：plan-gate 加工 P 组的 agent 任务时
+  //     直接写共享台账并放行 ready（不建工单、不挪 D），工人小组经同一登记表认领。
+  setPlanGateRegistry(getSharedRegistry());
 
   console.log(`\n✅ 飞书机器人已连接 (appId=${appId}) → ${persona}`);
   console.log("   飞书里 @项目小助理：「建任务：xxx」「我的任务」「完成 xxx」");

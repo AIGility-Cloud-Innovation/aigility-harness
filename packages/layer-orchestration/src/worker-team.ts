@@ -16,10 +16,14 @@
  * P1/P2（不在本期）：验收判定接 G1-5、队列与并发上限、组状态板、YAML
  * dispatch_node 节点化、崩溃后重启恢复。
  */
-import { err, ok, PluginState } from "@aigility-harness/core";
-import type { Result, TaskRecord, Provider, ServiceDefinition, HealthStatus } from "@aigility-harness/core";
-import { LayerId } from "@aigility-harness/core";
+import { err, ok, PluginState, LayerId } from "@aigility-harness/core";
+import type { Result, TaskRecord, Provider, ServiceDefinition, HealthStatus, SeamContext } from "@aigility-harness/core";
 import type { TaskRegistry } from "./task-registry.js";
+import { listChangedFiles } from "./pr-finisher.js";
+import type { FinishInfo } from "./pr-finisher.js";
+export type { FinishInfo };
+// 统一执行人判定（单一真相）：人工执行人任务（负责人/描述标记）不被工人小组抢接
+import { executorOfTask } from "./task-issue-sync.js";
 
 /** 小组成员登记（P0 硬编码名册；P1 配置化） */
 export interface WorkerMember {
@@ -111,8 +115,14 @@ export interface WorkerTeamOptions {
   callWorker: (member: WorkerMember, args: AgentCallArgs) => Promise<{ ok: boolean; text: string; error?: string }>;
   /** 单成员派发超时（缺省 15 分钟） */
   defaultTimeoutMs?: number;
-  /** 失败换人重派上限（缺省 1：主成员失败换兜底重试一次） */
+  /** 失败换人重派上限（缺省 0：失败即终态留现场——2026-10-13 拍板，业界惯例不换人重跑） */
   failoverLimit?: number;
+  /**
+   * 宿主侧收尾器（2026-10-13 pr-finisher）：工人 ok 后由它建分支/提交/push/
+   * 建 PR。交付成败以它为准（PR 建成才算 done），未注入则维持旧行为
+   * （工人 ok 即 done——单测与无交付场景兼容）。
+   */
+  finish?: (info: FinishInfo) => Promise<{ ok: boolean; detail: string }>;
 }
 
 const DEFAULT_ROSTER: WorkerMember[] = [
@@ -138,6 +148,9 @@ export class WorkerTeam {
     const ready = this.o.registry
       .list({ status: ["ready"] })
       .filter((t) => !this.dispatched.has(t.uid))
+      // 人工任务不接（2026-10-10 铁律的认领侧防线）：带负责人/描述执行人标记的
+      // ready 任务留给对应人（派发护栏同源判定），agent 任务才进工人小组。
+      .filter((t) => executorOfTask({ description: t.description, assignee_member_id: t.assignee_member_id }) === undefined)
       .slice(0, limit);
     const results: Array<{ uid: string; result: Result<string> }> = [];
     for (const t of ready) {
@@ -153,9 +166,19 @@ export class WorkerTeam {
     if (!member) return err("名册中无可用成员（或显式指定的成员不存在）");
 
     const cwd = task.projectRef ? this.o.resolveCwd?.(task.projectRef) : undefined;
-    const prompt = (task.description ?? task.title).replace(/\[worker:\w+\]\s*/, "");
+    // 沙箱边界提示（2026-10-13）：工人 CLI 在沙箱里断网且 .git 只读，git 写操作/
+    // push 必败。只管编码+测试，git 与 PR 由宿主侧收尾器统一完成。
+    const boundary = [
+      "【执行边界（重要）】",
+      "1. 你运行在沙箱内：无网络、.git 只读。禁止执行 git commit/push/branch 或任何网络操作（curl/pip/npm install 等）。",
+      "2. 只做：读代码、修改文件、在沙箱内运行测试验证。",
+      "3. 分支、提交、push、建 PR 由宿主侧收尾器在完成后统一处理，你无需关心。",
+      "4. 测试命令尽量离线可用（pytest 本地用例等）；若必须联网装依赖则跳过并说明。",
+    ].join("\n");
+    const prompt = `${boundary}\n\n---\n${(task.description ?? task.title).replace(/\[worker:\w+\]\s*/, "")}`;
     const timeoutMs = this.o.defaultTimeoutMs ?? 15 * 60_000;
-    const failoverLimit = this.o.failoverLimit ?? 1;
+    // 失败即终态（2026-10-13 拍板）：不换人重跑（烧 token 且产出混杂），留现场等人接管
+    const failoverLimit = this.o.failoverLimit ?? 0;
 
     this.dispatched.add(task.uid);
     // 台账 claim：ready → running（原子，改派保护在 claim 内）
@@ -165,23 +188,34 @@ export class WorkerTeam {
       return err(`台账领取失败：${claimed.error}`);
     }
 
-    // 派发（含换人重派）。claim 后任务为 dispatched；开工转 running，
+    // 派发（失败即终态）。claim 后任务为 dispatched；开工转 running，
     // 终态 running→done/failed（core 转移表）。产出摘要记入 record.note。
+    // 收尾器装配时交付以 PR 建成为准；改动归集用「派发前快照」防多任务混流。
     const memberErrors: string[] = [];
     let current = member;
     this.o.registry.transition(task.uid, "running", "dispatched");
+    const preExisting = cwd ? await listChangedFiles(cwd).catch(() => [] as string[]) : [];
     for (let attempt = 0; attempt <= failoverLimit; attempt++) {
       const r = await this.o.callWorker(current, { prompt, cwd, timeoutMs } satisfies AgentCallArgs);
       if (r.ok) {
-        this.o.registry.transition(task.uid, "done", "running");
-        this.o.registry.get(task.uid)!.note = `[worker-team/${current.id}] ${r.text.slice(0, 300)}`;
-        return ok(`[${current.id}] ${r.text.slice(0, 200)}`);
+        if (!this.o.finish) {
+          // 未装配收尾器：旧行为（工人 ok 即 done）
+          this.o.registry.transition(task.uid, "done", "running");
+          this.o.registry.get(task.uid)!.note = `[worker-team/${current.id}] ${r.text.slice(0, 300)}`;
+          return ok(`[${current.id}] ${r.text.slice(0, 200)}`);
+        }
+        const fin = await this.o.finish({ task, cwd, member: current.id, summary: r.text, preExisting });
+        if (fin.ok) {
+          this.o.registry.transition(task.uid, "done", "running");
+          this.o.registry.get(task.uid)!.note =
+            `[worker-team/${current.id}] ${r.text.slice(0, 160)}${fin.detail ? ` | ${fin.detail}` : ""}`.slice(0, 300);
+          return ok(`[${current.id}] ${fin.detail || r.text.slice(0, 200)}`);
+        }
+        memberErrors.push(`交付: ${fin.detail}`);
+        break; // 收尾失败=现场保留，不换人重跑
       }
       memberErrors.push(`${current.id}: ${r.error ?? "unknown"}`);
-      // 换人：换名册里下一个不同成员（成员间失败切换不回写台账，终态统一记因）
-      const next = this.roster.find((w) => w.id !== current.id && w.tier === "light");
-      if (!next) break;
-      current = next;
+      break; // 失败即终态：换人重跑已废除（2026-10-13）
     }
     // 回流：终态 failed + 各成员失败原因聚合
     const lastError = memberErrors.join("；");

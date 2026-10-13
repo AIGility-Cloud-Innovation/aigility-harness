@@ -91,14 +91,16 @@ describe("能力路由（第 3 优先级，能力特色名册）", () => {
 });
 
 describe("WorkerTeam 派发与回流", () => {
-  it("成功路径：claim → running → done，note 记成员与产出摘要", async () => {
+  it("成功路径：claim → running → done，note 记成员与产出摘要（prompt 含沙箱边界提示）", async () => {
     const reg = makeRegistry();
     const t = seedTask(reg);
     const team = new WorkerTeam(
       {
         registry: reg,
         callWorker: async (_m, args) => {
-          expect(args.prompt).toBe("把 foo 函数改成 bar");
+          // 2026-10-13：提示词带沙箱边界（工人禁 git/网络），任务原文附在分隔线后
+          expect(args.prompt).toContain("把 foo 函数改成 bar");
+          expect(args.prompt).toContain("【执行边界（重要）】");
           return { ok: true, text: "已完成：foo → bar，测试通过" };
         },
       },
@@ -113,7 +115,7 @@ describe("WorkerTeam 派发与回流", () => {
     expect(rec.note).toContain("已完成");
   });
 
-  it("失败换人：codex 失败 → claude 接手成功，note 记接手成员", async () => {
+  it("失败即终态：codex 失败不换人重跑（2026-10-13 拍板），failed 留现场", async () => {
     const reg = makeRegistry();
     const t = seedTask(reg);
     const calls: string[] = [];
@@ -122,17 +124,16 @@ describe("WorkerTeam 派发与回流", () => {
         registry: reg,
         callWorker: async (m) => {
           calls.push(m.id);
-          if (m.id === "codex") return { ok: false, text: "", error: "CLI 崩溃" };
-          return { ok: true, text: "claude 顶上完成" };
+          return { ok: false, text: "", error: "CLI 崩溃" };
         },
       },
       ROSTER,
     );
     const r = await team.dispatch(reg.get(t.uid)!);
-    expect(r.ok).toBe(true);
-    expect(calls).toEqual(["codex", "claude"]);
-    expect(reg.get(t.uid)!.status).toBe("done");
-    expect(reg.get(t.uid)!.note).toContain("claude");
+    expect(r.ok).toBe(false);
+    expect(calls).toEqual(["codex"]); // 只调一次：不换人
+    expect(reg.get(t.uid)!.status).toBe("failed");
+    expect(reg.get(t.uid)!.note).toContain("CLI 崩溃");
   });
 
   it("全员失败：终态 failed，note 记原因", async () => {

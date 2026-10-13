@@ -19,12 +19,14 @@ import { err, ok } from "@aigility-harness/core";
 import type { SeamContext } from "@aigility-harness/core";
 import { WorkerTeam } from "./worker-team.js";
 import type { WorkerTeamOptions, WorkerMember } from "./worker-team.js";
+import { createPrFinisher } from "./pr-finisher.js";
 import type { TaskRegistry } from "./task-registry.js";
 
 /** 轻型成员名册（能力路由默认特色版；与 @action 四工人服务对应）
  *  特色依据（2026-10-12 负责人确认）：codex 均衡+planning 强（经 @cognitive
- *  规划链路）；claude 长上下文/文档/深改稳；zcode 启动快适小修；pi print
- *  模式接网关适机械型数据/脚本任务。 */
+ *  规划链路）；claude 长上下文/文档/深改稳；pi print 模式接网关适机械型数据/脚本任务。
+ *  zcode 2026-10-13 摘除：CLI 配置缺失秒败（/opt/ZCode 配置无法定位），坏工具不进名册，
+ *  修复后可加回。 */
 export const LIGHT_ROSTER: WorkerMember[] = [
   {
     id: "codex", serviceId: "@action/codex-agent", tier: "light",
@@ -34,10 +36,6 @@ export const LIGHT_ROSTER: WorkerMember[] = [
     id: "claude", serviceId: "@action/claude-agent", tier: "light",
     strengths: ["docs", "refactor", "planning"],
     weakAt: ["quick-fix"],
-  },
-  {
-    id: "zcode", serviceId: "@action/zcode-agent", tier: "light",
-    strengths: ["quick-fix"],
   },
   {
     id: "pi", serviceId: "@action/pi-agent", tier: "light",
@@ -107,11 +105,16 @@ export function makeResolveCwd(opts: {
   };
 }
 
-/** 组装完整 WorkerTeam（feishu-task-loop bootstrap 一行接入用） */
+/** 组装完整 WorkerTeam（feishu-task-loop bootstrap 一行接入用）。
+ *  收尾器（2026-10-13 pr-finisher）：默认装配——工人只管沙箱内编码，
+ *  分支/提交/push/建 PR 由宿主侧统一完成（交付=PR 建成才算 done）。
+ *  notify 未注入时收尾通知仅打日志。 */
 export function createWorkerTeam(opts: {
   ctx: SeamContext;
   registry: TaskRegistry;
   timeoutMs?: number;
+  /** 收尾回程通知（PR 链接/失败原因）；缺省仅日志 */
+  notify?: (text: string) => Promise<void> | void;
 }): WorkerTeam {
   return new WorkerTeam(
     {
@@ -119,6 +122,7 @@ export function createWorkerTeam(opts: {
       callWorker: makeCallWorker(opts.ctx),
       resolveCwd: makeResolveCwd(),
       defaultTimeoutMs: opts.timeoutMs,
+      finish: createPrFinisher({ ctx: opts.ctx, notify: opts.notify }),
     },
     LIGHT_ROSTER,
   );
