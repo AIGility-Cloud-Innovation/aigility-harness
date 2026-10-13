@@ -1347,7 +1347,11 @@ export async function runPlanGate(
     // ⓪ 执行人确认闸门（先于回填建单，2026-10-10 规则①：确定好执行人才能建单）：
     // 负责人/描述标记出人名 = 人工执行；显式「执行者：agent」= agent 执行；两者皆无 = 未定，留 P
     const humanExecutor = executorOfTask(t);
-    const agentDecided = /执行者[:：]\s*agent\b/i.test(t.description ?? "") || /^【agent】/.test(summary);
+    // 【agent】标题前缀=agent 任务认定（2026-10-13 用户约定）。对齐器可能已在标题前
+    // 打过【待安排执行者】/【待确认归属】闸门标签（先于本约定运行的历史轮次），匹配前先剥掉。
+    const bareSummary = summary.replace(/^【(待安排执行者|待确认归属)】/, "");
+    const agentDecided =
+      /执行者[:：]\s*agent\b/i.test(t.description ?? "") || /^【agent】/.test(bareSummary);
     if (!humanExecutor && !agentDecided) {
       const tagged = `【待安排执行者】${summary.replace(/^【待安排执行者】/, "")}`;
       if (tagged !== summary) {
@@ -1470,7 +1474,7 @@ export async function runPlanGate(
         // 回退默认仓库（与回填路径同策略，不卡队列），⚠️ 一次性提示改标题可指定仓库。
         const agentRepo = repoFromPlannedSummary(summary);
         const rec = reg.adopt({
-          title: summary,
+          title: bareSummary,
           ...(t.description ? { description: t.description } : {}),
           status: "planned",
           origin: { provider: FEISHU_TASK_PROVIDER, guid },
