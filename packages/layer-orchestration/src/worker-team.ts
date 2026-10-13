@@ -176,7 +176,7 @@ export class WorkerTeam {
       "4. 测试命令尽量离线可用（pytest 本地用例等）；若必须联网装依赖则跳过并说明。",
     ].join("\n");
     const prompt = `${boundary}\n\n---\n${(task.description ?? task.title).replace(/\[worker:\w+\]\s*/, "")}`;
-    const timeoutMs = this.o.defaultTimeoutMs ?? 15 * 60_000;
+    const timeoutMs = this.o.defaultTimeoutMs ?? 30 * 60_000;
     // 失败即终态（2026-10-13 拍板）：不换人重跑（烧 token 且产出混杂），留现场等人接管
     const failoverLimit = this.o.failoverLimit ?? 0;
 
