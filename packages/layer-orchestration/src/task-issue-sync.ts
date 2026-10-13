@@ -64,6 +64,10 @@ import { getProjectRegistry, resolveProjectRef, projectRepoScope } from "./proje
 import { getIdentityRegistry, resolveMemberByName, findMemberByFeishuOpenId, identityMembers } from "./identity-registry.js";
 // 项目小助理事件快照：建单/完成等显著变化 → 防抖后写入 timem（briefing-events 内部节流）
 import { notifyRepoActivity } from "./briefing-events.js";
+// agent 任务免工单链：台账登记/放行（worker-team 认领执行）。
+// 注意：provider id 不从 feishu-task-provider import——该模块在模块求值期用本模块的
+// SECTION_NAMES 构建 SECTION_TO_STATUS，反向 import 会成环导致投影表拿到 undefined。
+import type { TaskRegistry } from "./task-registry.js";
 
 // ── 消费引用 ─────────────────────────────────────────────────────
 
@@ -1059,6 +1063,18 @@ interface DispatchRuntime {
 
 const dispatchRuntime: DispatchRuntime = { timer: null, inflight: new Map() };
 
+// ── agent 任务免工单链（2026-10-13 拍板）─────────────────────────
+/** plan-gate 用的登记表（bootstrap 注入 getSharedRegistry()；未注入时 agent 任务留 P 并提示） */
+let planGateRegistry: TaskRegistry | undefined;
+/** 注入登记表（装配层启动时调用一次） */
+export function setPlanGateRegistry(registry: TaskRegistry): void {
+  planGateRegistry = registry;
+}
+/** agent 任务放行回执防重（同任务只报一次，节拍重复扫不刷屏） */
+const agentReleasedReported = new Set<string>();
+/** agent 任务来源 provider（字面量与 feishu-task-provider 的 FEISHU_TASK_PROVIDER_ID 同值，防环不引） */
+const FEISHU_TASK_PROVIDER = "feishu-task";
+
 /**
  * 收编裸任务（飞书任务为先行主源）：清单里不在 P/D/C/A 任何分组的未完成任务
  * （成员直接在清单里手工建的）→ 自动挪入「P 计划中」，进入统一闸门。
@@ -1301,6 +1317,21 @@ export async function runPlanGate(
     const summary = t.summary ?? "";
     if (!guid) continue;
     const issueNo = issueNumberFromTaskSummary(summary);
+    // 【挂起】任务硬跳过（2026-10-13）：挂起不进闸门/LLM 核对，不建单不派发。
+    // 对齐器可能把它们当「裸任务」拉回 P（不识别非标准分组），这里跳过使拉回无害。
+    if (summary.includes("【挂起】")) continue;
+    // 列表端点不返回 description（2026-10-13 实测：17 个任务全部为空）：对空描述做
+    // 单任务 GET 补全量，否则执行人闸门/LLM 要素核对/agent 任务检测全部因空描述失判。
+    if (!t.description) {
+      const d = await callFeishuApi(ctx, {
+        method: "GET",
+        path: `/open-apis/task/v2/tasks/${guid}`,
+        query: { user_id_type: "open_id" },
+        identity: "user",
+      }).catch(() => undefined);
+      t.description =
+        (d?.ok ? (d.value?.data as { task?: { description?: string } } | undefined)?.task?.description : undefined) ?? "";
+    }
 
     // ① 去重：与 open 工单（排除自身对应单）Jaccard 相似
     const dupHit = existingTitles.find(
@@ -1336,7 +1367,9 @@ export async function runPlanGate(
     // ⓪-a 先行任务回填工单（归属+执行者齐备才建）：没有 #N 的 P 任务，标题带
     // [org/repo] 前缀（归属已确认）→ 从标题解析仓库自动建 Gitea 工单并同步回写 #N；
     // 缺前缀 = 归属未确认 → 打【待确认归属】留 P，等群里「任务归属」确认。
-    if (issueNo === undefined && !summary.includes("【待补充】")) {
+    // agent 任务（描述「执行者：agent」，2026-10-13 拍板：免工单模式，产出=开启的 PR）
+    // 跳过回填，落到下方 ready 分支走台账放行。
+    if (issueNo === undefined && !summary.includes("【待补充】") && !agentDecided) {
       const prefix = summary.match(/^\[([^\]]+)\]/);
       if (!prefix) {
         const tagged = `【待确认归属】${summary.replace(/^【待确认归属】/, "")}`;
@@ -1416,7 +1449,42 @@ export async function runPlanGate(
     }
 
     if (ready) {
-      // ③ 完备 → 自动挪 D（授权执行）
+      // ③ 完备 → agent 任务免工单：不挪 D（对齐器 D 投影=dispatched 会抢态），
+      // 台账 adopt+approve 放行 ready 交工人小组（worker-team）认领执行；
+      // 飞书任务留在 P 组防重复处理，产出=工人开的 Gitea PR（描述已带交付要求）。
+      if (humanExecutor === undefined && agentDecided) {
+        const reg = planGateRegistry;
+        if (!reg) {
+          reports.push(`⚠️ 「${summary.slice(0, 40)}」agent 任务未接登记表（setPlanGateRegistry 未注入），留 P。`);
+          continue;
+        }
+        const rec = reg.adopt({
+          title: summary,
+          ...(t.description ? { description: t.description } : {}),
+          status: "planned",
+          origin: { provider: FEISHU_TASK_PROVIDER, guid },
+          projectRef: repoFromPlannedSummary(summary),
+        });
+        // 收编可能是旧版（adopt 只补链不更新内容，2026-10-13 实测）：用列表全量描述强制刷新台账
+        if (t.description && rec.description !== t.description) {
+          reg.update(rec.uid, { description: t.description });
+        }
+        const approved = reg.approve(rec.uid, {
+          via: "auto",
+          by: "system",
+          note: "agent 任务五要素齐备，免工单直接放行（2026-10-13 拍板）",
+        });
+        if (approved.ok) {
+          if (!agentReleasedReported.has(guid)) {
+            agentReleasedReported.add(guid);
+            reports.push(`🤖 「${summary.slice(0, 40)}」agent 任务完备，免工单放行 ready，工人小组将认领执行。`);
+          }
+          continue;
+        }
+        reports.push(`⚠️ 「${summary.slice(0, 40)}」agent 任务台账放行失败：${approved.error}，留 P 下轮重试。`);
+        continue;
+      }
+      // 人工/未标 agent 任务 → 原链路：挪 D（授权执行），由 dispatch-scan 派发
       const moved = await moveToSection(ctx, guid, opts.tasklistGuid, doingGuid);
       reports.push(
         moved

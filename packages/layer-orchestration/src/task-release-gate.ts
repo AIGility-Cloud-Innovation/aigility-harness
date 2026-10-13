@@ -161,7 +161,7 @@ export async function evaluateReleaseGate(
     if (!okExec) {
       missing.push("执行人");
       tags.push(TAG_BY_MISSING["执行人"]!);
-      messages.push("尚未安排执行者：群里回复「安排执行者 编号 @姓名」，或派 code agent 时描述写「执行者：agentd」。");
+      messages.push("尚未安排执行者：群里回复「安排执行者 编号 @姓名」，或描述里写「执行者：agent」交工人小组（免工单，产出 PR）。");
     }
   }
 
