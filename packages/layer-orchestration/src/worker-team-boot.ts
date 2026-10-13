@@ -17,10 +17,11 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { err, ok } from "@aigility-harness/core";
-import type { SeamContext } from "@aigility-harness/core";
+import type { SeamContext, TaskRecord } from "@aigility-harness/core";
 import { WorkerTeam } from "./worker-team.js";
 import type { WorkerTeamOptions, WorkerMember } from "./worker-team.js";
-import { createPrFinisher } from "./pr-finisher.js";
+import { createPrFinisher, detectBaseBranch } from "./pr-finisher.js";
+import { ensureWorktree } from "./worktree-manager.js";
 import type { TaskRegistry } from "./task-registry.js";
 
 /** 轻型成员名册（能力路由默认特色版；与 @action 四工人服务对应）
@@ -61,6 +62,11 @@ export function makeCallWorker(ctx: SeamContext): WorkerTeamOptions["callWorker"
       // glm-5.3-flash 返回 model=deepseek-v4.1-flash，链路工作）。注意本机网关无
       // deepseek-v4-pro/qwen-turbo（旧结论仅适用旧网关）。可用 WORKER_TEAM_PLANNING_MODEL 覆盖。
       planningModel: process.env["WORKER_TEAM_PLANNING_MODEL"] ?? "bigmodel-glm-5.3-flash",
+      // 执行模型显式注入（2026-10-13 缺陷修复）：此前不传 model，codex 回落到
+      // ~/.codex/config.toml 的 model 行；该文件会被外部回写成已下线名
+      // （ksyun-deepseek-v4-flash → 网关 400 Invalid model name），导致 worker 任务
+      // 全体失败。此处显式声明，使执行链路不再依赖用户家目录配置文件。
+      model: process.env["WORKER_TEAM_CODEX_MODEL"] ?? "ksyun-deepseek-v4.1-flash",
     } as Record<string, unknown>)) as { ok: boolean; value?: { text?: string }; error?: string };
     if (!r.ok) return { ok: false, text: "", error: r.error ?? "成员调用失败" };
     return { ok: true, text: r.value?.text ?? "" };
@@ -141,7 +147,13 @@ export function makeResolveCwd(opts: {
 /** 组装完整 WorkerTeam（feishu-task-loop bootstrap 一行接入用）。
  *  收尾器（2026-10-13 pr-finisher）：默认装配——工人只管沙箱内编码，
  *  分支/提交/push/建 PR 由宿主侧统一完成（交付=PR 建成才算 done）。
- *  notify 未注入时收尾通知仅打日志。 */
+ *  notify 未注入时收尾通知仅打日志。
+ *
+ *  worktree 隔离（2026-10-13 事故修复）：resolveCwd 解析出仓库根后，
+ *  由 prepare 钩子为该任务建/复用「专属 worktree」，使工人与 pr-finisher
+ *  都在隔离目录内作业，不再抢主仓库工作区（此前多任务串行必踩：
+ *  checkout -B 失败 → stash pop 冲突 → 仓库半毁，实测两次）。
+ *  WORKER_TEAM_WORKTREE=0 可关闭（退回共享工作区模式，仅调试用）。 */
 export function createWorkerTeam(opts: {
   ctx: SeamContext;
   registry: TaskRegistry;
@@ -153,13 +165,31 @@ export function createWorkerTeam(opts: {
   // 未设保持 15 分钟默认；启动时内联传参即可，无需改 .env。
   const envTimeout = Number(process.env["WORKER_TEAM_TIMEOUT_MS"]);
   const timeoutMs = opts.timeoutMs ?? (Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : undefined);
+  const resolveRepoRoot = makeResolveCwd();
+  const useWorktree = process.env["WORKER_TEAM_WORKTREE"] !== "0";
   return new WorkerTeam(
     {
       registry: opts.registry,
       callWorker: makeCallWorker(opts.ctx),
-      resolveCwd: makeResolveCwd(),
+      resolveCwd: resolveRepoRoot,
       defaultTimeoutMs: timeoutMs,
       finish: createPrFinisher({ ctx: opts.ctx, notify: opts.notify }),
+      ...(useWorktree
+        ? {
+            // prepare：派发前把「仓库根」换成「专属 worktree」（建 worktree 并切好分支）
+            prepare: async (task: TaskRecord, repoRoot: string) => {
+              const base = await detectBaseBranch(repoRoot).catch(() => "main");
+              const r = await ensureWorktree({
+                repoRoot,
+                taskUid: task.uid,
+                title: task.title ?? "",
+                base,
+              });
+              if (!r.ok || !r.path) return { ok: false as const, error: r.error ?? "worktree 创建失败" };
+              return { ok: true as const, cwd: r.path, branch: r.branch! };
+            },
+          }
+        : {}),
     },
     LIGHT_ROSTER,
   );

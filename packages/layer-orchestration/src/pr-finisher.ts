@@ -162,6 +162,12 @@ export interface FinishInfo {
   summary: string;
   /** 派发前工作区快照（本任务改动 = 当前 − 快照） */
   preExisting: string[];
+  /**
+   * 已在 worktree 中切好的分支名（2026-10-13 worktree 隔离）。
+   * 提供时收尾器跳过「checkout -B + stash 兜底」——worktree 本就是干净的
+   * 独立检出，无需再切分支（那正是多任务抢主仓库时踩坑的一步）。
+   */
+  branch?: string;
 }
 
 /** 建 PR（gitea-api：POST /repos/{org}/{repo}/pulls） */
@@ -219,14 +225,17 @@ export function createPrFinisher(opts: PrFinisherOptions): NonNullable<WorkerTea
       await run("git", ["fetch", "origin"], { cwd });
       const base = opts.baseBranch ?? (await detectBaseBranch(cwd));
 
-      // 3. 一任务一分支，从 origin/<base> 干净切出（改动随行；冲突时 stash 兜底）
-      const branch = `${opts.branchPrefix ?? "agent/"}${slugifyBranch(task.title ?? "")}-${task.uid.slice(-6)}`;
-      try {
-        await run("git", ["checkout", "-B", branch, `refs/remotes/origin/${base}`], { cwd });
-      } catch {
-        await run("git", ["stash", "push", "-u", "-m", `pr-finisher:${task.uid}`], { cwd });
-        await run("git", ["checkout", "-B", branch, `refs/remotes/origin/${base}`], { cwd });
-        await run("git", ["stash", "pop"], { cwd });
+      // 3. 一任务一分支；worktree 隔离下分支已切好（info.branch），跳过 checkout/stash
+      const branch = info.branch
+        ?? `${opts.branchPrefix ?? "agent/"}${slugifyBranch(task.title ?? "")}-${task.uid.slice(-6)}`;
+      if (!info.branch) {
+        try {
+          await run("git", ["checkout", "-B", branch, `refs/remotes/origin/${base}`], { cwd });
+        } catch {
+          await run("git", ["stash", "push", "-u", "-m", `pr-finisher:${task.uid}`], { cwd });
+          await run("git", ["checkout", "-B", branch, `refs/remotes/origin/${base}`], { cwd });
+          await run("git", ["stash", "pop"], { cwd });
+        }
       }
 
       // 4. 按文件提交（gpg 失败退无签名重试一次）
