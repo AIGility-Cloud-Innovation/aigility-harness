@@ -87,3 +87,4 @@ tests/run-debug.py
 .tmp-baojing/
 gui-test-screenshots/
 *.tmp
+ops/api-router/venv/
