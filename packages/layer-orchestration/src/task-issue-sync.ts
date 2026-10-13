@@ -1187,7 +1187,9 @@ export async function syncCompletionFromGitea(
     const issueNo = issueNumberFromTaskSummary(t.summary);
     if (issueNo === undefined) continue;
     const repoMatch = t.summary.match(/^\[([^\]#/]+)\/([^\]#]+)#\d+\]/);
-    const repo = repoMatch ? `${repoMatch[1]}/${repoMatch[2]}` : giteaRepo();
+    // 无默认仓库机制（2026-10-13 拍板）：解析不出仓库跳过（任务标题残缺，等人工补正）
+    if (!repoMatch) continue;
+    const repo = `${repoMatch[1]}/${repoMatch[2]}`;
     const r = await callGiteaApi(ctx, {
       method: "GET",
       path: `${issuesBaseFor(repo)}/${issueNo}`,
@@ -1389,12 +1391,24 @@ export async function runPlanGate(
         reports.push(`🏷️ 「${summary.slice(0, 40)}」尚未确认归属，留 P。群里回复「任务归属 编号 @仓库」确认后自动创建工单。`);
         continue;
       }
-      // 前缀解析仓库：含 / 取 org/仓库；解析不出回退默认仓库并告警（不卡队列）
+      // 前缀解析仓库：含 / 取 org/仓库。2026-10-13 拍板：无默认仓库机制——
+      // 解析不出仓库不建单，留 P 提示确认归属（与归属确认同一交互）。
       const parsedRepo = repoFromPlannedSummary(summary);
-      const repo = parsedRepo ?? giteaRepo();
       if (!parsedRepo) {
-        reports.push(`⚠️ 「${summary.slice(0, 40)}」标题前缀解析不出仓库，回退默认仓库 ${repo} 回填工单。`);
+        const tagged = `【待确认归属】${summary.replace(/^【待确认归属】/, "")}`;
+        if (tagged !== summary) {
+          await callFeishuApi(ctx, {
+            method: "PATCH",
+            path: `/open-apis/task/v2/tasks/${guid}`,
+            query: { user_id_type: "open_id" },
+            identity: "user",
+            body: { update_fields: ["summary"], task: { summary: tagged } },
+          }).catch(() => undefined);
+        }
+        reports.push(`🏷️ 「${summary.slice(0, 40)}」标题前缀解析不出仓库，留 P。群里回复「任务归属 编号 @仓库」确认后自动创建工单。`);
+        continue;
       }
+      const repo = parsedRepo;
       const cleanTitle = summary.replace(/^【[^】]+】/, "").replace(/^\[[^\]]+\]\s*/, "").trim();
       // 工单描述带飞书任务链接 + 飞书负责人 → 工单指派人（2026-10-13 用户需求）：
       // 双向互链闭环（此前只有「工单链接→飞书描述」单向）；负责人经名册 open_id → gitea_username。
@@ -1470,15 +1484,21 @@ export async function runPlanGate(
           reports.push(`⚠️ 「${summary.slice(0, 40)}」agent 任务未接登记表（setPlanGateRegistry 未注入），留 P。`);
           continue;
         }
-        // 【agent】标题任务可能无 [org/repo] 前缀（2026-10-13 用户实测）：仓库解析不到
-        // 回退默认仓库（与回填路径同策略，不卡队列），⚠️ 一次性提示改标题可指定仓库。
+        // 【agent】标题任务必须能定位仓库（2026-10-13 拍板：无默认仓库机制）：
+        // 无 [org/repo] 前缀 → 留 P 提示补前缀，不放行（工人没有工作目录就不接单）。
         const agentRepo = repoFromPlannedSummary(summary);
+        if (!agentRepo) {
+          reports.push(
+            `🏷️ 「${summary.slice(0, 40)}」agent 任务未带 [org/repo] 前缀，无法定位仓库，留 P。请改标题为「[org/repo] 原标题」（如 [TiMEM-AI/TiMEM-Space] …），下轮自动放行。`,
+          );
+          continue;
+        }
         const rec = reg.adopt({
           title: bareSummary,
           ...(t.description ? { description: t.description } : {}),
           status: "planned",
           origin: { provider: FEISHU_TASK_PROVIDER, guid },
-          projectRef: agentRepo ?? giteaRepo(),
+          projectRef: agentRepo,
         });
         // 收编可能是旧版（adopt 只补链不更新内容，2026-10-13 实测）：用列表全量描述强制刷新台账
         if (t.description && rec.description !== t.description) {
@@ -1492,10 +1512,7 @@ export async function runPlanGate(
         if (approved.ok) {
           if (!agentReleasedReported.has(guid)) {
             agentReleasedReported.add(guid);
-            reports.push(
-              `🤖 「${summary.slice(0, 40)}」agent 任务完备，免工单放行 ready，工人小组将认领执行。` +
-                (agentRepo ? "" : `（⚠️ 未带 [org/repo] 前缀，仓库回退默认 ${giteaRepo()}；需指定仓库请改标题为「[org/repo] …」）`),
-            );
+            reports.push(`🤖 「${summary.slice(0, 40)}」agent 任务完备，免工单放行 ready，工人小组将认领执行。`);
           }
           continue;
         }
@@ -1575,7 +1592,9 @@ export async function runDispatchScan(
       continue;
     }
     const repoFromTitle = summary.match(/^\[([^\]#/]+)\/([^\]#]+)#\d+\]/);
-    const repo = repoFromTitle ? `${repoFromTitle[1]}/${repoFromTitle[2]}` : giteaRepo();
+    // 无默认仓库机制（2026-10-13 拍板）：解析不出仓库不派发（工单归属未知，防派错仓库）
+    if (!repoFromTitle) continue;
+    const repo = `${repoFromTitle[1]}/${repoFromTitle[2]}`;
     if (dispatchRuntime.inflight.size >= 3) {
       reports.push(`⏳ 并发上限（3），工单 #${issueNo} 留 D 下轮派发。`);
       continue;

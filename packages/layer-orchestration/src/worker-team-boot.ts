@@ -12,7 +12,8 @@
  * 装配原则（负责人 09-02 拍板）：harness 侧只编排，不复制 project 治理——
  * agentd 成员走 agentd-executor 原有链路（闸门/审计在 agentd），本循环只管轻型成员。
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { err, ok } from "@aigility-harness/core";
@@ -101,7 +102,39 @@ export function makeResolveCwd(opts: {
       ?? projectRef.split("/").pop()
       ?? projectRef;
     const dir = join(repoRoot, short);
-    return existsSync(dir) ? dir : undefined;
+    if (existsSync(dir)) return dir;
+    // 短名试探落空 → 扫 repoRoot 下（含一层子目录）git origin 真源匹配（2026-10-13）：
+    // 目录名≠仓库名是常态（TiMEM-Space 在 timem/TiMEM-Space，nx 系在 nx-opc/ 下），
+    // 仅靠短名试探会解析失败→cwd 退回 task-loop 自身目录，工人在错误目录干活。
+    const wanted = projectRef.replace(/\.git$/, "");
+    const stack = [repoRoot];
+    while (stack.length > 0) {
+      const cur = stack.pop()!;
+      let names: string[] = [];
+      try {
+        names = readdirSync(cur, { withFileTypes: true })
+          .filter((d) => d.isDirectory() && !d.name.startsWith("."))
+          .map((d) => d.name);
+      } catch {
+        continue;
+      }
+      for (const name of names) {
+        const sub = join(cur, name);
+        let url = "";
+        try {
+          url = execFileSync("git", ["-C", sub, "remote", "get-url", "origin"], {
+            timeout: 5_000, stdio: ["ignore", "pipe", "ignore"],
+          }).toString().trim().replace(/\.git$/, "");
+        } catch {
+          // 非 git 目录：可能是工作区容器（timem/、nx-opc/），按深度入栈继续下探
+          if (sub.split("/").length - repoRoot.split("/").length < 2) stack.push(sub);
+          continue;
+        }
+        if (url.endsWith(wanted) || wanted.endsWith(url.split("/").slice(-2).join("/"))) return sub;
+        if (sub.split("/").length - repoRoot.split("/").length < 2) stack.push(sub); // 只扫两层
+      }
+    }
+    return undefined;
   };
 }
 
