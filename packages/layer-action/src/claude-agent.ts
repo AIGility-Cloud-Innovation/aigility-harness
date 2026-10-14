@@ -99,8 +99,6 @@ const claudeAgentProvider: Provider<ClaudeAgentRequest, ClaudeAgentResponse> = {
     const args = [
       "-p",
       useShell && prompt.includes(" ") ? `"${prompt}"` : prompt,
-      "--cwd",
-      resolveAgentCwd(request.cwd),
       "--permission-mode",
       "acceptEdits",
     ];
