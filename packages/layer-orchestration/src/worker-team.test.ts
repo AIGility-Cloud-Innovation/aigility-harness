@@ -7,11 +7,13 @@
  */
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TaskRegistry } from "./task-registry.js";
 import { WorkerTeam, pickWorker, inferTaskTags, decisionBroadcast } from "./worker-team.js";
 import { DECISION_FILE, writeDecision } from "./agent-decision.js";
+import { listChangedFiles } from "./pr-finisher.js";
 import type { WorkerMember } from "./worker-team.js";
 import type { TaskRecord } from "@aigility-harness/core";
 
@@ -328,6 +330,66 @@ describe("决策暂停机制（.agent-decision.json → needs-input → 群回�
     expect(reg.get(t.uid)!.note).toContain("已按结论完成");
     // 决策文件已被清理（续跑完后不残留）
     expect(existsSync(join(repo, DECISION_FILE))).toBe(false);
+  });
+
+  it("回归：首轮产出文件、续跑轮不再改 → 仍算有新改动（基线存台账，不现拍）", async () => {
+    // 复现 2026-10-14 连续包月任务：工人在首轮写了交付文件并请求决策；
+    // 续跑轮只做汇报不再改文件。修复前续跑轮现拍 preExisting，会把首轮产物
+    // 当「派发前已有」→ 收尾误判「工作区无新改动」→ failed。基线必须复用首轮的。
+    const reg = makeRegistry();
+    const repo = tmpRepo();
+    // listChangedFiles 走 git status，需要真仓库（无需提交：porcelain 也列未跟踪文件）
+    execFileSync("git", ["init", "-b", "main"], { cwd: repo });
+    const t = seedInRepo(reg, repo);
+    const delivered = join(repo, "交付文档.md");
+    let call = 0;
+    const finishedWith: Array<string[]> = [];
+    const team = new WorkerTeam(
+      {
+        registry: reg,
+        resolveCwd: (ref) => (ref === "org/decision-repo" ? repo : undefined),
+        callWorker: async () => {
+          call += 1;
+          if (call === 1) {
+            // 首轮：写交付物 + 请求决策
+            writeFileSync(delivered, "# 交付文档\n内容\n", "utf-8");
+            writeFileSync(
+              join(repo, DECISION_FILE),
+              JSON.stringify({ question: "选哪个", options: ["A", "B"] }),
+              "utf-8",
+            );
+            return { ok: true, text: "已产出文档，等决策" };
+          }
+          return { ok: true, text: "已按结论补充说明" }; // 续跑：不再改文件
+        },
+        decision: { notify: async () => {}, timeoutMs: 60000 },
+        finish: async (info) => {
+          finishedWith.push(info.preExisting);
+          // 收尾器按「实际改动 = 工作区现状 − 基线」判定，模拟 pr-finisher 的语义
+          const now = await listChangedFiles(repo);
+          const fresh = now.filter((f) => !info.preExisting.includes(f));
+          return fresh.length
+            ? { ok: true, detail: `PR 已建（改动 ${fresh.length} 个文件）` }
+            : { ok: false, detail: "工作区无新改动（工人未落盘或改动全为派发前已有）" };
+        },
+      },
+      ROSTER,
+    );
+    await team.dispatch(reg.get(t.uid)!);
+    expect(reg.get(t.uid)!.status).toBe("needs-input");
+    // 首轮基线已存进台账，且不包含交付物
+    const base = reg.get(t.uid)!.dispatchBase;
+    expect(base?.files ?? []).not.toContain("交付文档.md");
+
+    writeDecision(repo, "B", { decidedBy: "johnny", decidedFrom: "决策 tsk 选 B" });
+    expect(reg.reenqueueNeedsInput(t.uid).ok).toBe(true);
+    const r2 = await team.dispatch(reg.get(t.uid)!);
+
+    expect(r2.ok, `r2.err=${r2.ok ? "" : r2.error}`).toBe(true);
+    expect(reg.get(t.uid)!.status).toBe("review"); // 交付成功，非 failed
+    // 两轮用的基线一致（都是首轮拍的）
+    expect(finishedWith.length).toBe(1);
+    expect(finishedWith[0]).not.toContain("交付文档.md");
   });
 
   it("决策超时兜底：按默认项写回 + 重入队 ready（config 缺省 24h → timeoutMs 覆盖）", async () => {

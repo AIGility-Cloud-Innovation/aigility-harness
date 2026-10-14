@@ -113,6 +113,14 @@ export interface TaskRecord {
   review?: { by: string; via: "auto" | "manual"; at: number; note?: string; member_id?: string };
   /** 执行产出/失败摘要（执行方写：如 worker-team 派发结果） */
   note?: string;
+  /**
+   * 派发基线快照（worker-team 写）：任务「首次派发」时工作区的既有改动文件清单。
+   * 收尾判定「本轮有无新改动」时与它做差集。必须存在任务级字段而非每轮现拍：
+   * 决策续跑（同线程第二轮）时上一轮的产物已落盘，现拍会把它们当「派发前已有」
+   * 而误判「无新改动」→ 交付失败（2026-10-14 连续包月任务实证）。
+   * 存文件名清单（非 HEAD sha）以兼容沙箱 .git 只读。
+   */
+  dispatchBase?: { at: number; files: string[] };
   createdAt: number;
   updatedAt: number;
 }

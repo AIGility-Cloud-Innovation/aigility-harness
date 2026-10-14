@@ -313,7 +313,10 @@ export class WorkerTeam {
       return err(`台账领取失败：${claimed.error}`);
     }
     this.o.registry.transition(task.uid, "running", "dispatched");
+    // 派发基线（2026-10-14 修复）：首轮拍一次并存进台账，决策续跑复用同一基线。
+    // 续跑轮禁止现拍——上一轮产物已落盘，现拍会把它们当「派发前已有」→ 误判无新改动。
     const preExisting = await preExistingOf(cwd);
+    this.o.registry.get(task.uid)!.dispatchBase = { at: Date.now(), files: preExisting };
     const prompt = `${boundary}\n\n---\n${DECISION_RULES}\n\n---\n${(task.description ?? task.title).replace(/\[worker:\w+\]\s*/, "")}`;
     const r = await this.o.callWorker(member, { prompt, cwd, timeoutMs } satisfies AgentCallArgs);
     return await this.handleRunResult(task, member, cwd, r, preExisting, { resumed: false, ...(preparedBranch ? { branch: preparedBranch } : {}) });
@@ -365,7 +368,12 @@ export class WorkerTeam {
     } satisfies AgentCallArgs);
     removeDecisionFile(cwd);
     this.dispatched.delete(task.uid);
-    return await this.handleRunResult(task, member, cwd, r, await preExistingOf(cwd), { resumed: true });
+    // 基线复用（2026-10-14 修复）：续跑轮必须用首轮存在台账里的 dispatchBase，
+    // 不能现拍——上一轮产物已落盘，现拍会把它们当「派发前已有」而误判「无新改动」，
+    // 导致只在一轮产出、续跑轮不再改文件的任务交付失败（连续包月任务实证）。
+    // 旧任务无 dispatchBase（本字段引入前派发）→ 退回现拍，行为同修复前。
+    const preExisting = task.dispatchBase?.files ?? (await preExistingOf(cwd));
+    return await this.handleRunResult(task, member, cwd, r, preExisting, { resumed: true });
   }
 
   /** 工人返回后的统一回流：决策暂停 / 完成收尾 / 失败终态 */
