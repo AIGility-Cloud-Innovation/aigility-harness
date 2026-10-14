@@ -35,6 +35,19 @@ export { DECISION_FILE, DECISION_RULES } from "./agent-decision.js";
 export type { AgentDecision } from "./agent-decision.js";
 // 统一执行人判定（单一真相）：人工执行人任务（负责人/描述标记）不被工人小组抢接
 import { executorOfTask } from "./task-issue-sync.js";
+// worktree 隔离（2026-10-14 修复）：决策文件在任务专属 worktree 里，续跑读决策
+// 文件必须优先用 worktree 路径（派发侧 prepare 的对称面），否则读主仓库根必然落空
+import { worktreeRoot, worktreeDirName } from "./worktree-manager.js";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+
+/** 决策续跑的工作区解析：worktree 存在则用 worktree，否则回退主仓库根 */
+function resolveDecisionCwd(repoRoot: string | undefined, uid: string): string | undefined {
+  if (!repoRoot) return undefined;
+  const wt = join(worktreeRoot(), worktreeDirName(repoRoot, uid));
+  if (existsSync(wt)) return wt;
+  return repoRoot;
+}
 
 /** 小组成员登记（P0 硬编码名册；P1 配置化） */
 export interface WorkerMember {
@@ -257,7 +270,8 @@ export class WorkerTeam {
     // 此时 dispatch 走的是普通派发分支——若工作区存在「已写回结论」的决策文件，
     // 应改走续跑路径（同线程 + 结论注入），否则会话被当首轮重跑、结论丢失。
     if (task.status === "ready" && task.projectRef) {
-      const probeCwd = this.o.resolveCwd?.(task.projectRef);
+      const probeRoot = this.o.resolveCwd?.(task.projectRef);
+      const probeCwd = probeRoot ? resolveDecisionCwd(probeRoot, task.uid) : undefined;
       if (probeCwd) {
         const pending = readAgentDecision(probeCwd);
         if (hasConclusion(pending)) return this.resumeDecisionTask(task);
@@ -315,7 +329,11 @@ export class WorkerTeam {
     }
     const member = pickWorker(task, this.roster);
     if (!member) return err("名册中无可用成员（或显式指定的成员不存在）");
-    const cwd = task.projectRef ? this.o.resolveCwd?.(task.projectRef) : undefined;
+    // worktree 隔离（2026-10-14 修复）：决策文件写在任务专属 worktree（派发时 prepare
+    // 换入的 cwd），续跑读决策文件必须解析 worktree 路径；无 worktree（旧任务）回退主仓库
+    const repoRoot = task.projectRef ? this.o.resolveCwd?.(task.projectRef) : undefined;
+    const cwd = repoRoot ? resolveDecisionCwd(repoRoot, task.uid)
+                         : (task.assigned?.handle as string | undefined);
     if (!cwd) {
       this.o.registry.transition(task.uid, "failed", "needs-input");
       this.o.registry.get(task.uid)!.note = `[worker-team] 决策重入异常：无法定位工作区（${task.projectRef ?? "无 projectRef"}）`;

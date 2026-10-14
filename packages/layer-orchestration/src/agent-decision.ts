@@ -23,7 +23,7 @@
  * 文件命名 .agent-decision.json 放工作区根：与任务 uid 解耦（工作区一次一任务，
  * 由收尾器快照防混流），供 worker 用任意语言/CLI 直写，宿主只读不猜。
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 /** 决策文件文件名（工作区根固定名，worker prompt 约定） */
@@ -131,7 +131,6 @@ export function writeDecision(
     mkdirSync(dirname(file), { recursive: true });
     const tmp = `${file}.tmp-${process.pid}`;
     writeFileSync(tmp, JSON.stringify(next, null, 2), "utf-8");
-    const { renameSync } = require("node:fs") as typeof import("node:fs");
     renameSync(tmp, file);
     return { ok: true };
   } catch (e) {
@@ -142,7 +141,6 @@ export function writeDecision(
 /** 清理决策文件（终态落定后调用；失败不阻塞主流程） */
 export function removeDecisionFile(cwd: string): void {
   try {
-    const { unlinkSync } = require("node:fs") as typeof import("node:fs");
     unlinkSync(join(cwd, DECISION_FILE));
   } catch {
     // 不存在/权限问题都无所谓（决策已完成）
