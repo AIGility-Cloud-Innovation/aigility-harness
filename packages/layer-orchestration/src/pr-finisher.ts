@@ -26,6 +26,18 @@ import type { WorkerTeamOptions } from "./worker-team.js";
 
 const run = promisify(execFile);
 
+/**
+ * 统一 git 调用（2026-10-14 中文路径修复）：一律带 `-c core.quotePath=false`。
+ *
+ * 背景：git 默认 `core.quotePath=true`，`status --porcelain` 把非 ASCII 路径输出成
+ * 八进制转义（`.ai/_plan/\346\212\200...md`）并带双引号；该字符串回传给
+ * `git add --` 时被当字面路径 → `致命错误：路径规格 '".ai/_plan/\346\212\200'`，
+ * agent 任务交付在最后一步 add 全数失败（2026-10-14 「撰写子社区方案说明」实测）。
+ * 关掉转义后 status/add/commit 看到的都是原始 UTF-8 路径，链路口径一致。
+ */
+const git = (args: string[], opts: { cwd: string }) =>
+  run("git", ["-c", "core.quotePath=false", ...args], opts);
+
 /** gitea-api 透传结果的最小形状与调用类型（与 gitea-issue-provider 共用定义） */
 import type { GiteaApiResultLike, GiteaCall } from "./gitea-issue-provider.js";
 
@@ -53,7 +65,13 @@ export function cleanTitle(title: string): string {
     .trim();
 }
 
-/** git status --porcelain 输出 → 文件路径列表（含 untracked 与删除） */
+/**
+ * git status --porcelain 输出 → 文件路径列表（含 untracked 与删除）
+ *
+ * 双保险（2026-10-14）：调用侧统一带 `-c core.quotePath=false`（见 git() 封装），
+ * 此处再兜底解掉 C 风格引号与八进制转义，防止任何遗漏的调用点把畸形路径
+ * 传给 git add 导致交付失败。
+ */
 export function parsePorcelain(out: string): string[] {
   const paths: string[] = [];
   for (const line of out.split("\n")) {
@@ -61,9 +79,40 @@ export function parsePorcelain(out: string): string[] {
     // 格式：XY <path>（rename 为 "R  old -> new"，取 new）
     const body = line.slice(3);
     const arrow = body.indexOf(" -> ");
-    paths.push(arrow >= 0 ? body.slice(arrow + 4) : body);
+    const raw = arrow >= 0 ? body.slice(arrow + 4) : body;
+    paths.push(decodeGitPath(raw));
   }
   return paths;
+}
+
+/**
+ * 还原 git 的 C 风格引用路径：去首尾双引号 + 八进制转义还原为字节。
+ * `"a/\346\212\200.md"` → `a/技.md`。非引用路径原样返回。
+ */
+export function decodeGitPath(p: string): string {
+  if (p.length < 2 || !p.startsWith('"') || !p.endsWith('"')) return p;
+  const inner = p.slice(1, -1);
+  const bytes: number[] = [];
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i];
+    if (c === "\\" && i + 3 < inner.length + 1) {
+      const oct = inner.slice(i + 1, i + 4);
+      if (/^[0-7]{3}$/.test(oct)) {
+        bytes.push(parseInt(oct, 8));
+        i += 3;
+        continue;
+      }
+      // 常见 C 转义（\" \\ \n \t）
+      const map: Record<string, string> = { '"': '"', "\\": "\\", n: "\n", t: "\t" };
+      if (c === "\\" && map[inner[i + 1]] !== undefined) {
+        bytes.push(...Buffer.from(map[inner[i + 1]], "utf8"));
+        i++;
+        continue;
+      }
+    }
+    bytes.push(...Buffer.from(c, "utf8"));
+  }
+  return Buffer.from(bytes).toString("utf8");
 }
 
 /** 本任务改动 = 当前改动 − 派发前快照（按路径差集，保序去重） */
@@ -123,14 +172,14 @@ export function buildPrBody(task: TaskRecord, member: string, files: string[], s
 
 /** 当前工作区改动文件（porcelain） */
 export async function listChangedFiles(cwd: string): Promise<string[]> {
-  const { stdout } = await run("git", ["status", "--porcelain"], { cwd });
+  const { stdout } = await git(["status", "--porcelain"], { cwd });
   return parsePorcelain(stdout);
 }
 
 /** 默认基线分支：origin/HEAD 探测 → 回退 main */
 export async function detectBaseBranch(cwd: string): Promise<string> {
   try {
-    const { stdout } = await run("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], { cwd });
+    const { stdout } = await git(["symbolic-ref", "refs/remotes/origin/HEAD"], { cwd });
     const m = stdout.trim().match(/^refs\/remotes\/origin\/(.+)$/);
     if (m?.[1]) return m[1];
   } catch {
@@ -222,7 +271,7 @@ export function createPrFinisher(opts: PrFinisherOptions): NonNullable<WorkerTea
       }
 
       // 2. fetch + 基线分支
-      await run("git", ["fetch", "origin"], { cwd });
+      await git(["fetch", "origin"], { cwd });
       const base = opts.baseBranch ?? (await detectBaseBranch(cwd));
 
       // 3. 一任务一分支；worktree 隔离下分支已切好（info.branch），跳过 checkout/stash
@@ -230,25 +279,25 @@ export function createPrFinisher(opts: PrFinisherOptions): NonNullable<WorkerTea
         ?? `${opts.branchPrefix ?? "agent/"}${slugifyBranch(task.title ?? "")}-${task.uid.slice(-6)}`;
       if (!info.branch) {
         try {
-          await run("git", ["checkout", "-B", branch, `refs/remotes/origin/${base}`], { cwd });
+          await git(["checkout", "-B", branch, `refs/remotes/origin/${base}`], { cwd });
         } catch {
-          await run("git", ["stash", "push", "-u", "-m", `pr-finisher:${task.uid}`], { cwd });
-          await run("git", ["checkout", "-B", branch, `refs/remotes/origin/${base}`], { cwd });
-          await run("git", ["stash", "pop"], { cwd });
+          await git(["stash", "push", "-u", "-m", `pr-finisher:${task.uid}`], { cwd });
+          await git(["checkout", "-B", branch, `refs/remotes/origin/${base}`], { cwd });
+          await git(["stash", "pop"], { cwd });
         }
       }
 
       // 4. 按文件提交（gpg 失败退无签名重试一次）
-      await run("git", ["add", "--", ...files], { cwd });
+      await git(["add", "--", ...files], { cwd });
       const msg = buildCommitMessage(task, member, files);
       try {
-        await run("git", ["commit", "-m", msg], { cwd });
+        await git(["commit", "-m", msg], { cwd });
       } catch {
-        await run("git", ["commit", "--no-gpg-sign", "-m", msg], { cwd });
+        await git(["commit", "--no-gpg-sign", "-m", msg], { cwd });
       }
 
       // 5. push
-      await run("git", ["push", "-u", "origin", branch], { cwd });
+      await git(["push", "-u", "origin", branch], { cwd });
 
       // 6. 建 PR
       const pr = await createPullRequest(call, {

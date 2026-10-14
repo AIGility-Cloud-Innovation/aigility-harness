@@ -54,6 +54,25 @@ describe("parsePorcelain", () => {
     ].join("\n");
     expect(parsePorcelain(out)).toEqual(["app/a.py", "app/b.py", "untracked/x.py", "app/old.py", "app/new.py"]);
   });
+
+  // 2026-10-14 回归：git 默认 core.quotePath=true 会把中文路径转义成 \346\212\200 并加双引号，
+  // 回传给 git add 必失败（agent 交付在最后一步全灭）。双保险：调用侧带 -c core.quotePath=false，
+  // 解析侧再兜底还原（decodeGitPath），确保两种情况都拿到真实 UTF-8 路径。
+  it("中文路径未转义时原样透传", () => {
+    const out = "?? .ai/_plan/技术方案/2026-10-14-01-子社区方案说明.md";
+    expect(parsePorcelain(out)).toEqual([".ai/_plan/技术方案/2026-10-14-01-子社区方案说明.md"]);
+  });
+
+  it("中文路径被转义时兜底还原（bug 现场形态）", () => {
+    // 这是 bug 现场的真实字节形态；修复后必须还原成同名真实路径，否则 git add 必失败
+    const escaped = '?? ".ai/_plan/\\346\\212\\200\\346\\234\\257\\346\\226\\271\\346\\241\\210/x.md"';
+    expect(parsePorcelain(escaped)).toEqual([".ai/_plan/技术方案/x.md"]);
+  });
+
+  it("rename 的转义路径同样还原", () => {
+    const out = 'R  "a/\\346\\227\\247.txt" -> "b/\\346\\226\\260.txt"';
+    expect(parsePorcelain(out)).toEqual(["b/新.txt"]);
+  });
 });
 
 describe("diffPaths", () => {
