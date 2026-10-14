@@ -108,6 +108,21 @@ export interface CodexAgentRequest {
   skipPlanning?: boolean;
   /** 规划阶段使用的模型名（默认 `deepseek-v4-pro`，经 LiteLLM 路由） */
   planningModel?: string;
+  /**
+   * 静默看门狗阈值（毫秒），默认 480_000（8 分钟）。
+   * 子进程连续该时长无任何 stdout 事件 = 判定卡死，主动 SIGTERM 并报错，
+   * 避免单条命令挂住烧光整个 timeoutMs 窗口。
+   * 传 0 或负数关闭看门狗（仅保留整体超时）。
+   */
+  silentTimeoutMs?: number;
+  /**
+   * 净化工人生成环境（默认 true）。
+   * spawn codex 时剔除宿主进程继承的 Python 相关环境变量
+   * （PYTHONPATH / PYTHONHOME / PYTHONSTARTUP / VIRTUAL_ENV 等），
+   * 防止宿主解释器的 site-packages 泄漏进子进程导致依赖冲突
+   * （如 Python 3.14 的包被 3.13 运行时加载，C 扩展加载失败）。
+   */
+  sanitizeEnv?: boolean;
 }
 
 /** 单次 agent turn 的用量统计 */
@@ -167,11 +182,58 @@ export const codexAgentService: ServiceDefinition<
 // ── 常量 ─────────────────────────────────────────────────────────
 
 const DEFAULT_TIMEOUT_MS = 300_000; // 5 min
+/** 静默看门狗默认阈值：8 分钟内无任何 stdout 事件 = 判定卡死 */
+const DEFAULT_SILENT_TIMEOUT_MS = 480_000; // 8 min
 const DEFAULT_APPROVAL_POLICY: CodexApprovalPolicy = "on-failure";
 const DEFAULT_SANDBOX_MODE: CodexSandboxMode = "workspace-write";
 
 /** 判断 codex 内置 metadata 回退的提示消息 */
 const METADATA_FALLBACK_MARKER = "Defaulting to fallback metadata";
+
+/**
+ * 宿主机 Python 相关环境变量黑名单。
+ * 这些变量会让子进程的 Python 解释器加载宿主的 site-packages，
+ * 造成运行时版本与 C 扩展编译版本不匹配（如 3.14 加载 3.13 的 .so）。
+ * 工人任务使用目标仓库自身的 python/venv，不应继承宿主解释器配置。
+ */
+const PYTHON_ENV_DENYLIST = [
+  "PYTHONPATH",
+  "PYTHONHOME",
+  "PYTHONSTARTUP",
+  "PYTHONUSERBASE",
+  "VIRTUAL_ENV",
+  "CONDA_PREFIX",
+  "CONDA_DEFAULT_ENV",
+  "VIRTUAL_ENV_PROMPT",
+  "PYTHONNOUSERSITE",
+] as const;
+
+/**
+ * 构造净化的子进程环境：剔除 Python 相关污染变量。
+ * 保留其余环境（PATH / HOME / 代理 / 框架自身变量等）。
+ */
+function sanitizeSpawnEnv(
+  base: NodeJS.ProcessEnv,
+  enabled: boolean,
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base };
+  if (!enabled) return env;
+  const removed: string[] = [];
+  for (const key of PYTHON_ENV_DENYLIST) {
+    if (env[key] !== undefined) {
+      delete env[key];
+      removed.push(key);
+    }
+  }
+  // 兜底：清理宿主 venv 注入的 bin 目录（其为 3.14 解释器所在处），
+  // 其余路径（含 node、系统 bin）必须原样保留，否则会影响所有子进程命令解析。
+  if (env.PATH) {
+    env.PATH = env.PATH.split(":")
+      .filter((p) => p && !/\.hermes\/installs\/.*\/venv\/bin$/.test(p))
+      .join(":");
+  }
+  return env;
+}
 
 // ── 内部工具 ─────────────────────────────────────────────────────
 
@@ -316,6 +378,10 @@ const codexAgentProviderImpl: Provider<
     }
 
     const timeoutMs = request.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    // 静默看门狗：0/负数关闭；默认 8 分钟无事件即判卡死
+    const silentMs = request.silentTimeoutMs ?? DEFAULT_SILENT_TIMEOUT_MS;
+    const watchdogEnabled = silentMs > 0;
+    const sanitize = request.sanitizeEnv ?? true;
     const bin = codexBin();
     backupHtmlFiles(request.cwd ?? process.cwd(), "codex");
     const args = buildArgs(request);
@@ -387,29 +453,68 @@ const codexAgentProviderImpl: Provider<
       const spawnArgs = useShell ? args.map((a) => (a.includes(" ") ? `"${a}"` : a)) : args;
       const child = spawn(bin, spawnArgs, {
         stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env },
+        env: sanitizeSpawnEnv(process.env, sanitize),
         shell: useShell,
       });
 
       let resolved = false;
 
+      // ── 静默看门狗（idle watchdog，2026-10-14）──────────────────────
+      // 与 dsh-interop/session-relay 同构：只要有任何 stdout 产出就重置计时器，
+      // 连续 silentMs 一个字节都没有才判定真卡死。
+      // 这样「长任务持续有输出」不会误杀，「单条命令挂死」照样被收割。
+      const startedAt = Date.now();
+      let lastActivityAt = startedAt;
+      let idleTimer: NodeJS.Timeout | undefined;
+      const clearIdle = (): void => {
+        if (idleTimer) {
+          clearTimeout(idleTimer);
+          idleTimer = undefined;
+        }
+      };
+      const bumpIdle = (): void => {
+        lastActivityAt = Date.now();
+        clearIdle();
+        if (!watchdogEnabled) return;
+        idleTimer = setTimeout(() => {
+          idleTimer = undefined;
+          const silentFor = Date.now() - lastActivityAt;
+          const sinceStart = ((Date.now() - startedAt) / 1000).toFixed(1);
+          finish(
+            err(
+              `codex-agent: stalled — no stdout activity for ${(silentFor / 1000).toFixed(1)}s ` +
+                `(threshold ${(silentMs / 1000).toFixed(0)}s, elapsed ${sinceStart}s); ` +
+                `last activity at ${new Date(lastActivityAt).toISOString()}; ` +
+                `killed to avoid burning the full ${(timeoutMs / 1000).toFixed(0)}s budget. ` +
+                `stderr tail: ${stderr.slice(-300) || "(empty)"}`,
+            ),
+          );
+        }, silentMs);
+        idleTimer.unref?.(); // 保险丝不该让进程悬着
+      };
+
+      // 超时（整体兜底，保留原有行为）
+      const timer = setTimeout(() => {
+        finish(err(`codex-agent: timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+
       const finish = (result: Result<CodexAgentResponse>): void => {
         if (resolved) return;
         resolved = true;
+        clearTimeout(timer);
+        clearIdle();
         if (!child.killed) {
           child.kill("SIGTERM");
         }
         resolve(result);
       };
 
-      // 超时
-      const timer = setTimeout(() => {
-        finish(err(`codex-agent: timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
+      bumpIdle(); // 起表
 
       // stdout: JSONL 事件流（手动缓冲 + 换行切分）
       let buffer = "";
       child.stdout?.on("data", (chunk: Buffer) => {
+        bumpIdle(); // 喂狗：更新时间戳 + 重置 idle 计时器
         buffer += chunk.toString("utf8");
         let idx: number;
         while ((idx = buffer.indexOf("\n")) >= 0) {
@@ -422,6 +527,7 @@ const codexAgentProviderImpl: Provider<
       // stderr: 纯收集（codex 日志/进度输出）
       child.stderr?.on("data", (chunk: Buffer) => {
         stderr += chunk.toString("utf8");
+        bumpIdle(); // stderr 有产出同样说明进程活着
       });
 
       // 进程结束
@@ -478,8 +584,17 @@ const codexAgentProviderImpl: Provider<
       });
 
       // 写入 prompt 到 stdin，关闭 stdin 触发 codex 开始执行
-      child.stdin?.write(prompt);
-      child.stdin?.end();
+      // 注意：子进程可能瞬间退出（参数错误/立即失败），此时管道已关闭，
+      // 异步写会抛 EPIPE；必须吞掉 stdin 的 error，否则未捕获事件会崩掉宿主进程。
+      child.stdin?.on("error", () => {
+        /* EPIPE / ERR_STREAM_DESTROYED：子进程已退出，属正常竞态，忽略 */
+      });
+      try {
+        child.stdin?.write(prompt);
+        child.stdin?.end();
+      } catch {
+        /* 同步抛出（管道已销毁）同样忽略；真实失败由 close/error 事件呈报 */
+      }
     });
   },
 
