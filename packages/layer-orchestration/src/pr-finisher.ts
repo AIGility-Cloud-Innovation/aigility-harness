@@ -176,14 +176,30 @@ export async function listChangedFiles(cwd: string): Promise<string[]> {
   return parsePorcelain(stdout);
 }
 
-/** 默认基线分支：origin/HEAD 探测 → 回退 main */
+/**
+ * 默认基线分支：env 显式 → origin/HEAD → 目标仓库实际 HEAD → 兜底 main。
+ *
+ * 2026-10-15 事故修正：旧实现 origin/HEAD 探测失败即硬编码回退 "main"，
+ * 而服务当时跑在 feat/persona-three-tier（领先 origin/main 48 提交）→ 工人
+ * 拿到旧快照、把已有文件当新增提交。现补齐中间两级，使基线与实际运行分支一致。
+ * 与 worktree-manager.resolveBaseBranch 同源（保持口径一致）。
+ */
 export async function detectBaseBranch(cwd: string): Promise<string> {
+  const explicit = (process.env["WORKER_TEAM_BASE_BRANCH"] ?? "").trim();
+  if (explicit) return explicit;
   try {
     const { stdout } = await git(["symbolic-ref", "refs/remotes/origin/HEAD"], { cwd });
     const m = stdout.trim().match(/^refs\/remotes\/origin\/(.+)$/);
     if (m?.[1]) return m[1];
   } catch {
-    // 未设置 origin/HEAD 时回退
+    // 未设置 origin/HEAD 时继续下探
+  }
+  try {
+    const { stdout } = await git(["symbolic-ref", "--short", "HEAD"], { cwd });
+    const cur = stdout.trim();
+    if (cur && cur !== "HEAD") return cur;
+  } catch {
+    // detached HEAD / 非 git 目录
   }
   return "main";
 }
@@ -271,8 +287,21 @@ export function createPrFinisher(opts: PrFinisherOptions): NonNullable<WorkerTea
         return { ok: false, detail };
       }
 
-      // 2. fetch + 基线分支
-      await git(["fetch", "origin"], { cwd });
+      // 2. fetch + 基线分支（fetch 加重试；失败即中止交付，避免拿陈旧 origin/<base> 建 PR）
+      let fetched = false;
+      for (let attempt = 1; attempt <= 3 && !fetched; attempt++) {
+        try {
+          await git(["fetch", "origin", "--prune"], { cwd });
+          fetched = true;
+        } catch {
+          if (attempt < 3) await new Promise((r) => setTimeout(r, 2_000 * attempt));
+        }
+      }
+      if (!fetched) {
+        const detail = "fetch origin 重试 3 次仍失败，放弃交付（不用陈旧基线建 PR）";
+        await notifyFail(opts, task, detail, "");
+        return { ok: false, detail };
+      }
       const base = opts.baseBranch ?? (await detectBaseBranch(cwd));
 
       // 3. 一任务一分支；worktree 隔离下分支已切好（info.branch），跳过 checkout/stash

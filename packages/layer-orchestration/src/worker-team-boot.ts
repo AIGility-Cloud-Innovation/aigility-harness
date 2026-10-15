@@ -20,7 +20,7 @@ import { err, ok } from "@aigility-harness/core";
 import type { SeamContext, TaskRecord } from "@aigility-harness/core";
 import { WorkerTeam } from "./worker-team.js";
 import type { WorkerTeamOptions, WorkerMember } from "./worker-team.js";
-import { createPrFinisher, detectBaseBranch } from "./pr-finisher.js";
+import { createPrFinisher } from "./pr-finisher.js";
 import { ensureWorktree } from "./worktree-manager.js";
 import type { TaskRegistry } from "./task-registry.js";
 
@@ -178,12 +178,12 @@ export function createWorkerTeam(opts: {
         ? {
             // prepare：派发前把「仓库根」换成「专属 worktree」（建 worktree 并切好分支）
             prepare: async (task: TaskRecord, repoRoot: string) => {
-              const base = await detectBaseBranch(repoRoot).catch(() => "main");
+              // 基线由 ensureWorktree 三级探测（env → origin/HEAD → 目标仓库实际 HEAD → main）；
+              // 不再在此处 detectBaseBranch 兜底 "main" —— 那正是 2026-10-15 基线事故的根因。
               const r = await ensureWorktree({
                 repoRoot,
                 taskUid: task.uid,
                 title: task.title ?? "",
-                base,
               });
               if (!r.ok || !r.path) return { ok: false as const, error: r.error ?? "worktree 创建失败" };
               return { ok: true as const, cwd: r.path, branch: r.branch! };
