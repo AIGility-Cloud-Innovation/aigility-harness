@@ -109,7 +109,7 @@ describe("createPrFinisher", () => {
   it("建 PR 成功 → ok + PR 链接（走注入的 giteaCall；git 操作注入空目录）", async () => {
     const giteaCall = async (req: Record<string, unknown>) => {
       expect(req.method).toBe("POST");
-      expect(req.path).toBe("/repos/TiMEM-AI/timem-platform-backend/pulls");
+      expect(req.path).toBe("/api/v1/repos/TiMEM-AI/timem-platform-backend/pulls");
       const body = req.body as { title: string; base: string };
       expect(body.base).toBe("main");
       expect(body.title).toBe("记忆权益 402 响应体增强");

@@ -226,7 +226,8 @@ async function createPullRequest(
 ): Promise<{ number: number; url: string }> {
   const r = await call({
     method: "POST",
-    path: `/repos/${p.repo}/pulls`,
+    // path 必须带 /api/v1 前缀（provider 不自动补；漏了会 404「Not found.」→ 误报「无 number」——2026-10-15 修）
+    path: `/api/v1/repos/${p.repo}/pulls`,
     body: { title: p.title, head: p.head, base: p.base, body: p.body },
   });
   if (!r.ok) {

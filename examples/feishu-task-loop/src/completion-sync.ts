@@ -102,7 +102,8 @@ async function moveTaskToCheck(call: Call, taskGuid: string): Promise<boolean> {
 }
 
 async function commentIssue(call: Call, repo: string, n: number, body: string): Promise<void> {
-  await call({ method: "POST", path: `/repos/${repo}/issues/${n}/comments`, body: { body } }).catch?.(() => undefined);
+  // path 必须带 /api/v1 前缀（provider 不自动补；漏了 404——2026-10-15 修）
+  await call({ method: "POST", path: `/api/v1/repos/${repo}/issues/${n}/comments`, body: { body } }).catch?.(() => undefined);
 }
 
 /** 每拍完成核对。返回已同步的工单引用列表（供提醒/日志）。 */

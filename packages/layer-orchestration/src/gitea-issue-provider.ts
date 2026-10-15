@@ -60,7 +60,8 @@ async function listOpenIssues(call: GiteaCall, repo: string, pageSize: number): 
   for (;;) {
     const r = await call({
       method: "GET",
-      path: `/repos/${repo}/issues`,
+      // path 必须带 /api/v1 前缀（provider 不自动补；漏了 404——2026-10-15 修）
+      path: `/api/v1/repos/${repo}/issues`,
       query: { state: "open", type: "issues", limit: pageSize, page },
     });
     if (!r.ok) return out; // 单仓库失败不拖垮整体扫描，由 stats.errors 记录
