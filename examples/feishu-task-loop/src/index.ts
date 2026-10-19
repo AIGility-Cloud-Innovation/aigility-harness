@@ -443,11 +443,26 @@ async function main(): Promise<void> {
   //    只接轻型即发任务；重型（需闸门/审计）仍走 taskIssueSync → agentd 原链路。
   //    WORKER_TEAM_INTERVAL_MS=0 停用；成员可用任务 description 里 [worker:claude] 指定。
   //    收尾器（pr-finisher）默认装配：交付=PR 建成才算 done，通知走机器人群（未配则日志）。
+  // 决策播报 DM 抄送目标（可选）：决策反问除机器人群外并行发该会话，保证用户看得到
+  const decisionDmChatId = process.env["TASK_DECISION_DM_CHAT_ID"] ?? "";
   const workerTeam = createWorkerTeam({
     ctx,
     registry: getSharedRegistry(),
     // send 返回 Promise<string|void>，收尾器 notify 只需 Promise<void>——包装丢弃返回值
     ...(notifyChatId ? { notify: async (text: string) => { await start.value.send(notifyChatId, text); } } : {}),
+    // 决策播报：机器人群 + 可选 DM 抄送（2026-10-19 修复静默丢失）
+    ...((notifyChatId || decisionDmChatId)
+      ? {
+          decision: {
+            notify: async (text: string) => {
+              if (notifyChatId) await start.value.send(notifyChatId, text);
+              if (decisionDmChatId && decisionDmChatId !== notifyChatId) {
+                await start.value.send(decisionDmChatId, text);
+              }
+            },
+          },
+        }
+      : {}),
   });
   const teamLoop = startWorkerTeamLoop({ team: workerTeam });
 
