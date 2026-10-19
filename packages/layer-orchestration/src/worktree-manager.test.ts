@@ -98,10 +98,10 @@ describe("resolveBaseBranch（三级探测 Q1-A）", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("非 git 目录 → 最终兜底 main（不抛）", async () => {
+  it("非 git 目录 → 最终兜底 dev（2026-10-19 整改①：流程=从 dev 切特性分支，不抛）", async () => {
     const r = await resolveBaseBranch("/nonexistent-wtm-test-dir");
-    expect(r.base).toBe("main");
-    expect(r.source).toBe("fallback");
+    expect(r.base).toBe("dev");
+    expect(r.source).toBe("fallback:dev");
   });
 });
 

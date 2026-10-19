@@ -443,6 +443,9 @@ async function main(): Promise<void> {
   //    只接轻型即发任务；重型（需闸门/审计）仍走 taskIssueSync → agentd 原链路。
   //    WORKER_TEAM_INTERVAL_MS=0 停用；成员可用任务 description 里 [worker:claude] 指定。
   //    收尾器（pr-finisher）默认装配：交付=PR 建成才算 done，通知走机器人群（未配则日志）。
+  // 基线兜底 dev（2026-10-19 整改①）：未显式配置时特性分支一律从 origin/dev 切——
+  // timem 系流程=「开发前从 dev 创建特性分支」；探测链（origin/HEAD→HEAD）在双远端仓上不可靠
+  process.env["WORKER_TEAM_BASE_BRANCH"] ??= "dev";
   // 决策播报 DM 抄送目标（可选）：决策反问除机器人群外并行发该会话，保证用户看得到
   const decisionDmChatId = process.env["TASK_DECISION_DM_CHAT_ID"] ?? "";
   const workerTeam = createWorkerTeam({

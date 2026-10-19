@@ -184,6 +184,39 @@ export async function listChangedFiles(cwd: string): Promise<string[]> {
  * 拿到旧快照、把已有文件当新增提交。现补齐中间两级，使基线与实际运行分支一致。
  * 与 worktree-manager.resolveBaseBranch 同源（保持口径一致）。
  */
+/**
+ * 交付前基线对齐：特性分支落后 <remote>/<base> 时变基；有冲突则中止变基并拒交（转人工）。
+ * 背景：timem_frontend 曾以落后 134 提交的分支直开 PR（mergeable=False），根因即收尾器无对齐步骤。
+ */
+export async function rebaseAheadIfNeeded(
+  cwd: string,
+  base: string,
+  remote = "origin",
+): Promise<{ ok: boolean; detail: string }> {
+  const baseRef = `refs/remotes/${remote}/${base}`;
+  try {
+    const { stdout: mbOut } = await git(["merge-base", "HEAD", baseRef], { cwd });
+    const mb = mbOut.trim();
+    const { stdout: cntOut } = await git(["rev-list", "--count", `${mb}..${baseRef}`], { cwd });
+    const behind = Number.parseInt(cntOut.trim(), 10) || 0;
+    if (behind <= 0) return { ok: true, detail: "基线已最新，无需变基" };
+    await git(["rebase", baseRef], { cwd });
+    return { ok: true, detail: `交付前已向 ${remote}/${base} 变基（曾落后 ${behind} 个提交）` };
+  } catch (e) {
+    const msg = String((e as Error)?.message ?? e);
+    const { stdout: names } = await git(["diff", "--name-only", "--diff-filter=U"], { cwd }).catch(() => ({ stdout: "" }));
+    const conflicted = names.trim().split("\n").filter(Boolean).slice(0, 5).join("、");
+    if (msg.includes("conflict") || conflicted) {
+      await git(["rebase", "--abort"], { cwd }).catch(() => {});
+      return {
+        ok: false,
+        detail: `交付前变基失败：分支落后 ${remote}/${base} 且存在冲突（${conflicted || "未知文件"}）。已中止变基保持现场，转人工解决冲突后再交付`,
+      };
+    }
+    return { ok: false, detail: `交付前基线对齐失败：${msg.slice(0, 160)}` };
+  }
+}
+
 export async function detectBaseBranch(cwd: string): Promise<string> {
   const explicit = (process.env["WORKER_TEAM_BASE_BRANCH"] ?? "").trim();
   if (explicit) return explicit;
@@ -302,7 +335,13 @@ export function createPrFinisher(opts: PrFinisherOptions): NonNullable<WorkerTea
         await notifyFail(opts, task, detail, "");
         return { ok: false, detail };
       }
+      // 交付远端可配（2026-10-19 整改③）：双远端仓（origin=GitHub、权威=Gitea）可显式指定交付目标，默认 origin 不变
+      const deliveryRemote = (process.env["WORKER_TEAM_DELIVERY_REMOTE"] ?? "origin").trim() || "origin";
       const base = opts.baseBranch ?? (await detectBaseBranch(cwd));
+      if (deliveryRemote !== "origin") {
+        // 交付远端≠origin 时单独保鲜其 refs/remotes（供变基比对）；失败不在此处致命，后续变基步骤会明确报错
+        await git(["fetch", deliveryRemote, "--prune"], { cwd }).catch(() => {});
+      }
 
       // 3. 一任务一分支；worktree 隔离下分支已切好（info.branch），跳过 checkout/stash
       const branch = info.branch
@@ -326,8 +365,15 @@ export function createPrFinisher(opts: PrFinisherOptions): NonNullable<WorkerTea
         await git(["commit", "--no-gpg-sign", "-m", msg], { cwd });
       }
 
-      // 5. push
-      await git(["push", "-u", "origin", branch], { cwd });
+      // 4.5 交付前基线对齐（整改②）：落后即变基，冲突拒交转人工——不带陈旧基线开 PR
+      const rb = await rebaseAheadIfNeeded(cwd, base, deliveryRemote);
+      if (!rb.ok) {
+        await notifyFail(opts, task, rb.detail, "");
+        return { ok: false, detail: rb.detail };
+      }
+
+      // 5. push（交付远端可配，默认 origin）
+      await git(["push", "-u", deliveryRemote, branch], { cwd });
 
       // 6. 建 PR
       const pr = await createPullRequest(call, {

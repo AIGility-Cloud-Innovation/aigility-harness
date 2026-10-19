@@ -108,8 +108,8 @@ export async function resolveBaseBranch(repoRoot: string): Promise<{ base: strin
     // detached HEAD 或非 git 目录，继续下探
   }
 
-  // ④ 兜底
-  return { base: "main", source: "fallback" };
+  // ④ 兜底：dev（2026-10-19 整改①）——流程=「开发前从 dev 创建特性分支」，探测链全空时 dev 比 main 更贴近交付基线
+  return { base: "dev", source: "fallback:dev" };
 }
 
 /**
