@@ -82,6 +82,8 @@ export type TaskIntent =
   | { kind: "pending-skip"; ref: string }
   /** 摘要核验确认：「确认 N」——认可 LLM 判断（项目/执行人齐备即记录） */
   | { kind: "confirm-pending"; ref: string }
+  /** 决策回复（耳朵）：「决策 N/短码 选项」——needs-input 反问回收；选项=序号或文字，省略=采用缺省项 */
+  | { kind: "decision"; ref: string; option: string }
   /** 多行澄清归属：一条消息里逐行「任务归属 N 仓库 / 安排执行者 N 姓名 / 确认 N / 跳过任务 N」
    *  （用户习惯把多条确认合并在一条消息发送，单行正则整串锚定匹配不到） */
   | {
@@ -256,6 +258,14 @@ export function parseTaskIntent(input: string): TaskIntent {
   // 摘要核验确认（「确认 1」；「确认派发 #N」是另一意图，带「派发」二字不会命中这里）
   const pc = text.match(/^(?:确认|确认任务|没问题)\s*[:：]?\s*#?(\d+)\s*$/u);
   if (pc) return { kind: "confirm-pending", ref: pc[1] };
+
+  // ── 决策回复（耳朵，2026-10-19）：「决策 R12 2」「决策 3fa660dd 修 Playground」「决策 R12」（采缺省项）──
+  // needs-input 反问回收通道：编号=任务号尾段短码/uid/R 码；选项=序号或文字，省略=缺省项。
+  // 前瞻要求编号含 ASCII 字母数字——「决策 很难做」这类普通语句不误命中。
+  const dc = text.match(
+    /^决策\s*[:：]?\s*#?(?=[\p{L}\d_\-]*[A-Za-z0-9])([\p{L}\d_\-]{2,64})(?:\s+([^\n]{1,120}?))?\s*$/u,
+  );
+  if (dc) return { kind: "decision", ref: dc[1], option: dc[2]?.trim() ?? "" };
 
   // ── 多行核验（同一消息逐行 确认/归属/执行者/跳过多条候选） ──
   // 单行正则整串锚定，用户把多条回复合并成一条消息（逐行发送）时整串解析

@@ -30,6 +30,8 @@
 
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { readAgentDecision, writeDecision } from "./agent-decision.js";
+import { worktreeDirName, worktreeRoot } from "./worktree-manager.js";
 import { homedir } from "node:os";
 import {
   LayerId,
@@ -68,6 +70,7 @@ import { notifyRepoActivity } from "./briefing-events.js";
 // 注意：provider id 不从 feishu-task-provider import——该模块在模块求值期用本模块的
 // SECTION_NAMES 构建 SECTION_TO_STATUS，反向 import 会成环导致投影表拿到 undefined。
 import type { TaskRegistry } from "./task-registry.js";
+import type { TaskRecord } from "@aigility-harness/core";
 
 // ── 消费引用 ─────────────────────────────────────────────────────
 
@@ -114,6 +117,9 @@ export type TaskIntent =
   | { kind: "pending-skip"; ref: string }
   /** 摘要核验确认：「确认 N」——认可 LLM 判断（项目/执行人），digest-only 下仅记录 */
   | { kind: "confirm-pending"; ref: string }
+  /** 决策回复（耳朵，2026-10-19）：「决策 N/短码 选项」——needs-input 反问回收；
+   *  编号=任务号尾段短码/uid/R 码，选项=序号或文字，省略=采用缺省项 */
+  | { kind: "decision"; ref: string; option: string }
   /** 多行澄清归属：一条消息逐行「任务归属 N 仓库 / 安排执行者 N 姓名 / 确认 N / 跳过任务 N」（逐条落单） */
   | {
       kind: "pending-batch";
@@ -1069,6 +1075,82 @@ let planGateRegistry: TaskRegistry | undefined;
 /** 注入登记表（装配层启动时调用一次） */
 export function setPlanGateRegistry(registry: TaskRegistry): void {
   planGateRegistry = registry;
+}
+
+// ── 决策回复（耳朵，2026-10-19）：「决策 任务号 选项」回收 needs-input 反问 ──────────
+let decisionNotifySend: ((text: string) => Promise<void> | void) | undefined;
+/** 注入决策回执发送函数（装配层启动时调用一次；未注入仅台账生效不播报） */
+export function setDecisionNotifySend(send: (text: string) => Promise<void> | void): void {
+  decisionNotifySend = send;
+}
+
+/** 决策回执播报（尽力而为：通知失败不影响决策落地） */
+function sendDecisionNotice(text: string): void {
+  try {
+    void decisionNotifySend?.(text);
+  } catch {
+    // 忽略通知异常
+  }
+}
+
+/** 决策 cwd 定位：与 worker-team 决策续跑同逻辑（worktree 优先，回退主仓库根 ~/AI/<短名>） */
+function decisionCwdOf(task: TaskRecord): string | undefined {
+  const short = task.projectRef?.split("/").pop();
+  if (!short) return undefined;
+  const repoRoot = join(homedir(), "AI", short);
+  const wt = join(worktreeRoot(), worktreeDirName(repoRoot, task.uid));
+  if (existsSync(wt)) return wt;
+  return repoRoot;
+}
+
+/**
+ * 「决策 N/短码 选项」：定位 needs-input 任务 → 按决策文件选项解析回复 → writeDecision →
+ * reenqueueNeedsInput（needs-input→ready）→ worker-team 下一拍原线程续跑。广播任务号=uid 尾段短码。
+ */
+async function handleDecision(ref: string, option: string): Promise<string> {
+  const reg = planGateRegistry;
+  if (!reg) return "⚠️ 决策通道未就绪（台账未注入），请稍后重试。";
+  const token = ref.replace(/^#/, "").trim();
+  const waiting = reg.list({ status: ["needs-input"] });
+  let task = waiting.find((t) => t.uid === token || t.uid === `tsk_${token}`);
+  if (!task && token.length >= 4) task = waiting.find((t) => t.uid.endsWith(token));
+  if (!task) {
+    if (waiting.length === 0) return "（当前没有等待决策的任务）";
+    const rows = waiting.map((t) => `  · ${t.uid.slice(-6)} ${t.title ?? ""}`).join("\n");
+    return `❓ 没找到任务「${ref}」或它不在等待决策中。当前待决策：\n${rows}\n回复「决策 任务号尾6位 选项序号/文字」`;
+  }
+  const cwd = decisionCwdOf(task);
+  if (!cwd) return `❓ ${task.uid.slice(-6)}「${task.title}」未关联仓库，无法定位决策文件。`;
+  const chk = readAgentDecision(cwd);
+  if (!chk.found) return `❓ ${task.uid.slice(-6)} 当前没有待决策的决策文件（可能已处理）。`;
+  let decisionText = option.trim();
+  if (/^\d+$/.test(decisionText)) {
+    const opts = chk.decision?.options ?? [];
+    const idx = Number.parseInt(decisionText, 10) - 1;
+    if (opts.length === 0) {
+      decisionText = `选项${decisionText}`;
+    } else if (idx < 0 || idx >= opts.length) {
+      const menu = opts.map((o, i) => `${i + 1}.${o}`).join("  ");
+      return `❓ 选项序号超出范围（1-${opts.length}）：${menu}`;
+    } else {
+      decisionText = opts[idx];
+    }
+  } else if (!decisionText) {
+    const opts = chk.decision?.options ?? [];
+    const def = chk.decision?.defaultOption ?? 0;
+    decisionText = opts[def] ?? opts[0] ?? "";
+    if (!decisionText) return "❓ 决策点没有可用的缺省项，请回复选项序号或文字。";
+  }
+  const w = writeDecision(cwd, decisionText, {
+    decidedBy: "用户（飞书「决策」指令）",
+    decidedFrom: `决策 ${ref} ${option}`.trim(),
+  });
+  if (!w.ok) return `⚠️ 决策写入失败：${w.error}`;
+  const r = reg.reenqueueNeedsInput(task.uid);
+  if (!r.ok) return `⚠️ 决策已写入但重入队失败：${"error" in r ? r.error : "未知错误"}（请人工核对台账）`;
+  const msg = `✅ 已按「${decisionText}」决策，${task.uid.slice(-6)}「${(task.title ?? "").slice(0, 40)}」重新入队，工人将自动续跑。`;
+  sendDecisionNotice(msg);
+  return msg;
 }
 /** agent 任务放行回执防重（同任务只报一次，节拍重复扫不刷屏） */
 const agentReleasedReported = new Set<string>();
@@ -2592,6 +2674,9 @@ const taskIssueSyncProvider: Provider<TaskIssueSyncRequest, TaskIssueSyncRespons
       response = await handlePendingAssign(ctx, intent.ref, intent.repo, sessionChatId, request.root_id);
     } else if (intent.kind === "pending-skip") {
       response = handlePendingSkip(intent.ref, sessionChatId, request.root_id);
+    } else if (intent.kind === "decision") {
+      // 决策回复（耳朵）：needs-input 反问的回收通道——写决策文件→重入队→worker-team 续跑
+      response = await handleDecision(intent.ref, intent.option);
     } else if (intent.kind === "pending-batch") {
       // 多行/连写核验逐条落单；单条失败不阻断其余（结果逐条汇报）
       const parts: string[] = [];

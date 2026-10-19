@@ -822,6 +822,29 @@ describe("parseTaskIntent — assign 安排执行者", () => {
 
 // ── 澄清归属意图（任务归属 N @仓库 / 跳过任务 N） ──────────────────
 
+describe("parseTaskIntent — 决策回复（耳朵）", () => {
+  it("决策 R码/短码 序号或文字", () => {
+    expect(parseTaskIntent("决策 R12 2")).toEqual({ kind: "decision", ref: "R12", option: "2" });
+    expect(parseTaskIntent("决策 3fa660dd 修 Playground")).toEqual({
+      kind: "decision",
+      ref: "3fa660dd",
+      option: "修 Playground",
+    });
+  });
+  it("决策 带#与冒号变体", () => {
+    expect(parseTaskIntent("决策 #R12 1")).toEqual({ kind: "decision", ref: "R12", option: "1" });
+    expect(parseTaskIntent("决策：R12 方案A")).toEqual({ kind: "decision", ref: "R12", option: "方案A" });
+  });
+  it("决策 省略选项 = 采用缺省项", () => {
+    expect(parseTaskIntent("决策 R12")).toEqual({ kind: "decision", ref: "R12", option: "" });
+    expect(parseTaskIntent("决策 3fa660dd")).toEqual({ kind: "decision", ref: "3fa660dd", option: "" });
+  });
+  it("纯中文编号不误命中（普通语句落默认语义）", () => {
+    expect(parseTaskIntent("决策很难做")).not.toEqual(expect.objectContaining({ kind: "decision" }));
+    expect(parseTaskIntent("决策 很难做")).not.toEqual(expect.objectContaining({ kind: "decision" }));
+  });
+});
+
 describe("parseTaskIntent — 澄清归属", () => {
   it("任务归属 N @短名 与 @组织/仓库 全名", () => {
     expect(parseTaskIntent("任务归属 3 @video")).toEqual({

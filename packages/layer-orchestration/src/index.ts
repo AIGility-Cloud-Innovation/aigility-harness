@@ -67,6 +67,7 @@ export {
   runDispatchScan,
   stopDispatchScan,
   setDispatchNotifySend,
+  setDecisionNotifySend,
   setManualAlignHook,
   setPlanGateRegistry,
   feishuApiRef,

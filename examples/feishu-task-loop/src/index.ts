@@ -62,6 +62,7 @@ import {
   createWorkerTeam,
   startWorkerTeamLoop,
   setPlanGateRegistry,
+  setDecisionNotifySend,
   feishuApiRef,
   createPeriodicAligner,
   createFeishuTaskProvider,
@@ -472,6 +473,13 @@ async function main(): Promise<void> {
   // 7.5 agent 任务免工单链（2026-10-13 拍板）：plan-gate 加工 P 组的 agent 任务时
   //     直接写共享台账并放行 ready（不建工单、不挪 D），工人小组经同一登记表认领。
   setPlanGateRegistry(getSharedRegistry());
+  // 决策回复通道（耳朵，2026-10-19）：「决策 任务号 选项」→ 写决策文件 → 重入队 → worker-team 续跑；
+  // 回执经响应回来源会话，此处把同文镜像播报机器人群（与决策反问同通道；未配置则不镜像）
+  if (notifyChatId) {
+    setDecisionNotifySend(async (text: string) => {
+      await start.value.send(notifyChatId, text);
+    });
+  }
 
   console.log(`\n✅ 飞书机器人已连接 (appId=${appId}) → ${persona}`);
   console.log("   飞书里 @项目小助理：「建任务：xxx」「我的任务」「完成 xxx」");
