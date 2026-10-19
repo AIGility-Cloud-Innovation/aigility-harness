@@ -233,6 +233,10 @@ export function startWorkerTeamLoop(opts: {
         if (result.ok) console.log(`[worker-team] ${uid} ✅ ${result.value}`);
         else console.error(`[worker-team] ${uid} ❌ ${result.error}`);
       }
+      // 决策看门狗（2026-10-19）：过期 needs-input 按 onTimeout 处理（默认=按缺省项自动续跑）。
+      // 修复前 settleExpiredDecisions 只有定义全仓零调用 = 死代码，needs-input 会无限等待。
+      const settled = await opts.team.settleExpiredDecisions();
+      for (const uid of settled) console.log(`[worker-team] 决策看门狗已处理 ${uid}`);
     } catch (e) {
       console.error(`[worker-team] 拍异常: ${String((e as Error)?.message ?? e)}`);
     } finally {

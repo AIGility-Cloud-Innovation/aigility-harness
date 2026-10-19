@@ -484,6 +484,9 @@ export class WorkerTeam {
       const enq = this.o.registry.reenqueueNeedsInput(t.uid);
       if (enq.ok) {
         this.o.registry.get(t.uid)!.note = `[worker-team] 决策超时（${timeoutMs}ms），按默认项「${dflt}」自动续跑`;
+        this.o.decision?.notify?.(
+          `⏱️ [决策超时] ${(t.title ?? "").slice(0, 40)}（尾号 ${t.uid.slice(-6)}）已按默认项「${dflt}」自动续跑；如需改判请回复「决策 ${t.uid.slice(-6)} 选项」`,
+        );
         out.push(t.uid);
       } else {
         // 重入队失败（并发/状态已变）→ 本拍跳过，下拍再判；记录错误便于诊断
