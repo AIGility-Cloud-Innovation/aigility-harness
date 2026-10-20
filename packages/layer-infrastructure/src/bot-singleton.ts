@@ -49,8 +49,16 @@ export function botHolderAlive(pid: number, cwdMarker: string): boolean {
     return false;
   }
   try {
-    return readlinkSync(`/proc/${pid}/cwd`).includes(cwdMarker);
+    // 存活判定（2026-10-20 修复多实例事故）：cwd 或 cmdline 任一能对上机器人特征即可。
+    // 旧逻辑只看 cwd——从其他目录（仓库根/平台目录等）启动的同一机器人会被误判为
+    // 已死，锁被新实例接管，造成多实例并发（事故：2026-10-19 三实例并存）。
+    const cwd = readlinkSync(`/proc/${pid}/cwd`);
+    if (cwd.includes(cwdMarker)) return true;
+    const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8");
+    if (cmdline.includes("src/index.ts") || cmdline.includes(cwdMarker)) return true;
+    return false;
   } catch {
+    // /proc 不可读（非 Linux）时退化为仅信号探活
     return true;
   }
 }
