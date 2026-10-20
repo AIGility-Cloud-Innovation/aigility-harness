@@ -1701,7 +1701,18 @@ export async function runDispatchScan(
         continue;
       }
       const taskGuid = t.guid ?? t.task_id ?? "";
-      if (executorOfTask(t)) {
+      // 2026-10-20 拍板「有 assignee 的优先以 assignee 为准」：扫描接口的任务对象不带
+      // members，先按台账行（assignee_member_id/描述标记）合并判定——体外负责人也算人。
+      const ledgerRow = planGateRegistry
+        ?.list()
+        .find((r) => r.origin.provider === FEISHU_TASK_PROVIDER && r.origin.guid === taskGuid);
+      const humanExecutor =
+        executorOfTask(t) ??
+        (ledgerRow?.assignee_member_id
+          ? identityMembers(getIdentityRegistry()).find((m) => m.member_id === ledgerRow.assignee_member_id)
+              ?.name ?? ledgerRow.assignee_member_id
+          : undefined);
+      if (humanExecutor) {
         reports.push(`👤 「${summary.slice(0, 40)}」执行人任务留 D 自行处理（负责人=执行人）。`);
         continue;
       }
