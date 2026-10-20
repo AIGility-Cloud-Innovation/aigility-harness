@@ -1596,6 +1596,20 @@ export async function runPlanGate(
         if (t.description && rec.description !== t.description) {
           reg.update(rec.uid, { description: t.description });
         }
+        // 台账已在途（ready/dispatched/running/review）= 早已放行：静默跳过（防每拍 CAS 告警，2026-10-20）
+        if (!["planned"].includes(rec.status ?? "")) {
+          if ((rec.status ?? "") === "done" && !agentReleasedReported.has("done:" + guid)) {
+            agentReleasedReported.add("done:" + guid);
+            const checkGuid2 = sections.check;
+            const movedDone = checkGuid2 ? await moveToSection(ctx, guid, opts.tasklistGuid, checkGuid2) : false;
+            reports.push(
+              movedDone
+                ? `✅ 「${summary.slice(0, 40)}」台账已完成，已挪「${SECTION_NAMES.check}」待测试。`
+                : `✅ 「${summary.slice(0, 40)}」台账已完成（挪 C 失败，请手动）。`,
+            );
+          }
+          continue;
+        }
         const approved = reg.approve(rec.uid, {
           via: "auto",
           by: "system",
@@ -1675,7 +1689,84 @@ export async function runDispatchScan(
   for (const t of doingTasks) {
     const summary = t.summary ?? "";
     const issueNo = issueNumberFromTaskSummary(summary);
-    if (issueNo === undefined) continue; // 非双建任务不自动派发（人工在工单侧补建后重挪）
+    if (issueNo === undefined) {
+      // D 组无工单号任务（2026-10-20 用户拍板）：不再静默跳过（防僵尸卡静默滞留）。
+      // 闸门标签卡不处理；人工任务留 D；完备 agent 卡就地免工单放行；其余挪回 P 补全并群通知。
+      if (
+        summary.includes("【挂起】") ||
+        summary.includes("【待补充】") ||
+        summary.includes("【待安排执行者】") ||
+        summary.includes("【待确认归属】")
+      ) {
+        continue;
+      }
+      const taskGuid = t.guid ?? t.task_id ?? "";
+      if (executorOfTask(t)) {
+        reports.push(`👤 「${summary.slice(0, 40)}」执行人任务留 D 自行处理（负责人=执行人）。`);
+        continue;
+      }
+      const bareSummary = summary.replace(/^【[^】]+】\s*/, "");
+      const isAgent = /^【agent】/.test(summary) || /执行者[:：]\s*agent\b/i.test(t.description ?? "");
+      const agentRepo = repoFromPlannedSummary(summary) ?? repoFromPlannedSummary(bareSummary);
+      const planGuid = sections.plan;
+      if (!isAgent || !agentRepo || !planGuid || !planGateRegistry || !taskGuid) {
+        // 信息不全（无工单号；agent 卡缺仓库前缀/登记表未接）→ 挪回 P 补全 + 通知
+        const back = planGuid && taskGuid ? await moveToSection(ctx, taskGuid, opts.tasklistGuid, planGuid) : false;
+        const why = isAgent ? (agentRepo ? "登记表未接" : "缺 [org/repo] 前缀") : "缺工单号且未标 agent";
+        const msg = back
+          ? `⬅️ 「${summary.slice(0, 40)}」在 D 但信息不全（${why}），已挪回 P 补全，补全后自动调度。`
+          : `⚠️ 「${summary.slice(0, 40)}」在 D 但信息不全（${why}），挪回 P 失败，请手动挪回。`;
+        reports.push(msg);
+        await dispatchNotify(opts.notifyChatId, msg);
+        continue;
+      }
+      if (dispatchRuntime.inflight.size >= 3) {
+        reports.push(`⏳ 并发上限（3），「${summary.slice(0, 40)}」留 D 下轮放行。`);
+        continue;
+      }
+      const rec = planGateRegistry.adopt({
+        title: bareSummary,
+        ...(t.description ? { description: t.description } : {}),
+        status: "planned",
+        origin: { provider: FEISHU_TASK_PROVIDER, guid: taskGuid },
+        projectRef: agentRepo,
+      });
+      // adopt 只补链不更新内容（2026-10-13 实测）：用列表全量描述强制刷新台账
+      if (t.description && rec.description !== t.description) {
+        planGateRegistry.update(rec.uid, { description: t.description });
+      }
+      // 台账终态卡不该留在 D：done→C 待测试（与 PR 交付回写一致）；cancelled/failed→P 复核
+      if ((rec.status ?? "") === "done") {
+        const checkGuid = (sections as { check?: string }).check;
+        await moveToSection(ctx, taskGuid, opts.tasklistGuid, checkGuid ?? planGuid);
+        const msg = `✅ 「${summary.slice(0, 40)}」台账已完成，已挪「${SECTION_NAMES.check}」待测试。`;
+        reports.push(msg);
+        await dispatchNotify(opts.notifyChatId, msg);
+        continue;
+      }
+      if (["cancelled", "failed"].includes(rec.status ?? "")) {
+        await moveToSection(ctx, taskGuid, opts.tasklistGuid, planGuid);
+        const msg = `⬅️ 「${summary.slice(0, 40)}」台账已是「${rec.status}」，已挪回 P（如需重跑请改标题重放行）。`;
+        reports.push(msg);
+        await dispatchNotify(opts.notifyChatId, msg);
+        continue;
+      }
+      const approved = planGateRegistry.approve(rec.uid, {
+        via: "auto",
+        by: "system",
+        note: "agent 任务在 D 组信息完备，免工单放行（挪卡即授权）",
+      });
+      if (approved.ok) {
+        if (!agentReleasedReported.has(taskGuid)) {
+          agentReleasedReported.add(taskGuid);
+          reports.push(`🤖 「${summary.slice(0, 40)}」agent 任务完备（D 组放行），工人小组将认领执行。`);
+          await dispatchNotify(opts.notifyChatId, reports[reports.length - 1]);
+        }
+        continue;
+      }
+      // 放行失败但非终态 = 已放行在执行（CAS 拒重复 approve）：静默留 D 交工人小组
+      continue;
+    }
     // 负责人=执行人（2026-10-10 铁律）：带执行人的 D 组任务是人工任务——
     // 留在 D、不派 agent（执行人自己干）。判定=executorOfTask（负责人>描述标记）
     const executor = executorOfTask(t);

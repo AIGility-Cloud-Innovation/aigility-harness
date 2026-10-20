@@ -244,6 +244,12 @@ export function startWorkerTeamLoop(opts: {
     }
   };
   const timer = setInterval(() => void tick(), interval);
+  // 启动期一次性回收：上一进程遗留的 dispatched 孤儿打回 ready（2026-10-20）
+  try {
+    opts.team.recoverOrphans();
+  } catch (e) {
+    console.error(`[worker-team] 孤儿回收异常: ${String((e as Error)?.message ?? e)}`);
+  }
   console.log(`[worker-team] 驱动循环已启动（节拍 ${interval}ms，名册 ${LIGHT_ROSTER.map((w) => w.id).join("/")}）`);
   return { stop: () => clearInterval(timer) };
 }

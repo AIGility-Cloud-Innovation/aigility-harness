@@ -232,8 +232,9 @@ export async function ensureWorktree(opts: {
       });
     } catch (e) {
       // 分支已存在（上轮残留）：改从该分支检出（保留其历史，便于续跑）
+      // 注意匹配中文 git 输出（致命错误：…已经存在），否则中文环境回退永不触发（2026-10-20 实测）
       const msg = String((e as Error)?.message ?? e);
-      if (/already exists/i.test(msg)) {
+      if (/already exists|已经存在/i.test(msg)) {
         await run("git", ["-C", repoRoot, "worktree", "add", wtPath, branch], { timeout: 60_000 });
       } else {
         throw e;

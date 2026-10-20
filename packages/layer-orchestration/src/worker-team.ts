@@ -244,6 +244,24 @@ export class WorkerTeam {
     this.roster = roster;
   }
 
+  /**
+   * 重启孤儿回收（2026-10-20）：上一进程死于 dispatched→running 之间的任务
+   * 重启后无人认领（takeReady 只认 ready），永久滞留 dispatched。
+   * 启动期一次性把 dispatched（无存活工人进程可查，统一视为孤儿）打回 ready 重认领。
+   * running 已有工人会话，不在回收范围（人工接管）。
+   */
+  recoverOrphans(): number {
+    const orphans = this.o.registry.list({ status: ["dispatched"] });
+    let n = 0;
+    for (const t of orphans) {
+      const back = this.o.registry.transition(t.uid, "ready", "dispatched");
+      if (back.ok) n++;
+      else console.error(`[worker-team] 孤儿回收失败 ${t.uid}: ${back.error}`);
+    }
+    if (n > 0) console.log(`[worker-team] 重启孤儿回收：${n} 条 dispatched 打回 ready 重新认领`);
+    return n;
+  }
+
   /** 接单：扫台账 ready 队列并逐个派发（供 cron/调度循环调用） */
   async takeReady(limit = 5): Promise<Array<{ uid: string; result: Result<string> }>> {
     const ready = this.o.registry
@@ -291,7 +309,11 @@ export class WorkerTeam {
       const p = await this.o.prepare(task, repoRoot);
       if (!p.ok) {
         this.dispatched.delete(task.uid);
-        return err(`工作区准备失败（worktree）：${p.error}`);
+        // 失败即终态（2026-10-13 拍板，2026-10-20 补执行）：prep 失败落 cancelled，
+        // 否则任务停在 ready，每拍重烧同一次失败（实测：worktree 残留分支中文报错→无限重试）。
+        this.o.registry.transition(task.uid, "cancelled", "ready");
+        this.o.registry.update(task.uid, { note: `工作区准备失败（终态，重跑请改标题重新放行）：${String(p.error).slice(0, 200)}` });
+        return err(`工作区准备失败（worktree，已落 cancelled 终态）：${p.error}`);
       }
       cwd = p.cwd;
       preparedBranch = p.branch;
