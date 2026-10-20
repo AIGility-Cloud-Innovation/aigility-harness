@@ -828,12 +828,12 @@ export function assigneeFromTask(
   return member?.name ?? m.id;
 }
 
-/** 统一执行人判定：负责人（members assignee）优先，其次台账结构化负责人
- *  assignee_member_id（①.2 反向同步落库的体外负责人，2026-10-10 补——此前
- *  同步写进了字段但判定不认，出现「行里显示执行人、桶里报缺执行人」自相矛盾），
- *  再次描述「执行者：」标记。显式「执行者：agent」= agent 任务（无人工执行人）；
- *  其余带执行人 = 人工任务。派发护栏、plan-gate 闸门、双建落组共用此判定
- * （判定源一致，行为才一致）。 */
+/** 统一执行人判定：负责人（members assignee）永远优先——有负责人=人工任务，
+ *  以负责人名字为准（2026-10-20 拍板：标题【agent】前缀也不推翻负责人）；其次台账结构化
+ *  负责人 assignee_member_id（①.2 反向同步落库的体外负责人）；再次描述「执行者：」人名标记。
+ *  「agent/agentd」不是人名：描述标记 agent 值一律返回 undefined（agent 判定已收敛为
+ *  只看标题【agent】前缀，2026-10-20 拍板，描述不再参与识别）。
+ *  派发护栏、plan-gate 闸门、双建落组共用此判定（判定源一致，行为才一致）。 */
 export function executorOfTask(
   task: { members?: TaskMemberLike[]; description?: string; assignee_member_id?: string } | undefined,
 ): string | undefined {
@@ -846,7 +846,7 @@ export function executorOfTask(
   }
   const md = (task?.description ?? "").match(/执行者[:：]\s*(\S+)/);
   const marked = md ? md[1] : undefined;
-  if (marked && /^agent$/i.test(marked)) return undefined; // 显式 agent 任务
+  if (marked && /^agent/i.test(marked)) return undefined; // agent/agentd 非人名（历史误写一并吞掉）
   return marked;
 }
 
@@ -1430,16 +1430,16 @@ export async function runPlanGate(
     }
 
     // ⓪ 执行人确认闸门（先于回填建单，2026-10-10 规则①：确定好执行人才能建单）：
-    // 负责人/描述标记出人名 = 人工执行；显式「执行者：agent」= agent 执行；两者皆无 = 未定，留 P
+    // 负责人=人工执行（永远优先，2026-10-20 拍板：以负责人名字为准）；无负责人且
+    // 标题带【agent】前缀 = agent 执行（描述「执行者：」不再参与 agent 识别）；两者皆无 = 未定，留 P
     const humanExecutor = executorOfTask(t);
-    // 【agent】标题前缀=agent 任务认定（2026-10-13 用户约定）。对齐器可能已在标题前
+    // 【agent】标题前缀=agent 任务唯一认定（2026-10-20 拍板收敛）。对齐器可能已在标题前
     // 打过【待安排执行者】/【待确认归属】闸门标签（先于本约定运行的历史轮次），匹配前先剥掉；
     // [org/repo] 前缀与【agent】顺序不限（先剥归属闸门标签、再剥仓库前缀后测试 agent 标记）。
     const bareSummary = summary
       .replace(/^【(待安排执行者|待确认归属)】/, "")
-      .replace(/^\[[^\]#/]+\/[^\]#/]+(?:#\d+)?\]\s*/, "");
-    const agentDecided =
-      /执行者[:：]\s*agent\b/i.test(t.description ?? "") || /^【agent】/.test(bareSummary);
+      .replace(/^\[[^\]#]+\/[^\]#]+(?:#\d+)?\]\s*/, "");
+    const agentDecided = /^【agent】/.test(bareSummary);
     if (!humanExecutor && !agentDecided) {
       const tagged = `【待安排执行者】${summary.replace(/^【待安排执行者】/, "")}`;
       if (tagged !== summary) {
@@ -1459,7 +1459,7 @@ export async function runPlanGate(
     // ⓪-a 先行任务回填工单（归属+执行者齐备才建）：没有 #N 的 P 任务，标题带
     // [org/repo] 前缀（归属已确认）→ 从标题解析仓库自动建 Gitea 工单并同步回写 #N；
     // 缺前缀 = 归属未确认 → 打【待确认归属】留 P，等群里「任务归属」确认。
-    // agent 任务（描述「执行者：agent」，2026-10-13 拍板：免工单模式，产出=开启的 PR）
+    // agent 任务（标题【agent】前缀认定，2026-10-20 拍板收敛：描述不再参与识别；免工单模式，产出=开启的 PR）
     // 跳过回填，落到下方 ready 分支走台账放行。
     if (issueNo === undefined && !summary.includes("【待补充】") && !agentDecided) {
       const prefix = summary.match(/^\[([^\]]+)\]/);
@@ -1706,7 +1706,8 @@ export async function runDispatchScan(
         continue;
       }
       const bareSummary = summary.replace(/^【[^】]+】\s*/, "");
-      const isAgent = /^【agent】/.test(summary) || /执行者[:：]\s*agent\b/i.test(t.description ?? "");
+      // agent 判定只看标题【agent】前缀（2026-10-20 拍板：描述「执行者：」不再参与识别）
+      const isAgent = /^【agent】/.test(summary) || /^【agent】/.test(bareSummary);
       const agentRepo = repoFromPlannedSummary(summary) ?? repoFromPlannedSummary(bareSummary);
       const planGuid = sections.plan;
       if (!isAgent || !agentRepo || !planGuid || !planGateRegistry || !taskGuid) {
@@ -2186,31 +2187,37 @@ async function handleAssignExecutor(
   }
   const guid = (target.guid ?? target.task_id) as string;
   const marker = `执行者：${executorName}`;
+  if (/^agent$/i.test(executorName)) {
+    // agent 指派（2026-10-20 拍板收敛）：识别唯一源=标题【agent】前缀——直接打前缀，
+    // 不再写描述「执行者：agent」标记（描述已退出 agent 识别）。
+    const title0 = target.summary ?? "";
+    if (/^【agent】/.test(title0.replace(/^【(待安排执行者|待确认归属)】/, ""))) {
+      return pendingNo !== undefined
+        ? `⏭️ 澄清任务 #${pendingNo} 已是 agent 任务，无需重复安排。`
+        : `⏭️ 工单 #${issueNo} 已是 agent 任务，无需重复安排。`;
+    }
+    const stripped = title0.replace(/^【(待安排执行者|待确认归属)】/, "").trim();
+    const newTitle = `【agent】${stripped}`;
+    const ar = await callFeishuApi(ctx, {
+      method: "PATCH",
+      path: `/open-apis/task/v2/tasks/${guid}`,
+      query: { user_id_type: "open_id" },
+      identity: "user",
+      body: { update_fields: ["summary"], task: { summary: newTitle } },
+    });
+    if (!ar.ok || (ar.value?.code ?? -1) !== 0) {
+      return `❌ 标记 agent 执行失败：${ar.ok ? ar.value?.msg : ar.error}`;
+    }
+    return pendingNo !== undefined
+      ? `🤖 澄清任务 #${pendingNo} 已打【agent】前缀。请再回复「任务归属 ${pendingNo} org/仓库」确认归属（或标题加 [org/repo] 前缀）；齐备后自动由 agent 执行。`
+      : `🤖 工单 #${issueNo} 已打【agent】前缀（不设负责人）。归属 [org/repo] 齐备后由 agent 自动执行。`;
+  }
   if (assigneeFromTask(target) === executorName && (target.description ?? "").includes(marker)) {
     return `⏭️ ${pendingNo !== undefined ? `澄清任务 #${pendingNo}` : `工单 #${issueNo}`} 的执行人已是「${executorName}」（负责人已设置），无需重复安排。`;
   }
 
-  // 执行人写入（2026-10-10 修正）：agent = 写描述标记「执行者：agent」（闸门放行、D 组派 agent）；
-  // 人名 = 设飞书负责人（members assignee，主判据）+ 描述标记双保险。
-  if (/^agent$/i.test(executorName)) {
-    const desc0 = (target.description ?? "").trimEnd();
-    const markerAgent = "执行者：agent";
-    if (!(target.description ?? "").includes(markerAgent)) {
-      const ar = await callFeishuApi(ctx, {
-        method: "PATCH",
-        path: `/open-apis/task/v2/tasks/${guid}`,
-        query: { user_id_type: "open_id" },
-        identity: "user",
-        body: { update_fields: ["description"], task: { description: desc0 ? `${desc0}\n${markerAgent}` : markerAgent } },
-      });
-      if (!ar.ok || (ar.value?.code ?? -1) !== 0) {
-        return `❌ 标记 agent 执行失败：${ar.ok ? ar.value?.msg : ar.error}`;
-      }
-    }
-    return pendingNo !== undefined
-      ? `🤖 澄清任务 #${pendingNo} 已标记 agent 执行。请再回复「任务归属 ${pendingNo} 仓库/项目简称」确认归属；齐备后自动建单。`
-      : `🤖 工单 #${issueNo} 已标记 agent 执行（不设负责人）。归属/建单齐备后由 agent 自动执行。`;
-  }
+  // 执行人写入（2026-10-20 收敛）：人名 = 设飞书负责人（members assignee，主判据）+ 描述标记双保险；
+  // agent 走上方标题前缀分支。
 
   // 执行人=飞书任务「负责人」（members assignee，2026-10-10 修正）：
   // ① open_id 速查登记表（别名→open_id），命中直接设负责人

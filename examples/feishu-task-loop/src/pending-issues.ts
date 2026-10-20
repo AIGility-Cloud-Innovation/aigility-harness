@@ -42,7 +42,8 @@ export function executorNameOf(r: { assignee_member_id?: string; description?: s
     const m = identityMembers(getIdentityRegistry()).find((x) => x.member_id === r.assignee_member_id);
     if (m) return m.name;
   }
-  return (r.description ?? "").match(/执行者：(\S+)/)?.[1];
+  const marked = (r.description ?? "").match(/执行者：(\S+)/)?.[1];
+  return marked && /^agent/i.test(marked) ? undefined : marked; // agent/agentd 非人名（2026-10-20）
 }
 
 /** uid → 短码（码表里没有返回 —） */
@@ -88,9 +89,12 @@ export function computePendingBuckets(registry: {
   const planned = registry.list({ status: ["planned"] as UnifiedStatus[] });
   const missingExecutor = planned.filter((t) => {
     const desc = t.description ?? "";
-    if (/执行者[:：]\s*\S+/.test(desc)) return false; // 描述已定（含「执行者：agent」）
+    const title = t.title ?? "";
+    // agent 任务（标题【agent】前缀，2026-10-20 唯一认定源）不需要人类执行人 → 不进缺执行人桶
+    const bareTitle = title.replace(/^【(待安排执行者|待确认归属)】/, "");
+    if (/^【agent】/.test(bareTitle)) return false;
     // 判定源与执行人闸门同源（executorOfTask）：members 负责人 / assignee_member_id
-    // （①.2 反向同步落库）/ 描述标记，三路任一有 = 不缺（2026-10-10 修：此前漏第二路）
+    // （①.2 反向同步落库）/ 描述人名标记，任一有 = 不缺；agent 值不算执行人（2026-10-20）
     return !executorOfTask({
       members: (t as { members?: unknown[] }).members as never,
       description: desc,

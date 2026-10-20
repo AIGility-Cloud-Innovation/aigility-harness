@@ -153,15 +153,22 @@ export async function evaluateReleaseGate(
     elements["项目"] = record.projectRef ? "ok" : "missing";
   }
 
-  // ② 结构性：执行人
+  // ② 结构性：执行人（2026-10-20 收敛：agent 唯一认定=标题【agent】前缀；人名 =
+  // 台账 assignee_member_id 或描述「执行者：人名」标记；「执行者：agent」值不算已安排）
   if (nodeEnabled(doc, "executor_check")) {
+    const bareTitle = (record.title ?? "").replace(/^【(待安排执行者|待确认归属)】/, "");
+    const isAgent = /^【agent】/.test(bareTitle);
     const pattern = new RegExp(String(nodeConfig(doc, "executor_check")["pattern"] ?? "执行者：\\S+"));
-    const okExec = pattern.test(record.description ?? "");
+    const descMark = pattern.test(record.description ?? "")
+      ? (record.description ?? "").match(/执行者[:：]\s*(\S+)/)?.[1]
+      : undefined;
+    const descHuman = descMark && !/^agent/i.test(descMark) ? descMark : undefined;
+    const okExec = isAgent || !!record.assignee_member_id || !!descHuman;
     elements["执行人"] = okExec ? "ok" : "missing";
     if (!okExec) {
       missing.push("执行人");
       tags.push(TAG_BY_MISSING["执行人"]!);
-      messages.push("尚未安排执行者：群里回复「安排执行者 编号 @姓名」，或描述里写「执行者：agent」交工人小组（免工单，产出 PR）。");
+      messages.push("尚未安排执行者：群里回复「安排执行者 编号 @姓名」，或在标题加「【agent】[org/repo] 」前缀交工人小组（免工单，产出 PR）。");
     }
   }
 

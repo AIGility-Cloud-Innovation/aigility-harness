@@ -44,10 +44,11 @@ describe("assigneeFromTask/executorOfTask（执行人=负责人，2026-10-10 铁
     expect(assigneeFromTask({ members: [{ id: "ou_y", role: "follower" }] })).toBeUndefined();
     expect(assigneeFromTask(undefined)).toBeUndefined();
   });
-  it("统一判定：负责人 > 描述标记；显式 agent 放行", () => {
+  it("统一判定：负责人永远优先；描述 agent 值不再当执行人（2026-10-20）", () => {
     expect(executorOfTask({ members: [{ id: "ou_x", role: "assignee" }], description: "" })).toBeTypeOf("string");
     expect(executorOfTask({ members: [], description: "执行者：张三" })).toBe("张三");
     expect(executorOfTask({ members: [], description: "执行者：agent" })).toBeUndefined();
+    expect(executorOfTask({ members: [], description: "执行者：agentd" })).toBeUndefined();
     expect(executorOfTask({ members: [], description: "工单链接：x" })).toBeUndefined();
     expect(executorOfTask(undefined)).toBeUndefined();
   });
