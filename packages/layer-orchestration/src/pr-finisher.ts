@@ -143,6 +143,15 @@ export function buildCommitMessage(task: TaskRecord, member: string, files: stri
   return `${head}\n${body}\n`;
 }
 
+/** 工单联动（2026-10-20 拍板：PR 合并即自动关闭来源工单）——标题含 [org/repo#N] 且与任务
+ *  归属仓库一致时，PR 正文追加 Gitea 原生关闭关键字（平台在合并时自动关单）。 */
+function closeIssueLine(task: TaskRecord): string[] {
+  const m = (task.title ?? "").match(/\[([^\]#/]+)\/([^\]#/]+)#(\d+)\]/);
+  if (!m) return [];
+  if ((task.projectRef ?? "") !== `${m[1]}/${m[2]}`) return []; // 防误关他仓工单
+  return [`Closes #${m[3]}`, ""];
+}
+
 /** PR 描述 */
 export function buildPrBody(task: TaskRecord, member: string, files: string[], summary: string): string {
   const desc = (task.description ?? "").split("\n").slice(0, 12).join("\n");
@@ -161,10 +170,11 @@ export function buildPrBody(task: TaskRecord, member: string, files: string[], s
     ...files.slice(0, 20).map((f) => `- \`${f}\``),
     files.length > 20 ? `- …等 ${files.length} 个文件` : "",
     "",
-    "### 工人摘要",
+    `### 工人摘要`,
     "",
     summary.slice(0, 600),
     "",
+    ...closeIssueLine(task),
   ].join("\n");
 }
 

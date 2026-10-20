@@ -864,9 +864,10 @@ export function taskIssueRefFromSummary(
   return m ? { repo: `${m[1]}/${m[2]}`, issueNo: Number(m[3]) } : undefined;
 }
 
-/** 飞书先行任务标题 [org/repo] 前缀（归属已确认标记）→ 仓库 full_name（解析不出 undefined） */
+/** 飞书先行任务标题 [org/repo] 前缀（归属已确认标记）→ 仓库 full_name（解析不出 undefined）
+ *  2026-10-20：兼容 [org/repo#N]（工单号保留在标题，不剥）与任意【…】前缀（如【agent】）。 */
 export function repoFromPlannedSummary(summary: string | undefined): string | undefined {
-  const m = (summary ?? "").match(/^\[([^\]#/]+)\/([^\]#/]+)\]/);
+  const m = (summary ?? "").match(/^(?:【[^】]*】\s*)*\[([^\]#/]+)\/([^\]#/]+)(?:#\d+)?\]/);
   return m ? `${m[1]}/${m[2]}` : undefined;
 }
 
@@ -1436,7 +1437,7 @@ export async function runPlanGate(
     // [org/repo] 前缀与【agent】顺序不限（先剥归属闸门标签、再剥仓库前缀后测试 agent 标记）。
     const bareSummary = summary
       .replace(/^【(待安排执行者|待确认归属)】/, "")
-      .replace(/^\[[^\]#/]+\/[^\]#/]+\]\s*/, "");
+      .replace(/^\[[^\]#/]+\/[^\]#/]+(?:#\d+)?\]\s*/, "");
     const agentDecided =
       /执行者[:：]\s*agent\b/i.test(t.description ?? "") || /^【agent】/.test(bareSummary);
     if (!humanExecutor && !agentDecided) {
@@ -1582,7 +1583,10 @@ export async function runPlanGate(
           continue;
         }
         const rec = reg.adopt({
-          title: bareSummary,
+          // 2026-10-20 拍板：标题保留原始前缀（含 [org/repo#N] 工单引用）——
+          // PR 收尾器 closeIssueLine 依赖标题里的 #N 生成 Closes 关键字（合并自动关单）；
+          // 展示侧 cleanTitle/slugifyBranch 自会剥壳，台账/PR 引用链不丢工单号。
+          title: summary,
           ...(t.description ? { description: t.description } : {}),
           status: "planned",
           origin: { provider: FEISHU_TASK_PROVIDER, guid },

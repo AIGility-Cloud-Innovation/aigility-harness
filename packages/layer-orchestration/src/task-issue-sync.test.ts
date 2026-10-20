@@ -347,10 +347,12 @@ describe("scan 多清单路由", () => {
 import { repoFromPlannedSummary } from "./task-issue-sync.js";
 
 describe("repoFromPlannedSummary — 飞书先行标题前缀解析", () => {
-  it("从 [org/repo] 前缀解析仓库；双建标题(#N)与无前缀不解析", () => {
+  it("从 [org/repo] 前缀解析仓库；2026-10-20 起兼容 [#N] 工单引用与【agent】前缀", () => {
     expect(repoFromPlannedSummary("[AIGility/x] 修白屏")).toBe("AIGility/x");
     expect(repoFromPlannedSummary("[P1] 修白屏")).toBeUndefined();
-    expect(repoFromPlannedSummary("[AIGility/x#7] 修白屏")).toBeUndefined();
+    // 【agent】+[#N] 完整形态（用户标题格式，2026-10-20 拍板 #N 保留在标题）
+    expect(repoFromPlannedSummary("【agent】[AIGility/x#7] 修白屏")).toBe("AIGility/x");
+    expect(repoFromPlannedSummary("[AIGility/x#7] 修白屏")).toBe("AIGility/x");
     expect(repoFromPlannedSummary(undefined)).toBeUndefined();
   });
 });

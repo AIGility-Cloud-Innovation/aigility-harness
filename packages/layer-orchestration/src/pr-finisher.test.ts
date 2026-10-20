@@ -84,7 +84,7 @@ describe("diffPaths", () => {
   });
 });
 
-describe("buildCommitMessage / buildPrBody", () => {
+describe("buildPrBody / buildCommitMessage", () => {
   it("含任务标题、来源、文件清单", () => {
     const msg = buildCommitMessage(task(), "codex", ["app/a.py", "tests/b.py"]);
     expect(msg).toContain("feat(agent): 记忆权益 402 响应体增强");
@@ -95,6 +95,15 @@ describe("buildCommitMessage / buildPrBody", () => {
     expect(body).toContain("任务描述");
     expect(body).toContain("app/a.py");
     expect(body).toContain("完成");
+  });
+  it("标题带 [#N] 且归属一致 → PR 正文含 Closes 自动关单（2026-10-20 拍板）", () => {
+    const t = task({ title: "【agent】[TiMEM-AI/timem-platform-backend#53] 修复白屏" });
+    const body = buildPrBody(t, "codex", ["a.py"], "完成");
+    expect(body).toContain("Closes #53");
+  });
+  it("标题 [#N] 但归属他仓 → 不写 Closes（防误关）", () => {
+    const t = task({ title: "[TiMEM-AI/other-repo#53] 修复白屏", projectRef: "TiMEM-AI/timem-platform-backend" });
+    expect(buildPrBody(t, "codex", ["a.py"], "完成")).not.toContain("Closes #");
   });
 });
 
