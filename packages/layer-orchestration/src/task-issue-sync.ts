@@ -1383,19 +1383,30 @@ export async function runPlanGate(
   const planTasks = await listSectionTasks(ctx, planGuid);
   if (planTasks.length === 0) return reports;
 
-  // 现有 open 工单标题（去重基准；阈值与 pipeline 一致 0.5）
+  // 现有 open 工单标题（去重基准；阈值与 pipeline 一致 0.5）。
+  // 2026-10-21 事故修复：去重基准必须与建单仓库一致——原先固定查 GITEA_DEFAULT_REPO，
+  // 而回填建单走标题解析仓库，两库不同时查重恒空 → 同一源卡每拍重复建单（#152~#261 连环 110 张）。
+  // 改为按仓库懒加载 memo（每轮每仓库至多一次 GET）。
   const threshold = opts.threshold ?? 0.5;
-  const existingTitles: string[] = [];
-  const dr = await callGiteaApi(ctx, {
-    method: "GET",
-    path: issuesBaseFor(),
-    query: { state: "open", limit: 50, type: "issues" },
-  });
-  if (dr.ok && is2xx(dr.value?.status ?? 0)) {
-    for (const it of (dr.value?.data as IssueLike[]) ?? []) {
-      if (it.title) existingTitles.push(it.title);
+  const openIssueTitlesByRepo = new Map<string, string[]>();
+  const openIssueTitles = async (repo?: string): Promise<string[]> => {
+    const key = repo ?? "__default__";
+    if (!openIssueTitlesByRepo.has(key)) {
+      const dr = await callGiteaApi(ctx, {
+        method: "GET",
+        path: issuesBaseFor(repo),
+        query: { state: "open", limit: 50, type: "issues" },
+      });
+      const titles: string[] = [];
+      if (dr.ok && is2xx(dr.value?.status ?? 0)) {
+        for (const it of (dr.value?.data as IssueLike[]) ?? []) {
+          if (it.title) titles.push(it.title);
+        }
+      }
+      openIssueTitlesByRepo.set(key, titles);
     }
-  }
+    return openIssueTitlesByRepo.get(key)!;
+  };
 
   for (const t of planTasks) {
     const guid = t.guid ?? t.task_id ?? "";
@@ -1418,15 +1429,26 @@ export async function runPlanGate(
         (d?.ok ? (d.value?.data as { task?: { description?: string } } | undefined)?.task?.description : undefined) ?? "";
     }
 
-    // ① 去重：与 open 工单（排除自身对应单）Jaccard 相似
-    const dupHit = existingTitles.find(
-      (title) =>
-        jaccard(title, summary.replace(/^\[[^\]]+\]\s*/, "")) >= threshold &&
-        issueNo === undefined, // 双建任务自身必有对应工单，编号可解析则跳过工单查重
-    );
-    if (dupHit) {
-      reports.push(`🧹 「${summary.slice(0, 40)}」与现有工单「${dupHit.slice(0, 40)}」疑似重复，已留 P 待人工确认。`);
-      continue;
+    // ① 去重：与标题解析仓库的 open 工单 Jaccard 相似（仓库解析不出则交给归属闸门，不在此查重）。
+    // 命中后标题尾部打【疑似重复】标（幂等，只报一次），留 P 人工合并或删除。
+    if (issueNo === undefined && !summary.includes("【疑似重复】")) {
+      const ownRepo = repoFromPlannedSummary(summary);
+      if (ownRepo) {
+        const dupHit = (await openIssueTitles(ownRepo)).find(
+          (title) => jaccard(title, summary.replace(/^\[[^\]]+\]\s*/, "")) >= threshold,
+        );
+        if (dupHit) {
+          await callFeishuApi(ctx, {
+            method: "PATCH",
+            path: `/open-apis/task/v2/tasks/${guid}`,
+            query: { user_id_type: "open_id" },
+            identity: "user",
+            body: { update_fields: ["summary"], task: { summary: `${summary}【疑似重复】` } },
+          }).catch(() => undefined);
+          reports.push(`🧹 「${summary.slice(0, 40)}」与现有工单「${dupHit.slice(0, 40)}」疑似重复，已打标留 P 待人工处理。`);
+          continue;
+        }
+      }
     }
 
     // ⓪ 执行人确认闸门（先于回填建单，2026-10-10 规则①：确定好执行人才能建单）：
