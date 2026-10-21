@@ -75,6 +75,31 @@ describe("createDshSessionRelayExecute 指令路径（不触 headless CLI）", (
     expect(r.value?.response).toContain("已清空");
     expect(new TranscriptStore(f).get("default")).toHaveLength(0);
   });
+
+  it("/help 列出全部指令", async () => {
+    const execute = createDshSessionRelayExecute({ dshHome: "/tmp/dsh", transcriptFile: file() });
+    const r = await execute({ user_input: "/help" });
+    expect(r.value?.response).toContain("/new");
+    expect(r.value?.response).toContain("/session");
+    expect(r.value?.response).toContain("/help");
+  });
+
+  it("未知 /命令 回提示不进模型（不触 headless）", async () => {
+    const execute = createDshSessionRelayExecute({ dshHome: "/tmp/dsh", transcriptFile: file() });
+    const r = await execute({ user_input: "/deploy prod" });
+    expect(r.value?.response).toContain("未知指令");
+    expect(r.value?.response).toContain("/deploy");
+  });
+
+  it("指令归一化：全角／与尾随空白照常命中", async () => {
+    const f = file();
+    const store = new TranscriptStore(f);
+    store.push("default", "user", "历史消息");
+    const execute = createDshSessionRelayExecute({ dshHome: "/tmp/dsh", transcriptFile: f });
+    const r = await execute({ user_input: "／new " });
+    expect(r.value?.response).toContain("已清空");
+    expect(new TranscriptStore(f).get("default")).toHaveLength(0);
+  });
 });
 
 describe("M-A 引擎级投递：SKILL.md → AGENTS-<id>.md patch", () => {

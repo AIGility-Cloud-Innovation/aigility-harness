@@ -467,11 +467,14 @@ export interface DshSessionRelayOptions {
 }
 
 /** 中继支持的聊天内指令 */
-export const RELAY_COMMANDS = ["/new", "/session"] as const;
+export const RELAY_COMMANDS = ["/new", "/session", "/help"] as const;
 
 /**
  * 创建中继执行体：返回 (request) → Result<{response}>。
- * /new 清空历史、/session 查看轮数；普通消息按滚动上下文转发 headless。
+ * /new 清空历史、/session 查看轮数、/help 列指令；普通消息按滚动上下文
+ * 转发 headless。指令识别先归一化（全角／→半角、压空白）再匹配；首 token
+ * 命令形（/^\/[a-z][\w-]*$/i）但不在清单内 → 回提示不再漏进模型；含第二
+ * 个 / 的内容（如粘贴文件路径）按普通消息处理，保留直问能力。
  */
 export function createDshSessionRelayExecute(
   opts: DshSessionRelayOptions,
@@ -485,13 +488,24 @@ export function createDshSessionRelayExecute(
     const text = request.user_input.trim();
     const chatId = request.user_id ?? "default";
 
-    if (text === "/new") {
-      transcript.clear(chatId);
-      return ok({ response: "✅ 已清空当前聊天的对话历史，下条消息从零开始。" });
-    }
-    if (text === "/session") {
-      const turns = transcript.get(chatId).length;
-      return ok({ response: turns > 0 ? `当前保留 ${turns} 轮对话上下文。` : "尚无对话历史。" });
+    // 指令识别（2026-10-21 加固）：归一化后匹配，未知命令回提示不进模型
+    const norm = text.replace(/／/g, "/").replace(/\s+/g, " ").trim();
+    const firstToken = norm.split(" ")[0] ?? "";
+    if (/^\/[a-zA-Z][a-zA-Z0-9_-]*$/.test(firstToken)) {
+      if (firstToken === "/new") {
+        transcript.clear(chatId);
+        return ok({ response: "✅ 已清空当前聊天的对话历史，下条消息从零开始。" });
+      }
+      if (firstToken === "/session") {
+        const turns = transcript.get(chatId).length;
+        return ok({ response: turns > 0 ? `当前保留 ${turns} 轮对话上下文。` : "尚无对话历史。" });
+      }
+      return ok({
+        response:
+          firstToken === "/help" || firstToken === "/?"
+            ? `可用指令：/new 清空对话历史 · /session 查看保留轮数 · /help 显示本帮助。其余消息直接对话。`
+            : `❓ 未知指令「${firstToken}」。可用指令：${RELAY_COMMANDS.join("、")}。其余消息直接对话，无需以 / 开头。`,
+      });
     }
 
     const history = transcript.get(chatId);
