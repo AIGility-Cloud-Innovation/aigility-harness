@@ -1430,22 +1430,26 @@ export async function runPlanGate(
     }
 
     // ① 去重：与标题解析仓库的 open 工单 Jaccard 相似（仓库解析不出则交给归属闸门，不在此查重）。
-    // 命中后标题尾部打【疑似重复】标（幂等，只报一次），留 P 人工合并或删除。
-    if (issueNo === undefined && !summary.includes("【疑似重复】")) {
+    // 2026-10-21 事故修复：命中 → 打【疑似重复】标（幂等，只报一次）并 continue——
+    // 打过标的卡仍参与查重（标题尾部加标对字符二元组相似度影响 <0.05，恒命中），绝不落到建单分支。
+    if (issueNo === undefined) {
       const ownRepo = repoFromPlannedSummary(summary);
       if (ownRepo) {
         const dupHit = (await openIssueTitles(ownRepo)).find(
           (title) => jaccard(title, summary.replace(/^\[[^\]]+\]\s*/, "")) >= threshold,
         );
         if (dupHit) {
-          await callFeishuApi(ctx, {
-            method: "PATCH",
-            path: `/open-apis/task/v2/tasks/${guid}`,
-            query: { user_id_type: "open_id" },
-            identity: "user",
-            body: { update_fields: ["summary"], task: { summary: `${summary}【疑似重复】` } },
-          }).catch(() => undefined);
-          reports.push(`🧹 「${summary.slice(0, 40)}」与现有工单「${dupHit.slice(0, 40)}」疑似重复，已打标留 P 待人工处理。`);
+          const alreadyTagged = summary.includes("【疑似重复】");
+          if (!alreadyTagged) {
+            await callFeishuApi(ctx, {
+              method: "PATCH",
+              path: `/open-apis/task/v2/tasks/${guid}`,
+              query: { user_id_type: "open_id" },
+              identity: "user",
+              body: { update_fields: ["summary"], task: { summary: `${summary}【疑似重复】` } },
+            }).catch(() => undefined);
+            reports.push(`🧹 「${summary.slice(0, 40)}」与现有工单「${dupHit.slice(0, 40)}」疑似重复，已打标留 P 待人工处理。`);
+          }
           continue;
         }
       }
@@ -1536,11 +1540,30 @@ export async function runPlanGate(
       });
       if (ir.ok && is2xx(ir.value?.status ?? 0)) {
         const issue = ir.value?.data as { number?: number; html_url?: string };
-        const sync = await syncIssueToTask(ctx, repo, issue);
+        // 收敛动作（2026-10-21 事故环3修复，方案 a）：#N 回写源卡标题（[repo#N] 形态，
+        // issueNumberFromTaskSummary 下拍即识别 → 不再进本分支重复建单），工单链接补进描述；
+        // 源卡自身即任务载体，不再另建镜像卡（镜像与源卡并存曾致同题双卡 + 永不收敛循环）。
+        const backfill = `[${repo}#${issue.number}] ${cleanTitle}`;
+        const pr = await callFeishuApi(ctx, {
+          method: "PATCH",
+          path: `/open-apis/task/v2/tasks/${guid}`,
+          query: { user_id_type: "open_id" },
+          identity: "user",
+          body: {
+            update_fields: issue.html_url ? ["summary", "description"] : ["summary"],
+            task: {
+              summary: backfill,
+              ...(issue.html_url
+                ? { description: [t.description, `工单链接：${issue.html_url}`].filter(Boolean).join("\n") }
+                : {}),
+            },
+          },
+        });
+        const writeBackOk = pr.ok && (pr.value?.code ?? -1) === 0;
         reports.push(
-          sync.ok
-            ? `🔗 「${cleanTitle.slice(0, 40)}」已回填工单 ${repo}#${issue.number}（双建完成），可「确认派发 #${issue.number}」。`
-            : `⚠️ 「${cleanTitle.slice(0, 40)}」工单 ${repo}#${issue.number} 已建但同步任务失败：${sync.detail}`,
+          writeBackOk
+            ? `🔗 「${cleanTitle.slice(0, 40)}」已回填工单 ${repo}#${issue.number}（#N 已写回源卡，收敛），可「确认派发 #${issue.number}」。`
+            : `⚠️ 「${cleanTitle.slice(0, 40)}」工单 ${repo}#${issue.number} 已建但源卡回写失败：${pr.ok ? pr.value?.msg : pr.error}——请人工把 #${issue.number} 补进卡标题，否则下轮会重复建单。`,
         );
       } else {
         reports.push(`⚠️ 「${cleanTitle.slice(0, 40)}」回填工单失败，下轮重试：${ir.ok ? `HTTP ${ir.value?.status}` : ir.error}`);
