@@ -350,7 +350,7 @@ async function callGiteaApi(
  * 仓库必填，缺省在解析层即转 need-repo 反问）
  */
 function giteaRepo(explicit?: string): string {
-  return explicit ?? process.env.GITEA_DEFAULT_REPO ?? "TiMEM-AI/timem-platform-backend";
+  return explicit ?? process.env.GITEA_DEFAULT_REPO ?? "AIGility-Cloud-Innovation/aigility-harness";
 }
 
 function issuesBaseFor(repo?: string): string {
