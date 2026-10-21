@@ -12,6 +12,7 @@ import {
   dispatchDelayMs,
   taskIssueSyncProvider,
   autoDispatchEnabled,
+  runPlanGate,
 } from "./task-issue-sync.js";
 import type { SeamContext } from "@aigility-harness/core";
 
@@ -139,6 +140,94 @@ describe("派发确认/取消意图路由", () => {
     );
     if (!r.ok) throw new Error("execute failed");
     expect(r.value.response).toContain("用法");
+  });
+});
+
+// ── runPlanGate 去重基准仓库（2026-10-21 事故 #152~#261）─────────────────
+describe("runPlanGate 去重按目标仓查询", () => {
+  const repoOf = (req: Record<string, unknown>): string =>
+    String((req as { path?: string }).path ?? "").match(/\/repos\/([^/]+\/[^/]+)\/issues/)?.[1] ?? "";
+
+  it("目标仓已有同名工单时：查重 GET 查目标仓、不 POST 建单", async () => {
+    const reports = await runPlanGate(mockCtx((id, req) => {
+      const r = req as { method?: string; path?: string };
+      if (id.includes("feishu")) {
+        if (r.path?.includes("sections/sec-plan/tasks")) {
+          return { ok: true, value: { code: 0, data: { items: [
+            {
+              guid: "task-1",
+              summary: "[AIGility-Cloud-Innovation/aigility-harness] https://console.timem.cloud/enterprise/usage 该页面有的账号能看到内容",
+              members: [{ role: "assignee", id: "ou_x" }],
+            },
+          ] } } };
+        }
+        if (r.path?.includes("/sections") && r.method === "GET") {
+          return { ok: true, value: { code: 0, data: { items: [
+            { guid: "sec-plan", name: "P 计划中" }, { guid: "sec-doing", name: "D 执行中" },
+          ] } } };
+        }
+        if (r.path?.includes("/tasks/task-1") && r.method === "GET") {
+          return { ok: true, value: { code: 0, data: { task: { description: "" } } } };
+        }
+        return { ok: true, value: { code: 0, data: {} } };
+      }
+      if (id.includes("gitea")) {
+        if (repoOf(r) === "AIGility-Cloud-Innovation/aigility-harness") {
+          return { ok: true, value: { status: 200, data: [
+            { number: 10, title: "https://console.timem.cloud/enterprise/usage 该页面有的账号能看到内容" },
+          ] } };
+        }
+        return { ok: true, value: { status: 200, data: [] } };
+      }
+      if (id.includes("llm") || id.includes("inference")) {
+        return { ok: true, value: { text: '{"ready": false, "missing": "缺验收"}' } };
+      }
+      return { ok: true, value: { code: 0, data: [] } };
+    }), { tasklistGuid: "list-1" });
+    const joined = reports.join("\n");
+    expect(joined).toContain("疑似重复");
+  });
+
+  it("两仓 stub：默认仓（GITEA_DEFAULT_REPO）查询不被用于目标仓判定", async () => {
+    const seenPaths: string[] = [];
+    await runPlanGate(mockCtx((id, req) => {
+      const r = req as { method?: string; path?: string };
+      if (id.includes("feishu")) {
+        if (r.path?.includes("sections/sec-plan/tasks")) {
+          return { ok: true, value: { code: 0, data: { items: [
+            {
+              guid: "task-1",
+              summary: "[AIGility-Cloud-Innovation/aigility-harness] 完全新任务没有重复",
+              members: [{ role: "assignee", id: "ou_x" }],
+            },
+          ] } } };
+        }
+        if (r.path?.includes("/sections") && r.method === "GET") {
+          return { ok: true, value: { code: 0, data: { items: [
+            { guid: "sec-plan", name: "P 计划中" }, { guid: "sec-doing", name: "D 执行中" },
+          ] } } };
+        }
+        if (r.path?.includes("/tasks/task-1") && r.method === "GET") {
+          return { ok: true, value: { code: 0, data: { task: { description: "执行者：张三" } } } };
+        }
+        return { ok: true, value: { code: 0, data: {} } };
+      }
+      if (id.includes("gitea")) {
+        if (r.method === "GET") {
+          seenPaths.push(repoOf(r));
+          // 目标仓返空（无重复）；默认仓也返空
+          return { ok: true, value: { status: 200, data: [] } };
+        }
+        return { ok: true, value: { status: 201, data: { number: 99, html_url: "https://git.example/99" } } };
+      }
+      if (id.includes("llm") || id.includes("inference")) {
+        return { ok: true, value: { text: '{"ready": true}' } };
+      }
+      return { ok: true, value: { code: 0, data: {} } };
+    }), { tasklistGuid: "list-1" });
+    // 关键断言：查重 GET 必须打到目标仓路径，而不是无参默认仓（path 不含 repos 视为缺陷）
+    expect(seenPaths.length).toBeGreaterThan(0);
+    for (const p of seenPaths) expect(p).toBe("AIGility-Cloud-Innovation/aigility-harness");
   });
 });
 
