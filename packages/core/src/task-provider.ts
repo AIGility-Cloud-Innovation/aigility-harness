@@ -116,6 +116,11 @@ export interface TaskRecord {
   /** 执行产出/失败摘要（执行方写：如 worker-team 派发结果） */
   note?: string;
   /**
+   * 失败计数（2026-10-22）：D 侧 failed 归位 P 时 +1；P 侧自动放行按它设门槛——
+   * failed 且 <2 自动重试一次，≥2 停止自动重放升级人工（防确定性失败无限循环刷屏）。
+   */
+  attempts?: { failed: number; lastError?: string; lastFailedAt?: number };
+  /**
    * 派发基线快照（worker-team 写）：任务「首次派发」时工作区的既有改动文件清单。
    * 收尾判定「本轮有无新改动」时与它做差集。必须存在任务级字段而非每轮现拍：
    * 决策续跑（同线程第二轮）时上一轮的产物已落盘，现拍会把它们当「派发前已有」

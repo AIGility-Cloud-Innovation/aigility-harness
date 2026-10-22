@@ -263,7 +263,7 @@ export function parseTaskIntent(input: string): TaskIntent {
   // needs-input 反问回收通道：编号=任务号尾段短码/uid/R 码；选项=序号或文字，省略=缺省项。
   // 前瞻要求编号含 ASCII 字母数字——「决策 很难做」这类普通语句不误命中。
   const dc = text.match(
-    /^决策\s*[:：]?\s*#?(?=[\p{L}\d_\-]*[A-Za-z0-9])([\p{L}\d_\-]{2,64})(?:\s+([^\n]{1,120}?))?\s*$/u,
+    /^决策\s*[:：]?\s*#?(?=[\p{L}\d_\-]*[A-Za-z0-9])([\p{L}\d_\-]{1,64})(?:\s+([^\n]{1,120}?))?\s*$/u,
   );
   if (dc) return { kind: "decision", ref: dc[1], option: dc[2]?.trim() ?? "" };
 

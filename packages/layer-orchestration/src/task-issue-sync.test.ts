@@ -552,7 +552,22 @@ describe("scan 多清单路由", () => {
 
 // ── 飞书先行链路：create-planned 原语 + 归属确认改标题 + 回填建单闸门 ──
 
-import { repoFromPlannedSummary } from "./task-issue-sync.js";
+import { repoFromPlannedSummary, resolveWaitingDecisionTask } from "./task-issue-sync.js";
+
+// 2026-10-22 决策寻任务回归（机器人群诊断）：短序号「决策 1」仅唯一待决策时对号
+describe("resolveWaitingDecisionTask — 短序号/尾码/uid 三态", () => {
+  const two = [{ uid: "tsk_8f3e71bc-f53c-4045" }, { uid: "tsk_aaaa-bbbb-cccc" }];
+  it("尾码(≥4)命中", () => {
+    expect(resolveWaitingDecisionTask(two, "4045")?.uid).toBe("tsk_8f3e71bc-f53c-4045");
+  });
+  it("短序号仅唯一待决策任务时对号（播报教「决策 1 1」）", () => {
+    expect(resolveWaitingDecisionTask([two[0]], "1")?.uid).toBe("tsk_8f3e71bc-f53c-4045");
+    expect(resolveWaitingDecisionTask(two, "1")).toBeUndefined();
+  });
+  it("uid 全号精确命中", () => {
+    expect(resolveWaitingDecisionTask(two, "tsk_aaaa-bbbb-cccc")?.uid).toBe("tsk_aaaa-bbbb-cccc");
+  });
+});
 
 describe("repoFromPlannedSummary — 飞书先行标题前缀解析", () => {
   it("从 [org/repo] 前缀解析仓库；2026-10-20 起兼容 [#N] 工单引用与【agent】前缀", () => {

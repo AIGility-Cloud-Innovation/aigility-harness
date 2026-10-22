@@ -181,6 +181,21 @@ export class TaskRegistry {
    * 同线程续跑，不重新 claim）；needs-input → ready 清除独占后由工人小组
    * 重新认领（超时按默认项继续）。
    */
+  /** 失败计数 +1（D 侧 failed 归位 P 时调用；P 侧自动放行按它设门槛，2026-10-22） */
+  bumpFailed(uid: string, error?: string): Result<TaskRecord> {
+    const record = this.records.get(uid);
+    if (!record) return err(`task-registry: 未知任务 ${uid}`);
+    const failed = (record.attempts?.failed ?? 0) + 1;
+    record.attempts = {
+      failed,
+      ...(error ? { lastError: error.slice(0, 200) } : {}),
+      lastFailedAt: Date.now(),
+    };
+    record.updatedAt = Date.now();
+    this.markDirty();
+    return ok(record);
+  }
+
   transition(uid: string, to: UnifiedStatus, expect?: UnifiedStatus): Result<TaskRecord> {
     const record = this.records.get(uid);
     if (!record) return err(`task-registry: 未知任务 ${uid}`);

@@ -831,6 +831,10 @@ describe("parseTaskIntent — 决策回复（耳朵）", () => {
       option: "修 Playground",
     });
   });
+  it("单字符编号（播报教的「决策 1 1」，2026-10-22 修复 {2,64}→{1,64}）", () => {
+    expect(parseTaskIntent("决策 1 1")).toEqual({ kind: "decision", ref: "1", option: "1" });
+    expect(parseTaskIntent("决策 1")).toEqual({ kind: "decision", ref: "1", option: "" });
+  });
   it("决策 带#与冒号变体", () => {
     expect(parseTaskIntent("决策 #R12 1")).toEqual({ kind: "decision", ref: "R12", option: "1" });
     expect(parseTaskIntent("决策：R12 方案A")).toEqual({ kind: "decision", ref: "R12", option: "方案A" });

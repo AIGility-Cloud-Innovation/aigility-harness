@@ -1151,20 +1151,33 @@ function decisionCwdOf(task: TaskRecord): string | undefined {
 }
 
 /**
- * 「决策 N/短码 选项」：定位 needs-input 任务 → 按决策文件选项解析回复 → writeDecision →
- * reenqueueNeedsInput（needs-input→ready）→ worker-team 下一拍原线程续跑。广播任务号=uid 尾段短码。
+ * 决策回复寻任务（2026-10-22 抽出可测）：尾码(≥4字符)/uid/全号精确匹配；
+ * 播报教的「决策 1 <选项>」短序号仅在唯一待决策任务时对号（多任务时序号
+ * 在各条播报里都是 1，无区分度，须用尾码）。
+ * 「决策 N/短码 选项」整体流程：定位 needs-input 任务 → 按决策文件选项解析回复 →
+ * writeDecision → reenqueueNeedsInput（needs-input→ready）→ worker-team 原线程续跑。
  */
+export function resolveWaitingDecisionTask<T extends { uid: string }>(
+  waiting: T[],
+  token: string,
+): T | undefined {
+  const t = token.replace(/^#/, "").trim();
+  let task = waiting.find((x) => x.uid === t || x.uid === `tsk_${t}`);
+  if (!task && t.length >= 4) task = waiting.find((x) => x.uid.endsWith(t));
+  if (!task && /^\d{1,2}$/.test(t) && waiting.length === 1) task = waiting[0];
+  return task;
+}
+
 async function handleDecision(ref: string, option: string): Promise<string> {
   const reg = planGateRegistry;
   if (!reg) return "⚠️ 决策通道未就绪（台账未注入），请稍后重试。";
-  const token = ref.replace(/^#/, "").trim();
   const waiting = reg.list({ status: ["needs-input"] });
-  let task = waiting.find((t) => t.uid === token || t.uid === `tsk_${token}`);
-  if (!task && token.length >= 4) task = waiting.find((t) => t.uid.endsWith(token));
+  const task = resolveWaitingDecisionTask(waiting, ref);
   if (!task) {
     if (waiting.length === 0) return "（当前没有等待决策的任务）";
     const rows = waiting.map((t) => `  · ${t.uid.slice(-6)} ${t.title ?? ""}`).join("\n");
-    return `❓ 没找到任务「${ref}」或它不在等待决策中。当前待决策：\n${rows}\n回复「决策 任务号尾6位 选项序号/文字」`;
+    const shortHint = waiting.length === 1 ? "\n（当前仅这一个待决策任务，也可回复「决策 1 <选项序号/文字>」）" : "";
+    return `❓ 没找到任务「${ref}」或它不在等待决策中。当前待决策：\n${rows}${shortHint}\n回复「决策 任务号尾6位 选项序号/文字」`;
   }
   const cwd = decisionCwdOf(task);
   if (!cwd) return `❓ ${task.uid.slice(-6)}「${task.title}」未关联仓库，无法定位决策文件。`;
@@ -1743,6 +1756,14 @@ export async function runPlanGate(
           by: "system",
           note: "agent 任务五要素齐备，免工单直接放行（2026-10-13 拍板）",
         });
+        // 失败重试门槛（2026-10-22）：failed 且 ≥2 次不再自动放行，升级人工
+        if (approved.ok && (rec.attempts?.failed ?? 0) >= 2) {
+          if (!agentReleasedReported.has("blocked:" + guid)) {
+            agentReleasedReported.add("blocked:" + guid);
+            reports.push(`🛑 「${summary.slice(0, 40)}」已失败 ${rec.attempts?.failed} 次，停止自动重试，请人工复核后重置台账。`);
+          }
+          continue;
+        }
         if (approved.ok) {
           if (!agentReleasedReported.has(guid)) {
             agentReleasedReported.add(guid);
@@ -1901,9 +1922,35 @@ export async function runDispatchScan(
         await dispatchNotify(opts.notifyChatId, msg);
         continue;
       }
+      if ((rec.status ?? "") === "needs-input") {
+        // 等决策可视化（2026-10-22）：板面无痕导致决策隐形滞留——卡打 ❓ 标 +
+        // 机器人群点一次名（防重），决策落定后由 handleDecision 摘标。
+        if (!agentReleasedReported.has("deciding:" + taskGuid)) {
+          agentReleasedReported.add("deciding:" + taskGuid);
+          if (!summary.startsWith("❓")) {
+            await callFeishuApi(ctx, {
+              method: "PATCH",
+              path: `/open-apis/task/v2/tasks/${taskGuid}`,
+              query: { user_id_type: "open_id" },
+              identity: "user",
+              body: { update_fields: ["summary"], task: { summary: `❓${summary}` } },
+            }).catch(() => undefined);
+          }
+          const msg = `❓ 「${bareSummary.slice(0, 40)}」在等人工决策（机器人群有反问），卡已标注。回复「决策 <选项>」继续。`;
+          reports.push(msg);
+          await dispatchNotify(opts.notifyChatId, msg);
+        }
+        continue;
+      }
       if (["cancelled", "failed"].includes(rec.status ?? "")) {
         await moveToSection(ctx, taskGuid, opts.tasklistGuid, planGuid);
-        const msg = `⬅️ 「${summary.slice(0, 40)}」台账已是「${rec.status}」，已挪回 P（如需重跑请改标题重放行）。`;
+        // 失败计数 +1（2026-10-22）：P 侧自动重放按它设门槛，防确定性失败无限循环
+        planGateRegistry.bumpFailed(rec.uid, rec.note ?? rec.attempts?.lastError);
+        const n = rec.attempts?.failed ?? 1;
+        const msg =
+          n >= 2
+            ? `🛑 「${summary.slice(0, 40)}」已失败 ${n} 次，停止自动重试，请人工复核（P 组打标）。`
+            : `⬅️ 「${summary.slice(0, 40)}」台账已是「${rec.status}」，已挪回 P 自动重试 1 次（如需重跑请改标题重放行）。`;
         reports.push(msg);
         await dispatchNotify(opts.notifyChatId, msg);
         continue;
@@ -1914,6 +1961,16 @@ export async function runDispatchScan(
         note: "agent 任务在 D 组信息完备，免工单放行（挪卡即授权）",
       });
       if (approved.ok) {
+        if (summary.startsWith("❓")) {
+          // 决策已落定重入队 → 摘 ❓ 标（决策即时回执在群里，板面同步在此收尾）
+          await callFeishuApi(ctx, {
+            method: "PATCH",
+            path: `/open-apis/task/v2/tasks/${taskGuid}`,
+            query: { user_id_type: "open_id" },
+            identity: "user",
+            body: { update_fields: ["summary"], task: { summary: summary.replace(/^❓\s*/, "") } },
+          }).catch(() => undefined);
+        }
         if (!agentReleasedReported.has(taskGuid)) {
           agentReleasedReported.add(taskGuid);
           reports.push(`🤖 「${summary.slice(0, 40)}」agent 任务完备（D 组放行），工人小组将认领执行。`);
@@ -1922,6 +1979,16 @@ export async function runDispatchScan(
         continue;
       }
       // 放行失败但非终态 = 已放行在执行（CAS 拒重复 approve）：静默留 D 交工人小组
+      if (summary.startsWith("❓")) {
+        // 决策已落定/超时按默认续跑 → 摘 ❓ 标（best-effort；决策即时摘在 handleDecision）
+        await callFeishuApi(ctx, {
+          method: "PATCH",
+          path: `/open-apis/task/v2/tasks/${taskGuid}`,
+          query: { user_id_type: "open_id" },
+          identity: "user",
+          body: { update_fields: ["summary"], task: { summary: summary.replace(/^❓\s*/, "") } },
+        }).catch(() => undefined);
+      }
       continue;
     }
     // 负责人=执行人（2026-10-10 铁律）：带执行人的 D 组任务是人工任务——
