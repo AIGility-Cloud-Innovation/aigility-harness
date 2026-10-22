@@ -35,6 +35,7 @@ export { DECISION_FILE, DECISION_RULES } from "./agent-decision.js";
 export type { AgentDecision } from "./agent-decision.js";
 // 统一执行人判定（单一真相）：人工执行人任务（负责人/描述标记）不被工人小组抢接
 import { executorOfTask } from "./task-issue-sync.js";
+import { looksLikeGatewayError } from "./worker-output-guard.js";
 // worktree 隔离（2026-10-14 修复）：决策文件在任务专属 worktree 里，续跑读决策
 // 文件必须优先用 worktree 路径（派发侧 prepare 的对称面），否则读主仓库根必然落空
 import { worktreeRoot, worktreeDirName } from "./worktree-manager.js";
@@ -457,6 +458,15 @@ export class WorkerTeam {
 
     // ── ② 收尾：未装配收尾器 = 工人 ok 即 done（单测/无交付场景兼容）──
     const note = `[worker-team/${member.id}] ${r.text.slice(0, 300)}`;
+    // 防线内层（2026-10-22 事故）：CLI 遇网关 4xx 仍可能 exit 0，把「API Error: 400…」
+    // 当交付 → 判失败留现场，绝不进 PR。签名同源：worker-output-guard.ts
+    if (looksLikeGatewayError(r.text)) {
+      this.o.registry.transition(task.uid, "failed", "running");
+      this.o.registry.get(task.uid)!.note =
+        `[worker-team/${member.id}] 失败：工人输出疑似网关报错被拦截（详见交付判定），未进入交付。首 200 字：${r.text.slice(0, 200)}`;
+      this.dispatched.delete(task.uid);
+      return err(`[${member.id}] 工人输出疑似 API/网关报错，已拦截不交付 → ${r.text.slice(0, 160)}`);
+    }
     if (!this.o.finish) {
       this.o.registry.transition(task.uid, "done", "running");
       this.o.registry.get(task.uid)!.note = note;

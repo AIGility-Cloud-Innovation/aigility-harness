@@ -1514,6 +1514,30 @@ export async function runPlanGate(
       await pauseBySection(ctx, guid, summary, opts.tasklistGuid, sections);
       continue;
     }
+    // 前缀仓库校验+近似纠正（2026-10-22 t102051 事故）：手写错名前缀（如
+    // [timem-console-frontend]，真名 TiMEM-AI/timem_console_frontend）解析不出
+    // projectRef → 派发反复失败、永久滞留 P。归一化（小写、-/_ 等价、单名自动配
+    // 唯一 org）命中登记表 → 机器改写为登记全名并播报；命中不了不动（交后续闸门）。
+    const prefixRepo = summary.match(/^\[([^\]]+)\]/)?.[1];
+    if (prefixRepo && !knownOrgRepos.includes(prefixRepo)) {
+      const norm = (s: string) => s.toLowerCase().replace(/[-_]/g, "");
+      const repoPartHits = knownOrgRepos.filter((r) => norm(r.split("/")[1] ?? "") === norm(prefixRepo));
+      const target =
+        knownOrgRepos.find((r) => norm(r) === norm(prefixRepo)) ??
+        (repoPartHits.length === 1 ? repoPartHits[0] : undefined);
+      if (target) {
+        const newSummary = `[${target}] ${summary.replace(/^\[[^\]]+\]\s*/, "")}`;
+        await callFeishuApi(ctx, {
+          method: "PATCH",
+          path: `/open-apis/task/v2/tasks/${guid}`,
+          query: { user_id_type: "open_id" },
+          identity: "user",
+          body: { update_fields: ["summary"], task: { summary: newSummary } },
+        }).catch(() => undefined);
+        reports.push(`🏷️ 仓库前缀已校正：${prefixRepo} → ${target}（如不对请改标题）。`);
+        continue; // 下一拍按纠正后的正常流程走
+      }
+    }
     // 列表端点不返回 description（2026-10-13 实测：17 个任务全部为空）：对空描述做
     // 单任务 GET 补全量，否则执行人闸门/LLM 要素核对/agent 任务检测全部因空描述失判。
     if (!t.description) {
