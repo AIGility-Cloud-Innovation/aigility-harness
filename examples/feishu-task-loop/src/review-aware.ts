@@ -216,9 +216,12 @@ export function resolveProjectRef(token: string): { repo?: string; candidates: s
 // ── 要素抽取（确定性正则，不烧 LLM） ────────────────────────────────
 
 function extractExecutor(text: string): string | undefined {
-  const m = text.match(/执行人?[：:]?\s*[@]?([\w\u4e00-\u9fa5·\-]{2,32})/);
+  // 「执行人」「执行者」都认（2026-10-22：闸门文案教「安排执行者」，旧正则
+  // 「执行人?」会把「者」当姓名开头吞进值 → 解析出「者张三」永远对不上人）
+  const m = text.match(/执行[人者][：:]?\s*[@]?([\w\u4e00-\u9fa5·\-]{2,32})/);
   return m?.[1];
 }
+export { extractExecutor };
 
 /** 执行人 = 编码代理（2026-10-08）：用户说「执行人 agent/AI/智能体」意为让 agent
  *  直接做，不指派人类——合法值，不触发人员台账匹配与私信提醒。 */
@@ -858,7 +861,7 @@ export async function handleReviewMessage(
   // （2026-10-07 与 extractProjectToken 同步扩展：归属/项目/仓库 三种引导词都要剥掉）
   const residual = text
     .replace(/R\d{2,}/gi, "")
-    .replace(/执行人?[：:]?\s*[@]?[\w\u4e00-\u9fa5·\-]{2,32}/, "")
+    .replace(/执行[人者][：:]?\s*[@]?[\w\u4e00-\u9fa5·\-]{2,32}/, "")
     .replace(/(?:归属\s*(?:项目|仓库)?|项目|仓库)(?:是|为|[:：])?\s*[\w\u4e00-\u9fa5/-]{2,64}/, "")
     .trim();
   const hasSupplement = residual.length >= 4;

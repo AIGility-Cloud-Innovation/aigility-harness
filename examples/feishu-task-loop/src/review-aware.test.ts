@@ -1,5 +1,28 @@
 import { describe, it, expect } from "vitest";
-import { extractProjectToken, resolveProjectRef, isAgentExecutor } from "./review-aware.js";
+import { extractProjectToken, resolveProjectRef, isAgentExecutor, extractExecutor } from "./review-aware.js";
+import { ELEMENT_HOWTO } from "@aigility-harness/layer-orchestration";
+
+// 2026-10-22 R66/R111 死循环事故沉淀：文案教的写法必须被解析器认得
+describe("review-aware extractExecutor — 执行人/执行者双写法", () => {
+  it("「执行者 张三」不被吞成「者张三」（闸门文案教的是「执行者」）", () => {
+    expect(extractExecutor("R01 执行者 张三")).toBe("张三");
+    expect(extractExecutor("R02 执行者:李四")).toBe("李四");
+  });
+  it("「执行人 姓名」原有写法保持", () => {
+    expect(extractExecutor("R03 执行人 王五")).toBe("王五");
+    expect(extractExecutor("R04 执行人 agent")).toBe("agent");
+  });
+});
+
+describe("ELEMENT_HOWTO — 催办/闸门文案单一事实源", () => {
+  it("教法与解析器对齐：文案含的引导词解析器必须认得", () => {
+    expect(ELEMENT_HOWTO.executorHuman("R66")).toBe("「R66 执行人 姓名」");
+    expect(ELEMENT_HOWTO.executorAgent("R66")).toContain("执行人 agent");
+    expect(ELEMENT_HOWTO.project("R66")).toBe("「任务归属 R66 org/仓库」");
+    // 教的写法解析器真能抽出值（防止再次文案与解析脱节）
+    expect(extractExecutor(`R66 ${ELEMENT_HOWTO.executorHuman("R66").slice(1, -1)}`)).toBe("姓名");
+  });
+});
 
 // 2026-10-07 句式扩展的回归：真实事故「R42 项目是 timem_console_frontend」
 // 旧正则只认「归属(项目)是」，用户明明说了项目却被当补充材料、机器人仍回「还差归属」。

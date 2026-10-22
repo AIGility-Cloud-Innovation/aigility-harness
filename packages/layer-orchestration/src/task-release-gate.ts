@@ -112,6 +112,16 @@ export type ReleaseLlm = (req: { model?: string; system: string; user: string })
   Result<{ text?: string }>
 >;
 
+/** 用户要素指令写法（单一事实源，2026-10-22 R66/R111 死循环事故沉淀）：
+ * 催办文案、复核回复提示必须引用这里，禁止各处各写各的——文案教的写法与
+ * 解析/闸门认定一旦脱节，用户按提示补了也永远「还差」。
+ * agent 语义：用户写「执行人 agent」→ 标题自动加【agent】前缀（闸门唯一认定）。 */
+export const ELEMENT_HOWTO = {
+  executorHuman: (code: string) => `「${code} 执行人 姓名」`,
+  executorAgent: (code: string) => `「${code} 执行人 agent」（交编码代理，标题自动加【agent】前缀）`,
+  project: (code: string) => `「任务归属 ${code} org/仓库」`,
+} as const;
+
 const TAG_BY_MISSING: Record<string, string> = {
   项目: "【待确认归属】",
   执行人: "【待安排执行者】",
@@ -148,7 +158,7 @@ export async function evaluateReleaseGate(
     if (!record.projectRef) {
       missing.push("项目");
       tags.push(TAG_BY_MISSING["项目"]!);
-      messages.push("尚未确认归属：群里回复「任务归属 编号 org/仓库」，或直接在标题加 [org/repo] 前缀。");
+      messages.push(`尚未确认归属：群里回复${ELEMENT_HOWTO.project("编号")}，或直接在标题加 [org/repo] 前缀。`);
     }
     elements["项目"] = record.projectRef ? "ok" : "missing";
   }
@@ -168,7 +178,7 @@ export async function evaluateReleaseGate(
     if (!okExec) {
       missing.push("执行人");
       tags.push(TAG_BY_MISSING["执行人"]!);
-      messages.push("尚未安排执行者：群里回复「安排执行者 编号 @姓名」，或在标题加「【agent】[org/repo] 」前缀交工人小组（免工单，产出 PR）。");
+      messages.push(`尚未安排执行者：群里回复${ELEMENT_HOWTO.executorHuman("编号")}；让编码代理做就写${ELEMENT_HOWTO.executorAgent("编号")}。`);
     }
   }
 

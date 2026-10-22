@@ -15,7 +15,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getIdentityRegistry, identityMembers } from "@aigility-harness/layer-orchestration";
+import { getIdentityRegistry, identityMembers, ELEMENT_HOWTO } from "@aigility-harness/layer-orchestration";
 import { getSharedRegistry, getReviewCodes } from "./review-aware.js";
 import { computePendingBuckets, pendingTaskLine, codeOfUid, executorNameOf as executorNameOfShared } from "./pending-issues.js";
 
@@ -108,12 +108,13 @@ export async function remindPendingTasks(ctx: ReminderContext): Promise<void> {
 
   const lines: string[] = [`📌 有 ${total} 条任务等你处理：`];
   if (missingExecutor.length) {
-    lines.push("", `缺执行人 ${missingExecutor.length} 条（回复「R0x 执行人 姓名」；让编码代理做就写「R0x 执行人 agent」）：`);
+    // 文案单一事实源（2026-10-22）：与闸门/解析同源，杜绝「教的写法不被认」死循环
+    lines.push("", `缺执行人 ${missingExecutor.length} 条（回复${ELEMENT_HOWTO.executorHuman("R0x")}；让编码代理做就写${ELEMENT_HOWTO.executorAgent("R0x")}）：`);
     for (const r of missingExecutor.slice(0, 5)) lines.push(taskLine(codeOf(r.uid), r));
     if (missingExecutor.length > 5) lines.push(`  …另有 ${missingExecutor.length - 5} 条`);
   }
   if (missingProject.length) {
-    lines.push("", `缺归属 ${missingProject.length} 条（回复「任务归属 R0x 仓库」）：`);
+    lines.push("", `缺归属 ${missingProject.length} 条（回复${ELEMENT_HOWTO.project("R0x")}）：`);
     for (const r of missingProject.slice(0, 5)) lines.push(taskLine(codeOf(r.uid), r));
     if (missingProject.length > 5) lines.push(`  …另有 ${missingProject.length - 5} 条`);
   }

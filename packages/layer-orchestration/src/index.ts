@@ -259,6 +259,7 @@ export {
   loadReleaseDoc,
   evaluateReleaseGate,
   runReleaseGate,
+  ELEMENT_HOWTO,
 } from "./task-release-gate.js";
 export type {
   ReleaseDoc,
