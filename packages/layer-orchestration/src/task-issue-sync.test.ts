@@ -300,8 +300,8 @@ describe("runPlanGate 去重按目标仓查询", () => {
     }
     const patch = calls.find((c) => c.method === "PATCH" && (c.path ?? "").includes("tasks/task-pause"));
     expect(patch?.body?.task?.summary).toBe("等兰锦宇接口文档的任务");
-    // ② 挪进「挂起」分组（add_tasklist POST）
-    const move = calls.find((c) => (c.path ?? "").includes("sections/sec-paused/tasks"));
+    // ② 挪进「挂起」分组（add_tasklist + section_guid）
+    const move = calls.find((c) => (c.path ?? "").includes("/tasks/task-pause/add_tasklist") && (c.body as { section_guid?: string } | undefined)?.section_guid === "sec-paused");
     expect(move).toBeTruthy();
   });
 
