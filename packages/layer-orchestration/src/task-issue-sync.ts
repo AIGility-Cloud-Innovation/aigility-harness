@@ -1078,7 +1078,7 @@ async function writebackOnFinal(
 interface DispatchRuntime {
   timer: ReturnType<typeof setInterval> | null;
   /** agentd taskId → {repo, issueNo, tasklistGuid, feishuTaskGuid}（终态轮询注册表） */
-  inflight: Map<string, { repo: string; issueNo: number; tasklistGuid: string; feishuTaskGuid?: string }>;
+  inflight: Map<string, { repo: string; issueNo: number; tasklistGuid: string; feishuTaskGuid?: string; startedAnnounced?: boolean }>;
 }
 
 const dispatchRuntime: DispatchRuntime = { timer: null, inflight: new Map() };
@@ -1773,6 +1773,13 @@ export async function runDispatchScan(
       .then((m) => m.getTask(endpoint, taskId))
       .catch(() => undefined);
     if (!current) continue;
+    // 执行开始通知（2026-10-21 用户拍板）：queued→running 迁移即推机器人群一次（每任务只报一次）
+    if ((current.status ?? "") === "running" && !meta.startedAnnounced) {
+      meta.startedAnnounced = true;
+      const msg = `▶️ 「${(current.title ?? `工单 #${meta.issueNo}`).slice(0, 40)}」开始执行：agent 正在处理工单 #${meta.issueNo}（agentd 任务 \`${taskId}\`）。`;
+      reports.push(msg);
+      await dispatchNotify(opts.notifyChatId, msg);
+    }
     if (["completed", "needs_review", "failed", "cancelled", "blocked"].includes(current.status ?? "")) {
       dispatchRuntime.inflight.delete(taskId);
       const msg = await writebackOnFinal(ctx, meta.repo, meta.issueNo, taskId, current.status ?? "", meta.tasklistGuid, sections, meta.feishuTaskGuid);
