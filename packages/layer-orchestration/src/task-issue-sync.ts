@@ -957,17 +957,24 @@ async function dispatchIssue(
     return `⏭️ 工单 #${issueNo} 已有进行中的执行任务（${active.status}），不重复派发。`;
   }
 
-  // ② 建任务：sourceMessageId=issue:{repo}#{n}（确定性映射，零存储防重）
+  // ② 建任务：sourceMessageId=issue:{repo}#{n}（确定性映射，零存储防重）。
+  // agentd 异常（socket 抖动/未启动）不炸扫描拍：捕获后报错留 D 下轮重试。
   const prompt = buildDispatchPrompt(repo, issue);
-  const created = await agentdCreateFromMessage(endpoint, {
-    source: "harness-dispatch",
-    sourceMessageId: `issue:${repo}#${issueNo}`,
-    sourceConversationId: notifyChatId ?? "",
-    title: `#${issueNo} ${issue.title?.trim() ?? ""}`.slice(0, 80),
-    description: prompt,
-    text: prompt,
-  });
-  const taskId = created.id ?? created.taskId ?? "";
+  let taskId = "";
+  let created: Awaited<ReturnType<typeof agentdCreateFromMessage>> | undefined;
+  try {
+    created = await agentdCreateFromMessage(endpoint, {
+      source: "harness-dispatch",
+      sourceMessageId: `issue:${repo}#${issueNo}`,
+      sourceConversationId: notifyChatId ?? "",
+      title: `#${issueNo} ${issue.title?.trim() ?? ""}`.slice(0, 80),
+      description: prompt,
+      text: prompt,
+    });
+    taskId = created.id ?? created.taskId ?? "";
+  } catch (e) {
+    return `❌ 派发失败（工单 #${issueNo}）：agentd 不可达 ${String((e as Error)?.message ?? e).slice(0, 80)}，留 D 下轮重试。`;
+  }
   if (!taskId) return "❌ 派发失败：agentd 未返回任务 ID（执行引擎未就绪或参数被拒）";
 
   // ③ 项目归属闸门：identify 已解析则自动确认（高置信建单即带 projectId）
@@ -991,6 +998,12 @@ async function dispatchIssue(
   }
 
   const mins = Math.round(dispatchDelayMs() / 60_000);
+  // 防误接（2026-10-21 拍板 ④）：派发即工单评论「施工中」，执行期全程有动态标记（失败不阻断派发）
+  await callGiteaApi(ctx, {
+    method: "POST",
+    path: `${issuesBaseFor(repo)}/${issueNo}/comments`,
+    body: { body: `🤖 **已派发 agent 执行中**（agentd 任务 \`${taskId}\`）。\n确认闸门 ${mins} 分钟：回复「取消派发 #${issueNo}」可撤销，超时自动执行。真人请勿认领。` },
+  }).catch(() => undefined);
   return [
     `⚙️ 已取走工单 #${issueNo}，安排 code agent 执行：`,
     `${issue.title?.trim() ?? ""}`,
@@ -1366,6 +1379,36 @@ async function dispatchNotify(chatId: string | undefined, text: string): Promise
   }
 }
 
+/** 「pipeline/agent」标签 id（每仓 memo）：确保标签存在并取 id，失败返回 undefined（不阻断建单） */
+const pipelineLabelIds = new Map<string, number | undefined>();
+async function ensurePipelineLabelId(ctx: SeamContext, repo: string): Promise<number | undefined> {
+  if (pipelineLabelIds.has(repo)) return pipelineLabelIds.get(repo);
+  let id: number | undefined;
+  try {
+    const labelsBase = issuesBaseFor(repo).replace(/\/issues$/, "/labels");
+    const lr = await callGiteaApi(ctx, { method: "GET", path: labelsBase, query: { limit: 50 } });
+    const found = ((lr.value?.data as { id: number; name: string }[]) ?? []).find((l) => l.name === "pipeline/agent");
+    if (found) id = found.id;
+    else {
+      const cr = await callGiteaApi(ctx, {
+        method: "POST",
+        path: labelsBase,
+        body: { name: "pipeline/agent", color: "#fbca04", description: "流水线自动创建，agent 派发执行中，请勿认领" },
+      });
+      if (cr.ok && is2xx(cr.value?.status ?? 0)) id = (cr.value?.data as { id?: number })?.id;
+    }
+  } catch {
+    /* 标签不可用不阻断建单 */
+  }
+  pipelineLabelIds.set(repo, id);
+  return id;
+}
+
+/** 建单防误接声明（2026-10-21 拍板 ①+②）：正文头部醒目警告，压低真人误接单概率 */
+function pipelineIssueBanner(): string {
+  return "⚠️ **流水线自动创建**：本单将由 agent 自动派发执行中，请勿认领。人工终止请回复「取消派发 #编号」。";
+}
+
 /**
  * plan-gate：加工 P 分组（去重 → LLM 目标核对 → 完备自动挪 D）。
  * 手动挪 D = 跳过核对（本函数只看 P 分组）；不完备打 needs-input 描述前缀，下轮跳过重判省 token。
@@ -1529,13 +1572,17 @@ export async function runPlanGate(
       const assigneeGitea = assigneeOpenId
         ? findMemberByFeishuOpenId(getIdentityRegistry(), assigneeOpenId)?.gitea_usernames[0]
         : undefined;
+      // 防误接（2026-10-21 拍板 ①+②）：无真人负责（将由 agent 派发）的单挂 pipeline/agent
+      // 标签 + 正文头声明；带真人 assignee 的人工单不挂（assignee 本身即归属信号）。
+      const labelId = assigneeGitea ? undefined : await ensurePipelineLabelId(ctx, repo);
       const ir = await callGiteaApi(ctx, {
         method: "POST",
         path: issuesBaseFor(repo),
         body: {
           title: cleanTitle,
           ...(assigneeGitea ? { assignees: [assigneeGitea] } : {}),
-          body: `> 来源：飞书任务（归属+执行者已确认，由项目小助理回填工单）\n>\n> 飞书任务：${summary.slice(0, 80)}\n> 任务链接：${feishuTaskUrl}${assigneeGitea ? `\n> 负责人：@${assigneeGitea}` : ""}`,
+          ...(labelId !== undefined ? { labels: [labelId] } : {}),
+          body: `${assigneeGitea ? "" : `${pipelineIssueBanner()}\n\n`}> 来源：飞书任务（归属+执行者已确认，由项目小助理回填工单）\n>\n> 飞书任务：${summary.slice(0, 80)}\n> 任务链接：${feishuTaskUrl}${assigneeGitea ? `\n> 负责人：@${assigneeGitea}` : ""}`,
         },
       });
       if (ir.ok && is2xx(ir.value?.status ?? 0)) {
@@ -1670,7 +1717,13 @@ export async function runPlanGate(
         reports.push(`⚠️ 「${summary.slice(0, 40)}」agent 任务台账放行失败：${approved.error}，留 P 下轮重试。`);
         continue;
       }
-      // 人工/未标 agent 任务 → 原链路：挪 D（授权执行），由 dispatch-scan 派发
+      // 人工/未标 agent 任务 → 原链路：挪 D（授权执行），由 dispatch-scan 派发。
+      // TASK_AUTO_DISPATCH=0（2026-10-21 B 案）：只拦机器自动挪 D 这步（卡留 P），
+      // 人工挪 D 不受控——挪进 D 即刻按统一标准派发（信息齐+无真人assignee+【agent】）。
+      if (!autoDispatchEnabled()) {
+        reports.push(`⏸️ 「${summary.slice(0, 40)}」核对通过；TASK_AUTO_DISPATCH=0 不自动挪 D，留在 P（手动挪 D 即授权派发）。`);
+        continue;
+      }
       const moved = await moveToSection(ctx, guid, opts.tasklistGuid, doingGuid);
       reports.push(
         moved
@@ -1728,11 +1781,12 @@ export async function runDispatchScan(
     }
   }
 
-  // ② 扫 D 分组 → 派发（TASK_AUTO_DISPATCH=0 时跳过：不自动执行，仅维持状态队列与回写）
-  if (!autoDispatchEnabled()) return reports;
+  // ② 扫 D 分组 → 派发（2026-10-21 拍板：不区分人工挪/自动双建，统一标准——
+  // 信息齐全 + 无真人 assignee + 标记【agent】即派发；真人 assignee 留 D 自行处理）
   const doingTasks = await listSectionTasks(ctx, doingGuid);
   for (const t of doingTasks) {
     const summary = t.summary ?? "";
+    const taskGuid = t.guid ?? t.task_id ?? "";
     const issueNo = issueNumberFromTaskSummary(summary);
     if (issueNo === undefined) {
       // D 组无工单号任务（2026-10-20 用户拍板）：不再静默跳过（防僵尸卡静默滞留）。
@@ -2405,6 +2459,8 @@ async function handleIssueIntent(
     }
     const body: Record<string, unknown> = { title: intent.title };
     if (intent.body) body.body = intent.body;
+    // 注：此处为聊天指令建单（用户主动要求，给真人接的单），不挂流水线标签/声明；
+    // 防误接标记只用于 plan-gate 自动回填建单链（ensurePipelineLabelId 调用点）。
     const r = await callGiteaApi(ctx, { method: "POST", path: issuesBaseFor(repo), body });
     if (!r.ok || !is2xx(r.value?.status ?? 0)) {
       return `❌ 建工单失败：${r.ok ? `HTTP ${r.value?.status}` : r.error}`;

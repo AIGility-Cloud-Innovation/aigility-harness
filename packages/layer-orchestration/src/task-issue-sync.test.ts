@@ -188,6 +188,90 @@ describe("runPlanGate 去重按目标仓查询", () => {
     expect(joined).toContain("疑似重复");
   });
 
+  it("TASK_AUTO_DISPATCH=0：核对通过不自动挪 D，留 P 待人工（B 闸门只拦机器挪卡）", async () => {
+    process.env["TASK_AUTO_DISPATCH"] = "0";
+    try {
+      const reports = await runPlanGate(mockCtx((id, req) => {
+        const r = req as { method?: string; path?: string };
+        if (id.includes("feishu")) {
+          if (r.path?.includes("sections/sec-plan/tasks")) {
+            return { ok: true, value: { code: 0, data: { items: [
+              {
+                guid: "task-gate",
+                summary: "[AIGility-Cloud-Innovation/aigility-harness#88] 闸门验证任务信息齐全",
+                members: [{ role: "assignee", id: "ou_x" }],
+              },
+            ] } } };
+          }
+          if (r.path?.includes("/sections") && r.method === "GET") {
+            return { ok: true, value: { code: 0, data: { items: [
+              { guid: "sec-plan", name: "P 计划中" }, { guid: "sec-doing", name: "D 执行中" },
+            ] } } };
+          }
+          if (r.path?.includes("/tasks/task-gate") && r.method === "GET") {
+            return { ok: true, value: { code: 0, data: { task: { description: "执行者：张三" } } } };
+          }
+          return { ok: true, value: { code: 0, data: {} } };
+        }
+        if (id.includes("gitea")) {
+          if ((r.path ?? "").endsWith("/88")) {
+            return { ok: true, value: { status: 200, data: { number: 88, title: "闸门验证任务信息齐全", state: "open", html_url: "https://git.example/88" } } };
+          }
+          return { ok: true, value: { status: 200, data: [] } };
+        }
+        if (id.includes("llm") || id.includes("inference")) {
+          return { ok: true, value: { text: '{"ready": true}' } };
+        }
+        return { ok: true, value: { code: 0, data: {} } };
+      }), { tasklistGuid: "list-1" });
+      const joined = reports.join("\n");
+      expect(joined).toContain("不自动挪 D");
+      expect(joined).not.toContain("已挪入");
+    } finally {
+      delete process.env["TASK_AUTO_DISPATCH"];
+    }
+  });
+
+  it("TASK_AUTO_DISPATCH=0 时 dispatch-scan 照常扫 D 组派发（0 不再拦 D，B 案）", async () => {
+    process.env["TASK_AUTO_DISPATCH"] = "0";
+    try {
+      const { runDispatchScan } = await import("./task-issue-sync.js");
+      const reports = await runDispatchScan(mockCtx((id, req) => {
+        const r = req as { method?: string; path?: string };
+        if (id.includes("feishu")) {
+          if (r.path?.includes("sections/sec-doing/tasks")) {
+            return { ok: true, value: { code: 0, data: { items: [
+              {
+                guid: "task-d1",
+                summary: "[AIGility-Cloud-Innovation/aigility-harness#77] D 组工单卡",
+              },
+            ] } } };
+          }
+          if (r.path?.includes("/sections") && r.method === "GET") {
+            return { ok: true, value: { code: 0, data: { items: [
+              { guid: "sec-plan", name: "P 计划中" }, { guid: "sec-doing", name: "D 执行中" },
+            ] } } };
+          }
+          return { ok: true, value: { code: 0, data: {} } };
+        }
+        if (id.includes("gitea")) {
+          if ((r.path ?? "").includes("/77")) {
+            return { ok: true, value: { status: 200, data: { number: 77, title: "D 组工单卡", state: "open" } } };
+          }
+          return { ok: true, value: { status: 200, data: [] } };
+        }
+        // agentd 走真实 UDS socket：单测环境连不上 → 派发尝试失败但「有尝试」即证明 0 未拦
+        return { ok: false, error: "no socket in test" };
+      }), { tasklistGuid: "list-1" });
+      const joined = reports.join("\n");
+      expect(joined.length).toBeGreaterThan(0);
+      // 走到派发尝试（失败回执）而非静默 return
+      expect(joined).toContain("#77");
+    } finally {
+      delete process.env["TASK_AUTO_DISPATCH"];
+    }
+  });
+
   it("两仓 stub：默认仓（GITEA_DEFAULT_REPO）查询不被用于目标仓判定", async () => {
     const seenPaths: string[] = [];
     await runPlanGate(mockCtx((id, req) => {
@@ -197,7 +281,8 @@ describe("runPlanGate 去重按目标仓查询", () => {
           return { ok: true, value: { code: 0, data: { items: [
             {
               guid: "task-1",
-              summary: "[AIGility-Cloud-Innovation/aigility-harness] 完全新任务没有重复",
+              // 独立仓库前缀：避开其他用例已写入的模块级 openIssueTitlesByRepo 缓存
+              summary: "[TiMEM-AI/timem-project] 完全新任务没有重复",
               members: [{ role: "assignee", id: "ou_x" }],
             },
           ] } } };
@@ -213,21 +298,21 @@ describe("runPlanGate 去重按目标仓查询", () => {
         return { ok: true, value: { code: 0, data: {} } };
       }
       if (id.includes("gitea")) {
-        if (r.method === "GET") {
+        if (r.method === "GET" && (r.path ?? "").includes("/issues")) {
           seenPaths.push(repoOf(r));
-          // 目标仓返空（无重复）；默认仓也返空
+          // 目标仓返空（无重复）
           return { ok: true, value: { status: 200, data: [] } };
         }
-        return { ok: true, value: { status: 201, data: { number: 99, html_url: "https://git.example/99" } } };
+        return { ok: true, value: { status: 200, data: [] } };
       }
       if (id.includes("llm") || id.includes("inference")) {
         return { ok: true, value: { text: '{"ready": true}' } };
       }
       return { ok: true, value: { code: 0, data: {} } };
     }), { tasklistGuid: "list-1" });
-    // 关键断言：查重 GET 必须打到目标仓路径，而不是无参默认仓（path 不含 repos 视为缺陷）
+    // 关键断言：查重 GET 必须打到卡标题解析的目标仓，而不是无参默认仓
     expect(seenPaths.length).toBeGreaterThan(0);
-    for (const p of seenPaths) expect(p).toBe("AIGility-Cloud-Innovation/aigility-harness");
+    for (const p of seenPaths) expect(p).toBe("TiMEM-AI/timem-project");
   });
 });
 
