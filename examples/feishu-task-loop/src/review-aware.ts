@@ -872,16 +872,33 @@ export async function handleReviewMessage(
       continue;
     }
     const applied: string[] = [];
-    const patch: { projectRef?: string; description?: string; assignee_member_id?: string } = {};
+    const patch: { projectRef?: string; description?: string; title?: string; assignee_member_id?: string } = {};
     if (projectRef) {
       patch.projectRef = projectRef;
       applied.push(`归属 ${projectRef}`);
     }
-    if (executor && !/执行者：\S+/.test(record.description ?? "")) {
+    if (executor && isAgentExecutor(executor)) {
+      // 2026-10-22 修（用户转发记录实锤）：agent 执行 → 标题加【agent】前缀
+      // （放行闸门 2026-10-20 收敛后 agent 唯一认定=标题前缀，仅写「执行者：agent」
+      // 描述标记会被判 missing → 用户补了却永远「还差执行人」的死循环）。
+      const bare = (record.title ?? "").replace(/^【agent】/, "").replace(/^【(待安排执行者|待确认归属)】/, "");
+      patch.title = `【agent】${bare}`;
+      if (!/执行者：\S+/.test(record.description ?? "")) {
+        patch.description = `${record.description ?? record.title}\n执行者：agent`;
+      }
+      applied.push("执行人 agent（标题【agent】）");
+    } else if (executor && !/执行者：\S+/.test(record.description ?? "")) {
       patch.description = `${record.description ?? record.title}\n执行者：${executor}`;
       applied.push(`执行人 ${executor}`);
       const mem = findMemberFuzzyUnique(executor).member;
       if (mem) patch.assignee_member_id = mem.member_id; // 结构化外键（解析失败留空，不阻塞）
+    } else if (executor) {
+      // 2026-10-22 修：已有旧「执行者：X」标记 → 覆盖新值（此前静默丢弃，
+      // 旧值哪怕写错用户也永远改不了，回复被无视只剩「还差」复读）。
+      patch.description = (record.description ?? record.title).replace(/执行者[:：]\s*\S+/, `执行者：${executor}`);
+      applied.push(`执行人改为 ${executor}`);
+      const mem = findMemberFuzzyUnique(executor).member;
+      if (mem) patch.assignee_member_id = mem.member_id;
     }
     if (hasSupplement) {
       patch.description = `${patch.description ?? record.description ?? record.title}\n〔补充〕${residual}`;
