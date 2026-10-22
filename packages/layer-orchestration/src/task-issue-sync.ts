@@ -1220,12 +1220,12 @@ const FEISHU_TASK_PROVIDER = "feishu-task";
 /**
  * 收编裸任务（飞书任务为先行主源）：清单里不在 P/D/C/A 任何分组的未完成任务
  * （成员直接在清单里手工建的）→ 自动挪入「P 计划中」，进入统一闸门。
- * 返回收编数量。
+ * 返回收编任务名（含 guid 尾码兜底）——播报要点明对象（2026-10-22 用户反馈）。
  */
 export async function adoptUnsectionedTasks(
   ctx: SeamContext,
   tasklistGuid: string,
-): Promise<number> {
+): Promise<string[]> {
   const sections = await ensureSections(ctx, tasklistGuid);
   const sectioned = new Set<string>();
   for (const key of Object.keys(SECTION_NAMES) as SectionKey[]) {
@@ -1243,15 +1243,18 @@ export async function adoptUnsectionedTasks(
     query: { page_size: 100, user_id_type: "open_id" },
     identity: "user",
   });
-  if (!fr.ok || (fr.value?.code ?? -1) !== 0) return 0;
-  const all = (fr.value?.data as { items?: Array<{ guid?: string; task_id?: string; completed_at?: string | number }> })?.items ?? [];
-  let adopted = 0;
+  if (!fr.ok || (fr.value?.code ?? -1) !== 0) return [];
+  const all = (fr.value?.data as { items?: Array<{ guid?: string; task_id?: string; summary?: string; completed_at?: string | number }> })?.items ?? [];
+  const adopted: string[] = [];
   for (const t of all) {
     if (t.completed_at && Number(t.completed_at) !== 0) continue; // 已完成
     const g = t.guid ?? t.task_id;
     if (!g || sectioned.has(g)) continue;
     const planGuid = sections.plan;
-    if (planGuid && (await moveToSection(ctx, g, tasklistGuid, planGuid))) adopted++;
+    if (planGuid && (await moveToSection(ctx, g, tasklistGuid, planGuid))) {
+      // 点明收编对象（2026-10-22 用户反馈：「检测到 1 条」看不出是哪条）
+      adopted.push(t.summary?.replace(/\s+/g, " ").slice(0, 30) ?? g.slice(-6));
+    }
   }
   return adopted;
 }
@@ -1476,6 +1479,9 @@ export async function runPlanGate(
   // 2026-10-21 事故修复：去重基准必须与建单仓库一致——原先固定查 GITEA_DEFAULT_REPO，
   // 而回填建单走标题解析仓库，两库不同时查重恒空 → 同一源卡每拍重复建单（#152~#261 连环 110 张）。
   // 改为按仓库懒加载 memo（每轮每仓库至多一次 GET）。
+  // 归属自动补齐（2026-10-22 拍板）白名单：登记表全部 gitea_repos（只认登记过的仓库，
+  // 防描述随手写的任意字符串被当归属）。
+  const knownOrgRepos = getProjectRegistry().projects.flatMap((p) => p.gitea_repos ?? []);
   const threshold = opts.threshold ?? 0.5;
   const openIssueTitlesByRepo = new Map<string, string[]>();
   const openIssueTitles = async (repo?: string): Promise<string[]> => {
@@ -1582,6 +1588,22 @@ export async function runPlanGate(
     if (issueNo === undefined && !summary.includes("【待补充】") && !agentDecided) {
       const prefix = summary.match(/^\[([^\]]+)\]/);
       if (!prefix) {
+        // 归属自动补齐（2026-10-22 用户拍板：信息不全仅此项机器推断，执行人仍必问人）——
+        // 描述里出现登记过的 org/仓库全名 → 直接写进标题前缀，不再等群里回复。
+        const repoHit = (t.description ?? "").match(/([A-Za-z][\w.-]*\/[\w.-]+)(?:\.git)?/);
+        const inferred = repoHit?.[1] && knownOrgRepos?.includes(repoHit[1]) ? repoHit[1] : undefined;
+        if (inferred) {
+          const newSummary = `[${inferred}] ${summary.replace(/^(?:【[^】]*】\s*)*/, "")}`;
+          await callFeishuApi(ctx, {
+            method: "PATCH",
+            path: `/open-apis/task/v2/tasks/${guid}`,
+            query: { user_id_type: "open_id" },
+            identity: "user",
+            body: { update_fields: ["summary"], task: { summary: newSummary } },
+          }).catch(() => undefined);
+          reports.push(`🏷️ 「${summary.slice(0, 40)}」归属按描述自动判定为 ${inferred}（下一拍回填工单）。如不对请改标题。`);
+          continue;
+        }
         const tagged = `【待确认归属】${summary.replace(/^【待确认归属】/, "")}`;
         if (tagged !== summary) {
           await callFeishuApi(ctx, {
@@ -2886,9 +2908,11 @@ async function runScanForList(
   let adoptedNote = "";
   try {
     const adopted = await adoptUnsectionedTasks(ctx, listGuid);
-    if (adopted > 0) {
-      adoptedNote = `📥 收编 ${adopted} 条清单裸任务进「${SECTION_NAMES.plan}」`;
-      await dispatchNotify(notifyChatId, `📥 检测到 ${adopted} 条直接建在清单里的新任务，已收编进「${SECTION_NAMES.plan}」，将依次完成工单回填与执行者安排。`);
+    if (adopted.length > 0) {
+      // 点明任务名（2026-10-22 用户反馈：「检测到 1 条」看不出是哪条进了哪个清单）
+      const names = adopted.map((n) => `「${n}」`).join("、");
+      adoptedNote = `📥 收编 ${adopted.length} 条清单裸任务进「${SECTION_NAMES.plan}」：${names}`;
+      await dispatchNotify(notifyChatId, `📥 检测到 ${adopted.length} 条直接建在本清单的新任务，已收编进「${SECTION_NAMES.plan}」：${names}。将依次完成工单回填与执行者安排。`);
     }
   } catch (e) {
     console.error(`[task-issue-sync] 收编裸任务失败(不阻断): ${String(e)}`);

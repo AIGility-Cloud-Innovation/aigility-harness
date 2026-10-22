@@ -106,7 +106,13 @@ export async function remindPendingTasks(ctx: ReminderContext): Promise<void> {
   const alreadyToday = state.lastSentDate === today;
   if (alreadyToday) return;
 
-  const lines: string[] = [`📌 有 ${total} 条任务等你处理：`];
+  // 口径拆分（2026-10-22 用户反馈「51 条等你处理」与板面对不上造成错位）：
+  // 「等你处理」只数缺要素 P 任务；执行中/等测试单列一句带数量（板面 D/C 可见），
+  // 摘要行不再把执行中算进「等你处理」。
+  const awaiting = registry.list({ status: ["needs-input"] }).length;
+  const lines: string[] = [
+    `📌 等你处理 ${total} 条（缺执行人 ${counts.missingExecutor}、缺归属 ${counts.missingProject}）${awaiting ? `，另有 ${awaiting} 条等拍板决策` : ""}；执行中/等测试 ${counts.released} 条见板面 D/C 列。`,
+  ];
   if (missingExecutor.length) {
     // 文案单一事实源（2026-10-22）：与闸门/解析同源，杜绝「教的写法不被认」死循环
     lines.push("", `缺执行人 ${missingExecutor.length} 条（回复${ELEMENT_HOWTO.executorHuman("R0x")}；让编码代理做就写${ELEMENT_HOWTO.executorAgent("R0x")}）：`);

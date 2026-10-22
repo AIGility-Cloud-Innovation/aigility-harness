@@ -128,6 +128,44 @@ export async function syncBoardAlignment(
     }
   }
 
+  // ①-b 已完成卡 → 台账关单（2026-10-22 用户拍板：飞书卡勾完成 = 台账关闭，双向终态）。
+  // 只列 PDCA 分组内的 completed=true 卡（根目录卡不在板面语义内），按 guid 反查台账。
+  const listsRaw = (await callData<{ items?: Array<{ guid?: string }> }>(feishuCall, {
+    path: "/open-apis/task/v2/tasklists",
+    query: { page_size: 50, user_id_type: "open_id" },
+    identity: "user",
+  }))?.items ?? [];
+  for (const l of listsRaw) {
+    if (!l.guid) continue;
+    const secsRaw = (await callData<{ items?: Array<{ guid?: string; name?: string }> }>(feishuCall, {
+      path: "/open-apis/task/v2/sections",
+      query: { resource_type: "tasklist", resource_id: l.guid, page_size: 50, user_id_type: "open_id" },
+      identity: "user",
+    }))?.items ?? [];
+    for (const sec of secsRaw) {
+      if (!sec.guid || !sectionKeyOf(sec.name)) continue; // 自定义分组不计
+      const done = (await callData<{ items?: Array<{ guid?: string; task_id?: string }> }>(feishuCall, {
+        path: `/open-apis/task/v2/sections/${sec.guid}/tasks`,
+        query: { completed: true, page_size: 100, user_id_type: "open_id" },
+        identity: "user",
+      }))?.items ?? [];
+      for (const t of done) {
+        const g = t.guid ?? t.task_id;
+        if (!g) continue;
+        const rec = registry
+          .list({})
+          .find((x) => x.links?.["feishu-task"]?.guid === g || (x.origin?.provider === "feishu-task" && x.origin?.guid === g));
+        if (!rec || rec.status === "done" || rec.status === "cancelled") continue; // 无台账或已终态
+        const path = transitionPath(rec.status, "done");
+        if (!path) continue; // 如 needs-input 无到 done 的路径——不动，交闸门流程
+        for (const step of path) {
+          if (!registry.transition(rec.uid, step as UnifiedStatus).ok) break;
+        }
+        changes.push(`「${(rec.title ?? "").slice(0, 24)}」看板已勾完成，台账 → done`);
+      }
+    }
+  }
+
   // ② 逐任务比对：实际 vs 预期 → 人工挪动则台账经合法路径跟随
   for (const t of registry.list({ status: ["planned", "ready", "dispatched", "running", "review", "failed", "blocked", "suspended"] })) {
     const guid = t.links?.["feishu-task"]?.guid ?? (t.origin?.provider === "feishu-task" ? t.origin?.guid : undefined);
