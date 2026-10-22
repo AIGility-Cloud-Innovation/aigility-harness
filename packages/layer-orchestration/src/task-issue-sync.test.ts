@@ -272,6 +272,39 @@ describe("runPlanGate 去重按目标仓查询", () => {
     }
   });
 
+  it("标题【挂起】自动挪「挂起」分组并摘前缀（2026-10-22 拍板：分组即状态）", async () => {
+    const calls: Array<{ method?: string; path?: string; body?: { task?: { summary?: string } } }> = [];
+    await runPlanGate(mockCtx((id, req) => {
+      const r = req as { method?: string; path?: string; body?: { task?: { summary?: string } } };
+      if (id.includes("feishu")) {
+        calls.push(r);
+        if (r.path?.includes("sections/sec-plan/tasks")) {
+          return { ok: true, value: { code: 0, data: { items: [
+            { guid: "task-pause", summary: "【挂起】等兰锦宇接口文档的任务", members: [{ role: "assignee", id: "ou_x" }] },
+          ] } } };
+        }
+        if (r.path?.includes("/sections") && r.method === "GET") {
+          return { ok: true, value: { code: 0, data: { items: [
+            { guid: "sec-plan", name: "P 计划中" }, { guid: "sec-doing", name: "D 执行中" },
+            { guid: "sec-check", name: "C 待测试" }, { guid: "sec-fix", name: "A 待修复" },
+            { guid: "sec-paused", name: "挂起" },
+          ] } } };
+        }
+        return { ok: true, value: { code: 0, data: {} } };
+      }
+      return { ok: true, value: { status: 200, data: [] } };
+    }), { tasklistGuid: "list-1" });
+    // ① 标题摘【挂起】前缀
+    if (!calls.some((c) => c.method === "PATCH")) {
+      console.error("DEBUG feishu calls:", JSON.stringify(calls.map((c) => `${c.method ?? "?"} ${c.path}`)).slice(0, 800));
+    }
+    const patch = calls.find((c) => c.method === "PATCH" && (c.path ?? "").includes("tasks/task-pause"));
+    expect(patch?.body?.task?.summary).toBe("等兰锦宇接口文档的任务");
+    // ② 挪进「挂起」分组（add_tasklist POST）
+    const move = calls.find((c) => (c.path ?? "").includes("sections/sec-paused/tasks"));
+    expect(move).toBeTruthy();
+  });
+
   it("两仓 stub：默认仓（GITEA_DEFAULT_REPO）查询不被用于目标仓判定", async () => {
     const seenPaths: string[] = [];
     await runPlanGate(mockCtx((id, req) => {

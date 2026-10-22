@@ -26,6 +26,7 @@ export const SECTION_TO_STATUS: Record<string, UnifiedStatus> = {
   [SECTION_NAMES.doing]: "dispatched",
   [SECTION_NAMES.check]: "review",
   [SECTION_NAMES.fix]: "failed",
+  [SECTION_NAMES.paused]: "suspended",
 };
 
 /** feishu-api 透传结果的最小形状（ctx.call 的 Result<FeishuApiResponse>） */

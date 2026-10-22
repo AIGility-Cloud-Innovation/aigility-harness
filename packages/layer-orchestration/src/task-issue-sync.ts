@@ -712,7 +712,7 @@ export async function createPlannedTask(
 // ── 状态队列（飞书自定义分组 P/D/C/A = 状态主源；SDK 源码考证端点） ──
 
 /** 四状态分组名（清单内自定义分组；缺则自动创建） */
-export const SECTION_NAMES = { plan: "P 计划中", doing: "D 执行中", check: "C 待测试", fix: "A 待修复" } as const;
+export const SECTION_NAMES = { plan: "P 计划中", doing: "D 执行中", check: "C 待测试", fix: "A 待修复", paused: "挂起" } as const;
 export type SectionKey = keyof typeof SECTION_NAMES;
 
 interface SectionLike {
@@ -766,6 +766,39 @@ export async function ensureSections(
   }
   if (Object.values(map).every(Boolean)) sectionGuidCache.set(tasklistGuid, map);
   return map;
+}
+
+/**
+ * 摘除任务标题的【挂起】前缀（飞书 PATCH summary；失败不抛——挂起主状态在分组，
+ * 标题清理是尽力而为的展示收尾）。
+ */
+async function stripPausedPrefix(ctx: SeamContext, taskGuid: string, summary: string): Promise<void> {
+  const cleaned = summary.replace(/^【挂起】\s*/, "");
+  if (cleaned === summary) return;
+  await callFeishuApi(ctx, {
+    method: "PATCH",
+    path: `/open-apis/task/v2/tasks/${taskGuid}`,
+    query: { user_id_type: "open_id" },
+    identity: "user",
+    body: { update_fields: ["summary"], task: { summary: cleaned } },
+  }).catch(() => undefined);
+}
+
+/**
+ * 【挂起】→ 摘前缀 + 挪「挂起」分组（2026-10-22 用户拍板：标题带【挂起】自动挪组；
+ * 分组即状态——用户自定义组被收编豁免（adoptUnsectionedTasks 只收真裸任务），
+ * 状态靠分组不再靠标题，机器主动摘前缀防「标题脏 + 分组信号冗余」）。
+ */
+async function pauseBySection(
+  ctx: SeamContext,
+  taskGuid: string,
+  summary: string,
+  tasklistGuid: string,
+  sections: Partial<Record<SectionKey, string>>,
+): Promise<void> {
+  await stripPausedPrefix(ctx, taskGuid, summary);
+  const pausedGuid = sections.paused;
+  if (pausedGuid) await moveToSection(ctx, taskGuid, tasklistGuid, pausedGuid);
 }
 
 /** 任务挪进某分组（add_tasklist 带 section_guid；同组幂等返回成功） */
@@ -1456,9 +1489,12 @@ export async function runPlanGate(
     const summary = t.summary ?? "";
     if (!guid) continue;
     const issueNo = issueNumberFromTaskSummary(summary);
-    // 【挂起】任务硬跳过（2026-10-13）：挂起不进闸门/LLM 核对，不建单不派发。
-    // 对齐器可能把它们当「裸任务」拉回 P（不识别非标准分组），这里跳过使拉回无害。
-    if (summary.includes("【挂起】")) continue;
+    // 【挂起】处理（2026-10-13 硬跳过 → 2026-10-22 拍板升级）：标题【挂起】自动挪
+    // 「挂起」分组并摘前缀；分组即状态（用户自定义组收编豁免，不会被拉回 P）。
+    if (summary.includes("【挂起】")) {
+      await pauseBySection(ctx, guid, summary, opts.tasklistGuid, sections);
+      continue;
+    }
     // 列表端点不返回 description（2026-10-13 实测：17 个任务全部为空）：对空描述做
     // 单任务 GET 补全量，否则执行人闸门/LLM 要素核对/agent 任务检测全部因空描述失判。
     if (!t.description) {
@@ -1798,15 +1834,18 @@ export async function runDispatchScan(
     if (issueNo === undefined) {
       // D 组无工单号任务（2026-10-20 用户拍板）：不再静默跳过（防僵尸卡静默滞留）。
       // 闸门标签卡不处理；人工任务留 D；完备 agent 卡就地免工单放行；其余挪回 P 补全并群通知。
+      if (summary.includes("【挂起】")) {
+        // 2026-10-22 拍板：D 组挂起卡同样挪「挂起」分组 + 摘前缀（分组即状态）
+        await pauseBySection(ctx, taskGuid, summary, opts.tasklistGuid, sections);
+        continue;
+      }
       if (
-        summary.includes("【挂起】") ||
         summary.includes("【待补充】") ||
         summary.includes("【待安排执行者】") ||
         summary.includes("【待确认归属】")
       ) {
         continue;
       }
-      const taskGuid = t.guid ?? t.task_id ?? "";
       // 2026-10-20 拍板「有 assignee 的优先以 assignee 为准」：扫描接口的任务对象不带
       // members，先按台账行（assignee_member_id/描述标记）合并判定——体外负责人也算人。
       const ledgerRow = planGateRegistry

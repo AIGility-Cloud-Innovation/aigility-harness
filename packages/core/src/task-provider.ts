@@ -40,6 +40,7 @@ export type UnifiedStatus =
   | "review"
   | "done"
   | "failed"
+  | "suspended"
   | "blocked"
   | "needs-input"
   | "cancelled";
@@ -53,14 +54,15 @@ export type UnifiedStatus =
  *  为决策重入队（超时按默认项继续，重新认领）。卡片/提醒按 needs-input
  *  呈「A 待修复」同组（见 worker-team）。 */
 export const TASK_STATUS_TRANSITIONS: Record<UnifiedStatus, UnifiedStatus[]> = {
-  planned: ["ready", "review", "cancelled"],
-  ready: ["dispatched", "review", "planned", "cancelled"],
-  dispatched: ["running", "review", "ready", "cancelled"],
-  running: ["review", "done", "failed", "blocked", "needs-input", "cancelled"],
-  "needs-input": ["running", "ready", "failed", "cancelled"],
-  review: ["done", "failed", "ready", "planned"],
+  planned: ["ready", "review", "suspended", "cancelled"],
+  ready: ["dispatched", "review", "planned", "suspended", "cancelled"],
+  dispatched: ["running", "review", "ready", "suspended", "cancelled"],
+  running: ["review", "done", "failed", "blocked", "needs-input", "suspended", "cancelled"],
+  "needs-input": ["running", "ready", "failed", "suspended", "cancelled"],
+  review: ["done", "failed", "ready", "planned", "suspended"],
   done: [],
-  failed: ["ready", "cancelled"],
+  failed: ["ready", "suspended", "cancelled"],
+  suspended: ["planned", "ready", "cancelled"],
   blocked: ["ready", "cancelled"],
   cancelled: [],
 };

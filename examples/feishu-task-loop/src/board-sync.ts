@@ -28,7 +28,9 @@ type Call = (req: Record<string, unknown>) => Promise<{
 }>;
 
 function sectionKeyOf(name: string | undefined): string | undefined {
-  const c = (name ?? "").trim()[0]?.toUpperCase();
+  const n = (name ?? "").trim();
+  if (n.startsWith("挂")) return "挂"; // 自定义「挂起」组（2026-10-22：分组即状态）
+  const c = n[0]?.toUpperCase();
   return ["P", "D", "C", "A"].includes(c ?? "") ? c : undefined;
 }
 
@@ -127,7 +129,7 @@ export async function syncBoardAlignment(
   }
 
   // ② 逐任务比对：实际 vs 预期 → 人工挪动则台账经合法路径跟随
-  for (const t of registry.list({ status: ["planned", "ready", "dispatched", "running", "review", "failed", "blocked"] })) {
+  for (const t of registry.list({ status: ["planned", "ready", "dispatched", "running", "review", "failed", "blocked", "suspended"] })) {
     const guid = t.links?.["feishu-task"]?.guid ?? (t.origin?.provider === "feishu-task" ? t.origin?.guid : undefined);
     if (!guid) continue;
     const actual = actualByGuid.get(guid);
