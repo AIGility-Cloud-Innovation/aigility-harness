@@ -197,6 +197,21 @@ async function preExistingOf(cwd: string | undefined): Promise<string[]> {
   return cwd ? listChangedFiles(cwd).catch(() => [] as string[]) : [];
 }
 
+/** 交付报告要求（2026-10-22 用户拍板）：最终输出=PR 正文「交付报告」节，读者是不了解过程的验收人 */
+export const DELIVERY_REPORT_RULES = [
+  "【交付报告要求（重要）】",
+  "你的最终输出会原样进入 PR 描述，供不了解过程的人做验收决策，请严格用以下结构：",
+  "## 改了什么",
+  "  每个文件/模块一句话，用业务语言（不要过程流水账）。",
+  "## 没动什么",
+  "  边界与不变式（如「入账状态机未动」「仅新增可空列」）。",
+  "## 怎么验证的",
+  "  执行过的测试命令与结果原文；跳过的测试说明原因。",
+  "## 已知风险/待验证",
+  "  诚实列出未验证项（如真实数据质量、外部依赖可用性）。",
+  "禁止把内部排障过程（工具报错、重试、输出截断）写进最终输出。",
+].join("\n");
+
 /** 沙箱边界提示（2026-10-13）：工人 CLI 在沙箱里断网且 .git 只读，git 写操作/push 必败 */
 function boundaryLines(): string {
   return [
@@ -339,7 +354,7 @@ export class WorkerTeam {
     // 续跑轮禁止现拍——上一轮产物已落盘，现拍会把它们当「派发前已有」→ 误判无新改动。
     const preExisting = await preExistingOf(cwd);
     this.o.registry.get(task.uid)!.dispatchBase = { at: Date.now(), files: preExisting };
-    const prompt = `${boundary}\n\n---\n${DECISION_RULES}\n\n---\n${(task.description ?? task.title).replace(/\[worker:\w+\]\s*/, "")}`;
+    const prompt = `${boundary}\n\n---\n${DECISION_RULES}\n\n---\n${DELIVERY_REPORT_RULES}\n\n---\n${(task.description ?? task.title).replace(/\[worker:\w+\]\s*/, "")}`;
     const r = await this.o.callWorker(member, { prompt, cwd, timeoutMs } satisfies AgentCallArgs);
     return await this.handleRunResult(task, member, cwd, r, preExisting, { resumed: false, ...(preparedBranch ? { branch: preparedBranch } : {}) });
   }
@@ -384,7 +399,7 @@ export class WorkerTeam {
     this.o.registry.get(task.uid)!.note = `[worker-team/${member.id}] 决策已拍板（${d.decision.decidedBy ?? "用户"}），续跑同一线程…`;
     this.dispatched.add(task.uid);
     const r = await this.o.callWorker(member, {
-      prompt: `${boundaryLines()}\n\n---\n决策续跑：${concl}`,
+      prompt: `${boundaryLines()}\n\n---\n${DELIVERY_REPORT_RULES}\n\n---\n决策续跑：${concl}`,
       cwd,
       timeoutMs,
     } satisfies AgentCallArgs);

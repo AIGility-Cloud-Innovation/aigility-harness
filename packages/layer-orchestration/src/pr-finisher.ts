@@ -170,9 +170,9 @@ export function buildPrBody(task: TaskRecord, member: string, files: string[], s
     ...files.slice(0, 20).map((f) => `- \`${f}\``),
     files.length > 20 ? `- …等 ${files.length} 个文件` : "",
     "",
-    `### 工人摘要`,
+    `### 交付报告（工人最终输出，2026-10-22 起要求结构化：改了什么/没动什么/怎么验证/已知风险）`,
     "",
-    summary.slice(0, 600),
+    summary.slice(0, 4000),
     "",
     ...closeIssueLine(task),
   ].join("\n");

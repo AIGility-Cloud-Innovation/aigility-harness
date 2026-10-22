@@ -109,6 +109,7 @@ describe("WorkerTeam 派发与回流", () => {
           // 2026-10-13：提示词带沙箱边界（工人禁 git/网络），任务原文附在分隔线后
           expect(args.prompt).toContain("把 foo 函数改成 bar");
           expect(args.prompt).toContain("【执行边界（重要）】");
+          expect(args.prompt).toContain("【交付报告要求（重要）】"); // 2026-10-22 拍板：最终输出=结构化交付报告
           return { ok: true, text: "已完成：foo → bar，测试通过" };
         },
       },

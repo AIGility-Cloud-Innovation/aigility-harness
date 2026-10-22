@@ -85,6 +85,13 @@ describe("diffPaths", () => {
 });
 
 describe("buildPrBody / buildCommitMessage", () => {
+  it("交付报告结构化（2026-10-22）：含改了什么/没动什么标题位，4000 字不截腰", () => {
+    const long = Array.from({ length: 40 }, (_, i) => `第${i}行说明内容填充行`).join("\n");
+    const body = buildPrBody(task(), "codex", ["app/a.py"], long);
+    expect(body).toContain("### 交付报告");
+    expect(body).not.toContain("工人摘要");
+    expect(body).toContain("第39行说明内容填充行"); // 4000 字内不截
+  });
   it("含任务标题、来源、文件清单", () => {
     const msg = buildCommitMessage(task(), "codex", ["app/a.py", "tests/b.py"]);
     expect(msg).toContain("feat(agent): 记忆权益 402 响应体增强");
