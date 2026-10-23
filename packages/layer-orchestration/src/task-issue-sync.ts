@@ -1514,6 +1514,30 @@ export async function runPlanGate(
       await pauseBySection(ctx, guid, summary, opts.tasklistGuid, sections);
       continue;
     }
+    // 前缀仓库校验+近似纠正（2026-10-22 t102051 事故）：手写错名前缀（如
+    // [timem-console-frontend]，真名 TiMEM-AI/timem_console_frontend）解析不出
+    // projectRef → 派发反复失败、永久滞留 P。归一化（小写、-/_ 等价、单名自动配
+    // 唯一 org）命中登记表 → 机器改写为登记全名并播报；命中不了不动（交后续闸门）。
+    const prefixRepo = summary.match(/^\[([^\]]+)\]/)?.[1];
+    if (prefixRepo && !knownOrgRepos.includes(prefixRepo)) {
+      const norm = (s: string) => s.toLowerCase().replace(/[-_]/g, "");
+      const repoPartHits = knownOrgRepos.filter((r) => norm(r.split("/")[1] ?? "") === norm(prefixRepo));
+      const target =
+        knownOrgRepos.find((r) => norm(r) === norm(prefixRepo)) ??
+        (repoPartHits.length === 1 ? repoPartHits[0] : undefined);
+      if (target) {
+        const newSummary = `[${target}] ${summary.replace(/^\[[^\]]+\]\s*/, "")}`;
+        await callFeishuApi(ctx, {
+          method: "PATCH",
+          path: `/open-apis/task/v2/tasks/${guid}`,
+          query: { user_id_type: "open_id" },
+          identity: "user",
+          body: { update_fields: ["summary"], task: { summary: newSummary } },
+        }).catch(() => undefined);
+        reports.push(`🏷️ 仓库前缀已校正：${prefixRepo} → ${target}（如不对请改标题）。`);
+        continue; // 下一拍按纠正后的正常流程走
+      }
+    }
     // 列表端点不返回 description（2026-10-13 实测：17 个任务全部为空）：对空描述做
     // 单任务 GET 补全量，否则执行人闸门/LLM 要素核对/agent 任务检测全部因空描述失判。
     if (!t.description) {
@@ -1782,7 +1806,13 @@ export async function runPlanGate(
         if (approved.ok && (rec.attempts?.failed ?? 0) >= 2) {
           if (!agentReleasedReported.has("blocked:" + guid)) {
             agentReleasedReported.add("blocked:" + guid);
-            reports.push(`🛑 「${summary.slice(0, 40)}」已失败 ${rec.attempts?.failed} 次，停止自动重试，请人工复核后重置台账。`);
+            const lastErr = String(rec.attempts?.lastError ?? rec.note ?? "").replace(/\s+/g, " ").slice(0, 180);
+            reports.push([
+              `🛑 「${(rec.title ?? summary).slice(0, 48)}」已失败 ${rec.attempts?.failed} 次，停止自动重试。`,
+              `  归属：${String((rec as unknown as Record<string, unknown>).repo ?? rec.projectRef ?? "未定仓库")}｜台账：${rec.uid}`,
+              `  最近失败：${lastErr || "（台账无败因记录）"}`,
+              `  处理：排除后改标题重放行；确认放弃请标题加【挂起】。`,
+            ].join("\n"));
           }
           continue;
         }
@@ -1969,10 +1999,16 @@ export async function runDispatchScan(
         // 失败计数 +1（2026-10-22）：P 侧自动重放按它设门槛，防确定性失败无限循环
         planGateRegistry.bumpFailed(rec.uid, rec.note ?? rec.attempts?.lastError);
         const n = rec.attempts?.failed ?? 1;
+        const lastErr = String(rec.attempts?.lastError ?? rec.note ?? "").replace(/\s+/g, " ").slice(0, 180);
         const msg =
           n >= 2
-            ? `🛑 「${summary.slice(0, 40)}」已失败 ${n} 次，停止自动重试，请人工复核（P 组打标）。`
-            : `⬅️ 「${summary.slice(0, 40)}」台账已是「${rec.status}」，已挪回 P 自动重试 1 次（如需重跑请改标题重放行）。`;
+            ? [
+                `🛑 「${(rec.title ?? summary).slice(0, 48)}」已失败 ${n} 次，停止自动重试。`,
+                `  归属：${String((rec as unknown as Record<string, unknown>).repo ?? rec.projectRef ?? "未定仓库")}｜台账：${rec.uid}`,
+                `  最近失败：${lastErr || "（台账无败因记录）"}`,
+                `  处理：排除后改标题重放行；确认放弃请标题加【挂起】。`,
+              ].join("\n")
+            : `⬅️ 「${(rec.title ?? summary).slice(0, 40)}」台账已是「${rec.status}」，已挪回 P 自动重试 1 次（最近失败：${lastErr.slice(0, 100) || "无记录"}；如需重跑请改标题重放行）。`;
         reports.push(msg);
         await dispatchNotify(opts.notifyChatId, msg);
         continue;

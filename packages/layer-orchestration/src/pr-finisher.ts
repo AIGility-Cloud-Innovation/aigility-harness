@@ -41,6 +41,7 @@ const git = (args: string[], opts: { cwd: string }) =>
 /** gitea-api 透传结果的最小形状与调用类型（与 gitea-issue-provider 共用定义） */
 import type { GiteaApiResultLike, GiteaCall } from "./gitea-issue-provider.js";
 import { deliverPingcodeFixed } from "./pingcode-sync.js";
+import { looksLikeGatewayError } from "./worker-output-guard.js";
 
 // ── 纯函数（单测覆盖） ────────────────────────────────────────────
 
@@ -318,6 +319,13 @@ export function createPrFinisher(opts: PrFinisherOptions): NonNullable<WorkerTea
 
   return async (info: FinishInfo) => {
     const { task, cwd, member, summary, preExisting } = info;
+    // 防线外层（2026-10-22 事故兜底）：内层 worker-team 已拦一次，这里再拦——
+    // 任何路径都不允许 API/网关报错原文进 PR 正文当「交付报告」。
+    if (looksLikeGatewayError(summary)) {
+      const detail = `工人输出为 API/网关报错原文，拒绝建 PR（防报错当交付）。首 120 字：${summary.slice(0, 120)}`;
+      await notifyFail(opts, task, detail, "");
+      return { ok: false, detail };
+    }
     if (!cwd) {
       await notifyFail(opts, task, "任务无 cwd（projectRef 未解析到本机仓库）", "改动未落盘或仍在沙箱");
       return { ok: false, detail: "任务无 cwd，无法收尾" };
