@@ -73,6 +73,7 @@ import { getSharedRegistry, getReviewCodes, assignReviewCodes } from "./review-a
 import { wireLlmNodes } from "@aigility-harness/appbase/llm-node-store";
 import { syncGiteaCompletions } from "./completion-sync.js";
 import { runPingcodeStatusSync } from "./pingcode-status-sync-adapter.js";
+import { syncPingcodeClosures } from "./pingcode-reverse-sync.js";
 import { backfillIssueLinks } from "./issue-link-backfill.js";
 import { syncAssignees } from "./assignee-sync.js";
 import { remindPendingTasks } from "./review-reminder.js";
@@ -318,6 +319,16 @@ async function main(): Promise<void> {
       const boardChanges = await syncBoardAlignment(getSharedRegistry(), alignFeishuCall);
       if (boardChanges.length > 0) {
         console.log(`[align] 看板反向对齐: ${boardChanges.join(" / ")}`);
+      }
+      // ①.555 PingCode 反向关单（2026-10-23 用户拍板）：PC 关闭/发布 → 台账 done + 飞书标完成。
+      //     必须先于正向 ①.56：同拍内台账先落 done，正向快照 completed=true → 期望关闭 → 现态已关闭只记账不写。
+      try {
+        const pcClosed = await syncPingcodeClosures(getSharedRegistry(), REPO_ROOT, alignFeishuCall);
+        if (pcClosed.length > 0) {
+          console.log(`[align] PingCode 反向关单: ${pcClosed.join(" / ")}`);
+        }
+      } catch (e) {
+        console.error(`[align] PingCode 反向关单异常: ${String((e as Error)?.message ?? e).slice(0, 120)}`);
       }
       // ①.56 PingCode 状态联动（2026-10-23 用户拍板「2要做」）：飞书分组/完成 → PC 卡状态
       //     （P→打开 · D→进行中 · C→已提测 · done→关闭；签名防重，未配凭据静默跳过）
