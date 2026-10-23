@@ -1806,7 +1806,13 @@ export async function runPlanGate(
         if (approved.ok && (rec.attempts?.failed ?? 0) >= 2) {
           if (!agentReleasedReported.has("blocked:" + guid)) {
             agentReleasedReported.add("blocked:" + guid);
-            reports.push(`🛑 「${summary.slice(0, 40)}」已失败 ${rec.attempts?.failed} 次，停止自动重试，请人工复核后重置台账。`);
+            const lastErr = String(rec.attempts?.lastError ?? rec.note ?? "").replace(/\s+/g, " ").slice(0, 180);
+            reports.push([
+              `🛑 「${(rec.title ?? summary).slice(0, 48)}」已失败 ${rec.attempts?.failed} 次，停止自动重试。`,
+              `  归属：${String((rec as unknown as Record<string, unknown>).repo ?? rec.projectRef ?? "未定仓库")}｜台账：${rec.uid}`,
+              `  最近失败：${lastErr || "（台账无败因记录）"}`,
+              `  处理：排除后改标题重放行；确认放弃请标题加【挂起】。`,
+            ].join("\n"));
           }
           continue;
         }
@@ -1993,10 +1999,16 @@ export async function runDispatchScan(
         // 失败计数 +1（2026-10-22）：P 侧自动重放按它设门槛，防确定性失败无限循环
         planGateRegistry.bumpFailed(rec.uid, rec.note ?? rec.attempts?.lastError);
         const n = rec.attempts?.failed ?? 1;
+        const lastErr = String(rec.attempts?.lastError ?? rec.note ?? "").replace(/\s+/g, " ").slice(0, 180);
         const msg =
           n >= 2
-            ? `🛑 「${summary.slice(0, 40)}」已失败 ${n} 次，停止自动重试，请人工复核（P 组打标）。`
-            : `⬅️ 「${summary.slice(0, 40)}」台账已是「${rec.status}」，已挪回 P 自动重试 1 次（如需重跑请改标题重放行）。`;
+            ? [
+                `🛑 「${(rec.title ?? summary).slice(0, 48)}」已失败 ${n} 次，停止自动重试。`,
+                `  归属：${String((rec as unknown as Record<string, unknown>).repo ?? rec.projectRef ?? "未定仓库")}｜台账：${rec.uid}`,
+                `  最近失败：${lastErr || "（台账无败因记录）"}`,
+                `  处理：排除后改标题重放行；确认放弃请标题加【挂起】。`,
+              ].join("\n")
+            : `⬅️ 「${(rec.title ?? summary).slice(0, 40)}」台账已是「${rec.status}」，已挪回 P 自动重试 1 次（最近失败：${lastErr.slice(0, 100) || "无记录"}；如需重跑请改标题重放行）。`;
         reports.push(msg);
         await dispatchNotify(opts.notifyChatId, msg);
         continue;
