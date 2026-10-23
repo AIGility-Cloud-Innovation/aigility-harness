@@ -40,6 +40,7 @@ const git = (args: string[], opts: { cwd: string }) =>
 
 /** gitea-api 透传结果的最小形状与调用类型（与 gitea-issue-provider 共用定义） */
 import type { GiteaApiResultLike, GiteaCall } from "./gitea-issue-provider.js";
+import { deliverPingcodeFixed } from "./pingcode-sync.js";
 
 // ── 纯函数（单测覆盖） ────────────────────────────────────────────
 
@@ -395,13 +396,20 @@ export function createPrFinisher(opts: PrFinisherOptions): NonNullable<WorkerTea
       });
 
       // 7. 回程通知 + 台账 detail（worker-team 记 done/note）
-      const text = `✅ agent 任务已交付 PR\n「${cleanTitle(task.title ?? task.uid)}」\n${pr.url}\n分支 ${branch} → ${base}｜改动 ${files.length} 个文件`;
+      // PingCode 同步（2026-10-23 用户需求）：agent 交付 PR → 建缺陷卡并置「已修复」。
+      // 旁路：未配置凭据/任何异常静默跳过，不阻塞交付。
+      let pcSuffix = "";
+      try {
+        const pcIdent = await deliverPingcodeFixed(task, pr.url);
+        if (pcIdent) pcSuffix = `\n📌 PingCode 已建「已修复」卡：${pcIdent}`;
+      } catch { /* 旁路 */ }
+      const text = `✅ agent 任务已交付 PR\n「${cleanTitle(task.title ?? task.uid)}」\n${pr.url}\n分支 ${branch} → ${base}｜改动 ${files.length} 个文件${pcSuffix}`;
       try {
         await opts.notify?.(text);
       } catch (e) {
         console.error(`[pr-finisher] 通知失败: ${String((e as Error)?.message ?? e)}`);
       }
-      return { ok: true, detail: `${pr.url}（${branch} → ${base}，${files.length} 文件）` };
+      return { ok: true, detail: `${pr.url}（${branch} → ${base}，${files.length} 文件）${pcSuffix.trim()}` };
     } catch (e) {
       const detail = String((e as Error)?.message ?? e).slice(0, 300);
       await notifyFail(opts, task, detail, `改动保留在 ${cwd} 工作区（或 stash），等待接管`);
