@@ -8,6 +8,7 @@ import {
   issueNumberFromTaskSummary,
   assigneeFromTask,
   executorOfTask,
+  stripPendingExecutorTag,
   buildDispatchPrompt,
   dispatchDelayMs,
   taskIssueSyncProvider,
@@ -24,6 +25,25 @@ describe("SECTION_NAMES 状态分组", () => {
     expect(SECTION_NAMES.fix).toBe("A 待修复");
   });
 });
+
+describe("stripPendingExecutorTag（2026-10-23 摘牌规则）", () => {
+  it("链首摘除", () => {
+    expect(stripPendingExecutorTag("【待安排执行者】修 bug")).toBe("修 bug");
+  });
+  it("链中摘除（待确认归属之后，今天 13 张卡的实际形态）", () => {
+    expect(stripPendingExecutorTag("【待确认归属】【待安排执行者】对接宇乐数确认 Open 付费方式")).toBe(
+      "【待确认归属】对接宇乐数确认 Open 付费方式",
+    );
+  });
+  it("非前缀链内不动（正文引用不算标签）", () => {
+    const s = "讨论【待安排执行者】规则的会议纪要";
+    expect(stripPendingExecutorTag(s)).toBe(s);
+  });
+  it("无标签原样返回", () => {
+    expect(stripPendingExecutorTag("普通任务标题")).toBe("普通任务标题");
+  });
+});
+
 
 describe("issueNumberFromTaskSummary", () => {
   it("从 [org/repo#N] 标题解析工单号", () => {

@@ -849,6 +849,14 @@ export interface TaskMemberLike {
   type?: string;
 }
 
+/** 标题前缀标签链摘除【待安排执行者】（可在链中任意位置，如【待确认归属】之后；非前缀链内不动）。
+ *  2026-10-23 摘牌规则用：执行人已定的任务不再挂「待安排执行者」。 */
+export function stripPendingExecutorTag(summary: string): string {
+  const chain = summary.match(/^(?:【[^】]*】)*/)?.[0] ?? "";
+  if (!chain.includes("【待安排执行者】")) return summary;
+  return chain.replace("【待安排执行者】", "") + summary.slice(chain.length);
+}
+
 /** 提取飞书任务的负责人（members[].role === "assignee" → 名册成员名或 open_id）。
  *  负责人=执行人=人工任务铁证：带负责人的 D 组任务绝不派 agent（2026-10-10 用户铁律）。
  *  执行人写在飞书任务的「负责人」字段（成员），不是任务描述。 */
@@ -1602,6 +1610,22 @@ export async function runPlanGate(
       }
       reports.push(`👤 「${summary.slice(0, 40)}」尚未安排执行者，留 P。群里回复「安排执行者 ${issueNo !== undefined ? `#${issueNo}` : "编号"} @姓名」后自动进入执行。`);
       continue;
+    }
+    // ⓪-前置摘牌（2026-10-23 用户拍板：负责人已有人名的任务不再挂【待安排执行者】）：
+    // 执行人已定（负责人/agent）而标题仍带历史轮次的闸门标签 → 摘除（可能在【待确认归属】等
+    // 标签之后，非开头），防「已定执行人却显示待安排」。
+    if (summary.includes("【待安排执行者】")) {
+      const cleaned = stripPendingExecutorTag(summary);
+      if (cleaned !== summary) {
+        await callFeishuApi(ctx, {
+          method: "PATCH",
+          path: `/open-apis/task/v2/tasks/${guid}`,
+          query: { user_id_type: "open_id" },
+          identity: "user",
+          body: { update_fields: ["summary"], task: { summary: cleaned } },
+        }).catch(() => undefined);
+        reports.push(`🏷️ 「${cleaned.slice(0, 40)}」已有执行人，摘除【待安排执行者】标签。`);
+      }
     }
 
     // ⓪-a 先行任务回填工单（归属+执行者齐备才建）：没有 #N 的 P 任务，标题带
