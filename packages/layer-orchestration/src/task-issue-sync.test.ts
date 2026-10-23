@@ -30,9 +30,9 @@ describe("stripPendingExecutorTag（2026-10-23 摘牌规则）", () => {
   it("链首摘除", () => {
     expect(stripPendingExecutorTag("【待安排执行者】修 bug")).toBe("修 bug");
   });
-  it("链中摘除（待确认归属之后，今天 13 张卡的实际形态）", () => {
-    expect(stripPendingExecutorTag("【待确认归属】【待安排执行者】对接宇乐数确认 Open 付费方式")).toBe(
-      "【待确认归属】对接宇乐数确认 Open 付费方式",
+  it("链中摘除（待确认仓库之后，今天 13 张卡的实际形态）", () => {
+    expect(stripPendingExecutorTag("【待确认仓库】【待安排执行者】对接宇乐数确认 Open 付费方式")).toBe(
+      "【待确认仓库】对接宇乐数确认 Open 付费方式",
     );
   });
   it("非前缀链内不动（正文引用不算标签）", () => {
@@ -834,7 +834,7 @@ describe("plan-gate 顺序（飞书先行）— 先执行者闸门，后回填�
     expect(log.some((l) => l.includes("【待安排执行者】"))).toBe(true);
   });
 
-  it("有执行者但缺 [repo] 前缀 → 打【待确认归属】，不建工单", async () => {
+  it("有执行者但缺 [repo] 前缀 → 打【待确认仓库】，不建工单", async () => {
     const log: string[] = [];
     const r = await taskIssueSyncProvider.execute(
       { mode: "scan", tasklistGuid: "tl-pg2" },

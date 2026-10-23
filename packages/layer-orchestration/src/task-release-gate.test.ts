@@ -37,7 +37,7 @@ function baseRecord(overrides: Partial<TaskRecord> = {}): TaskRecord {
 }
 
 describe("结构性检查（不烧 LLM）", () => {
-  it("缺项目 → tag-missing +【待确认归属】，LLM 不被调用", async () => {
+  it("缺项目 → tag-missing +【待确认仓库】，LLM 不被调用", async () => {
     let llmCalls = 0;
     const spy: ReleaseLlm = (req) => {
       llmCalls += 1;
@@ -46,7 +46,7 @@ describe("结构性检查（不烧 LLM）", () => {
     const d = await evaluateReleaseGate(baseRecord({ projectRef: undefined }), doc, spy);
     expect(d.action).toBe("tag-missing");
     expect(d.missing).toEqual(["项目"]);
-    expect(d.tags).toContain("【待确认归属】");
+    expect(d.tags).toContain("【待确认仓库】");
     expect(llmCalls).toBe(0);
   });
 

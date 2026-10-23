@@ -663,7 +663,7 @@ export async function createPlannedTask(
   };
   const descParts: string[] = [];
   if (opts.sourceChatId) descParts.push(`来源群：${await resolveChatName(ctx, opts.sourceChatId)}`);
-  descParts.push("状态：待确认归属与执行者（两者齐备后自动创建 Gitea 工单）");
+  descParts.push("状态：待确认仓库与执行者（两者齐备后自动创建 Gitea 工单）");
   const supTexts = opts.texts;
   if (supTexts && supTexts.length > 0) {
     const idx = (opts.sources ?? supTexts.map((_, i) => i + 1))
@@ -849,7 +849,7 @@ export interface TaskMemberLike {
   type?: string;
 }
 
-/** 标题前缀标签链摘除【待安排执行者】（可在链中任意位置，如【待确认归属】之后；非前缀链内不动）。
+/** 标题前缀标签链摘除【待安排执行者】（可在链中任意位置，如【待确认仓库】之后；非前缀链内不动）。
  *  2026-10-23 摘牌规则用：执行人已定的任务不再挂「待安排执行者」。 */
 export function stripPendingExecutorTag(summary: string): string {
   const chain = summary.match(/^(?:【[^】]*】)*/)?.[0] ?? "";
@@ -1590,10 +1590,10 @@ export async function runPlanGate(
     // 标题带【agent】前缀 = agent 执行（描述「执行者：」不再参与 agent 识别）；两者皆无 = 未定，留 P
     const humanExecutor = executorOfTask(t);
     // 【agent】标题前缀=agent 任务唯一认定（2026-10-20 拍板收敛）。对齐器可能已在标题前
-    // 打过【待安排执行者】/【待确认归属】闸门标签（先于本约定运行的历史轮次），匹配前先剥掉；
+    // 打过【待安排执行者】/【待确认仓库】闸门标签（先于本约定运行的历史轮次），匹配前先剥掉；
     // [org/repo] 前缀与【agent】顺序不限（先剥归属闸门标签、再剥仓库前缀后测试 agent 标记）。
     const bareSummary = summary
-      .replace(/^【(待安排执行者|待确认归属)】/, "")
+      .replace(/^【(待安排执行者|待确认仓库)】/, "")
       .replace(/^\[[^\]#]+\/[^\]#]+(?:#\d+)?\]\s*/, "");
     const agentDecided = /^【agent】/.test(bareSummary);
     if (!humanExecutor && !agentDecided) {
@@ -1612,7 +1612,7 @@ export async function runPlanGate(
       continue;
     }
     // ⓪-前置摘牌（2026-10-23 用户拍板：负责人已有人名的任务不再挂【待安排执行者】）：
-    // 执行人已定（负责人/agent）而标题仍带历史轮次的闸门标签 → 摘除（可能在【待确认归属】等
+    // 执行人已定（负责人/agent）而标题仍带历史轮次的闸门标签 → 摘除（可能在【待确认仓库】等
     // 标签之后，非开头），防「已定执行人却显示待安排」。
     if (summary.includes("【待安排执行者】")) {
       const cleaned = stripPendingExecutorTag(summary);
@@ -1630,7 +1630,7 @@ export async function runPlanGate(
 
     // ⓪-a 先行任务回填工单（归属+执行者齐备才建）：没有 #N 的 P 任务，标题带
     // [org/repo] 前缀（归属已确认）→ 从标题解析仓库自动建 Gitea 工单并同步回写 #N；
-    // 缺前缀 = 归属未确认 → 打【待确认归属】留 P，等群里「任务归属」确认。
+    // 缺前缀 = 归属未确认 → 打【待确认仓库】留 P，等群里「任务归属」确认。
     // agent 任务（标题【agent】前缀认定，2026-10-20 拍板收敛：描述不再参与识别；免工单模式，产出=开启的 PR）
     // 跳过回填，落到下方 ready 分支走台账放行。
     if (issueNo === undefined && !summary.includes("【待补充】") && !agentDecided) {
@@ -1652,7 +1652,7 @@ export async function runPlanGate(
           reports.push(`🏷️ 「${summary.slice(0, 40)}」归属按描述自动判定为 ${inferred}（下一拍回填工单）。如不对请改标题。`);
           continue;
         }
-        const tagged = `【待确认归属】${summary.replace(/^【待确认归属】/, "")}`;
+        const tagged = `【待确认仓库】${summary.replace(/^【待确认仓库】/, "")}`;
         if (tagged !== summary) {
           await callFeishuApi(ctx, {
             method: "PATCH",
@@ -1669,7 +1669,7 @@ export async function runPlanGate(
       // 解析不出仓库不建单，留 P 提示确认归属（与归属确认同一交互）。
       const parsedRepo = repoFromPlannedSummary(summary);
       if (!parsedRepo) {
-        const tagged = `【待确认归属】${summary.replace(/^【待确认归属】/, "")}`;
+        const tagged = `【待确认仓库】${summary.replace(/^【待确认仓库】/, "")}`;
         if (tagged !== summary) {
           await callFeishuApi(ctx, {
             method: "PATCH",
@@ -1786,7 +1786,7 @@ export async function runPlanGate(
         // 前缀顺序不限：[org/repo] 在闸门标签/【agent】之后时从剥后标题再解析。
         const agentRepo =
           repoFromPlannedSummary(summary) ??
-          repoFromPlannedSummary(summary.replace(/^【(待安排执行者|待确认归属|agent)】\s*/, ""));
+          repoFromPlannedSummary(summary.replace(/^【(待安排执行者|待确认仓库|agent)】\s*/, ""));
         if (!agentRepo) {
           reports.push(
             `🏷️ 「${summary.slice(0, 40)}」agent 任务未带 [org/repo] 前缀，无法定位仓库，留 P。请改标题为「[org/repo] 原标题」（如 [TiMEM-AI/TiMEM-Space] …），下轮自动放行。`,
@@ -1939,7 +1939,7 @@ export async function runDispatchScan(
       if (
         summary.includes("【待补充】") ||
         summary.includes("【待安排执行者】") ||
-        summary.includes("【待确认归属】")
+        summary.includes("【待确认仓库】")
       ) {
         continue;
       }
@@ -2496,12 +2496,12 @@ async function handleAssignExecutor(
     // agent 指派（2026-10-20 拍板收敛）：识别唯一源=标题【agent】前缀——直接打前缀，
     // 不再写描述「执行者：agent」标记（描述已退出 agent 识别）。
     const title0 = target.summary ?? "";
-    if (/^【agent】/.test(title0.replace(/^【(待安排执行者|待确认归属)】/, ""))) {
+    if (/^【agent】/.test(title0.replace(/^【(待安排执行者|待确认仓库)】/, ""))) {
       return pendingNo !== undefined
         ? `⏭️ 澄清任务 #${pendingNo} 已是 agent 任务，无需重复安排。`
         : `⏭️ 工单 #${issueNo} 已是 agent 任务，无需重复安排。`;
     }
-    const stripped = title0.replace(/^【(待安排执行者|待确认归属)】/, "").trim();
+    const stripped = title0.replace(/^【(待安排执行者|待确认仓库)】/, "").trim();
     const newTitle = `【agent】${stripped}`;
     const ar = await callFeishuApi(ctx, {
       method: "PATCH",

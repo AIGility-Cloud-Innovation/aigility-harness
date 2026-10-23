@@ -95,7 +95,7 @@ export function computePendingBuckets(registry: {
     const desc = t.description ?? "";
     const title = t.title ?? "";
     // agent 任务（标题【agent】前缀，2026-10-20 唯一认定源）不需要人类执行人 → 不进缺执行人桶
-    const bareTitle = title.replace(/^【(待安排执行者|待确认归属)】/, "");
+    const bareTitle = title.replace(/^【(待安排执行者|待确认仓库)】/, "");
     if (/^【agent】/.test(bareTitle)) return false;
     // 判定源与执行人闸门同源（executorOfTask）：members 负责人 / assignee_member_id
     // （①.2 反向同步落库）/ 描述人名标记，任一有 = 不缺；agent 值不算执行人（2026-10-20）

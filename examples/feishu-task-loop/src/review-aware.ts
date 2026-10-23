@@ -884,7 +884,7 @@ export async function handleReviewMessage(
       // 2026-10-22 修（用户转发记录实锤）：agent 执行 → 标题加【agent】前缀
       // （放行闸门 2026-10-20 收敛后 agent 唯一认定=标题前缀，仅写「执行者：agent」
       // 描述标记会被判 missing → 用户补了却永远「还差执行人」的死循环）。
-      const bare = (record.title ?? "").replace(/^【agent】/, "").replace(/^【(待安排执行者|待确认归属)】/, "");
+      const bare = (record.title ?? "").replace(/^【agent】/, "").replace(/^【(待安排执行者|待确认仓库)】/, "");
       patch.title = `【agent】${bare}`;
       if (!/执行者：\S+/.test(record.description ?? "")) {
         patch.description = `${record.description ?? record.title}\n执行者：agent`;

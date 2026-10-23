@@ -8,7 +8,7 @@
 #   · 项目、执行人 = 结构性检查（登记表 projectRef、描述"执行者："标记），不靠 LLM
 #   · 现状/过程方法/目标 = LLM 只判"是否交代清楚"，不判内容对错
 #   · 五项全齐   → 自动放行（登记表 review.via=auto, by=system）
-#   · 缺结构要素 → 【待确认归属】/【待安排执行者】留 P（复用既有约定）
+#   · 缺结构要素 → 【待确认仓库】/【待安排执行者】留 P（复用既有约定）
 #   · 缺 LLM 要素 → 【缺X】逐项列出，人补描述后群「确认 编号」人工放行（记复核人）
 #   · LLM 判不准 → 【待复核】人工一票
 #
@@ -32,7 +32,7 @@ workflow:
       type: function_node
       function_ref: check_project
       enabled: true
-      description: 结构性：登记表 projectRef（org/repo）；缺 → 【待确认归属】留 P
+      description: 结构性：登记表 projectRef（org/repo）；缺 → 【待确认仓库】留 P
 
     executor_check:
       type: function_node

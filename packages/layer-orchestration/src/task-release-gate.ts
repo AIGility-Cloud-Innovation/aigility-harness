@@ -6,7 +6,7 @@
  *   · 项目、执行人为结构性检查（登记表 projectRef、描述"执行者："标记，不靠 LLM）；
  *   · 现状/过程方法/目标由 LLM 只判"是否交代清楚"，不判内容对错（三要素验收官升级版）；
  *   · 五项全齐 → 自动放行 approve(via=auto, by=system)；
- *   · 缺结构要素 → 对应标签留 P（【待确认归属】/【待安排执行者】，复用既有约定）；
+ *   · 缺结构要素 → 对应标签留 P（【待确认仓库】/【待安排执行者】，复用既有约定）；
  *   · 缺 LLM 要素 → 【缺X】逐项列出，人补描述 +「确认 #N」→ approve(via=manual, by=复核人)；
  *   · LLM 判不准(unsure) → 【待复核】人工一票。
  *
@@ -34,7 +34,7 @@ workflow:
       type: function_node
       function_ref: check_project
       enabled: true
-      description: 结构性：登记表 projectRef（org/repo）；缺 → 【待确认归属】留 P
+      description: 结构性：登记表 projectRef（org/repo）；缺 → 【待确认仓库】留 P
     executor_check:
       type: function_node
       function_ref: check_executor
@@ -123,7 +123,7 @@ export const ELEMENT_HOWTO = {
 } as const;
 
 const TAG_BY_MISSING: Record<string, string> = {
-  项目: "【待确认归属】",
+  项目: "【待确认仓库】",
   执行人: "【待安排执行者】",
 };
 
@@ -166,7 +166,7 @@ export async function evaluateReleaseGate(
   // ② 结构性：执行人（2026-10-20 收敛：agent 唯一认定=标题【agent】前缀；人名 =
   // 台账 assignee_member_id 或描述「执行者：人名」标记；「执行者：agent」值不算已安排）
   if (nodeEnabled(doc, "executor_check")) {
-    const bareTitle = (record.title ?? "").replace(/^【(待安排执行者|待确认归属)】/, "");
+    const bareTitle = (record.title ?? "").replace(/^【(待安排执行者|待确认仓库)】/, "");
     const isAgent = /^【agent】/.test(bareTitle);
     const pattern = new RegExp(String(nodeConfig(doc, "executor_check")["pattern"] ?? "执行者：\\S+"));
     const descMark = pattern.test(record.description ?? "")
