@@ -87,7 +87,11 @@ export function computePendingBuckets(registry: {
   list: (q: { status: UnifiedStatus[] }) => TaskRecord[];
 }): PendingBuckets {
   const planned = registry.list({ status: ["planned"] as UnifiedStatus[] });
+  // 【挂起】= 车主明确停进 garage 的卡（2026-10-23 口径）：不算缺要素待办，
+  // 否则挂起任务永远挂在「缺执行人」清单里刷存在感（R66 案例）。
+  const parked = (t: TaskRecord) => (t.title ?? "").includes("【挂起】");
   const missingExecutor = planned.filter((t) => {
+    if (parked(t)) return false;
     const desc = t.description ?? "";
     const title = t.title ?? "";
     // agent 任务（标题【agent】前缀，2026-10-20 唯一认定源）不需要人类执行人 → 不进缺执行人桶
@@ -121,6 +125,11 @@ export function buildPendingIssuesReport(
   if (!planned.length) return "当前没有待复核的任务，都清了 🎉";
   const { missingExecutor, missingProject } = computePendingBuckets(registry);
   const total = planned.length;
+  // 统计口径对齐（2026-10-23 用户反馈：手动复核清单 48 vs 自动播报 19）——
+  // 「等你处理」= 缺要素并集（缺执行人∪缺归属∪缺仓库），与定时提醒同口径；
+  // 非 planned 不算，挂起不算，已派发未完卡不算。total 只作页脚全量参考。
+  const bucketUids = new Set([...missingExecutor, ...missingProject].map((t) => t.uid));
+  const awaiting = bucketUids.size;
   const execUids = new Set(missingExecutor.map((t) => t.uid));
   const projUids = new Set(missingProject.map((t) => t.uid));
 
@@ -131,15 +140,21 @@ export function buildPendingIssuesReport(
     return tags.length ? `（${tags.join("、")}）` : "";
   };
 
-  const all = planned.map((r) => `${codeOfUid(codes, r.uid)}｜${r.title.slice(0, 36)}${tagOf(r.uid)}`);
+  // 默认列「等你处理」的卡（与头部统计同口径）；「复核清单 全部」= 板面规划全量
   const wantAll = pageSpec && /^(全部|all)$/i.test(pageSpec.trim());
+  if (!wantAll && awaiting === 0) {
+    return `当前没有等你处理的任务（缺要素已清）🎉 板面规划尚有 ${total} 条（已就绪/挂起等非待办态）。看全量发「复核清单 全部」。`;
+  }
+  const listing = (wantAll ? planned : planned.filter((r) => bucketUids.has(r.uid))).map(
+    (r) => `${codeOfUid(codes, r.uid)}｜${r.title.slice(0, 36)}${tagOf(r.uid)}`,
+  );
   const pageNum = wantAll ? 1 : Math.max(1, Number(pageSpec ?? "1") || 1);
-  const pages = Math.max(1, Math.ceil(all.length / PENDING_PAGE_SIZE));
-  const slice = wantAll ? all : all.slice((pageNum - 1) * PENDING_PAGE_SIZE, pageNum * PENDING_PAGE_SIZE);
-  const header = `📌 有 ${total} 条任务等你处理（缺执行人 ${missingExecutor.length}、缺归属 ${missingProject.length}）：`;
+  const pages = Math.max(1, Math.ceil(listing.length / PENDING_PAGE_SIZE));
+  const slice = wantAll ? listing : listing.slice((pageNum - 1) * PENDING_PAGE_SIZE, pageNum * PENDING_PAGE_SIZE);
+  const header = `📌 等你处理 ${awaiting} 条（缺执行人 ${missingExecutor.length}、缺归属 ${missingProject.length}）；板面规划全量 ${total} 条（含已就绪/挂起）。`;
   const lines = slice.map((l) => `  - ${l}`);
   const footer = wantAll
-    ? `（共 ${total} 条 · 回复短码直接补要素，如「R01 执行人 张三 归属 opc」；「R01 执行人 agent」= 让编码代理做）`
-    : `（第 ${Math.min(pageNum, pages)}/${pages} 页 · 共 ${total} 条 · 「复核清单 ${Math.min(pageNum + 1, pages)}」看下页 /「复核清单 全部」一次看全；回复短码直接补要素）`;
+    ? `（板面规划全量 ${total} 条 · 回复短码直接补要素，如「R01 执行人 张三 归属 opc」；「R01 执行人 agent」= 让编码代理做）`
+    : `（第 ${Math.min(pageNum, pages)}/${pages} 页 · 等你处理 ${awaiting} 条 · 「复核清单 全部」看板面全量 ${total}；回复短码直接补要素）`;
   return [header, ...lines, footer].join("\n");
 }
