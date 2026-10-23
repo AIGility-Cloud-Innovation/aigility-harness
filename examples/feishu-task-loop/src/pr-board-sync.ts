@@ -10,6 +10,10 @@
  *
  * 动作：飞书镜像卡片挪「C 待测试」（SECTION_NAMES.check，幂等防重挪）+
  * board-projection 投影记 C（防止反向对齐把正向动作误判为人工挪动）。
+ * 
+ * 补描述（2026-10-23 用户需求）：挪 C 的同时/之后，台账 note 里的 PR 链接
+ * 每拍兜底补写进飞书任务描述（幂等：已有链接跳过），验收人点开任务详情
+ * 直接看到 PR，不用翻群消息。历史 review 卡也顺带补齐。
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -148,18 +152,42 @@ export async function syncPrDeliveredTasks(
 
   const projection = loadProjection();
   const moved: string[] = [];
+  const descPatched: string[] = [];
   let dirty = false;
   for (const t of targets) {
     const guid = t.links?.["feishu-task"]?.guid ?? (t.origin?.provider === "feishu-task" ? t.origin?.guid : undefined);
     if (!guid) continue;
     // 幂等：投影已是 C 视为已挪过（飞书侧被人工挪回也不反复抢——以投影为准）
-    if (projection[t.uid] === "C") continue;
-    const r = await moveTaskToCheck(feishuCall, guid);
-    if (r === false) continue; // 失败留待下拍重试
-    projection[t.uid] = "C";
-    dirty = true;
-    moved.push(t.title.slice(0, 24));
+    if (projection[t.uid] !== "C") {
+      const r = await moveTaskToCheck(feishuCall, guid);
+      if (r === false) continue; // 失败留待下拍重试
+      projection[t.uid] = "C";
+      dirty = true;
+      moved.push(t.title.slice(0, 24));
+    }
+    // 补描述（2026-10-23 用户需求）：note 里的 PR 链接兜底补写进飞书描述。
+    // 独立于挪卡（历史卡投影已是 C 也补）；幂等：描述已含 git.aigility.cloud 链接跳过。
+    const prUrl = (t.note ?? "").match(/https:\/\/git\.aigility\.cloud\/[^\s（)）]+\/pulls\/\d+/)?.[0];
+    if (!prUrl) continue;
+    const cur = await callData<{ description?: string }>(feishuCall, {
+      method: "GET",
+      path: `/open-apis/task/v2/tasks/${guid}`,
+      query: { user_id_type: "open_id" },
+      identity: "user",
+    });
+    if (!cur || (cur.description ?? "").includes(prUrl)) continue; // 已有：幂等跳过
+    const next = `${(cur.description ?? "").trim()}${cur.description?.trim() ? "\n" : ""}🔗 交付 PR：${prUrl}`;
+    await feishuCall({
+      method: "PATCH",
+      path: `/open-apis/task/v2/tasks/${guid}`,
+      query: { user_id_type: "open_id" },
+      identity: "user",
+      body: { update_fields: ["description"], task: { description: next } },
+    }).catch(() => undefined);
+    descPatched.push(`${t.title.slice(0, 20)}←${prUrl.split("/pulls/")[1]}`);
   }
   if (dirty) saveProjection(projection);
-  return moved;
+  return moved.length > 0 || descPatched.length > 0
+    ? [...moved.map((s) => `挪C:${s}`), ...descPatched.map((s) => `补PR链:${s}`)]
+    : [];
 }
