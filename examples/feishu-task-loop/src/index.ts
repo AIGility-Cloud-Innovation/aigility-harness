@@ -72,6 +72,7 @@ import {
 import { getSharedRegistry, getReviewCodes, assignReviewCodes } from "./review-aware.js";
 import { wireLlmNodes } from "@aigility-harness/appbase/llm-node-store";
 import { syncGiteaCompletions } from "./completion-sync.js";
+import { runPingcodeStatusSync } from "./pingcode-status-sync-adapter.js";
 import { backfillIssueLinks } from "./issue-link-backfill.js";
 import { syncAssignees } from "./assignee-sync.js";
 import { remindPendingTasks } from "./review-reminder.js";
@@ -317,6 +318,16 @@ async function main(): Promise<void> {
       const boardChanges = await syncBoardAlignment(getSharedRegistry(), alignFeishuCall);
       if (boardChanges.length > 0) {
         console.log(`[align] 看板反向对齐: ${boardChanges.join(" / ")}`);
+      }
+      // ①.56 PingCode 状态联动（2026-10-23 用户拍板「2要做」）：飞书分组/完成 → PC 卡状态
+      //     （P→打开 · D→进行中 · C→已提测 · done→关闭；签名防重，未配凭据静默跳过）
+      try {
+        const pcChanges = await runPingcodeStatusSync(getSharedRegistry());
+        if (pcChanges.length > 0) {
+          console.log(`[align] PingCode 状态联动: ${pcChanges.join(" / ")}`);
+        }
+      } catch (e) {
+        console.error(`[align] PingCode 状态联动异常: ${String((e as Error)?.message ?? e).slice(0, 120)}`);
       }
       // ①.55 PR 交付看板正向同步（2026-10-13 拍板）：agent 任务终结于 PR——
       //     review（PR 已建）的工人小组任务卡片挪「C 待测试」，与台账待验收对齐

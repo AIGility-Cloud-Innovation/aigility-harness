@@ -88,3 +88,4 @@ tests/run-debug.py
 gui-test-screenshots/
 *.tmp
 ops/api-router/venv/
+config/feishu-pingcode-sync.map.state.json
