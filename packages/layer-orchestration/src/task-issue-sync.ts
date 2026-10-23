@@ -826,7 +826,7 @@ export async function moveToSection(
 async function listSectionTasks(
   ctx: SeamContext,
   sectionGuid: string,
-): Promise<Array<{ guid?: string; task_id?: string; summary?: string; description?: string; url?: string; members?: TaskMemberLike[] }>> {
+): Promise<Array<{ guid?: string; task_id?: string; summary?: string; description?: string; url?: string; members?: TaskMemberLike[]; created_at?: string | number }>> {
   // 注意：query 里不能带 completed=false —— 实测（2026-10-10）当前租户带该参数恒返回空列表；
   // 改为不过滤拉全量，再按 completed_at 代码内过滤（completed_at>0 = 已完成）
   const r = await callFeishuApi(ctx, {
@@ -837,9 +837,9 @@ async function listSectionTasks(
   });
   if (!r.ok || (r.value?.code ?? -1) !== 0) return [];
   const items = (r.value?.data as {
-    items?: Array<{ guid?: string; task_id?: string; summary?: string; description?: string; url?: string; members?: TaskMemberLike[]; completed_at?: string | number }>;
+    items?: Array<{ guid?: string; task_id?: string; summary?: string; description?: string; url?: string; members?: TaskMemberLike[]; completed_at?: string | number; created_at?: string | number }>;
   })?.items ?? [];
-  return items.filter((t) => !t.completed_at || Number(t.completed_at) === 0);
+  return items.filter((t) => !t.completed_at || Number(t.completed_at) === 0) as Array<{ guid?: string; task_id?: string; summary?: string; description?: string; url?: string; members?: TaskMemberLike[]; created_at?: string | number }>;
 }
 
 /** 飞书任务成员形状（task members[]） */
@@ -855,6 +855,45 @@ export function stripPendingExecutorTag(summary: string): string {
   const chain = summary.match(/^(?:【[^】]*】)*/)?.[0] ?? "";
   if (!chain.includes("【待安排执行者】")) return summary;
   return chain.replace("【待安排执行者】", "") + summary.slice(chain.length);
+}
+
+/** 闸门标签常量（2026-10-23 更名：归属→仓库）。历史别名一并识别防连环叠标。 */
+export const GATE_TAG_REPO = "待确认仓库";
+/** 历史别名（2026-10-23 前的旧名，存量卡与旧代码写入残留） */
+export const GATE_TAG_REPO_LEGACY = "待确认归属";
+const GATE_TAG_EXEC = "待安排执行者";
+
+/**
+ * 标题闸门标签链归一化：把前缀【…】链内的闸门标签收敛为规范形。
+ * 修复 2026-10-23 严重缺陷「P 任务被连续叠加【待确认归属/仓库】」：
+ * 旧实现只剥链首（/^【待确认仓库】/），遇到旧名【待确认归属】开头或多标签链
+ * 剥不到 → 每拍在链首再叠一个新标签（现网 ×7 连环即此）。
+ * 规则：链内所有闸门标签（新旧名+执行者）各收敛至多 1 个、按固定次序排列
+ * （仓库→执行者），正文原样保留；链外（正文内）出现的同名文本不动。
+ */
+export function normalizeGateTags(summary: string): string {
+  const m = summary.match(/^((?:【[^】]*】)*)([\s\S]*)$/);
+  if (!m) return summary;
+  const chainText = m[1] ?? "";
+  const body = m[2] ?? "";
+  const hasRepo = chainText.includes(`【${GATE_TAG_REPO}】`) || chainText.includes(`【${GATE_TAG_REPO_LEGACY}】`);
+  const hasExec = chainText.includes(`【${GATE_TAG_EXEC}】`);
+  const next =
+    (hasRepo ? `【${GATE_TAG_REPO}】` : "") + (hasExec ? `【${GATE_TAG_EXEC}】` : "");
+  if (chainText === next) return summary;
+  return next + body;
+}
+
+/** 摘除执行者闸门标签 + 其余标签归一化（执行人已定时的摘牌用；仓库旧名一并转新名）。 */
+export function stripExecutorTagNormalized(summary: string): string {
+  const m = summary.match(/^((?:【[^】]*】)*)([\s\S]*)$/);
+  if (!m) return summary;
+  const chainText = m[1] ?? "";
+  const body = m[2] ?? "";
+  const hasRepo = chainText.includes(`【${GATE_TAG_REPO}】`) || chainText.includes(`【${GATE_TAG_REPO_LEGACY}】`);
+  const next = hasRepo ? `【${GATE_TAG_REPO}】` : "";
+  if (chainText === next) return summary;
+  return next + body;
 }
 
 /** 提取飞书任务的负责人（members[].role === "assignee" → 名册成员名或 open_id）。
@@ -1522,6 +1561,14 @@ export async function runPlanGate(
       await pauseBySection(ctx, guid, summary, opts.tasklistGuid, sections);
       continue;
     }
+    // 自动挂起（2026-10-23 用户拍板方案A）：静默收集的任务在 P 滞留超 7 天未确认
+    // → 挪「挂起」组（不删，可恢复），周播报汇总提示可回复恢复。created_at 缺失跳过不猜。
+    const createdAtMs = Number(t.created_at ?? 0);
+    if (createdAtMs > 0 && Date.now() - createdAtMs > 7 * 24 * 3600 * 1000) {
+      await pauseBySection(ctx, guid, summary, opts.tasklistGuid, sections);
+      reports.push(`⏸️ 「${summary.replace(/^【[^】]*】\s*/, "").slice(0, 36)}」P 滞留超 7 天，自动挂起。群里回复「恢复任务」可重新拉回 P。`);
+      continue;
+    }
     // 前缀仓库校验+近似纠正（2026-10-22 t102051 事故）：手写错名前缀（如
     // [timem-console-frontend]，真名 TiMEM-AI/timem_console_frontend）解析不出
     // projectRef → 派发反复失败、永久滞留 P。归一化（小写、-/_ 等价、单名自动配
@@ -1615,7 +1662,7 @@ export async function runPlanGate(
     // 执行人已定（负责人/agent）而标题仍带历史轮次的闸门标签 → 摘除（可能在【待确认仓库】等
     // 标签之后，非开头），防「已定执行人却显示待安排」。
     if (summary.includes("【待安排执行者】")) {
-      const cleaned = stripPendingExecutorTag(summary);
+      const cleaned = stripExecutorTagNormalized(summary);
       if (cleaned !== summary) {
         await callFeishuApi(ctx, {
           method: "PATCH",
@@ -1652,7 +1699,7 @@ export async function runPlanGate(
           reports.push(`🏷️ 「${summary.slice(0, 40)}」归属按描述自动判定为 ${inferred}（下一拍回填工单）。如不对请改标题。`);
           continue;
         }
-        const tagged = `【待确认仓库】${summary.replace(/^【待确认仓库】/, "")}`;
+        const tagged = normalizeGateTags(`【${GATE_TAG_REPO}】${summary}`);
         if (tagged !== summary) {
           await callFeishuApi(ctx, {
             method: "PATCH",
@@ -1669,7 +1716,7 @@ export async function runPlanGate(
       // 解析不出仓库不建单，留 P 提示确认归属（与归属确认同一交互）。
       const parsedRepo = repoFromPlannedSummary(summary);
       if (!parsedRepo) {
-        const tagged = `【待确认仓库】${summary.replace(/^【待确认仓库】/, "")}`;
+        const tagged = normalizeGateTags(`【${GATE_TAG_REPO}】${summary}`);
         if (tagged !== summary) {
           await callFeishuApi(ctx, {
             method: "PATCH",

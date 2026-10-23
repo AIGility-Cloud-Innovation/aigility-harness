@@ -97,10 +97,27 @@ export function acquireBotLock(botName: string, opts: BotLockOptions = {}): BotS
   if (fd === null) return null;
 
   let released = false;
+  // 运行时守卫（2026-10-23 双实例事故复盘）：锁文件被外力删除后，另一实例可重构
+  // 锁并启动 → 双写者交替破坏数据（现网曾致任务标题连环叠标 ×7）。每 30s 校验
+  // 锁文件仍在且写的是本 pid，不符即自杀退出，交由启动方/看护重新拉起单实例。
+  const watch = setInterval(() => {
+    try {
+      const cur = readFileSync(lockPath, "utf8").trim();
+      if (cur !== String(process.pid)) {
+        console.error(`[bot-singleton] 锁被接管（文件内容=${cur || "空"}，本 pid=${process.pid}）→ 自杀退出防双实例双写`);
+        process.exit(1);
+      }
+    } catch {
+      console.error(`[bot-singleton] 锁文件丢失（被删除/未落盘）→ 自杀退出防双实例双写`);
+      process.exit(1);
+    }
+  }, 30_000);
+  watch.unref?.();
   return {
     release(): void {
       if (released) return;
       released = true;
+      clearInterval(watch);
       try {
         closeSync(fd);
       } catch {

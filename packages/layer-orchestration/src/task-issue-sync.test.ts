@@ -9,6 +9,9 @@ import {
   assigneeFromTask,
   executorOfTask,
   stripPendingExecutorTag,
+  normalizeGateTags,
+  stripExecutorTagNormalized,
+  GATE_TAG_REPO,
   buildDispatchPrompt,
   dispatchDelayMs,
   taskIssueSyncProvider,
@@ -26,7 +29,33 @@ describe("SECTION_NAMES 状态分组", () => {
   });
 });
 
-describe("stripPendingExecutorTag（2026-10-23 摘牌规则）", () => {
+describe("normalizeGateTags / stripExecutorTagNormalized（2026-10-23 连环叠标缺陷修复）", () => {
+  it("×7 新旧名交替叠链收敛为单标签（现网事故形态）", () => {
+    const bad = "【待确认归属】【待确认仓库】【待确认归属】【待确认仓库】【待确认归属】【待确认仓库】优化简历评估系统";
+    expect(normalizeGateTags(bad)).toBe("【待确认仓库】优化简历评估系统");
+  });
+  it("打标幂等：已带标签原样返回", () => {
+    const s = "【待确认仓库】优化简历评估系统";
+    expect(normalizeGateTags(`【${GATE_TAG_REPO}】${s}`)).toBe(s);
+  });
+  it("仓库+执行者双标签固定次序（仓库在前）", () => {
+    expect(normalizeGateTags("【待安排执行者】【待确认归属】对接宇乐数")).toBe("【待确认仓库】【待安排执行者】对接宇乐数");
+  });
+  it("正文里的同名文本不动", () => {
+    const s = "讨论【待确认归属】规则的会议";
+    expect(normalizeGateTags(s)).toBe(s);
+  });
+  it("摘牌：执行人已定 → 执行者标签摘除、仓库标签保留转新名", () => {
+    expect(stripExecutorTagNormalized("【待确认归属】【待安排执行者】催办海鑫网站开发进度")).toBe(
+      "【待确认仓库】催办海鑫网站开发进度",
+    );
+  });
+  it("摘牌：无仓库标签 → 纯正文", () => {
+    expect(stripExecutorTagNormalized("【待安排执行者】修 bug")).toBe("修 bug");
+  });
+});
+
+describe("stripPendingExecutorTag（保留兼容，逻辑已被 normalizeGateTags 覆盖）", () => {
   it("链首摘除", () => {
     expect(stripPendingExecutorTag("【待安排执行者】修 bug")).toBe("修 bug");
   });
