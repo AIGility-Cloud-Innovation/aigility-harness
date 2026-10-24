@@ -1,137 +1,142 @@
 [
- {
-  "feishu_guid": "f8a5694f-8870-4fb4-b1e8-be52a564045e",
-  "pingcode": "TYY-103",
-  "feishu_summary": "【agent】[TiMEM-AI/timem-platform-backend]管理端支持导出指定用户的费用记录：运营管"
- },
- {
-  "feishu_guid": "4bc09dc0-0277-486c-9b76-ea5ce1d51a98",
-  "pingcode": "TYY-101",
-  "feishu_summary": "【待确认归属】【timem platform】月度用户画像功能重构 — 分阶段计划\n "
- },
- {
-  "feishu_guid": "fff812d4-a20c-49cc-8980-95ceaa6995d6",
-  "pingcode": "TYY-102",
-  "feishu_summary": "【待确认归属】【timem frontend】体验中心设计：待兰锦宇完成接口文档编写后，设计体验中心页面，用于意向客户测"
- },
- {
-  "feishu_guid": "30d8fdd8-f3eb-452b-9609-7d0728b5c791",
-  "pingcode": "TYY-104",
-  "feishu_summary": "【agent】[TiMEM-AI/timem_console_frontend]\n折扣规则这一个需要优化一下。他这个添加"
- },
- {
-  "feishu_guid": "0707f887-027f-487f-bf99-3cc45519898e",
-  "pingcode": "TYY-105",
-  "feishu_summary": "[TiMEM-AI/timem-platform-backend#265] https://console.timem."
- },
- {
-  "feishu_guid": "a56b4497-53ea-432c-b4ed-e89d192f2788",
-  "pingcode": "TAI-196",
-  "feishu_summary": "【agent】[TiMEM-AI/TiMEM-Space] space项目 检查新手教程指引智能体能不能正常跑通对话流（"
- },
- {
-  "feishu_guid": "5d33c251-8281-41bf-bf4a-e1ce08fbc203",
-  "pingcode": "TAI-197",
-  "feishu_summary": "【agent】[TiMEM-AI/TiMEM-Space] space项目 检查新手教程步骤全流程是否合理合适（Ping"
- },
- {
-  "feishu_guid": "01f9c82b-9c19-496d-a485-90d0fff612aa",
-  "pingcode": "TAI-198",
-  "feishu_summary": "【agent】[TiMEM-AI/TiMEM-Space] 记忆溯源与来源查看（方案设计）"
- },
- {
-  "feishu_guid": "d7b28d16-560a-45d4-8a9a-bfdde378e5b9",
-  "pingcode": "TYY-106",
-  "feishu_summary": "[TiMEM-AI/timem_frontend#11]文档完善工作：补充太忆云帮助文档内容，覆盖知识库定价明细、订单明"
- },
- {
-  "feishu_guid": "3abdc527-662e-4f8a-bf4f-01965a7fc9f1",
-  "pingcode": "TAI-199",
-  "feishu_summary": "[TiMEM-AI/TiMEM-Space#137] 【timem space】案例广场测试：开展案例广场相关工作时，深"
- },
- {
-  "feishu_guid": "abf503e9-1c74-4321-82b4-f60aef2053da",
-  "pingcode": "TYY-107",
-  "feishu_summary": "【timem platform】规则测试跟进：完成规则测试后通知吉翰云，测试过程中截取有代表性的 case，用于后续公众"
- },
- {
-  "feishu_guid": "be074b5b-01a3-4b3b-9a58-eabd3429f4ef",
-  "pingcode": "TYY-108",
-  "feishu_summary": "【agent】[TiMEM-AI/timem_console_frontend] 对公打款 OCR 全链路前端：运营页复"
- },
- {
-  "feishu_guid": "60cdc876-cfda-4298-a696-6b9d5ff970bb",
-  "pingcode": "TYY-109",
-  "feishu_summary": "【agent】[TiMEM-AI/timem-platform-backend] 对公支付自动识别（澄清核对，准备实施）"
- },
- {
-  "feishu_guid": "65496a72-4ae3-4e57-9e9f-bb80887402bb",
-  "pingcode": "TYY-110",
-  "feishu_summary": "[TiMEM-AI/timem_frontend] 修复体验中心图谱页 Playground /graph-playgr"
- },
- {
-  "feishu_guid": "2da843ba-9d56-4b7e-b599-6b9f1a637fe4",
-  "pingcode": "TYY-111",
-  "feishu_summary": "[TiMEM-AI/timem_console_frontend] 修复体验中心关键区域因高度布局需额外滚动查看（Pin"
- },
- {
-  "feishu_guid": "6004288f-19a7-4e9c-95bd-0a4026700d3d",
-  "pingcode": "TYY-112",
-  "feishu_summary": "[TiMEM-AI/timem_frontend#9] 【timem frontend】为了将版本日志加入到文档页面和U"
- },
- {
-  "feishu_guid": "ebef7ab9-83b4-4507-8359-004210ef79ab",
-  "pingcode": "TYY-113",
-  "feishu_summary": "[TiMEM-AI/timem_console_frontend#47] 【timem console】问题9：选择导出"
- },
- {
-  "feishu_guid": "75eaeaab-b8ae-4bab-96b1-50dcee82b4c0",
-  "pingcode": "TAI-200",
-  "feishu_summary": "[TiMEM-AI/TiMEM-Space] 【agent】【space】太忆空间订阅的连续包月的这一个模式，调研一下，"
- },
- {
-  "feishu_guid": "9551b47b-1986-409c-8712-16418ae86c76",
-  "pingcode": "TYY-114",
-  "feishu_summary": "【待安排执行者】[TiMEM-AI/timem-platform-backend] 新账号开通即赠记忆资源包（补全 co"
- },
- {
-  "feishu_guid": "74a8d7a5-3f0c-4721-8f27-0d293eae40e2",
-  "pingcode": "TYY-115",
-  "feishu_summary": "【待安排执行者】[TiMEM-AI/timem-platform-backend] 记忆权益 402 响应体增强（EXP"
- },
- {
-  "feishu_guid": "e0ac0d2b-2d84-4497-b8d7-4e9ca8973ce8",
-  "pingcode": "TYY-116",
-  "feishu_summary": "[TiMEM-AI/timem-platform-backend#110]架构图绘制：完成抽取生成检索模块、上层业务管理"
- },
- {
-  "feishu_guid": "1ba60ee5-c480-4994-8c79-685b175c0184",
-  "pingcode": "TYY-117",
-  "feishu_summary": "[TiMEM-AI/timem-platform-backend#100] 账单导出功能-导出的账单表格需要修复 安排给"
- },
- {
-  "feishu_guid": "d2788019-40c2-4ec8-9803-638271dfcbde",
-  "pingcode": "TYY-118",
-  "feishu_summary": "[TiMEM-AI/timem_console_frontend] 账单状态列补 reversed（已冲销）展示：筛选项"
- },
- {
-  "feishu_guid": "1155e283-28bf-425a-8591-d3ac2f082e8b",
-  "pingcode": "TYY-119",
-  "feishu_summary": "【agent】【console】给 create_export 加管理员分支（adminOnly + 请求体带 user"
- },
- {
-  "feishu_guid": "e7dcaad0-1216-4447-9bfd-85f3f1e1040b",
-  "pingcode": "TAI-201",
-  "feishu_summary": "[TiMEM-AI/TiMEM-Space#104] 【timem space】太忆空间团队版的设计"
- },
- {
-  "feishu_guid": "a708a54c-b601-4839-92c9-6fb99ce64d04",
-  "pingcode": "TAI-202",
-  "feishu_summary": "【space】【挂起】排个运维任务，要把这一个 TiMEM.Space 备案一下"
- },
- {
-  "feishu_guid": "5c6e73b2-0df3-474a-8099-8ff0495fc0cc",
-  "pingcode": "TYY-120",
-  "feishu_summary": "【timem platform】在数据库中新建专属数据表，设置功能名称、消耗 token 数量、时间等字段，用于存储各用"
- }
+  {
+    "feishu_guid": "f8a5694f-8870-4fb4-b1e8-be52a564045e",
+    "pingcode": "TYY-103",
+    "feishu_summary": "【agent】[TiMEM-AI/timem-platform-backend]管理端支持导出指定用户的费用记录：运营管"
+  },
+  {
+    "feishu_guid": "4bc09dc0-0277-486c-9b76-ea5ce1d51a98",
+    "pingcode": "TYY-101",
+    "feishu_summary": "【待确认归属】【timem platform】月度用户画像功能重构 — 分阶段计划\n "
+  },
+  {
+    "feishu_guid": "fff812d4-a20c-49cc-8980-95ceaa6995d6",
+    "pingcode": "TYY-102",
+    "feishu_summary": "【待确认归属】【timem frontend】体验中心设计：待兰锦宇完成接口文档编写后，设计体验中心页面，用于意向客户测"
+  },
+  {
+    "feishu_guid": "30d8fdd8-f3eb-452b-9609-7d0728b5c791",
+    "pingcode": "TYY-104",
+    "feishu_summary": "【agent】[TiMEM-AI/timem_console_frontend]\n折扣规则这一个需要优化一下。他这个添加"
+  },
+  {
+    "feishu_guid": "0707f887-027f-487f-bf99-3cc45519898e",
+    "pingcode": "TYY-105",
+    "feishu_summary": "[TiMEM-AI/timem-platform-backend#265] https://console.timem."
+  },
+  {
+    "feishu_guid": "a56b4497-53ea-432c-b4ed-e89d192f2788",
+    "pingcode": "TAI-196",
+    "feishu_summary": "【agent】[TiMEM-AI/TiMEM-Space] space项目 检查新手教程指引智能体能不能正常跑通对话流（"
+  },
+  {
+    "feishu_guid": "5d33c251-8281-41bf-bf4a-e1ce08fbc203",
+    "pingcode": "TAI-197",
+    "feishu_summary": "【agent】[TiMEM-AI/TiMEM-Space] space项目 检查新手教程步骤全流程是否合理合适（Ping"
+  },
+  {
+    "feishu_guid": "01f9c82b-9c19-496d-a485-90d0fff612aa",
+    "pingcode": "TAI-198",
+    "feishu_summary": "【agent】[TiMEM-AI/TiMEM-Space] 记忆溯源与来源查看（方案设计）"
+  },
+  {
+    "feishu_guid": "d7b28d16-560a-45d4-8a9a-bfdde378e5b9",
+    "pingcode": "TYY-106",
+    "feishu_summary": "[TiMEM-AI/timem_frontend#11]文档完善工作：补充太忆云帮助文档内容，覆盖知识库定价明细、订单明"
+  },
+  {
+    "feishu_guid": "3abdc527-662e-4f8a-bf4f-01965a7fc9f1",
+    "pingcode": "TAI-199",
+    "feishu_summary": "[TiMEM-AI/TiMEM-Space#137] 【timem space】案例广场测试：开展案例广场相关工作时，深"
+  },
+  {
+    "feishu_guid": "abf503e9-1c74-4321-82b4-f60aef2053da",
+    "pingcode": "TYY-107",
+    "feishu_summary": "【timem platform】规则测试跟进：完成规则测试后通知吉翰云，测试过程中截取有代表性的 case，用于后续公众"
+  },
+  {
+    "feishu_guid": "be074b5b-01a3-4b3b-9a58-eabd3429f4ef",
+    "pingcode": "TYY-108",
+    "feishu_summary": "【agent】[TiMEM-AI/timem_console_frontend] 对公打款 OCR 全链路前端：运营页复"
+  },
+  {
+    "feishu_guid": "60cdc876-cfda-4298-a696-6b9d5ff970bb",
+    "pingcode": "TYY-109",
+    "feishu_summary": "【agent】[TiMEM-AI/timem-platform-backend] 对公支付自动识别（澄清核对，准备实施）"
+  },
+  {
+    "feishu_guid": "65496a72-4ae3-4e57-9e9f-bb80887402bb",
+    "pingcode": "TYY-110",
+    "feishu_summary": "[TiMEM-AI/timem_frontend] 修复体验中心图谱页 Playground /graph-playgr"
+  },
+  {
+    "feishu_guid": "2da843ba-9d56-4b7e-b599-6b9f1a637fe4",
+    "pingcode": "TYY-111",
+    "feishu_summary": "[TiMEM-AI/timem_console_frontend] 修复体验中心关键区域因高度布局需额外滚动查看（Pin"
+  },
+  {
+    "feishu_guid": "6004288f-19a7-4e9c-95bd-0a4026700d3d",
+    "pingcode": "TYY-112",
+    "feishu_summary": "[TiMEM-AI/timem_frontend#9] 【timem frontend】为了将版本日志加入到文档页面和U"
+  },
+  {
+    "feishu_guid": "ebef7ab9-83b4-4507-8359-004210ef79ab",
+    "pingcode": "TYY-113",
+    "feishu_summary": "[TiMEM-AI/timem_console_frontend#47] 【timem console】问题9：选择导出"
+  },
+  {
+    "feishu_guid": "75eaeaab-b8ae-4bab-96b1-50dcee82b4c0",
+    "pingcode": "TAI-200",
+    "feishu_summary": "[TiMEM-AI/TiMEM-Space] 【agent】【space】太忆空间订阅的连续包月的这一个模式，调研一下，"
+  },
+  {
+    "feishu_guid": "9551b47b-1986-409c-8712-16418ae86c76",
+    "pingcode": "TYY-114",
+    "feishu_summary": "【待安排执行者】[TiMEM-AI/timem-platform-backend] 新账号开通即赠记忆资源包（补全 co"
+  },
+  {
+    "feishu_guid": "74a8d7a5-3f0c-4721-8f27-0d293eae40e2",
+    "pingcode": "TYY-115",
+    "feishu_summary": "【待安排执行者】[TiMEM-AI/timem-platform-backend] 记忆权益 402 响应体增强（EXP"
+  },
+  {
+    "feishu_guid": "e0ac0d2b-2d84-4497-b8d7-4e9ca8973ce8",
+    "pingcode": "TYY-116",
+    "feishu_summary": "[TiMEM-AI/timem-platform-backend#110]架构图绘制：完成抽取生成检索模块、上层业务管理"
+  },
+  {
+    "feishu_guid": "1ba60ee5-c480-4994-8c79-685b175c0184",
+    "pingcode": "TYY-117",
+    "feishu_summary": "[TiMEM-AI/timem-platform-backend#100] 账单导出功能-导出的账单表格需要修复 安排给"
+  },
+  {
+    "feishu_guid": "d2788019-40c2-4ec8-9803-638271dfcbde",
+    "pingcode": "TYY-118",
+    "feishu_summary": "[TiMEM-AI/timem_console_frontend] 账单状态列补 reversed（已冲销）展示：筛选项"
+  },
+  {
+    "feishu_guid": "1155e283-28bf-425a-8591-d3ac2f082e8b",
+    "pingcode": "TYY-119",
+    "feishu_summary": "【agent】【console】给 create_export 加管理员分支（adminOnly + 请求体带 user"
+  },
+  {
+    "feishu_guid": "e7dcaad0-1216-4447-9bfd-85f3f1e1040b",
+    "pingcode": "TAI-201",
+    "feishu_summary": "[TiMEM-AI/TiMEM-Space#104] 【timem space】太忆空间团队版的设计"
+  },
+  {
+    "feishu_guid": "a708a54c-b601-4839-92c9-6fb99ce64d04",
+    "pingcode": "TAI-202",
+    "feishu_summary": "【space】【挂起】排个运维任务，要把这一个 TiMEM.Space 备案一下"
+  },
+  {
+    "feishu_guid": "5c6e73b2-0df3-474a-8099-8ff0495fc0cc",
+    "pingcode": "TYY-120",
+    "feishu_summary": "【timem platform】在数据库中新建专属数据表，设置功能名称、消耗 token 数量、时间等字段，用于存储各用"
+  },
+  {
+    "feishu_guid": "d0aafd8c-88e4-4622-9a92-8f1fc99d8972",
+    "pingcode": "TYY-130",
+    "feishu_summary": "【agent】[AIGility-Cloud-Innovation/aigility-harness] 反向同步加 PR"
+  }
 ]

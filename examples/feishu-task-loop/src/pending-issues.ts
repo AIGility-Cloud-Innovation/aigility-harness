@@ -22,7 +22,6 @@ import {
 import type { TaskRecord } from "@aigility-harness/core";
 import type { UnifiedStatus } from "@aigility-harness/core";
 import { getProjectedSection } from "./board-sync.js";
-
 /** 台账状态 → PDCA 看板语言 */
 const PDCA_OF: Record<string, string> = {
   planned: "P·规划中",
@@ -82,21 +81,34 @@ export interface PendingBuckets {
  * 待处理分桶（两清单共用的唯一口径；与 review-reminder 2026-10-10 拍板一致：
  * ready/dispatched/running 是正常执行态非待办，只看 planned）。
  * 同一条任务可同时缺执行人和缺归属（进两个桶，两处列表都会出现）。
+ *
+ * 2026-10-24 口径修复（用户反馈三类误收）：
+ * ① 挂起判定：标题含「挂起」（不限【】包裹）**或**看板投影段位为「挂」——
+ *    人挪挂起段位时标题不变，只认标题会漏（R66/数据表格案例）；
+ * ② agent 认定：标题任意位置【agent】或描述「执行者：agent」皆算已安排
+ *    （原只认标题开头，前缀挪位/描述标记全漏，与 plan-gate 口径对齐）；
+ * ③ 真人 assignee：executorOfTask 链路本身不误收——健康卡（有执行人+有归属）
+ *    只出现在「复核清单 全部」全量视图，默认页只列缺要素卡（口径本就如此，补测试锁住）。
+ * sectionLookup 参数供测试注入投影（默认真实 getProjectedSection）。
  */
-export function computePendingBuckets(registry: {
-  list: (q: { status: UnifiedStatus[] }) => TaskRecord[];
-}): PendingBuckets {
+export function computePendingBuckets(
+  registry: { list: (q: { status: UnifiedStatus[] }) => TaskRecord[] },
+  sectionLookup: (uid: string) => string | undefined = getProjectedSection,
+): PendingBuckets {
   const planned = registry.list({ status: ["planned"] as UnifiedStatus[] });
-  // 【挂起】= 车主明确停进 garage 的卡（2026-10-23 口径）：不算缺要素待办，
-  // 否则挂起任务永远挂在「缺执行人」清单里刷存在感（R66 案例）。
-  const parked = (t: TaskRecord) => (t.title ?? "").includes("【挂起】");
+  // 挂起 = 车主明确停进 garage 的卡（2026-10-23 口径，2026-10-24 扩段位投影）：
+  // 标题含「挂起」（【挂起】/「挂起xxx」等变体）或看板段位投影为「挂」，
+  // 不算缺要素待办，否则挂起任务永远挂在清单里刷存在感。
+  const parked = (t: TaskRecord) =>
+    (t.title ?? "").includes("挂起") || sectionLookup(t.uid) === "挂";
   const missingExecutor = planned.filter((t) => {
     if (parked(t)) return false;
     const desc = t.description ?? "";
     const title = t.title ?? "";
-    // agent 任务（标题【agent】前缀，2026-10-20 唯一认定源）不需要人类执行人 → 不进缺执行人桶
-    const bareTitle = title.replace(/^【(待安排执行者|待确认仓库)】/, "");
-    if (/^【agent】/.test(bareTitle)) return false;
+    // agent 任务不需要人类执行人 → 不进缺执行人桶（2026-10-24：标题任意位置
+    // 【agent】或描述「执行者：agent」皆认定，不再锚定标题开头）
+    if (/【agent】/.test(title)) return false;
+    if (/^agent/i.test(desc.match(/执行[者人][:：]\s*(\S+)/)?.[1] ?? "")) return false;
     // 判定源与执行人闸门同源（executorOfTask）：members 负责人 / assignee_member_id
     // （①.2 反向同步落库）/ 描述人名标记，任一有 = 不缺；agent 值不算执行人（2026-10-20）
     return !executorOfTask({
