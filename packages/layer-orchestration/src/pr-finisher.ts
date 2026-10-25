@@ -130,6 +130,35 @@ export function diffPaths(now: string[], pre: string[]): string[] {
   return out;
 }
 
+/**
+ * 按内容判定「本轮有实际改动」的文件（2026-10-25 事故修复）。
+ *
+ * 事故：`diffPaths` 只比对**路径名**——派发前工作区已有 5 个文件被改过（上一轮残留），
+ * 工人本轮又在同一批文件里写了 +181/-10（含新增 159 行测试），收尾仍判「工作区无新改动」
+ * → 整轮劳动成果判失败（后端导出卡 t102268 连续两次）。路径相同 ≠ 内容没变。
+ *
+ * 做法：对每个候选路径算 `git hash-object`（工作区内容哈希），与派发前快照比对；
+ * 快照缺失（旧任务无 baseline）时退回旧路径语义，行为不变。
+ *
+ * @param nowHashes 当前各路径的内容哈希
+ * @param preHashes 派发前各路径的内容哈希（undefined = 无快照，退回路径比较）
+ * @param prePaths  派发前路径清单（快照缺失时兜底）
+ */
+export function diffByContent(
+  nowHashes: Record<string, string>,
+  preHashes: Record<string, string> | undefined,
+  prePaths: string[],
+): string[] {
+  if (!preHashes) return diffPaths(Object.keys(nowHashes), prePaths);
+  return Object.keys(nowHashes).filter((p) => {
+    const before = preHashes[p];
+    // 派发前不存在 → 新增，必收
+    if (before === undefined) return true;
+    // 存在但内容变了 → 本轮改动，必收（这正是旧实现漏掉的一类）
+    return nowHashes[p] !== before;
+  });
+}
+
 /** 提交信息（单提交口径；多文件一次提交，文件清单进 body） */
 export function buildCommitMessage(task: TaskRecord, member: string, files: string[]): string {
   const head = `feat(agent): ${cleanTitle(task.title)}`;
@@ -186,6 +215,33 @@ export function buildPrBody(task: TaskRecord, member: string, files: string[], s
 export async function listChangedFiles(cwd: string): Promise<string[]> {
   const { stdout } = await git(["status", "--porcelain"], { cwd });
   return parsePorcelain(stdout);
+}
+
+/**
+ * 工作区改动文件的内容哈希（路径 → blob hash）。
+ *
+ * 用 `git hash-object --stdin-paths` 一次算完（比逐文件 spawn 快一个量级）；
+ * 文件内容为空/被删的项跳过——删除改动由 `listChangedFiles` 的路径差异覆盖。
+ */
+export async function hashWorkingTree(cwd: string): Promise<Record<string, string>> {
+  const files = await listChangedFiles(cwd);
+  if (files.length === 0) return {};
+  return new Promise<Record<string, string>>((resolve) => {
+    const child = spawn("git", ["-c", "core.quotePath=false", "hash-object", "--stdin-paths"], { cwd });
+    let out = "";
+    child.stdout.on("data", (b: Buffer) => (out += b.toString("utf8")));
+    child.on("error", () => resolve({}));
+    child.on("close", () => {
+      const hashes = out.split("\n").map((l) => l.trim()).filter(Boolean);
+      // 顺序与输入一致：git 按 stdin 行序输出哈希
+      const map: Record<string, string> = {};
+      files.forEach((f, i) => {
+        if (hashes[i]) map[f] = hashes[i];
+      });
+      resolve(map);
+    });
+    child.stdin.end(files.join("\n") + "\n");
+  });
 }
 
 /**
@@ -304,6 +360,11 @@ export interface FinishInfo {
   /** 派发前工作区快照（本任务改动 = 当前 − 快照） */
   preExisting: string[];
   /**
+   * 派发前各文件的内容哈希（2026-10-25 修复）。
+   * 路径相同但内容变了也算本轮改动；缺省时退回纯路径比较（旧任务兼容）。
+   */
+  preExistingHashes?: Record<string, string>;
+  /**
    * 已在 worktree 中切好的分支名（2026-10-13 worktree 隔离）。
    * 提供时收尾器跳过「checkout -B + stash 兜底」——worktree 本就是干净的
    * 独立检出，无需再切分支（那正是多任务抢主仓库时踩坑的一步）。
@@ -380,7 +441,7 @@ export function createPrFinisher(opts: PrFinisherOptions): NonNullable<WorkerTea
       (await opts.ctx!.call({ id: "@action/gitea-api", versionRange: "^1.0.0" }, req)) as GiteaApiResultLike);
 
   return async (info: FinishInfo) => {
-    const { task, cwd, member, summary, preExisting } = info;
+    const { task, cwd, member, summary, preExisting, preExistingHashes } = info;
     // 防线外层（2026-10-22 事故兜底）：内层 worker-team 已拦一次，这里再拦——
     // 任何路径都不允许 API/网关报错原文进 PR 正文当「交付报告」。
     if (looksLikeGatewayError(summary)) {
@@ -394,7 +455,12 @@ export function createPrFinisher(opts: PrFinisherOptions): NonNullable<WorkerTea
     }
     try {
       // 1. 改动归集：新改动 = 当前 − 派发前快照（防多任务混流）
-      const files = diffPaths(await listChangedFiles(cwd), preExisting);
+      // 2026-10-25：升级为按内容哈希判定——派发前已有改动的同一文件，本轮内容变了也算交付。
+      const nowHashes = await hashWorkingTree(cwd).catch(() => ({} as Record<string, string>));
+      const files =
+        Object.keys(nowHashes).length > 0
+          ? diffByContent(nowHashes, preExistingHashes, preExisting)
+          : diffPaths(await listChangedFiles(cwd), preExisting);
       if (files.length === 0) {
         const detail = "工作区无新改动（工人未落盘或改动全为派发前已有）";
         await notifyFail(opts, task, detail, "");

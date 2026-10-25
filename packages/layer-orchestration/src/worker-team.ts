@@ -19,7 +19,7 @@
 import { err, ok, PluginState, LayerId } from "@aigility-harness/core";
 import type { Result, TaskRecord, Provider, ServiceDefinition, HealthStatus, SeamContext } from "@aigility-harness/core";
 import type { TaskRegistry } from "./task-registry.js";
-import { listChangedFiles } from "./pr-finisher.js";
+import { hashWorkingTree, listChangedFiles } from "./pr-finisher.js";
 import type { FinishInfo } from "./pr-finisher.js";
 export type { FinishInfo };
 import {
@@ -198,6 +198,19 @@ async function preExistingOf(cwd: string | undefined): Promise<string[]> {
   return cwd ? listChangedFiles(cwd).catch(() => [] as string[]) : [];
 }
 
+/**
+ * 派发前内容快照（路径 → 内容哈希）。2026-10-25 修复：
+ * 仅记路径不足以判断「本轮是否有改动」——同一文件前后内容变了也算改动。
+ */
+async function preExistingHashesOf(cwd: string | undefined): Promise<Record<string, string>> {
+  if (!cwd) return {};
+  try {
+    return await hashWorkingTree(cwd);
+  } catch {
+    return {};
+  }
+}
+
 /** 交付报告要求（2026-10-22 用户拍板）：最终输出=PR 正文「交付报告」节，读者是不了解过程的验收人 */
 export const DELIVERY_REPORT_RULES = [
   "【交付报告要求（重要）】",
@@ -359,11 +372,21 @@ export class WorkerTeam {
     this.o.registry.transition(task.uid, "running", "dispatched");
     // 派发基线（2026-10-14 修复）：首轮拍一次并存进台账，决策续跑复用同一基线。
     // 续跑轮禁止现拍——上一轮产物已落盘，现拍会把它们当「派发前已有」→ 误判无新改动。
+    // 2026-10-25：同时存内容哈希，同一文件内容变化也能识别为本轮改动。
     const preExisting = await preExistingOf(cwd);
-    this.o.registry.get(task.uid)!.dispatchBase = { at: Date.now(), files: preExisting };
+    const preExistingHashes = await preExistingHashesOf(cwd);
+    this.o.registry.get(task.uid)!.dispatchBase = {
+      at: Date.now(),
+      files: preExisting,
+      hashes: preExistingHashes,
+    };
     const prompt = `${boundary}\n\n---\n${DECISION_RULES}\n\n---\n${DELIVERY_REPORT_RULES}\n\n---\n${(task.description ?? task.title).replace(/\[worker:\w+\]\s*/, "")}`;
     const r = await this.o.callWorker(member, { prompt, cwd, timeoutMs } satisfies AgentCallArgs);
-    return await this.handleRunResult(task, member, cwd, r, preExisting, { resumed: false, ...(preparedBranch ? { branch: preparedBranch } : {}) });
+    return await this.handleRunResult(task, member, cwd, r, preExisting, {
+      resumed: false,
+      ...(preparedBranch ? { branch: preparedBranch } : {}),
+      preExistingHashes,
+    });
   }
 
   /**
@@ -419,7 +442,10 @@ export class WorkerTeam {
     // 导致只在一轮产出、续跑轮不再改文件的任务交付失败（连续包月任务实证）。
     // 旧任务无 dispatchBase（本字段引入前派发）→ 退回现拍，行为同修复前。
     const preExisting = task.dispatchBase?.files ?? (await preExistingOf(cwd));
-    return await this.handleRunResult(task, member, cwd, r, preExisting, { resumed: true });
+    return await this.handleRunResult(task, member, cwd, r, preExisting, {
+      resumed: true,
+      ...(task.dispatchBase?.hashes ? { preExistingHashes: task.dispatchBase.hashes } : {}),
+    });
   }
 
   /** 工人返回后的统一回流：决策暂停 / 完成收尾 / 失败终态 */
@@ -429,7 +455,7 @@ export class WorkerTeam {
     cwd: string | undefined,
     r: { ok: boolean; text: string; error?: string },
     preExisting: string[],
-    opts: { resumed: boolean; branch?: string },
+    opts: { resumed: boolean; branch?: string; preExistingHashes?: Record<string, string> },
   ): Promise<Result<string>> {
     // ── ① 决策暂停（2026-10-13）：工人正常结束但工作区出现未决策文件 →
     //      转 needs-input（不算失败，不计 failover），机器人群播报决策请求
@@ -485,6 +511,7 @@ export class WorkerTeam {
     const fin = await this.o.finish({
       task, cwd, member: member.id, summary: r.text, preExisting,
       ...(opts.branch ? { branch: opts.branch } : {}),
+      ...(opts.preExistingHashes ? { preExistingHashes: opts.preExistingHashes } : {}),
     });
     if (fin.ok) {
       // PR 交付语义（2026-10-13 负责人拍板）：agent 任务终结于 PR——建成才转 review

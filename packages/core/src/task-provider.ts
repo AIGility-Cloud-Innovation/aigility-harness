@@ -127,7 +127,7 @@ export interface TaskRecord {
    * 而误判「无新改动」→ 交付失败（2026-10-14 连续包月任务实证）。
    * 存文件名清单（非 HEAD sha）以兼容沙箱 .git 只读。
    */
-  dispatchBase?: { at: number; files: string[] };
+  dispatchBase?: { at: number; files: string[]; hashes?: Record<string, string> };
   createdAt: number;
   updatedAt: number;
 }
