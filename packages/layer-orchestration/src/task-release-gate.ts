@@ -2,9 +2,9 @@
  * L4 编排层: task-release-gate — 五要素放行检查单（planned → ready 的判定引擎）
  *
  * 放行规则（2026-10-03 与负责人确认）：
- *   · 五要素 = 项目(归属) / 执行人 / 现状 / 过程方法 / 目标；
+ *   · 结构要素 = 项目(归属) / 执行人；LLM 要素 = 2W2H（Why/What/How/How much，2026-10-26 改版）；
  *   · 项目、执行人为结构性检查（登记表 projectRef、描述"执行者："标记，不靠 LLM）；
- *   · 现状/过程方法/目标由 LLM 只判"是否交代清楚"，不判内容对错（三要素验收官升级版）；
+ *   · 2W2H 由 LLM 只判"是否交代清楚"，不判内容对错；旧版「现状/过程方法/目标」按语义映射兼容；
  *   · 五项全齐 → 自动放行 approve(via=auto, by=system)；
  *   · 缺结构要素 → 对应标签留 P（【待确认仓库】/【待安排执行者】，复用既有约定）；
  *   · 缺 LLM 要素 → 【缺X】逐项列出，人补描述 +「确认 #N」→ approve(via=manual, by=复核人)；
@@ -27,7 +27,7 @@ import type { TaskRegistry } from "./task-registry.js";
 export const BUILTIN_RELEASE_YAML = `
 workflow:
   name: task-release
-  description: 五要素放行检查单 — 项目/执行人(结构) + 现状/过程方法/目标(LLM)
+  description: 2W2H 放行检查单 — 项目/执行人(结构) + Why/What/How/How much(LLM)
   entry_point: project_check
   nodes:
     project_check:
@@ -56,16 +56,20 @@ workflow:
       description: LLM 只判"是否交代清楚"，不判对错；required 要素 unsure → 【待复核】人工一票
       config:
         optional:
-          - 过程方法
+          - How
         elements:
-          现状: "是否交代了当前状况与为什么做（背景/问题）"
-          过程方法: "是否给出了可执行的方案/路径/步骤"
-          目标: "是否明确做到什么程度算完成（验收标准）"
+          Why: "是否交代了为什么做（背景/现状/要解决的问题）"
+          What: "是否明确了做什么（需求/目标物）"
+          How: "是否给出了可执行的方案/路径/步骤"
+          How much: "是否明确了做到什么程度算完成（验收标准）与不做什么（边界/范围）"
         system_prompt: >-
           你是任务要素审查员。对照检查单逐项判断下面的任务描述"是否交代清楚"该要素。
           只判清楚与否，不判内容对错、不代写内容。
-          只输出 JSON：{"现状":"ok|missing|unsure","过程方法":"ok|missing|unsure","目标":"ok|missing|unsure",
-          "缺什么":"一句话面向任务的补齐提示，全部 ok 时为空串"}
+          只输出 JSON：{"Why":"ok|missing|unsure","What":"ok|missing|unsure","How":"ok|missing|unsure",
+          "How much":"ok|missing|unsure","缺什么":"一句话面向任务的补齐提示，全部 ok 时为空串"}
+          标签新旧兼容：描述可能用旧版段落（现状/过程方法/目标）或 2W2H 标签
+          （Why/What/How/How much），按语义对应判定（现状→Why、目标→What、
+          过程方法→How），不要求标签字面匹配。
           判定标准：描述里能明确指出该要素说了什么 → ok；完全没提 → missing；
           提了但含糊到无法判断是否交代清楚 → unsure。
 `;
@@ -187,13 +191,14 @@ export async function evaluateReleaseGate(
     return { action: "tag-missing", missing, tags, messages, soft: [], elements };
   }
 
-  // ③ LLM：现状/过程方法/目标（optional 列表里的要素不阻塞放行）
+  // ③ LLM：2W2H 要素（optional 列表里的要素不阻塞放行）
   if (nodeEnabled(doc, "llm_elements")) {
     const cfg = nodeConfig(doc, "llm_elements");
     const elementSpecs = (cfg["elements"] as Record<string, string> | undefined) ?? {
-      现状: "是否交代了当前状况与为什么做",
-      过程方法: "是否给出了可执行的方案/步骤",
-      目标: "是否明确验收标准",
+      Why: "是否交代了为什么做（背景/现状/问题）",
+      What: "是否明确了做什么（需求/目标物）",
+      How: "是否给出了可执行的方案/路径/步骤",
+      "How much": "是否明确了验收标准与边界范围",
     };
     const optionalSet = new Set(
       ((cfg["optional"] as string[] | undefined) ?? []).map((s) => String(s)),

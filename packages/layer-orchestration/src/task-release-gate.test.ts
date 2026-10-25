@@ -19,13 +19,13 @@ const doc: ReleaseDoc = loadReleaseDoc().doc;
 function llmReply(json: string): ReleaseLlm {
   return () => Promise.resolve({ ok: true, value: { text: json } });
 }
-const allOk = llmReply('{"现状":"ok","过程方法":"ok","目标":"ok","缺什么":""}');
+const allOk = llmReply('{"Why":"ok","What":"ok","How":"ok","How much":"ok","缺什么":""}');
 
 function baseRecord(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
     uid: "tsk_test-1",
     title: "优化账单导出",
-    description: "现状：导出表格列错位。过程方法：修复模板渲染并补对账用例。目标：导出与账单一致，对账通过。执行者：徐彬程",
+    description: "Why：导出表格列错位影响对账。What：修复导出列位。How：修复模板渲染并补对账用例。How much：导出与账单一致、对账通过，不改导出权限。执行者：徐彬程",
     status: "planned",
     origin: { provider: "feishu-task", guid: "f-1" },
     projectRef: "TiMEM-AI/timem-platform-backend",
@@ -51,57 +51,66 @@ describe("结构性检查（不烧 LLM）", () => {
   });
 
   it("缺执行人 → tag-missing +【待安排执行者】", async () => {
-    const d = await evaluateReleaseGate(baseRecord({ description: "现状/方法/目标都写了，但没写执行者" }), doc, allOk);
+    const d = await evaluateReleaseGate(baseRecord({ description: "Why/What/How/How much 都写了，但没写执行者" }), doc, allOk);
     expect(d.action).toBe("tag-missing");
     expect(d.tags).toContain("【待安排执行者】");
   });
 });
 
-describe("LLM 三要素判定", () => {
-  it("五项全齐 → auto-release", async () => {
+describe("LLM 2W2H 判定", () => {
+  it("全部要素齐 → auto-release", async () => {
     const d = await evaluateReleaseGate(baseRecord(), doc, allOk);
     expect(d.action).toBe("auto-release");
     expect(d.missing).toEqual([]);
   });
 
-  it("缺过程方法（选填）→ 照常自动放行，只给软提示", async () => {
+  it("缺How（选填）→ 照常自动放行，只给软提示", async () => {
     const d = await evaluateReleaseGate(
       baseRecord(),
       doc,
-      llmReply('{"现状":"ok","过程方法":"missing","目标":"ok","缺什么":"没有方案"}'),
+      llmReply('{"Why":"ok","What":"ok","How":"missing","How much":"ok","缺什么":"没有方案"}'),
     );
     expect(d.action).toBe("auto-release");
     expect(d.missing).toEqual([]);
-    expect(d.soft[0]).toContain("过程方法");
+    expect(d.soft[0]).toContain("How");
     expect(d.tags).toEqual([]);
   });
 
-  it("缺现状（必填）→ 仍拦下 +【缺现状】", async () => {
+  it("缺Why（必填）→ 仍拦下 +【缺Why】", async () => {
     const d = await evaluateReleaseGate(
       baseRecord(),
       doc,
-      llmReply('{"现状":"missing","过程方法":"ok","目标":"ok","缺什么":"没说背景"}'),
+      llmReply('{"Why":"missing","What":"ok","How":"ok","How much":"ok","缺什么":"没说背景"}'),
     );
     expect(d.action).toBe("tag-missing");
-    expect(d.tags).toContain("【缺现状】");
+    expect(d.tags).toContain("【缺Why】");
+  });
+  it("缺How much（必填，验收/边界）→ 拦下 +【缺How much】", async () => {
+    const d = await evaluateReleaseGate(
+      baseRecord(),
+      doc,
+      llmReply('{"Why":"ok","What":"ok","How":"ok","How much":"missing","缺什么":"没有验收标准"}'),
+    );
+    expect(d.action).toBe("tag-missing");
+    expect(d.tags).toContain("【缺How much】");
   });
 
   it("选填要素 unsure 不阻塞；必填 unsure 仍转人工", async () => {
     const dOptional = await evaluateReleaseGate(
       baseRecord(),
       doc,
-      llmReply('{"现状":"ok","过程方法":"unsure","目标":"ok","缺什么":""}'),
+      llmReply('{"Why":"ok","What":"ok","How":"unsure","How much":"ok","缺什么":""}'),
     );
     expect(dOptional.action).toBe("auto-release");
     const dRequired = await evaluateReleaseGate(
       baseRecord(),
       doc,
-      llmReply('{"现状":"unsure","过程方法":"ok","目标":"ok","缺什么":""}'),
+      llmReply('{"Why":"unsure","What":"ok","How":"ok","How much":"ok","缺什么":""}'),
     );
     expect(dRequired.action).toBe("pending-review");
   });
 
-  it("workflows/task-release.yaml 数据面文件与内置语义一致（过程方法选填）", async () => {
+  it("workflows/task-release.yaml 数据面文件与内置语义一致（How 选填）", async () => {
     const { dirname, join } = await import("node:path");
     const { fileURLToPath } = await import("node:url");
     const file = join(
@@ -110,11 +119,11 @@ describe("LLM 三要素判定", () => {
     );
     const fileDoc = loadReleaseDoc(file).doc;
     const optional = (fileDoc.nodes["llm_elements"].config?.["optional"] as string[]) ?? [];
-    expect(optional).toContain("过程方法");
+    expect(optional).toContain("How");
     const d = await evaluateReleaseGate(
       baseRecord(),
       fileDoc,
-      llmReply('{"现状":"ok","过程方法":"missing","目标":"ok","缺什么":""}'),
+      llmReply('{"Why":"ok","What":"ok","How":"missing","How much":"ok","缺什么":""}'),
     );
     expect(d.action).toBe("auto-release");
   });
@@ -123,7 +132,7 @@ describe("LLM 三要素判定", () => {
     const d = await evaluateReleaseGate(
       baseRecord(),
       doc,
-      llmReply('{"现状":"unsure","过程方法":"ok","目标":"ok","缺什么":"背景太含糊"}'),
+      llmReply('{"Why":"unsure","What":"ok","How":"ok","How much":"ok","缺什么":"背景太含糊"}'),
     );
     expect(d.action).toBe("pending-review");
     expect(d.tags).toContain("【待复核】");
