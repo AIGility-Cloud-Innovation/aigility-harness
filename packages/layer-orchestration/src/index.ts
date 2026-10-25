@@ -196,6 +196,13 @@ export type {
   ConsolidationItem,
 } from "./requirement-store.js";
 export { TaskRegistry } from "./task-registry.js";
+export {
+  runObstacleAnalyst, obstacleAnalystEnabled, obstacleAnalystModel,
+  extractFailureMember, sanitizeForReviewGate,
+  buildObstacleMessages, parseObstacleAnalysis, fallbackObstacleAnalysis, composeFollowUp,
+  OBSTACLE_CATEGORIES,
+} from "./obstacle-analyst.js";
+export type { ObstacleAnalysis, ObstacleFailure, ObstacleLlm } from "./obstacle-analyst.js";
 export type { AdoptTaskInput, TaskListFilter } from "./task-registry.js";
 
 // ── 工人小组（worker-team：接单/分派/派发/回流，D4 编排域） ──────

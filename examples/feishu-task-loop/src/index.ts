@@ -69,6 +69,7 @@ import {
   createGiteaIssueProvider,
   SECTION_NAMES,
 } from "@aigility-harness/layer-orchestration";
+import { makeObstacleAnalystOnResult } from "./obstacle-wiring.js";
 import { getSharedRegistry, getReviewCodes, assignReviewCodes } from "./review-aware.js";
 import { wireLlmNodes } from "@aigility-harness/appbase/llm-node-store";
 import { syncGiteaCompletions } from "./completion-sync.js";
@@ -492,7 +493,15 @@ async function main(): Promise<void> {
         }
       : {}),
   });
-  const teamLoop = startWorkerTeamLoop({ team: workerTeam });
+  // 障碍分析员（2026-10-26）：工人失败结果 → LLM 归因 → 飞书 P 组待审核修复卡；
+  // OBSTACLE_ANALYST=0 关闭；回调异常不影响工人循环（见 obstacle-wiring/obstacle-analyst）。
+  const obstacleOnResult = makeObstacleAnalystOnResult({
+    ctx,
+    registry: getSharedRegistry(),
+    tasklistNames,
+    ...(notifyChatId ? { notify: async (text: string) => { await start.value.send(notifyChatId, text); } } : {}),
+  });
+  const teamLoop = startWorkerTeamLoop({ team: workerTeam, onResult: obstacleOnResult });
 
   // 7.5 agent 任务免工单链（2026-10-13 拍板）：plan-gate 加工 P 组的 agent 任务时
   //     直接写共享台账并放行 ready（不建工单、不挪 D），工人小组经同一登记表认领。
