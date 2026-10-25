@@ -1381,6 +1381,24 @@ export interface ChannelPlan {
 /** 平台可用模型池（网关上游模型列表；不可达时返回空 + 说明） */
 export interface GatewayModelEntry { id: string; provider: string; maxIn?: number; maxOut?: number }
 
+export interface LlmSourceModel { name: string; upstreamModel: string; rpm?: number; tpm?: number }
+export interface LlmSourceNode { id: string; label: string; apiBase: string; keyRef: string; models: LlmSourceModel[]; aliases: string[] }
+export interface LlmSourcesSnapshot { configPath: string; sources: LlmSourceNode[]; modelCount: number; updatedAt: string }
+export interface LlmSourceProbeResult { ok: boolean; status?: number; model?: string; ms?: number; snippet?: string; error?: string }
+
+export async function fetchLlmSources(): Promise<{ ok: boolean; error?: string } & Partial<LlmSourcesSnapshot>> {
+  return authJsonFetch('/api/aigility/llm-sources')
+}
+export async function addLlmSourceAlias(name: string, targetModel: string): Promise<{ ok: boolean; error?: string; hint?: string }> {
+  return authJsonFetch('/api/aigility/llm-sources/alias', { method: 'POST', body: JSON.stringify({ name, targetModel }) })
+}
+export async function removeLlmSourceModel(name: string): Promise<{ ok: boolean; error?: string }> {
+  return authJsonFetch(`/api/aigility/llm-sources/models/${encodeURIComponent(name)}`, { method: 'DELETE' })
+}
+export async function probeLlmSourceModel(name: string): Promise<LlmSourceProbeResult> {
+  return authJsonFetch(`/api/aigility/llm-sources/models/${encodeURIComponent(name)}/probe`, { method: 'POST' })
+}
+
 export async function fetchLlmModels(): Promise<{ ok: boolean; models: string[]; entries?: GatewayModelEntry[]; health?: { healthy: number; unhealthy: number }; error?: string }> {
   return authJsonFetch('/api/aigility/llm/models')
 }

@@ -55,6 +55,7 @@ export const moduleRegistry: ModuleManifest[] = [
   { id: 'tools', name: '工具管理', kind: 'page', page: 'tools', category: '平台能力', desc: '工具插件安装/启停/卸载 + 能力总线 + MCP 工具总线，统一工具管理', available: true, serverRoutes: ['/api/aigility/plugins', '/api/aigility/dsh/tools'] },
   { id: 'orchestration', name: '编排管理', kind: 'page', page: 'orchestration', category: '平台能力', desc: '数据面工作流图形化管理：节点画布、条件分支、循环与编排委托', available: true, serverRoutes: ['/api/aigility/flows'] },
   { id: 'models', name: '模型管理', kind: 'page', page: 'models', category: '平台能力', desc: '多模型接入与路由：语言/代码/视觉/向量/重排序，私有推理可计量', available: true },
+  { id: 'llm-sources', name: 'LLM 来源节点', kind: 'page', page: 'llm-sources', category: '平台能力', desc: '上游渠道与别名映射管理：来源健康、探活、增删别名，模型路由故障就地修复', available: true, serverRoutes: ['/api/aigility/llm-sources'] },
   { id: 'ops', name: '运营驾驶舱', kind: 'page', page: 'ops', category: '平台能力', desc: '调用量、Token、成功率、知识库命中率与今日任务一屏总览', available: true },
   { id: 'task-loop', name: '项目小助理运维', kind: 'app-package', category: '平台能力', desc: '机器人进程启停 / 凭证 / 配置 / 运行日志（看板已并入任务台账看板）', available: true, entry: { mode: 'redirect', url: 'task-loop-config' }, serverRoutes: ['/api/aigility/task-loop'] },
   { id: 'identity', name: '身份对齐', kind: 'page', page: 'identity', category: '平台能力', desc: '同一个人在 飞书/Gitea/太忆云 是同一个人：花名册自动匹配 + 人工审查绑定', available: true, serverRoutes: ['/api/aigility/identity'] },

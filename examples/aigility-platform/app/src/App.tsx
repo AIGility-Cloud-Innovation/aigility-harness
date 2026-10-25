@@ -15,6 +15,7 @@ import WorkspacePage from './pages/WorkspacePage'
 import TaskBoardPage from './pages/TaskBoardPage'
 import StudioPage from './pages/StudioPage'
 import ModelsPage from './pages/ModelsPage'
+import LlmSourcesPage from './pages/LlmSourcesPage'
 import ToolsPage from './pages/ToolsPage'
 import TaskLoopBoardPage from './pages/TaskLoopBoardPage'
 import TaskLoopConfigPage from './pages/TaskLoopConfigPage'
@@ -41,7 +42,7 @@ import {
 const moduleIcon: Record<string, any> = {
   workspace: Briefcase, agent: Bot, market: Store, apps: LayoutGrid, studio: Factory, tasks: ListChecks, orchestration: ListTree,
   ingest: Database, graph: Network, space: BrainCircuit, process: GitBranch,
-  tools: Wrench, models: Cpu, ops: Gauge, 'task-loop': Bot, 'team-memory': BookOpenCheck, 'log-monitor': ScanSearch,
+  tools: Wrench, models: Cpu, ops: Gauge, 'task-loop': Bot, 'team-memory': BookOpenCheck, 'log-monitor': ScanSearch, 'llm-sources': Network,
   identity: UserCheck,
 }
 
@@ -254,6 +255,7 @@ export default function App() {
       case 'identity': return <IdentityPage />
       case 'log-monitor': return <LogMonitorPage navVisible={!navHidden.has('log-monitor')} onToggleNav={() => toggleNavIfAllowed('log-monitor')} navEditable={navEditable} />
       case 'models': return <ModelsPage />
+      case 'llm-sources': return <LlmSourcesPage />
       case 'ops': return <OpsPage />
       case 'modules': return <ModulePage enabled={enabledModules} toggle={toggleModule} applyFullState={applyFullState} navHidden={navHidden} onToggleNav={toggleNavIfAllowed} navEditable={navEditable} />
       case 'auth': return <AuthPage viewerIsAdmin={navEditable} />

@@ -91,6 +91,7 @@ import { loadRolePackage, loadRolePackages, validateRoleManifest, validateSitePe
 import { checkPermissions, resolveUserPermissionKeys, assignRoleToUser, revokeRoleFromUser, setRolePermissionGroups } from "@aigility-harness/rbac";
 import { ensureRbacReady, rbacStore } from "./rbac-store.js";
 import { ensureLlmNodeReady, llmNodeStore } from "./llm-node-store.js";
+import { LlmSourcesStore } from "./llm-sources-store.js";
 import { resolveLLMNode } from "@aigility-harness/layer-cognitive/llm-node";
 import { existsSync as fileExists, mkdirSync, cpSync, rmSync, renameSync } from "node:fs";
 
@@ -1365,6 +1366,62 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
           });
         } catch (e) {
           json(res, 200, { ok: false, error: String(e) });
+        }
+        return;
+      }
+
+      // ── LLM 来源节点管理（litellm config.yaml 受控读写 · 管理员闸门同 llm 节点）──
+      const llmSources = new LlmSourcesStore();
+      if (path === "/api/aigility/llm-sources" && req.method === "GET") {
+        if (!requireUser(req, res)) return;
+        try {
+          json(res, 200, { ok: true, ...llmSources.snapshot() });
+        } catch (e) { json(res, 500, { ok: false, error: String(e) }); }
+        return;
+      }
+      if (path === "/api/aigility/llm-sources/alias" && req.method === "POST") {
+        if (!requireUser(req, res)) return;
+        if (!(await llmAdminGate())) { json(res, 403, { ok: false, error: "需要 model:manage 权限" }); return; }
+        const body = JSON.parse((await readBody(req)) || "{}") as { name?: string; targetModel?: string };
+        if (!body.name?.trim() || !body.targetModel?.trim()) { json(res, 400, { ok: false, error: "需要 name 与 targetModel" }); return; }
+        try {
+          const r = llmSources.addAlias(body.name.trim(), body.targetModel.trim());
+          void writeAudit(sessionUserId(req) ?? "unknown", "llm.source.alias.add", body.name.trim() + " → " + body.targetModel.trim());
+          json(res, 200, { ok: true, ...r, hint: "配置已写入，litellm 重启后生效" });
+        } catch (e) { json(res, 409, { ok: false, error: String(e) }); }
+        return;
+      }
+      const llmSourceModelDel = path.match(/^\/api\/aigility\/llm-sources\/models\/([^/]+)$/);
+      if (llmSourceModelDel && req.method === "DELETE") {
+        if (!requireUser(req, res)) return;
+        if (!(await llmAdminGate())) { json(res, 403, { ok: false, error: "需要 model:manage 权限" }); return; }
+        const name = decodeURIComponent(llmSourceModelDel[1]);
+        try {
+          const r = llmSources.removeModel(name);
+          void writeAudit(sessionUserId(req) ?? "unknown", "llm.source.model.remove", name);
+          json(res, 200, { ok: true, ...r, hint: "配置已写入，litellm 重启后生效" });
+        } catch (e) { json(res, 409, { ok: false, error: String(e) }); }
+        return;
+      }
+      const llmSourceProbe = path.match(/^\/api\/aigility\/llm-sources\/models\/([^/]+)\/probe$/);
+      if (llmSourceProbe && req.method === "POST") {
+        if (!requireUser(req, res)) return;
+        const probeName = decodeURIComponent(llmSourceProbe[1]);
+        const gw = (process.env["LITELLM_URL"] ?? "http://127.0.0.1:48724").replace(/\/$/, "");
+        const t0 = Date.now();
+        try {
+          const r = await fetch(gw + "/v1/chat/completions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: "Bearer " + (process.env["LITELLM_KEY"] ?? "") },
+            body: JSON.stringify({ model: probeName, messages: [{ role: "user", content: "请回复两个字：正常" }], max_tokens: 16, temperature: 0 }),
+          });
+          const ms = Date.now() - t0;
+          const payload = (await r.text()).slice(0, 120);
+          void writeAudit(sessionUserId(req) ?? "unknown", "llm.source.probe", probeName + " → " + r.status + " " + ms + "ms");
+          json(res, 200, { ok: r.ok, status: r.status, model: probeName, ms, snippet: payload });
+        } catch (e) {
+          void writeAudit(sessionUserId(req) ?? "unknown", "llm.source.probe", probeName + " → 失败");
+          json(res, 200, { ok: false, model: probeName, ms: Date.now() - t0, error: String(e) });
         }
         return;
       }
