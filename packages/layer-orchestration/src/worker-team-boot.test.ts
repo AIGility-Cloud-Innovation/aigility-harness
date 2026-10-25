@@ -57,4 +57,21 @@ describe("makeResolveCwd（真源匹配 + 无默认仓库）", () => {
     const resolve = makeResolveCwd();
     expect(resolve("TiMEM-AI/不存在的仓库")).toBeUndefined();
   });
+
+  // 2026-10-25 现场事故：台账 projectRef 写成全小写 "TiMEM-AI/timem-space"，
+  // 实际远端 "TiMEM-AI/TiMEM-Space"，原 endsWith 大小写敏感 → 解析失败 → 任务无 cwd。
+  it("大小写不敏感：projectRef 全小写也命中 timem/TiMEM-Space", () => {
+    const resolve = makeResolveCwd();
+    expect(resolve("TiMEM-AI/timem-space")).toBe(join(root, "timem", "TiMEM-Space"));
+  });
+
+  it("`-` 与 `_` 等价：下划线写法命中连字符仓库", () => {
+    const resolve = makeResolveCwd();
+    expect(resolve("TiMEM-AI/timem_platform_backend")).toBe(join(root, "timem-platform-backend"));
+  });
+
+  it("短名直探同样忽略大小写与 `_`/`-` 差异", () => {
+    const resolve = makeResolveCwd();
+    expect(resolve("X/TIMEM_PLATFORM_BACKEND")).toBe(join(root, "timem-platform-backend"));
+  });
 });
