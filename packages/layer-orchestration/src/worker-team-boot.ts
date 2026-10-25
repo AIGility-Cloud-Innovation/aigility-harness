@@ -216,11 +216,6 @@ export function startWorkerTeamLoop(opts: {
   intervalMs?: number;
   /** 每拍最多接几单（默认 3） */
   batchLimit?: number;
-  /**
-   * 每单结果回调（2026-10-26 障碍分析员接线）：失败结果在此触发自动归因。
-   * 回调异常只记日志，绝不影响驱动循环（分析慢/坏不拖工人下一拍）。
-   */
-  onResult?: (uid: string, result: { ok: boolean; value?: string; error?: string }) => void | Promise<void>;
 }): { stop: () => void } {
   const env = Number(process.env["WORKER_TEAM_INTERVAL_MS"] ?? "");
   const interval = env === 0 ? 0 : (Number.isFinite(env) && env > 0 ? env : opts.intervalMs ?? 60_000);
@@ -237,13 +232,6 @@ export function startWorkerTeamLoop(opts: {
       for (const { uid, result } of results) {
         if (result.ok) console.log(`[worker-team] ${uid} ✅ ${result.value}`);
         else console.error(`[worker-team] ${uid} ❌ ${result.error}`);
-        if (opts.onResult) {
-          try {
-            await opts.onResult(uid, { ok: result.ok, ...(result.ok ? { value: result.value } : { error: result.error }) });
-          } catch (e) {
-            console.error(`[worker-team] ${uid} onResult 回调失败（不影响循环）: ${String(e)}`);
-          }
-        }
       }
       // 决策看门狗（2026-10-19）：过期 needs-input 按 onTimeout 处理（默认=按缺省项自动续跑）。
       // 修复前 settleExpiredDecisions 只有定义全仓零调用 = 死代码，needs-input 会无限等待。

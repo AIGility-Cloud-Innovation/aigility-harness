@@ -163,6 +163,12 @@ export interface WorkerTeamOptions {
    */
   finish?: (info: FinishInfo) => Promise<{ ok: boolean; detail: string }>;
   /**
+   * 单任务结果回调（2026-10-26 障碍分析员）：每个任务 dispatch 一返回就触发
+   * （不等整批跑完——批内下一任务可能长达 60 分钟，批末回调会把失败归因
+   * 拖到整批结束）。回调异常只记日志，绝不影响批内后续任务。
+   */
+  onResult?: (uid: string, result: { ok: boolean; value?: string; error?: string }) => void | Promise<void>;
+  /**
    * 派发前工作区准备（2026-10-13 worktree 隔离）：resolveCwd 解析出「仓库根」后，
    * 由此钩子产出「本任务专属工作目录」（通常是 worktree 路径）与所在分支，
    * 工人与收尾器都在该目录内作业。返回 ok:false 则放弃派发（不退回主仓库）。
@@ -306,7 +312,15 @@ export class WorkerTeam {
       .slice(0, limit);
     const results: Array<{ uid: string; result: Result<string> }> = [];
     for (const t of ready) {
-      results.push({ uid: t.uid, result: await this.dispatch(t) });
+      const result = await this.dispatch(t);
+      results.push({ uid: t.uid, result });
+      if (this.o.onResult) {
+        try {
+          await this.o.onResult(t.uid, { ok: result.ok, ...(result.ok ? { value: result.value } : { error: result.error }) });
+        } catch (e) {
+          console.error(`[worker-team] ${t.uid} onResult 回调失败（不影响批内后续任务）: ${String(e)}`);
+        }
+      }
     }
     return results;
   }

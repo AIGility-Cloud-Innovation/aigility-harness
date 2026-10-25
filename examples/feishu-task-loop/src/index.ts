@@ -474,9 +474,17 @@ async function main(): Promise<void> {
   // 跨仓差异用 origin/HEAD 声明表达（git remote set-head origin -a），不靠启动期一刀切。
   // 决策播报 DM 抄送目标（可选）：决策反问除机器人群外并行发该会话，保证用户看得到
   const decisionDmChatId = process.env["TASK_DECISION_DM_CHAT_ID"] ?? "";
+  // 障碍分析员（2026-10-26）：单任务 dispatch 回流即归因（不等整批）；
+  // OBSTACLE_ANALYST=0 关闭；回调异常不影响批内后续任务（见 obstacle-wiring）。
+  const obstacleOnResult = makeObstacleAnalystOnResult({
+    ctx,
+    registry: getSharedRegistry(),
+    ...(notifyChatId ? { notify: async (text: string) => { await start.value.send(notifyChatId, text); } } : {}),
+  });
   const workerTeam = createWorkerTeam({
     ctx,
     registry: getSharedRegistry(),
+    onResult: obstacleOnResult,
     // send 返回 Promise<string|void>，收尾器 notify 只需 Promise<void>——包装丢弃返回值
     ...(notifyChatId ? { notify: async (text: string) => { await start.value.send(notifyChatId, text); } } : {}),
     // 决策播报：机器人群 + 可选 DM 抄送（2026-10-19 修复静默丢失）
@@ -493,14 +501,7 @@ async function main(): Promise<void> {
         }
       : {}),
   });
-  // 障碍分析员（2026-10-26）：工人失败结果 → LLM 归因 → 飞书 P 组待审核修复卡；
-  // OBSTACLE_ANALYST=0 关闭；回调异常不影响工人循环（见 obstacle-wiring/obstacle-analyst）。
-  const obstacleOnResult = makeObstacleAnalystOnResult({
-    ctx,
-    registry: getSharedRegistry(),
-    ...(notifyChatId ? { notify: async (text: string) => { await start.value.send(notifyChatId, text); } } : {}),
-  });
-  const teamLoop = startWorkerTeamLoop({ team: workerTeam, onResult: obstacleOnResult });
+  const teamLoop = startWorkerTeamLoop({ team: workerTeam });
 
   // 7.5 agent 任务免工单链（2026-10-13 拍板）：plan-gate 加工 P 组的 agent 任务时
   //     直接写共享台账并放行 ready（不建工单、不挪 D），工人小组经同一登记表认领。

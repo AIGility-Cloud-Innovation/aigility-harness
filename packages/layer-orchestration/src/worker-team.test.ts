@@ -204,6 +204,36 @@ describe("WorkerTeam 派发与回流", () => {
     expect(reg.get(t.uid)!.status).toBe("failed");
   });
 
+  it("onResult：单任务 dispatch 回流即触发（不等整批跑完）", async () => {
+    const reg = new TaskRegistry();
+    seedTask(reg, { title: "t1 快速失败", description: "desc-t1-fast" });
+    seedTask(reg, { title: "t2 慢速成功", description: "desc-t2-slow" });
+    const fired: string[] = [];
+    let release2!: () => void;
+    const gate2 = new Promise<void>((r) => { release2 = r; });
+    const team = new WorkerTeam(
+      {
+        registry: reg,
+        callWorker: async (_m, args) => {
+          if (String(args.prompt).includes("desc-t2-slow")) {
+            await gate2; // t2 长跑（模拟同批下一任务 60 分钟）
+            return { ok: true, text: "done2" };
+          }
+          return { ok: false, text: "", error: "boom-t1" };
+        },
+        onResult: (uid, result) => { fired.push(`${uid}:${result.ok ? "ok" : "fail"}`); },
+      },
+      ROSTER,
+    );
+    const batch = team.takeReady(3); // t1 快速失败 → 回调应即刻发生；t2 阻塞在 gate
+    await new Promise((r) => setTimeout(r, 80));
+    expect(fired).toHaveLength(1); // t1 已回流回调，不被 t2 阻塞
+    expect(fired[0]).toContain(":fail");
+    release2();
+    await batch;
+    expect(fired).toHaveLength(2); // t2 完成后其二回调
+  });
+
   it("takeReady：只接 ready 队列，派发后不再重复接", async () => {
     const reg = makeRegistry();
     seedTask(reg, { title: "任务一" });
