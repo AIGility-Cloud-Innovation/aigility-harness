@@ -286,14 +286,17 @@ export class WorkerTeam {
    * running 已有工人会话，不在回收范围（人工接管）。
    */
   recoverOrphans(): number {
-    const orphans = this.o.registry.list({ status: ["dispatched"] });
+    // running 同为 worker-team 独占态：进程重启后上一轮 running 必为孤儿（结果随旧
+    // 进程丢失），不回收将永久滞留无法再认领（2026-10-26 实测：重启恰好杀在收尾期，
+    // 任务卡 running 无人认领）。启动期回收天然安全——新进程此刻不持有任何任务。
+    const orphans = this.o.registry.list({ status: ["dispatched", "running"] });
     let n = 0;
     for (const t of orphans) {
-      const back = this.o.registry.transition(t.uid, "ready", "dispatched");
+      const back = this.o.registry.transition(t.uid, "ready", t.status);
       if (back.ok) n++;
-      else console.error(`[worker-team] 孤儿回收失败 ${t.uid}: ${back.error}`);
+      else console.error(`[worker-team] 孤儿回收失败 ${t.uid}(${t.status}): ${back.error}`);
     }
-    if (n > 0) console.log(`[worker-team] 重启孤儿回收：${n} 条 dispatched 打回 ready 重新认领`);
+    if (n > 0) console.log(`[worker-team] 重启孤儿回收：${n} 条 dispatched/running 打回 ready 重新认领`);
     return n;
   }
 
