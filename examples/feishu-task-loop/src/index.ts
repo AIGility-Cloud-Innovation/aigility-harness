@@ -498,7 +498,6 @@ async function main(): Promise<void> {
   const obstacleOnResult = makeObstacleAnalystOnResult({
     ctx,
     registry: getSharedRegistry(),
-    tasklistNames,
     ...(notifyChatId ? { notify: async (text: string) => { await start.value.send(notifyChatId, text); } } : {}),
   });
   const teamLoop = startWorkerTeamLoop({ team: workerTeam, onResult: obstacleOnResult });

@@ -33,11 +33,13 @@ async function callFeishu(ctx: CtxLike, req: Record<string, unknown>): Promise<F
 async function createRepairCard(opts: {
   ctx: CtxLike;
   orgName?: string;
-  tasklistNames: string[];
+  /** 配置清单名（可选；清单位以组织名匹配为主，缺省回落第一个清单） */
+  tasklistNames?: string[];
   title: string;
   description: string;
 }): Promise<{ guid: string; url?: string } | undefined> {
-  const { ctx, orgName, tasklistNames, title, description } = opts;
+  const { ctx, orgName, title, description } = opts;
+  const tasklistNames = opts.tasklistNames ?? [];
   const lists = await callFeishu(ctx, {
     method: "GET", path: "/open-apis/task/v2/tasklists", query: { page_size: "50" }, identity: "user",
   });
@@ -82,10 +84,11 @@ async function createRepairCard(opts: {
 export function makeObstacleAnalystOnResult(opts: {
   ctx: CtxLike;
   registry: TaskRegistry;
-  tasklistNames: string[];
+  tasklistNames?: string[];
   notify?: (text: string) => Promise<void> | void;
 }): (uid: string, result: { ok: boolean; value?: string; error?: string }) => Promise<void> {
-  const { ctx, registry, tasklistNames, notify } = opts;
+  const { ctx, registry, notify } = opts;
+  const tasklistNames = opts.tasklistNames ?? [];
   return async (uid, result) => {
     if (result.ok) return;
     if (!obstacleAnalystEnabled()) return;
