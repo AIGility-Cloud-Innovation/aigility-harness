@@ -19,7 +19,7 @@
  * 改动保留在工作区/stash 不丢，等人接管；不重试不换人（业界惯例：
  * 超时/失败=终态留现场，换人重跑烧 token 且产出混杂——2026-10-13 拍板）。
  */
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import type { SeamContext, TaskRecord } from "@aigility-harness/core";
 import type { WorkerTeamOptions } from "./worker-team.js";
@@ -189,6 +189,37 @@ export async function listChangedFiles(cwd: string): Promise<string[]> {
 }
 
 /**
+ * 剔除被 .gitignore 覆盖的路径（2026-10-25 事故修复）。
+ *
+ * 事故：工人在 worktree 留下 `.backups/<agent>-<时间戳>/` 快照，仓库 .gitignore
+ * 已含 `.backups/`。收尾 `git add -- .backups/...` 撞上忽略规则 → git 致命错误
+ * "下列路径根据您的一个 .gitignore 文件而被忽略" → 整批交付失败（前端卡 309 行
+ * 成果因此送不出去，重试 4 次全废）。
+ *
+ * 做法：`git check-ignore --stdin` 一次性判定（比逐文件 spawn 快），被忽略的剔除；
+ * 命令本身失败时保守返回原列表（宁可交付失败报错，也不静默丢用户改动）。
+ */
+export async function filterIgnored(files: string[], cwd: string): Promise<string[]> {
+  if (files.length === 0) return files;
+  return new Promise<string[]>((resolve) => {
+    // -z 必须与 --stdin 共用（git 约束）；execFile 不能写 stdin，用 spawn。
+    // -z: NUL 分隔，文件名含空格/换行也不会拆错
+    const child = spawn("git", ["-c", "core.quotePath=false", "check-ignore", "-z", "--stdin"], {
+      cwd,
+    });
+    let out = "";
+    child.stdout.on("data", (b: Buffer) => (out += b.toString("utf8")));
+    child.on("error", () => resolve(files)); // git 不可用：保守放行
+    child.on("close", () => {
+      // 退出码 1 = 无文件被忽略（正常），stdout 为空 → 全部保留
+      const ignored = new Set(out.split("\0").filter(Boolean));
+      resolve(files.filter((f) => !ignored.has(f)));
+    });
+    child.stdin.end(files.join("\0") + "\0");
+  });
+}
+
+/**
  * 默认基线分支：env 显式 → origin/HEAD → 目标仓库实际 HEAD → 兜底 main。
  *
  * 2026-10-15 事故修正：旧实现 origin/HEAD 探测失败即硬编码回退 "main"，
@@ -303,8 +334,39 @@ async function createPullRequest(
     typeof raw.number === "number"
       ? ({ number: raw.number, html_url: raw.html_url } as { number?: number; html_url?: string })
       : nested;
-  if (!d?.number) throw new Error(`建 PR 响应异常: 无 number（data=${JSON.stringify(raw).slice(0, 200)}）`);
+  if (!d?.number) {
+    // 「PR 已存在」不是失败（2026-10-25 事故）：工人可能重跑，分支上已有开放 PR，
+    // Gitea 返回 409-ish 的 message 而非 number。此时应复用已有 PR，把新提交补进去，
+    // 而不是把整轮成果判为失败（前端卡因此白跑一轮）。
+    const msgText = JSON.stringify(raw);
+    if (/already exists/i.test(msgText)) {
+      const existing = await findOpenPr(call, p.repo, p.head);
+      if (existing) return existing;
+    }
+    throw new Error(`建 PR 响应异常: 无 number（data=${msgText.slice(0, 200)}）`);
+  }
   return { number: d.number, url: d.html_url ?? `PR #${d.number}` };
+}
+
+/** 按 head 分支查已开放的 PR（复用而非重复创建） */
+async function findOpenPr(
+  call: GiteaCall,
+  repo: string,
+  head: string,
+): Promise<{ number: number; url: string } | undefined> {
+  const r = await call({
+    method: "GET",
+    path: `/api/v1/repos/${repo}/pulls?state=open&limit=50`,
+  });
+  if (!r.ok) return undefined;
+  const raw = (r.value?.data ?? {}) as Record<string, unknown>;
+  const list = (Array.isArray(raw) ? raw : (raw.data as unknown[] | undefined) ?? []) as Array<{
+    number?: number;
+    html_url?: string;
+    head?: { ref?: string };
+  }>;
+  const hit = list.find((x) => x.head?.ref === head);
+  return hit?.number ? { number: hit.number, url: hit.html_url ?? `PR #${hit.number}` } : undefined;
 }
 
 /**
@@ -376,8 +438,15 @@ export function createPrFinisher(opts: PrFinisherOptions): NonNullable<WorkerTea
       }
 
       // 4. 按文件提交（gpg 失败退无签名重试一次）
-      await git(["add", "--", ...files], { cwd });
-      const msg = buildCommitMessage(task, member, files);
+      // 交付前剔除 .gitignore 覆盖的文件（2026-10-25 事故）：工人常留 .backups/ 快照，
+      // 而仓库 .gitignore 已忽略它 —— git add 撞忽略规则直接致命，整批改动送不出去
+      // （前端卡 309 行成果卡在这一步）。这里主动过滤，不让工件拖垮交付。
+      const stageable = await filterIgnored(files, cwd);
+      if (stageable.length === 0) {
+        return { ok: false, detail: "改动全部落在 .gitignore 覆盖范围内（如 .backups/），无可交付文件" };
+      }
+      await git(["add", "--", ...stageable], { cwd });
+      const msg = buildCommitMessage(task, member, stageable);
       try {
         await git(["commit", "-m", msg], { cwd });
       } catch {

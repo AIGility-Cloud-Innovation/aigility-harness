@@ -1868,6 +1868,16 @@ export async function runPlanGate(
           }
           continue;
         }
+        // A 案闸门（2026-10-24 用户拍板）：TASK_AUTO_DISPATCH=0 = 全手动。
+        // 此前 agent 任务在「机器挪 D」闸门前就直通 ready（工人随即认领），
+        // 用户看到「没挪卡就派发了」。开关关闭时，台账不动、卡留 P 等人挪。
+        if (!autoDispatchEnabled()) {
+          if (!agentReleasedReported.has("manual:" + guid)) {
+            agentReleasedReported.add("manual:" + guid);
+            reports.push(`⏸️ 「${summary.slice(0, 40)}」agent 任务要素齐备；TASK_AUTO_DISPATCH=0，留 P 待人工挪入「${SECTION_NAMES.doing}」授权执行。`);
+          }
+          continue;
+        }
         const approved = reg.approve(rec.uid, {
           via: "auto",
           by: "system",

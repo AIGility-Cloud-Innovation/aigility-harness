@@ -182,8 +182,14 @@ export const codexAgentService: ServiceDefinition<
 // ── 常量 ─────────────────────────────────────────────────────────
 
 const DEFAULT_TIMEOUT_MS = 300_000; // 5 min
-/** 静默看门狗默认阈值：8 分钟内无任何 stdout 事件 = 判定卡死 */
-const DEFAULT_SILENT_TIMEOUT_MS = 480_000; // 8 min
+/**
+ * 静默看门狗默认阈值：20 分钟内无任何 stdout 事件 = 判定卡死。
+ *
+ * 2026-10-25 事故：原 8 分钟在「导出费用明细」这类多文件改造上误杀——工人先大量
+ * 读代码/探结构，长时间不产生 stdout，连续两轮被判 stalled（各烧 8-20 分钟窗口）。
+ * 编码任务的自然静默远长于问答任务，放宽到 20 分钟；真挂死仍由整体 timeoutMs 兜底。
+ */
+const DEFAULT_SILENT_TIMEOUT_MS = 1_200_000; // 20 min
 const DEFAULT_APPROVAL_POLICY: CodexApprovalPolicy = "on-failure";
 const DEFAULT_SANDBOX_MODE: CodexSandboxMode = "workspace-write";
 

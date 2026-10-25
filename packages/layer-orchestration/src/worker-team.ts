@@ -280,6 +280,10 @@ export class WorkerTeam {
 
   /** 接单：扫台账 ready 队列并逐个派发（供 cron/调度循环调用） */
   async takeReady(limit = 5): Promise<Array<{ uid: string; result: Result<string> }>> {
+    // 注意（2026-10-24 用户澄清）：TASK_AUTO_DISPATCH=1 才自动挪 D 后派发；
+    // =0 时卡留 P 等人工挪 D——但「人工挪进 D 就派发」不受此开关约束（用户授权即执行）。
+    // 因此闸门不能设在认领侧：D 组派发走 dispatch-scan（listSectionTasks），
+    // 本方法只服务 ready 队列，若在此拦截，人工挪 D 的任务也派不出去。
     const ready = this.o.registry
       .list({ status: ["ready"] })
       .filter((t) => !this.dispatched.has(t.uid))
@@ -337,7 +341,9 @@ export class WorkerTeam {
     // 沙箱边界提示（2026-10-13）：工人 CLI 在沙箱里断网且 .git 只读，git 写操作/
     // push 必败。只管编码+测试，git 与 PR 由宿主侧收尾器统一完成。
     const boundary = boundaryLines();
-    const timeoutMs = this.o.defaultTimeoutMs ?? 30 * 60_000;
+    // 编码类任务 60 分钟（2026-10-24 拍板）：30 分钟对多文件改造/测试编写不够，
+    // 实测后端导出卡连续两次跑满 30 分钟被杀。可用 WORKER_TEAM_TIMEOUT_MS 覆盖。
+    const timeoutMs = this.o.defaultTimeoutMs ?? (Number(process.env.WORKER_TEAM_TIMEOUT_MS) || 60 * 60_000);
     // 失败即终态（2026-10-13 拍板）：不换人重跑（烧 token 且产出混杂），留现场等人接管
     const failoverLimit = this.o.failoverLimit ?? 0;
 
@@ -390,7 +396,9 @@ export class WorkerTeam {
       return err("决策重入异常：决策文件缺失或非法");
     }
     const concl = d.decision.decision;
-    const timeoutMs = this.o.defaultTimeoutMs ?? 30 * 60_000;
+    // 编码类任务 60 分钟（2026-10-24 拍板）：30 分钟对多文件改造/测试编写不够，
+    // 实测后端导出卡连续两次跑满 30 分钟被杀。可用 WORKER_TEAM_TIMEOUT_MS 覆盖。
+    const timeoutMs = this.o.defaultTimeoutMs ?? (Number(process.env.WORKER_TEAM_TIMEOUT_MS) || 60 * 60_000);
     // 状态转移（2026-10-13 修复）：本方法有两个入口——needs-input 直入、
     // 以及「决策已写回后重入队为 ready」的派发路径。用当前状态作为 from，
     // 避免在 ready 入口下 from=needs-input 不匹配而使转移静默失效（卡在 ready）。
