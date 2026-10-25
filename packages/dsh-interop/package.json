@@ -13,11 +13,11 @@
   "dependencies": {
     "@aigility-harness/core": "workspace:*",
     "@deepseek-ai/cordis": "~4.0.4",
-    "@deepseek-ai/dsh": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-base": "0.2.0-rc.2",
+    "@deepseek-ai/dsh": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-base": "0.2.1-rc.3",
     "js-yaml": "^4.2.0",
-    "@deepseek-ai/dsh-system-prompt": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-tools": "0.2.0-rc.2"
+    "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.3"
   },
   "devDependencies": {
     "@aigility-harness/kernel-dsh": "workspace:*",
