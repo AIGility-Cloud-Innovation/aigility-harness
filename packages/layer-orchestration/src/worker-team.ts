@@ -502,6 +502,8 @@ export class WorkerTeam {
       // 注意：resume 续跑失败时运行态已由 resumeDecisionTask 转入 running，
       // handleRunResult 只见 running（首次派发也是 running）→ from 恒 running
       const lastError = r.error ?? "unknown";
+      // 2026-10-26 回归修复：83e78a2 加取证时误删了本行——失败不落终态，卡死 running 不挪 A
+      this.o.registry.transition(task.uid, "failed", "running");
 
       // ── 失败取证（2026-10-26 障碍分析员配套）：stderr 尾部 + git log + git status ──
       const evidence: Record<string, string> = {
