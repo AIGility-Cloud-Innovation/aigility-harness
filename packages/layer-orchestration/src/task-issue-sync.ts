@@ -1259,6 +1259,10 @@ async function handleDecision(ref: string, option: string): Promise<string> {
   if (!cwd) return `❓ ${task.uid.slice(-6)}「${task.title}」未关联仓库，无法定位决策文件。`;
   const chk = readAgentDecision(cwd);
   if (!chk.found) return `❓ ${task.uid.slice(-6)} 当前没有待决策的决策文件（可能已处理）。`;
+  if (chk.invalid || !chk.decision) return `⚠️ ${task.uid.slice(-6)} 决策文件格式非法，请人工处理。`;
+  if (chk.decision.decision) {
+    return `ℹ️ ${task.uid.slice(-6)} 决策已完成（「${chk.decision.decision}」），请勿重复提交。`;
+  }
   let decisionText = option.trim();
   if (/^\d+$/.test(decisionText)) {
     const opts = chk.decision?.options ?? [];
@@ -1277,13 +1281,17 @@ async function handleDecision(ref: string, option: string): Promise<string> {
     decisionText = opts[def] ?? opts[0] ?? "";
     if (!decisionText) return "❓ 决策点没有可用的缺省项，请回复选项序号或文字。";
   }
+  const decidedFrom = `决策 ${ref} ${option}`.trim();
   const w = writeDecision(cwd, decisionText, {
     decidedBy: "用户（飞书「决策」指令）",
-    decidedFrom: `决策 ${ref} ${option}`.trim(),
+    decidedFrom,
   });
   if (!w.ok) return `⚠️ 决策写入失败：${w.error}`;
   const r = reg.reenqueueNeedsInput(task.uid);
-  if (!r.ok) return `⚠️ 决策已写入但重入队失败：${"error" in r ? r.error : "未知错误"}（请人工核对台账）`;
+  if (!r.ok) {
+    writeDecision(cwd, chk.decision.decision ?? "");
+    return `⚠️ 决策重入队失败：${"error" in r ? r.error : "未知错误"}，未生效请重新回复。`;
+  }
   const msg = `✅ 已按「${decisionText}」决策，${task.uid.slice(-6)}「${(task.title ?? "").slice(0, 40)}」重新入队，工人将自动续跑。`;
   sendDecisionNotice(msg);
   return msg;
