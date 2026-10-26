@@ -128,6 +128,12 @@ export interface TaskRecord {
    * 存文件名清单（非 HEAD sha）以兼容沙箱 .git 只读。
    */
   dispatchBase?: { at: number; files: string[]; hashes?: Record<string, string> };
+  /**
+   * 失败取证快照（worker-team handleRunResult 失败路径写入，JSON 字符串）。
+   * 内容：{ stderr_tail, git_log_tail, git_status, timestamp }
+   * 供障碍分析员 / 人工排查用。成功时不写入。
+   */
+  failureDetail?: string;
   createdAt: number;
   updatedAt: number;
 }

@@ -39,7 +39,8 @@ import { looksLikeGatewayError } from "./worker-output-guard.js";
 // worktree 隔离（2026-10-14 修复）：决策文件在任务专属 worktree 里，续跑读决策
 // 文件必须优先用 worktree 路径（派发侧 prepare 的对称面），否则读主仓库根必然落空
 import { worktreeRoot, worktreeDirName } from "./worktree-manager.js";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
 /** 决策续跑的工作区解析：worktree 存在则用 worktree，否则回退主仓库根 */
@@ -501,8 +502,24 @@ export class WorkerTeam {
       // 注意：resume 续跑失败时运行态已由 resumeDecisionTask 转入 running，
       // handleRunResult 只见 running（首次派发也是 running）→ from 恒 running
       const lastError = r.error ?? "unknown";
-      this.o.registry.transition(task.uid, "failed", "running");
-      this.o.registry.get(task.uid)!.note = `[worker-team/${member.id}] 失败：${lastError.slice(0, 300)}`;
+
+      // ── 失败取证（2026-10-26 障碍分析员配套）：stderr 尾部 + git log + git status ──
+      const evidence: Record<string, string> = {
+        timestamp: new Date().toISOString(), worker: member.id, error: lastError.slice(0, 500),
+      };
+      if (cwd) {
+        try { evidence.git_log = execFileSync("git", ["-C", cwd, "log", "--oneline", "-5"], { timeout: 5000 }).toString().slice(0, 500); } catch {}
+        try { evidence.git_status = execFileSync("git", ["-C", cwd, "status", "--porcelain"], { timeout: 5000 }).toString().slice(0, 300); } catch {}
+      }
+      const stderrPath = process.env["TIMEM_CODEX_STDERR"];
+      if (stderrPath && existsSync(stderrPath)) {
+        try { evidence.stderr_tail = readFileSync(stderrPath, "utf8").split("\n").slice(-20).join("\n").slice(0, 2000); } catch {}
+      }
+      this.o.registry.update(task.uid, { note: `[worker-team/${member.id}] 失败：${lastError.slice(0, 300)}` });
+      // 写入 failureDetail（registry update 只支持有限字段，用底层 API 写）
+      const rec = this.o.registry.get(task.uid);
+      if (rec) rec.failureDetail = JSON.stringify(evidence);
+
       this.dispatched.delete(task.uid);
       return err(`[${member.id}] 执行失败 → ${lastError}`);
     }
@@ -515,6 +532,14 @@ export class WorkerTeam {
       this.o.registry.transition(task.uid, "failed", "running");
       this.o.registry.get(task.uid)!.note =
         `[worker-team/${member.id}] 失败：工人输出疑似网关报错被拦截（详见交付判定），未进入交付。首 200 字：${r.text.slice(0, 200)}`;
+      const recGw = this.o.registry.get(task.uid);
+      if (recGw) {
+        const gwEvidence: Record<string, string> = {
+          timestamp: new Date().toISOString(), worker: member.id, type: "gateway_error",
+          output_head: r.text.slice(0, 500),
+        };
+        recGw.failureDetail = JSON.stringify(gwEvidence);
+      }
       this.dispatched.delete(task.uid);
       return err(`[${member.id}] 工人输出疑似 API/网关报错，已拦截不交付 → ${r.text.slice(0, 160)}`);
     }
