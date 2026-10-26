@@ -166,6 +166,8 @@ export function createWorkerTeam(opts: {
    * 缺省复用 notify（与 PR 播报同通道）；DM 抄送由装配层传定制 decision.notify。
    */
   decision?: { notify?: (text: string) => Promise<void> | void };
+  /** 单任务结果回调（2026-10-26 障碍分析员接线）：透传 WorkerTeamOptions.onResult */
+  onResult?: (uid: string, result: { ok: boolean; value?: string; error?: string }) => void | Promise<void>;
 }): WorkerTeam {
   // 研究型 codex 任务 15 分钟常不够（2026-10-13 方案A超时实测）：WORKER_TEAM_TIMEOUT_MS 可调，
   // 未设保持 15 分钟默认；启动时内联传参即可，无需改 .env。
@@ -179,6 +181,7 @@ export function createWorkerTeam(opts: {
       callWorker: makeCallWorker(opts.ctx),
       resolveCwd: resolveRepoRoot,
       defaultTimeoutMs: timeoutMs,
+      onResult: opts.onResult,
       finish: createPrFinisher({ ctx: opts.ctx, notify: opts.notify }),
       // 决策播报接线（2026-10-19）：不装配则 worker-team 决策播报静默跳过（无日志无通知）
       ...((opts.decision?.notify ?? opts.notify)

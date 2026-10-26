@@ -43,6 +43,28 @@ import type { GiteaApiResultLike, GiteaCall } from "./gitea-issue-provider.js";
 import { deliverPingcodeFixed } from "./pingcode-sync.js";
 import { looksLikeGatewayError } from "./worker-output-guard.js";
 
+/** 仓库名归一化：剥 owner、忽略大小写与 -/_。 */
+function normalizeRepoName(repo: string): string {
+  return (repo.split("/").pop() ?? repo).trim().toLowerCase().replace(/[-_]/g, "");
+}
+
+/** 从任务标题解析归属仓库 token，支持 [owner/repo] 与【仓库】。 */
+export function titleOfRepo(title: string): string | undefined {
+  const bracket = title.match(/[[【]\s*([^\]】#/\s]+(?:\s*\/\s*[^\]】#/\s]+)?)[\]】]/);
+  const token = bracket?.[1]?.replace(/\s+/g, "");
+  return token || undefined;
+}
+
+/**
+ * 交付前一致性判定：标题归属与 PR 仓库均能解析且短仓库名不一致 → 错仓。
+ * 任一侧无法解析时不猜（无归属、外部 URL 等沿用原交付流程）。
+ */
+export function isWrongRepoDelivery(title: string, prUrl: string): boolean {
+  const taskRepo = titleOfRepo(title);
+  const prRepo = prUrl.match(/\/([^/]+)\/pulls\/\d+(?:[/?#]|$)/)?.[1];
+  return Boolean(taskRepo && prRepo && normalizeRepoName(taskRepo) !== normalizeRepoName(prRepo));
+}
+
 // ── 纯函数（单测覆盖） ────────────────────────────────────────────
 
 /** 标题 → 分支 slug：剥【】/[org/repo] 前缀，仅留 ASCII 词字符，空则 task */
@@ -556,6 +578,14 @@ export function createPrFinisher(opts: PrFinisherOptions): NonNullable<WorkerTea
       });
 
       // 7. 回程通知 + 台账 detail（worker-team 记 done/note）
+      // 错仓保险：在通知与 PingCode 副作用前终判失败，避免错仓 PR 触发下游挪卡/建卡。
+      if (isWrongRepoDelivery(task.title ?? "", pr.url)) {
+        const expectedRepo = titleOfRepo(task.title ?? "");
+        const actualRepo = pr.url.split("/").at(-3) ?? pr.url;
+        const detail = `错仓：PR 在 ${actualRepo}，卡归属 ${expectedRepo}（${pr.url}）；不挪 C、不建 PC 修复卡`;
+        await notifyFail(opts, task, detail, "改动与 PR 已保留，等待人工迁移或关闭");
+        return { ok: false, detail };
+      }
       // PingCode 同步（2026-10-23 用户需求）：agent 交付 PR → 建缺陷卡并置「已修复」。
       // 旁路：未配置凭据/任何异常静默跳过，不阻塞交付。
       let pcSuffix = "";
