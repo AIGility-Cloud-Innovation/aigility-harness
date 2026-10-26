@@ -213,7 +213,9 @@ export function buildPrBody(task: TaskRecord, member: string, files: string[], s
 
 /** 当前工作区改动文件（porcelain） */
 export async function listChangedFiles(cwd: string): Promise<string[]> {
-  const { stdout } = await git(["status", "--porcelain"], { cwd });
+  // -uall：未跟踪目录展开到文件级。默认模式会把新目录折叠成 `src/`，
+  // 而 hash-object 不能对目录求哈希，导致整批候选丢失（含真实代码）。
+  const { stdout } = await git(["status", "--porcelain", "--untracked-files=all"], { cwd });
   return parsePorcelain(stdout);
 }
 
@@ -252,7 +254,10 @@ export async function hashWorkingTree(cwd: string): Promise<Record<string, strin
  * "下列路径根据您的一个 .gitignore 文件而被忽略" → 整批交付失败（前端卡 309 行
  * 成果因此送不出去，重试 4 次全废）。
  *
- * 做法：`git check-ignore --stdin` 一次性判定（比逐文件 spawn 快），被忽略的剔除；
+ * 做法：`git check-ignore --no-index --stdin` 一次性判定（比逐文件 spawn 快），
+ * 被忽略的剔除。`--no-index` 让已跟踪但后来被 .gitignore 覆盖的文件（历史误提交的
+ * .backups/ 等）也能识别——否则 `git add -- <path>` 仍会撞忽略规则而整批失败。
+ * 规则完全取自仓库 .gitignore（check-ignore 语义），不在此维护第二套白名单。
  * 命令本身失败时保守返回原列表（宁可交付失败报错，也不静默丢用户改动）。
  */
 export async function filterIgnored(files: string[], cwd: string): Promise<string[]> {
@@ -260,16 +265,26 @@ export async function filterIgnored(files: string[], cwd: string): Promise<strin
   return new Promise<string[]>((resolve) => {
     // -z 必须与 --stdin 共用（git 约束）；execFile 不能写 stdin，用 spawn。
     // -z: NUL 分隔，文件名含空格/换行也不会拆错
-    const child = spawn("git", ["-c", "core.quotePath=false", "check-ignore", "-z", "--stdin"], {
+    const child = spawn("git", ["-c", "core.quotePath=false", "check-ignore", "--no-index", "-z", "--stdin"], {
       cwd,
     });
     let out = "";
     child.stdout.on("data", (b: Buffer) => (out += b.toString("utf8")));
     child.on("error", () => resolve(files)); // git 不可用：保守放行
-    child.on("close", () => {
+    child.stdin.on("error", () => {}); // git 提前退出时避免 EPIPE 冒泡
+    child.on("close", (code) => {
+      // 0=有命中，1=无命中；其余（非 git 仓库/参数错误）保守放行
+      if (code !== 0 && code !== 1) {
+        resolve(files);
+        return;
+      }
       // 退出码 1 = 无文件被忽略（正常），stdout 为空 → 全部保留
       const ignored = new Set(out.split("\0").filter(Boolean));
-      resolve(files.filter((f) => !ignored.has(f)));
+      const kept = files.filter((f) => !ignored.has(f));
+      if (ignored.size > 0) {
+        console.log(`[pr-finisher] 已跳过 ${ignored.size} 个忽略路径（规则来源：.gitignore）`);
+      }
+      resolve(kept);
     });
     child.stdin.end(files.join("\0") + "\0");
   });
@@ -457,12 +472,21 @@ export function createPrFinisher(opts: PrFinisherOptions): NonNullable<WorkerTea
       // 1. 改动归集：新改动 = 当前 − 派发前快照（防多任务混流）
       // 2026-10-25：升级为按内容哈希判定——派发前已有改动的同一文件，本轮内容变了也算交付。
       const nowHashes = await hashWorkingTree(cwd).catch(() => ({} as Record<string, string>));
-      const files =
+      const candidates =
         Object.keys(nowHashes).length > 0
           ? diffByContent(nowHashes, preExistingHashes, preExisting)
           : diffPaths(await listChangedFiles(cwd), preExisting);
-      if (files.length === 0) {
+      if (candidates.length === 0) {
         const detail = "工作区无新改动（工人未落盘或改动全为派发前已有）";
+        await notifyFail(opts, task, detail, "");
+        return { ok: false, detail };
+      }
+      // 交付前剔除 .gitignore 覆盖的文件（2026-10-25 事故）：工人常留 .backups/ 快照，
+      // 而仓库 .gitignore 已忽略它 —— git add 撞忽略规则直接致命，整批改动送不出去
+      // （前端卡 309 行成果卡在这一步）。在改动归集处就过滤，后续 PR 正文/文件数也不含工件。
+      const files = await filterIgnored(candidates, cwd);
+      if (files.length === 0) {
+        const detail = `改动全部落在 .gitignore 覆盖范围内（跳过 ${candidates.length} 个忽略路径），无可交付文件`;
         await notifyFail(opts, task, detail, "");
         return { ok: false, detail };
       }
@@ -504,15 +528,8 @@ export function createPrFinisher(opts: PrFinisherOptions): NonNullable<WorkerTea
       }
 
       // 4. 按文件提交（gpg 失败退无签名重试一次）
-      // 交付前剔除 .gitignore 覆盖的文件（2026-10-25 事故）：工人常留 .backups/ 快照，
-      // 而仓库 .gitignore 已忽略它 —— git add 撞忽略规则直接致命，整批改动送不出去
-      // （前端卡 309 行成果卡在这一步）。这里主动过滤，不让工件拖垮交付。
-      const stageable = await filterIgnored(files, cwd);
-      if (stageable.length === 0) {
-        return { ok: false, detail: "改动全部落在 .gitignore 覆盖范围内（如 .backups/），无可交付文件" };
-      }
-      await git(["add", "--", ...stageable], { cwd });
-      const msg = buildCommitMessage(task, member, stageable);
+      await git(["add", "--", ...files], { cwd });
+      const msg = buildCommitMessage(task, member, files);
       try {
         await git(["commit", "-m", msg], { cwd });
       } catch {
