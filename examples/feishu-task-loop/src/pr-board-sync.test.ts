@@ -176,6 +176,70 @@ describe("syncPrDeliveredTasks", () => {
     expect(second.some((a) => a.startsWith("补PR链:"))).toBe(false);
   });
 
+  it("failed 卡补失败原因进描述（幂等，重复拍不重复补）", async () => {
+    const files = tempFiles();
+    const reg = new TaskRegistry();
+    const rec = reg.adopt({
+      title: "【agent】[o/r] 超时任务",
+      status: "ready",
+      origin: { provider: "feishu-task", guid: "feishu-1" },
+    });
+    reg.transition(rec.uid, "dispatched");
+    reg.transition(rec.uid, "running");
+    reg.transition(rec.uid, "failed");
+    reg.update(rec.uid, { note: "[worker-team] 失败：codex: codex-agent: timed out after 1800000ms" });
+    const descriptions = [""];
+    const call = vi.fn(async (req: Record<string, unknown>) => {
+      const path = String(req.path);
+      if (path === "/open-apis/task/v2/tasklists") {
+        return { ok: true, value: { code: 0, data: { items: [{ guid: "list-1" }] } } };
+      }
+      if (path === "/open-apis/task/v2/tasklists/list-1/tasks") {
+        return { ok: true, value: { code: 0, data: { items: [{ guid: "feishu-1" }] } } };
+      }
+      if (path === "/open-apis/task/v2/sections") {
+        return { ok: true, value: { code: 0, data: { items: [{ guid: "sec-a", name: "A 待修复" }] } } };
+      }
+      if (path === "/open-apis/task/v2/sections/sec-a/tasks") {
+        return { ok: true, value: { code: 0, data: { items: [{ guid: "feishu-1" }] } } };
+      }
+      if (path === "/open-apis/task/v2/tasks/feishu-1" && req.method === "GET") {
+        return { ok: true, value: { code: 0, data: { description: descriptions[0] } } };
+      }
+      if (path === "/open-apis/task/v2/tasks/feishu-1" && req.method === "PATCH") {
+        descriptions[0] = (req.body as { task: { description: string } }).task.description;
+        return { ok: true, value: { code: 0 } };
+      }
+      return { ok: true, value: { code: 0, data: {} } };
+    });
+    const first = await syncPrDeliveredTasks(reg, call, files);
+    expect(first.some((a) => a.startsWith("补败因:"))).toBe(true);
+    expect(descriptions[0]).toContain("❌ 最近失败（");
+    expect(descriptions[0]).toContain("timed out after 1800000ms");
+    expect(descriptions[0]).toContain("挪 D");
+    const second = await syncPrDeliveredTasks(reg, call, files);
+    expect(second.some((a) => a.startsWith("补败因:"))).toBe(false);
+    expect((descriptions[0].match(/❌ 最近失败/g) ?? []).length).toBe(1);
+  });
+
+  it("ready 且预期截面 D（人工挪 D 重跑）：不拉回 P", async () => {
+    const files = tempFiles();
+    const reg = new TaskRegistry();
+    const rec = reg.adopt({
+      title: "【agent】[o/r] 重跑任务",
+      status: "ready",
+      origin: { provider: "feishu-task", guid: "feishu-1" },
+    });
+    writeFileSync(files.projectionFile, JSON.stringify({ [rec.uid]: "D" }));
+    const call = fakeFeishu("D");
+    const actions = await syncPrDeliveredTasks(reg, call, files);
+    expect(actions.some((a) => a.startsWith("挪P:"))).toBe(false);
+    expect(call).not.toHaveBeenCalledWith(expect.objectContaining({
+      path: "/open-apis/task/v2/tasks/feishu-1/add_tasklist",
+      body: { tasklist_guid: "list-1", section_guid: "sec-p" },
+    }));
+  });
+
   it("failed 卡片挪 A，失败播报只发一次；重新放行后再次失败可再发", async () => {
     const files = tempFiles();
     const reg = new TaskRegistry();

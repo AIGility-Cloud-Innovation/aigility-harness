@@ -180,7 +180,12 @@ export async function syncBoardAlignment(
       continue;
     }
     const target = ({ P: "planned", D: "dispatched", C: "review", A: "failed" } as Record<string, UnifiedStatus | undefined>)[actual];
-    const path = target ? transitionPath(t.status, target) : undefined;
+    // 人工把 failed 任务挪 D = 重跑信号：AUTO_DISPATCH=0 下 D 组是唯一派发闸门，
+    // 台账落 ready（清旧领取声明）后卡片留在 D，由 D 组扫描器认领派发——
+    // 不得直落 dispatched（那是系统领取态，且不得把卡拉回 P 让人拖两次）。
+    const targetOverride = target === "dispatched" && t.status === "failed" ? "ready" : undefined;
+    const effective = targetOverride ?? target;
+    const path = effective ? transitionPath(t.status, effective) : undefined;
     if (!path) {
       projection[t.uid] = actual;
       dirty = true;
@@ -193,7 +198,7 @@ export async function syncBoardAlignment(
     }
     projection[t.uid] = actual;
     dirty = true;
-    changes.push(`「${t.title.slice(0, 24)}」人工挪动 ${prev}→${actual}，台账已跟随`);
+    changes.push(`「${t.title.slice(0, 24)}」人工挪动 ${prev}→${actual}，台账已跟随${targetOverride ? "（重跑：台账 ready，待 D 组认领派发）" : ""}`);
   }
 
   if (dirty) saveProjection(projection);

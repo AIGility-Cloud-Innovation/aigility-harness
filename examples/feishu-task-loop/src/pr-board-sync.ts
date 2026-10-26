@@ -266,6 +266,38 @@ async function backfillPrLink(call: Call, guid: string, note: string | undefined
 }
 
 /**
+ * 失败原因补写进飞书描述（2026-10-26 用户需求）：A 组卡要让负责人一眼知道
+ * 「发生了什么 + 我要做什么才能让它跑通」。按失败版本幂等（同一 updatedAt
+ * 只补一次，重新失败会追加新记录）。
+ */
+async function backfillFailureReason(call: Call, guid: string, t: TaskRecord): Promise<string | undefined> {
+  const reason = failureReasonOf(t);
+  if (!reason) return undefined;
+  const when = new Date(t.updatedAt ?? Date.now()).toLocaleString("zh-CN");
+  const cur = await callData<{ description?: string }>(call, {
+    method: "GET",
+    path: `/open-apis/task/v2/tasks/${guid}`,
+    query: { user_id_type: "open_id" },
+    identity: "user",
+  });
+  if (!cur) return undefined;
+  const desc = (cur.description ?? "").trim();
+  if (desc.includes(`❌ 最近失败（${when}）`)) return undefined; // 同一失败已补过
+  const block = [
+    `${desc}${desc ? "\n\n" : ""}❌ 最近失败（${when}）：${reason}`,
+    `　重跑：修复障碍后把本卡挪 D（已有改动会续用）；放弃：标题加【挂起】或挪出清单。`,
+  ].join("\n");
+  await call({
+    method: "PATCH",
+    path: `/open-apis/task/v2/tasks/${guid}`,
+    query: { user_id_type: "open_id" },
+    identity: "user",
+    body: { update_fields: ["description"], task: { description: block } },
+  }).catch(() => undefined);
+  return reason;
+}
+
+/**
  * 每拍执行。返回动作说明列表（供日志；空数组=无事发生）。
  * 兼容旧名 syncPrDeliveredTasks：识别范围已从「工人小组 review」放宽到所有 agent 任务。
  */
@@ -307,8 +339,12 @@ export async function syncPrDeliveredTasks(
 
     const target = sectionKeyForStatus(t.status);
     const guid = guidOf(t);
+    // 人工重启语义（board-sync 反向对齐先跑、已把 projection 记 D 并转台账
+    // ready）：ready 且预期截面 D = 用户挪 D 触发的重跑，保持 D 不拉回 P——
+    // 认领后 status 变 dispatched，投影自然回 D。
+    const humanRestart = t.status === "ready" && projection[t.uid] === "D";
     const parked = projectedSection(t.uid) === "挂";
-    if (target && !parked && guid && projection[t.uid] !== target) {
+    if (target && !humanRestart && !parked && guid && projection[t.uid] !== target) {
       const moved = await moveTaskToSection(feishuCall, guid, target);
       if (moved !== false) {
         projection[t.uid] = target;
@@ -319,6 +355,11 @@ export async function syncPrDeliveredTasks(
     if (guid && !wrongRepo) {
       const prNo = await backfillPrLink(feishuCall, guid, t.note);
       if (prNo) actions.push(`补PR链:${t.title.slice(0, 20)}←${prNo}`);
+    }
+    // failed 卡补失败原因进描述（幂等按失败版本），负责人在 A 组即可判断怎么救
+    if (t.status === "failed" && guid && !wrongRepo) {
+      const reason = await backfillFailureReason(feishuCall, guid, t);
+      if (reason) actions.push(`补败因:${t.title.slice(0, 20)}`);
     }
 
     if (t.status !== "failed" || wrongRepo || state.failureNotified[t.uid] === t.updatedAt) continue;
