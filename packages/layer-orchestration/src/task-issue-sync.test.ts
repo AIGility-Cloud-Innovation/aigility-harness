@@ -112,6 +112,14 @@ describe("assigneeFromTask/executorOfTask（执行人=负责人，2026-10-10 铁
     expect(executorOfTask({ members: [], description: "工单链接：x" })).toBeUndefined();
     expect(executorOfTask(undefined)).toBeUndefined();
   });
+  it("描述执行者标记遇到括号/后缀/半角冒号即停（【执行者：agent】不得误判人工）", () => {
+    expect(executorOfTask({ members: [], description: "【执行者：agent】" })).toBeUndefined();
+    expect(executorOfTask({ members: [], description: "【执行者：agent】目标xx" })).toBeUndefined();
+    expect(executorOfTask({ members: [], description: "执行者:agent，负责发布" })).toBeUndefined();
+    expect(executorOfTask({ members: [], description: "【执行者：agent】目标xx" })).not.toBe("agent】目标xx");
+    expect(executorOfTask({ members: [], description: "执行者：张三】" })).toBe("张三");
+    expect(executorOfTask({ members: [], description: "执行者:张三，负责发布" })).toBe("张三");
+  });
 });
 
 describe("buildDispatchPrompt", () => {

@@ -160,14 +160,14 @@ export function createWorkerTeam(opts: {
   timeoutMs?: number;
   /** 收尾回程通知（PR 链接/失败原因）；缺省仅日志 */
   notify?: (text: string) => Promise<void> | void;
+  /** 单任务结果回调（障碍分析员等旁路观察者；异常不影响派发） */
+  onResult?: (uid: string, result: { ok: boolean; value?: string; error?: string }) => void | Promise<void>;
   /**
    * 决策播报装配（2026-10-19 修复）：10-13 上线以来 decision 从未被装配，
    * worker-team.ts 里 this.o.decision?.notify?.() 全可选链 → needs-input 播报静默丢失。
    * 缺省复用 notify（与 PR 播报同通道）；DM 抄送由装配层传定制 decision.notify。
    */
   decision?: { notify?: (text: string) => Promise<void> | void };
-  /** 单任务结果回调（2026-10-26 障碍分析员接线）：透传 WorkerTeamOptions.onResult */
-  onResult?: (uid: string, result: { ok: boolean; value?: string; error?: string }) => void | Promise<void>;
 }): WorkerTeam {
   // 研究型 codex 任务 15 分钟常不够（2026-10-13 方案A超时实测）：WORKER_TEAM_TIMEOUT_MS 可调，
   // 未设保持 15 分钟默认；启动时内联传参即可，无需改 .env。

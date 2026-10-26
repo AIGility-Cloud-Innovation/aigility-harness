@@ -79,7 +79,8 @@ import { backfillIssueLinks } from "./issue-link-backfill.js";
 import { syncAssignees } from "./assignee-sync.js";
 import { remindPendingTasks } from "./review-reminder.js";
 import { syncPrDeliveredTasks } from "./pr-board-sync.js";
-import { syncBoardAlignment } from "./board-sync.js";
+import { remindStaleTasks } from "./stale-task-reminder.js";
+import { getProjectedSection, syncBoardAlignment } from "./board-sync.js";
 import { loadEnv, REPO_ROOT } from "./env.js";
 import { isAbsolute, resolve as resolvePath } from "node:path";
 import { readFileSync } from "node:fs";
@@ -354,9 +355,22 @@ async function main(): Promise<void> {
       }
       // ①.55 PR 交付看板正向同步（2026-10-13 拍板）：agent 任务终结于 PR——
       //     review（PR 已建）的工人小组任务卡片挪「C 待测试」，与台账待验收对齐
-      const prMoved = await syncPrDeliveredTasks(getSharedRegistry(), alignFeishuCall);
+      const prMoved = await syncPrDeliveredTasks(getSharedRegistry(), alignFeishuCall, {
+        sendGroup: notifyChatId
+          ? async (text) => {
+              try {
+                await start.value.send(notifyChatId, text);
+                return true;
+              } catch (e) {
+                console.error(`[align] agent 失败播报发送失败: ${String((e as Error)?.message ?? e).slice(0, 120)}`);
+                return false;
+              }
+            }
+          : undefined,
+        projectedSection: getProjectedSection,
+      });
       if (prMoved.length > 0) {
-        console.log(`[align] PR 交付挪卡: ${prMoved.join(" / ")} → 「${SECTION_NAMES.check}」`);
+        console.log(`[align] agent 任务看板投影: ${prMoved.join(" / ")}`);
       }
       // ①.6 工单链接回填（2026-10-10 负责人需求）：带工单的任务描述缺
       //     「工单链接：」→ 定期补上（幂等；只补不建，建单归 plan-gate 链路）
@@ -368,6 +382,24 @@ async function main(): Promise<void> {
       );
       if (backfilled.length > 0) {
         console.log(`[align] 工单链接回填: ${backfilled.join(" / ")}`);
+      }
+      // ①.65 人工任务滞留巡检（2026-10-26）：D 组无 agentd 句柄且 >72h 未动 → 群内 @ 负责人。
+      //      只读任务状态/分组，提醒基线独立落盘；首拍静默建立基线。
+      if (notifyChatId) {
+        const stale = await remindStaleTasks(getSharedRegistry(), {
+          sendGroup: async (text) => {
+            try {
+              await start.value.send(notifyChatId, text);
+              return true;
+            } catch (e) {
+              console.error(`[align] 滞留提醒发送失败: ${String((e as Error)?.message ?? e).slice(0, 120)}`);
+              return false;
+            }
+          },
+        });
+        if (stale.sent > 0 || stale.baselined > 0) {
+          console.log(`[align] 滞留巡检: 发送 ${stale.sent} / 首拍基线 ${stale.baselined} / 失败 ${stale.failed}`);
+        }
       }
       // ② 「待你处理」提醒：每天最多一次私信负责人（未绑定飞书则跳过）
       await remindPendingTasks({
