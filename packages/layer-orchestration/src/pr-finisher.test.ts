@@ -34,6 +34,17 @@ describe("isWrongRepoDelivery", () => {
     expect(isWrongRepoDelivery("【timem-platform-backend】修复接口", wrongRepoPrUrl)).toBe(false);
     expect(titleOfRepo("[TiMEM-AI/TiMEM_Console-Frontend] 修复页面")).toBe("TiMEM-AI/TiMEM_Console-Frontend");
   });
+  it("组合标题【agent】[org/repo] 取仓库括号，不取角色词（2026-10-26 同仓误判回归）", () => {
+    expect(titleOfRepo("【agent】[TiMEM-AI/timem-platform-backend] 修复接口")).toBe("TiMEM-AI/timem-platform-backend");
+    expect(isWrongRepoDelivery("【agent】[TiMEM-AI/timem-platform-backend] 修复接口", wrongRepoPrUrl)).toBe(false);
+    expect(isWrongRepoDelivery("【agent】[TiMEM-AI/timem_console_frontend] 修复页面", wrongRepoPrUrl)).toBe(true);
+    expect(isWrongRepoDelivery("【agent】[AIGility-Cloud-Innovation/aigility-harness] 修 bug", wrongRepoPrUrl)).toBe(true);
+  });
+  it("角色词/中文前缀不算归属：不猜，不判错仓", () => {
+    expect(titleOfRepo("【agent】修复接口")).toBeUndefined();
+    expect(titleOfRepo("【待安排执行者】timem console 费用明细导出功能")).toBeUndefined();
+    expect(isWrongRepoDelivery("【待安排执行者】timem console 费用明细导出功能", wrongRepoPrUrl)).toBe(false);
+  });
 });
 
 describe("slugifyBranch", () => {

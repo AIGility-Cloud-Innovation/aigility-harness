@@ -48,11 +48,20 @@ function normalizeRepoName(repo: string): string {
   return (repo.split("/").pop() ?? repo).trim().toLowerCase().replace(/[-_]/g, "");
 }
 
-/** 从任务标题解析归属仓库 token，支持 [owner/repo] 与【仓库】。 */
+/** 从任务标题解析归属仓库 token：优先 [org/repo]，其次【仓库名】；角色词/中文前缀不算归属。 */
+const NON_REPO_TOKENS = new Set(["agent", "pi", "codex", "claude", "zcode", "worker", "review", "blocked"]);
+
 export function titleOfRepo(title: string): string | undefined {
-  const bracket = title.match(/[[【]\s*([^\]】#/\s]+(?:\s*\/\s*[^\]】#/\s]+)?)[\]】]/);
-  const token = bracket?.[1]?.replace(/\s+/g, "");
-  return token || undefined;
+  const tokens = [...title.matchAll(/[[【]\s*([^\]】#/\s]+(?:\s*\/\s*[^\]】#/\s]+)?)[\]】]/g)]
+    .map((m) => (m[1] ?? "").replace(/\s+/g, ""))
+    .filter(Boolean);
+  const repoLike = (t: string) => /^[A-Za-z0-9][A-Za-z0-9_\-.\\/]*$/.test(t) && !NON_REPO_TOKENS.has(t.toLowerCase());
+  // 组合标题（如【agent】[org/repo]）必须取含 / 的形态——2026-10-26 事故：取首个括号得 agent，同仓交付被误判错仓
+  return (
+    tokens.find((t) => t.includes("/") && repoLike(t)) ??
+    tokens.find((t) => !t.includes("/") && repoLike(t)) ??
+    undefined
+  );
 }
 
 /**
