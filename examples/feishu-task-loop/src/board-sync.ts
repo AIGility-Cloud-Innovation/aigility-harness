@@ -130,6 +130,7 @@ export async function syncBoardAlignment(
 
   // ①-b 已完成卡 → 台账关单（2026-10-22 用户拍板：飞书卡勾完成 = 台账关闭，双向终态）。
   // 只列 PDCA 分组内的 completed=true 卡（根目录卡不在板面语义内），按 guid 反查台账。
+  const doneGuids = new Set<string>();
   const listsRaw = (await callData<{ items?: Array<{ guid?: string }> }>(feishuCall, {
     path: "/open-apis/task/v2/tasklists",
     query: { page_size: 50, user_id_type: "open_id" },
@@ -152,6 +153,7 @@ export async function syncBoardAlignment(
       for (const t of done) {
         const g = t.guid ?? t.task_id;
         if (!g) continue;
+        doneGuids.add(g);
         const rec = registry
           .list({})
           .find((x) => x.links?.["feishu-task"]?.guid === g || (x.origin?.provider === "feishu-task" && x.origin?.guid === g));
@@ -164,6 +166,30 @@ export async function syncBoardAlignment(
         changes.push(`「${(rec.title ?? "").slice(0, 24)}」看板已勾完成，台账 → done`);
       }
     }
+  }
+
+  // ①-c 卡片消失巡检（2026-10-26 用户拍板：人关闭/删除卡片，台账跟随关闭）。
+  // 只对 review/failed 的 agent 任务且卡不在「未完成截面+已完成集」时，单独 GET
+  // 复核（防自定义分组/分页截断误伤）；确认 404 才判 cancelled——删除/关闭是
+  // 最明确的人工终态信号。
+  for (const t of registry.list({ status: ["review", "failed"] })) {
+    const guid = t.links?.["feishu-task"]?.guid ?? (t.origin?.provider === "feishu-task" ? t.origin?.guid : undefined);
+    if (!guid || actualByGuid.has(guid) || doneGuids.has(guid)) continue;
+    const probe = await callData<{ guid?: string }>(feishuCall, {
+      method: "GET",
+      path: `/open-apis/task/v2/tasks/${guid}`,
+      query: { user_id_type: "open_id" },
+      identity: "user",
+    });
+    if (probe) continue; // 卡还在（临时不可见）→ 不动
+    const path = transitionPath(t.status, "cancelled");
+    if (!path) continue;
+    for (const step of path) {
+      if (!registry.transition(t.uid, step as UnifiedStatus).ok) break;
+    }
+    delete projection[t.uid];
+    dirty = true;
+    changes.push(`「${(t.title ?? "").slice(0, 24)}」卡片已删除/关闭，台账 → cancelled`);
   }
 
   // ② 逐任务比对：实际 vs 预期 → 人工挪动则台账经合法路径跟随
