@@ -19,6 +19,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SECTION_NAMES } from "@aigility-harness/layer-orchestration";
 import type { TaskRegistry } from "@aigility-harness/layer-orchestration";
+import { isWrongRepoDelivery } from "@aigility-harness/layer-orchestration";
 
 type Call = (req: Record<string, unknown>) => Promise<{
   ok: boolean;
@@ -26,10 +27,8 @@ type Call = (req: Record<string, unknown>) => Promise<{
   error?: string;
 }>;
 
-const PROJECTION_FILE = join(
-  import.meta.dirname ?? ".",
-  "..", "..", "..", "config", "board-projection.local.json",
-);
+const PROJECTION_FILE = process.env["BOARD_PROJECTION_FILE"]
+  ?? join(import.meta.dirname ?? ".", "..", "..", "..", "config", "board-projection.local.json");
 
 function loadProjection(): Record<string, string> {
   try {
@@ -144,10 +143,14 @@ export async function syncPrDeliveredTasks(
   registry: TaskRegistry,
   feishuCall: Call,
 ): Promise<string[]> {
-  // PR 交付型 review 任务：工人小组产物（note 带成员标记 + PR 链接）
+  // PR 交付型 review 任务：工人小组产物（note 带成员标记 + PR 链接）；
+  // failed 仅兜底扫描交付失败记录（错仓保险命中后的历史 review 记录）。
   const targets = registry
-    .list({ status: ["review"] })
-    .filter((t) => /\[worker-team\/[a-z]+\]/.test(t.note ?? ""));
+    .list({ status: ["review", "failed"] })
+    .filter((t) =>
+      /\[worker-team\/[a-z]+\]/.test(t.note ?? "") &&
+      (t.status !== "failed" || (t.note ?? "").includes("交付失败："))
+    );
   if (targets.length === 0) return [];
 
   const projection = loadProjection();
@@ -155,6 +158,13 @@ export async function syncPrDeliveredTasks(
   const descPatched: string[] = [];
   let dirty = false;
   for (const t of targets) {
+    // 错仓保险：与收尾器共用判定，历史 review 记录兜底不挪 C、不补 PR 链接。
+    const prUrl = (t.note ?? "").match(/https:\/\/git\.aigility\.cloud\/[^\s（)）]+\/pulls\/\d+/)?.[0];
+    if (prUrl && isWrongRepoDelivery(t.title ?? "", prUrl)) {
+      if (t.status === "review") registry.transition(t.uid, "failed", "review");
+      continue;
+    }
+    if (t.status === "failed") continue;
     const guid = t.links?.["feishu-task"]?.guid ?? (t.origin?.provider === "feishu-task" ? t.origin?.guid : undefined);
     if (!guid) continue;
     // 幂等：投影已是 C 视为已挪过（飞书侧被人工挪回也不反复抢——以投影为准）
@@ -167,7 +177,6 @@ export async function syncPrDeliveredTasks(
     }
     // 补描述（2026-10-23 用户需求）：note 里的 PR 链接兜底补写进飞书描述。
     // 独立于挪卡（历史卡投影已是 C 也补）；幂等：描述已含 git.aigility.cloud 链接跳过。
-    const prUrl = (t.note ?? "").match(/https:\/\/git\.aigility\.cloud\/[^\s（)）]+\/pulls\/\d+/)?.[0];
     if (!prUrl) continue;
     const cur = await callData<{ description?: string }>(feishuCall, {
       method: "GET",

@@ -210,7 +210,7 @@ export { WorkerTeam, pickWorker, workerTeamService, workerTeamProvider } from ".
 export type { WorkerMember, DispatchInput, WorkerTeamOptions, FinishInfo } from "./worker-team.js";
 export { createWorkerTeam, startWorkerTeamLoop, LIGHT_ROSTER, makeCallWorker, makeResolveCwd } from "./worker-team-boot.js";
 export {
-  slugifyBranch, cleanTitle, parsePorcelain, diffPaths,
+  slugifyBranch, cleanTitle, parsePorcelain, diffPaths, titleOfRepo, isWrongRepoDelivery,
   buildCommitMessage, buildPrBody, listChangedFiles, detectBaseBranch, createPrFinisher,
 } from "./pr-finisher.js";
 export type { PrFinisherOptions } from "./pr-finisher.js";

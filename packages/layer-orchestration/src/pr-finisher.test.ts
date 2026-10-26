@@ -3,6 +3,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  isWrongRepoDelivery,
+  titleOfRepo,
   slugifyBranch,
   cleanTitle,
   parsePorcelain,
@@ -23,6 +25,16 @@ const task = (over: Partial<TaskRecord> = {}): TaskRecord =>
     projectRef: "TiMEM-AI/timem-platform-backend",
     ...over,
   }) as TaskRecord;
+
+const wrongRepoPrUrl = "https://git.aigility.cloud/TiMEM-AI/timem-platform-backend/pulls/271";
+
+describe("isWrongRepoDelivery", () => {
+  it("标题归属与 PR 仓库不一致时判错仓，同仓不误判", () => {
+    expect(isWrongRepoDelivery("【timem_console_frontend】修复页面", wrongRepoPrUrl)).toBe(true);
+    expect(isWrongRepoDelivery("【timem-platform-backend】修复接口", wrongRepoPrUrl)).toBe(false);
+    expect(titleOfRepo("[TiMEM-AI/TiMEM_Console-Frontend] 修复页面")).toBe("TiMEM-AI/TiMEM_Console-Frontend");
+  });
+});
 
 describe("slugifyBranch", () => {
   it("剥【】与 [org/repo] 前缀、只留 ASCII 词字符（中文被剥，唯一性靠 uid 后缀）", () => {
@@ -122,6 +134,49 @@ describe("detectBaseBranch", () => {
 });
 
 describe("createPrFinisher", () => {
+  it("错仓 PR → failed，不触发 PingCode 副作用", async () => {
+    const { execSync } = await import("node:child_process");
+    const base = mkdtempSync(join(tmpdir(), "pr-finisher-wrong-repo-"));
+    const repo = join(base, "repo");
+    execSync(
+      `git init --bare "${base}/origin.git" && git init -b main "${repo}" && ${""}` +
+      `git -C "${repo}" config user.email t@t && git -C "${repo}" config user.name t && git -C "${repo}" remote add origin "${base}/origin.git"`,
+      { stdio: "ignore" },
+    );
+    // stash push 需要 unborn HEAD 之外的真实基线，先落一个初始提交并推到裸远端（供 checkout origin/main）
+    execSync(`git -C "${repo}" add -A && git -C "${repo}" commit -m init --no-verify --allow-empty && git -C "${repo}" push -u origin main`, { stdio: "ignore" });
+    execSync("echo changed > changed.txt", { cwd: repo, stdio: "ignore" });
+
+    let pingcodeCalled = false;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      pingcodeCalled = true;
+      throw new Error("PingCode must not be called");
+    }) as typeof fetch;
+    try {
+      const finisher = createPrFinisher({
+        giteaCall: async () => ({
+          ok: true,
+          value: { status: 201, data: { ok: true, data: { number: 271, html_url: wrongRepoPrUrl } } },
+        }),
+        baseBranch: "main",
+      });
+      const r = await finisher({
+        task: task({ title: "【timem_console_frontend】修复页面", projectRef: "TiMEM-AI/timem-platform-backend" }),
+        cwd: repo,
+        member: "codex",
+        summary: "错仓交付回归",
+        preExisting: [],
+      });
+      expect(r.ok).toBe(false);
+      expect(r.detail).toContain("错仓：PR 在 timem-platform-backend");
+      expect(r.detail).toContain("卡归属 timem_console_frontend");
+      expect(pingcodeCalled).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("建 PR 成功 → ok + PR 链接（走注入的 giteaCall；git 操作注入空目录）", async () => {
     const giteaCall = async (req: Record<string, unknown>) => {
       expect(req.method).toBe("POST");
