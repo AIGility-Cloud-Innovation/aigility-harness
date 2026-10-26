@@ -936,6 +936,11 @@ export function assigneeFromTask(
  *  「agent/agentd」不是人名：描述标记 agent 值一律返回 undefined（agent 判定已收敛为
  *  只看标题【agent】前缀，2026-10-20 拍板，描述不再参与识别）。
  *  派发护栏、plan-gate 闸门、双建落组共用此判定（判定源一致，行为才一致）。 */
+/** 剥掉 【agent】/[org/repo] 等结构前缀，返回核心任务描述 */
+function cleanSummary(s: string): string {
+  return s.replace(/^【[^】]*】\s*/, "").replace(/^\[[^\]]+\]\s*/, "").trim();
+}
+
 export function executorOfTask(
   task: { members?: TaskMemberLike[]; description?: string; assignee_member_id?: string } | undefined,
 ): string | undefined {
@@ -1967,7 +1972,7 @@ export async function runPlanGate(
         if (approved.ok) {
           if (!agentReleasedReported.has(guid)) {
             agentReleasedReported.add(guid);
-            reports.push(`🤖 「${summary.slice(0, 40)}」agent 任务完备，免工单放行 ready，工人小组将认领执行。`);
+            reports.push(`🤖 agent 任务完备：「${cleanSummary(summary).slice(0, 60)}」→ 工人小组将认领执行。`);
           }
           continue;
         }
@@ -2179,7 +2184,7 @@ export async function runDispatchScan(
         }
         if (!agentReleasedReported.has(taskGuid)) {
           agentReleasedReported.add(taskGuid);
-          reports.push(`🤖 「${summary.slice(0, 40)}」agent 任务完备（D 组放行），工人小组将认领执行。`);
+          reports.push(`🤖 agent 任务完备（D 组放行）：「${cleanSummary(summary).slice(0, 60)}」→ 工人小组将认领执行。`);
           await dispatchNotify(opts.notifyChatId, reports[reports.length - 1]);
         }
         continue;
