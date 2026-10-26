@@ -160,6 +160,8 @@ export function createWorkerTeam(opts: {
   timeoutMs?: number;
   /** 收尾回程通知（PR 链接/失败原因）；缺省仅日志 */
   notify?: (text: string) => Promise<void> | void;
+  /** 单任务结果回调（障碍分析员等旁路观察者；异常不影响派发） */
+  onResult?: (uid: string, result: { ok: boolean; value?: string; error?: string }) => void | Promise<void>;
   /**
    * 决策播报装配（2026-10-19 修复）：10-13 上线以来 decision 从未被装配，
    * worker-team.ts 里 this.o.decision?.notify?.() 全可选链 → needs-input 播报静默丢失。
@@ -180,6 +182,7 @@ export function createWorkerTeam(opts: {
       resolveCwd: resolveRepoRoot,
       defaultTimeoutMs: timeoutMs,
       finish: createPrFinisher({ ctx: opts.ctx, notify: opts.notify }),
+      ...(opts.onResult ? { onResult: opts.onResult } : {}),
       // 决策播报接线（2026-10-19）：不装配则 worker-team 决策播报静默跳过（无日志无通知）
       ...((opts.decision?.notify ?? opts.notify)
         ? { decision: { notify: opts.decision?.notify ?? opts.notify } }

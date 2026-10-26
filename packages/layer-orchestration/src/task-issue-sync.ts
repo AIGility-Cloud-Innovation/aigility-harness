@@ -946,7 +946,9 @@ export function executorOfTask(
     if (m) return m.name;
     return task.assignee_member_id;
   }
-  const md = (task?.description ?? "").match(/执行者[:：]\s*(\S+)/);
+  // 捕获到空白/中文或半角标点/右括号即停：任务描述常写成「【执行者：agent】目标xx」，
+  // 旧 \S+ 会把「agent】目标xx」整段吞成执行人名，导致 agent 任务被误判为人工任务。
+  const md = (task?.description ?? "").match(/执行者[:：]\s*([^\s，,。；;】）)\]]+)/);
   const marked = md ? md[1] : undefined;
   if (marked && /^agent/i.test(marked)) return undefined; // agent/agentd 非人名（历史误写一并吞掉）
   return marked;
