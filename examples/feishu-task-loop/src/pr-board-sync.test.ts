@@ -161,7 +161,7 @@ describe("syncPrDeliveredTasks", () => {
         return { ok: true, value: { code: 0, data: { items: [{ guid: "feishu-1" }] } } };
       }
       if (path === "/open-apis/task/v2/tasks/feishu-1" && req.method === "GET") {
-        return { ok: true, value: { code: 0, data: { description: descriptions[0] } } };
+        return { ok: true, value: { code: 0, data: { task: { description: descriptions[0] } } } };
       }
       if (path === "/open-apis/task/v2/tasks/feishu-1" && req.method === "PATCH") {
         descriptions[0] = (req.body as { task: { description: string } }).task.description;
@@ -204,7 +204,7 @@ describe("syncPrDeliveredTasks", () => {
         return { ok: true, value: { code: 0, data: { items: [{ guid: "feishu-1" }] } } };
       }
       if (path === "/open-apis/task/v2/tasks/feishu-1" && req.method === "GET") {
-        return { ok: true, value: { code: 0, data: { description: descriptions[0] } } };
+        return { ok: true, value: { code: 0, data: { task: { description: descriptions[0] } } } };
       }
       if (path === "/open-apis/task/v2/tasks/feishu-1" && req.method === "PATCH") {
         descriptions[0] = (req.body as { task: { description: string } }).task.description;

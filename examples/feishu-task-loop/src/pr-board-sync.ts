@@ -243,18 +243,25 @@ function guidOf(t: TaskRecord): string | undefined {
     ?? (t.origin?.provider === "feishu-task" ? t.origin?.guid : undefined);
 }
 
+/** v2 GET 响应的描述统一从 data.task.description 取（顶层没有该字段）——取错层级会读成空串导致 PATCH 覆盖原描述（2026-10-26 事故）。 */
+function taskDescriptionOf(cur: unknown): string {
+  return String((cur as { task?: { description?: string } } | null | undefined)?.task?.description ?? "");
+}
+
 /** note 里的 PR 链接兜底补写进飞书描述（2026-10-23 用户需求；幂等） */
 async function backfillPrLink(call: Call, guid: string, note: string | undefined): Promise<string | undefined> {
   const prUrl = (note ?? "").match(/https:\/\/git\.aigility\.cloud\/[^\s（)）]+\/pulls\/\d+/)?.[0];
   if (!prUrl) return undefined;
-  const cur = await callData<{ description?: string }>(call, {
+  const cur = await callData<unknown>(call, {
     method: "GET",
     path: `/open-apis/task/v2/tasks/${guid}`,
     query: { user_id_type: "open_id" },
     identity: "user",
   });
-  if (!cur || (cur.description ?? "").includes(prUrl)) return undefined;
-  const next = `${(cur.description ?? "").trim()}${cur.description?.trim() ? "\n" : ""}🔗 交付 PR：${prUrl}`;
+  if (!cur) return undefined;
+  const desc = taskDescriptionOf(cur);
+  if (desc.includes(prUrl)) return undefined;
+  const next = `${desc.trim()}${desc.trim() ? "\n" : ""}🔗 交付 PR：${prUrl}`;
   await call({
     method: "PATCH",
     path: `/open-apis/task/v2/tasks/${guid}`,
@@ -281,7 +288,7 @@ async function backfillFailureReason(call: Call, guid: string, t: TaskRecord): P
     identity: "user",
   });
   if (!cur) return undefined;
-  const desc = (cur.description ?? "").trim();
+  const desc = taskDescriptionOf(cur).trim();
   if (desc.includes(`❌ 最近失败（${when}）`)) return undefined; // 同一失败已补过
   const block = [
     `${desc}${desc ? "\n\n" : ""}❌ 最近失败（${when}）：${reason}`,
