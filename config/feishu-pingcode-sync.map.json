@@ -138,5 +138,15 @@
     "feishu_guid": "d0aafd8c-88e4-4622-9a92-8f1fc99d8972",
     "pingcode": "TYY-130",
     "feishu_summary": "【agent】[AIGility-Cloud-Innovation/aigility-harness] 反向同步加 PR"
+  },
+  {
+    "feishu_guid": "8072a0f8-f0c2-4542-acc9-bb3018d3a084",
+    "pingcode": "TYY-132",
+    "feishu_summary": "【agent】[AIGility-Cloud-Innovation/aigility-harness] 交付防错仓保险："
+  },
+  {
+    "feishu_guid": "ca07b2cb-bae5-4243-8ca5-5491e5069096",
+    "pingcode": "TYY-133",
+    "feishu_summary": "【agent】[TiMEM-AI/timem_console_frontend] 管理员导出费用明细端到端测试（前端 P"
   }
 ]

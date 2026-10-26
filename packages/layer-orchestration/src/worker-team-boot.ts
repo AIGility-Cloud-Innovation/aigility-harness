@@ -102,13 +102,35 @@ export function makeResolveCwd(opts: {
   } catch {
     // 配置缺失不致命：resolveCwd 退化为短名试探
   }
+  /**
+   * 仓库名归一化：大小写不敏感，且 `-` 与 `_` 等价（2026-10-25 用户拍板）。
+   *
+   * 现场事故：台账 projectRef = "TiMEM-AI/timem-space"，实际远端是
+   * "TiMEM-AI/TiMEM-Space"，原实现对 endsWith 大小写敏感 → 两级探测全落空
+   * → resolveCwd 返回 undefined → 派发时报「任务无 cwd」直接交付失败。
+   * 仓库名里 `_`/`-` 混用也是常态（timem_frontend vs timem-frontend）。
+   */
+  const normRepo = (s: string): string =>
+    s.replace(/\.git$/i, "").toLowerCase().replace(/_/g, "-");
+  const sameRepo = (a: string, b: string): boolean => normRepo(a) === normRepo(b);
+  const endsWithRepo = (full: string, tail: string): boolean => normRepo(full).endsWith(normRepo(tail));
+
   return (projectRef: string): string | undefined => {
-    const entry = entries.find((e) => e.project_id === projectRef);
+    const entry = entries.find((e) => sameRepo(e.project_id, projectRef));
     const short = entry?.gitea_repos?.[0]?.split("/").pop()
       ?? projectRef.split("/").pop()
       ?? projectRef;
+    // ① 短名直探（先精确，再按归一化规则匹配同层目录名）
     const dir = join(repoRoot, short);
     if (existsSync(dir)) return dir;
+    try {
+      const hit = readdirSync(repoRoot, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && !d.name.startsWith("."))
+        .find((d) => sameRepo(d.name, short));
+      if (hit) return join(repoRoot, hit.name);
+    } catch {
+      // repoRoot 不可读：继续走 origin 扫描
+    }
     // 短名试探落空 → 扫 repoRoot 下（含一层子目录）git origin 真源匹配（2026-10-13）：
     // 目录名≠仓库名是常态（TiMEM-Space 在 timem/TiMEM-Space，nx 系在 nx-opc/ 下），
     // 仅靠短名试探会解析失败→cwd 退回 task-loop 自身目录，工人在错误目录干活。
@@ -136,7 +158,7 @@ export function makeResolveCwd(opts: {
           if (sub.split("/").length - repoRoot.split("/").length < 2) stack.push(sub);
           continue;
         }
-        if (url.endsWith(wanted) || wanted.endsWith(url.split("/").slice(-2).join("/"))) return sub;
+        if (endsWithRepo(url, wanted) || endsWithRepo(wanted, url.split("/").slice(-2).join("/"))) return sub;
         if (sub.split("/").length - repoRoot.split("/").length < 2) stack.push(sub); // 只扫两层
       }
     }
