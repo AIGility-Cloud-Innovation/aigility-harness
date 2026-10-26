@@ -6,8 +6,13 @@
  * 飞书建卡：P 计划中分组、不带执行者标记 → plan-gate 下一拍打【待安排执行者】，
  * 人工审核（安排执行者 @姓名 / 改【agent】）后进入下一轮派发。
  *
- * 开关与模型：OBSTACLE_ANALYST=0 关闭；OBSTACLE_ANALYST_MODEL 覆盖（缺省
- * bigmodel-glm-5.3-flash，与 worker-team 规划模型同源）。
+ * 开关与模型（2026-10-26 改版）：OBSTACLE_ANALYST=0 关闭。归因 LLM 来源
+ * 本地优先：Ollama（OLLAMA_URL 缺省 127.0.0.1:11434，OLLAMA_MODEL 缺省
+ * qwen3.5:latest，format=json 强制合法 JSON、think=false 关思考链）→ 失败
+ * 回落网关 llm-inference（OBSTACLE_ANALYST_MODEL 覆盖模型名）。背景：网关
+ * 切思考型模型后 max_tokens=600 被推理吃光，正文空 → 一度全量降级；本地
+ * 9B 实测 2-6s 出合法 JSON，归因这种小文本结构化提取不需要网关大模型。
+ * OBSTACLE_LLM=gateway 可跳过本地直走网关。
  */
 import { TaskRegistry } from "@aigility-harness/layer-orchestration";
 import {
@@ -77,6 +82,52 @@ async function createRepairCard(opts: {
   return { guid, url: `https://www.feishu.cn/task/${guid}` };
 }
 
+/** 本地 Ollama 归因（format=json 强制合法 JSON；think=false 归因不需要思考链）。失败返回 null 由调用方回落。 */
+async function callLocalOllama(req: { messages: Array<{ role: string; content: string }>; temperature?: number }): Promise<{ ok: true; value: { text: string } } | { ok: false; error: string } | null> {
+  if ((process.env["OBSTACLE_LLM"] ?? "").toLowerCase() === "gateway") return null;
+  const base = process.env["OLLAMA_URL"] ?? "http://127.0.0.1:11434";
+  const model = process.env["OLLAMA_MODEL"] ?? "qwen3.5:latest";
+  try {
+    const r = await fetch(`${base}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        messages: req.messages,
+        stream: false,
+        think: false,
+        format: "json",
+        options: { temperature: req.temperature ?? 0.2, num_predict: 600 },
+      }),
+      signal: AbortSignal.timeout(Number(process.env["OLLAMA_TIMEOUT_MS"] ?? 120_000)),
+    });
+    if (!r.ok) return null;
+    const body = (await r.json()) as { message?: { content?: string } };
+    const text = body.message?.content ?? "";
+    return text ? { ok: true as const, value: { text } } : null;
+  } catch {
+    return null; // 本地不可用 → 回落网关
+  }
+}
+
+/** 网关归因兜底：max_tokens 1200（思考型模型推理开销大，600 会被吃光致正文截断——2026-10-26 降级根因） */
+async function callGatewayLlm(ctx: CtxLike, req: { messages: Array<{ role: string; content: string }>; temperature?: number }): Promise<{ ok: true; value: { text: string } } | { ok: false; error: string }> {
+  try {
+    const v = (await ctx.call({ id: "@cognitive/llm-inference", versionRange: "^1.0.0" }, {
+      messages: req.messages,
+      temperature: req.temperature ?? 0.2,
+      max_tokens: 1200,
+      model: obstacleAnalystModel(),
+    })) as { ok?: boolean; value?: { text?: string }; error?: string };
+    if (v?.ok && typeof v.value?.text === "string" && v.value.text) {
+      return { ok: true, value: { text: v.value.text } } as const;
+    }
+    return { ok: false, error: v?.error ?? "llm-inference 未返回" } as const;
+  } catch (e) {
+    return { ok: false, error: String(e) } as const;
+  }
+}
+
 /**
  * 生成 onResult 处理器（startWorkerTeamLoop 注入）。失败触发，成功静默；
  * 全链路异常只记日志——障碍分析员绝不拖垮工人循环。
@@ -112,15 +163,10 @@ export function makeObstacleAnalystOnResult(opts: {
         failedUid: uid,
         failure,
         llm: async (req) => {
-          try {
-            const v = (await ctx.call({ id: "@cognitive/llm-inference", versionRange: "^1.0.0" }, {
-              ...req, model: req.model ?? obstacleAnalystModel(),
-            })) as { ok?: boolean; value?: { text?: string }; error?: string };
-            if (v?.ok && v.value) return { ok: true, value: v.value } as const;
-            return { ok: false, error: v?.error ?? "llm-inference 未返回" } as const;
-          } catch (e) {
-            return { ok: false, error: String(e) } as const;
-          }
+          // 本地 Ollama 优先（零 token、不依赖网关），失败回落网关（max_tokens 已调大防思考型截断）
+          const local = await callLocalOllama(req);
+          if (local) return local;
+          return callGatewayLlm(ctx, req);
         },
         createCard: (follow) => createRepairCard({
           ctx,
