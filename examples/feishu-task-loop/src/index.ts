@@ -93,6 +93,7 @@ const FEISHU_AGENT_ROUTES: Record<string, string> = {
 
 async function main(): Promise<void> {
   console.log("=== 飞书任务管理闭环（项目小助理）===\n");
+  const recentMessages: string[] = [];
 
   // 单实例守护：确保同一时刻只有一个运行实例连接飞书（防多实例抢事件）
   // （实现已泛化为 layer-infrastructure 共享 bot-singleton；TASK_LOOP_LOCK_PATH 环境变量仍可覆盖锁路径）
@@ -218,7 +219,10 @@ async function main(): Promise<void> {
         collectP2p: !["0", "false", "off"].includes(
           (process.env["TASK_LISTEN_P2P"] ?? "1").toLowerCase(),
         ),
-        onCollect: (m) => collectMessage(m),
+        onCollect: (m) => {
+          collectMessage(m);
+          recentMessages.push(m.text);
+        },
       },
     },
     ctx,
@@ -229,6 +233,9 @@ async function main(): Promise<void> {
   }
   // 群播报函数注入流水线（建单播报 / PR 提醒）
   setNotifySend(start.value.send);
+  const reverseSyncNotify = notifyChatId
+    ? async (text: string) => { await start.value.send(notifyChatId, text); }
+    : undefined;
 
   // 模型节点解析器注入（页面上按节点改模型/参数；节点缺失或 DB 不可达 → 退回 env 兜底）
   await wireLlmNodes();
@@ -324,7 +331,11 @@ async function main(): Promise<void> {
       // ①.555 PingCode 反向关单（2026-10-23 用户拍板）：PC 关闭/发布 → 台账 done + 飞书标完成。
       //     必须先于正向 ①.56：同拍内台账先落 done，正向快照 completed=true → 期望关闭 → 现态已关闭只记账不写。
       try {
-        const pcClosed = await syncPingcodeClosures(getSharedRegistry(), REPO_ROOT, alignFeishuCall);
+        const pcClosed = await syncPingcodeClosures(getSharedRegistry(), REPO_ROOT, alignFeishuCall, {
+          giteaCall: alignGiteaCall,
+          notify: reverseSyncNotify,
+          receivedMessages: recentMessages.splice(0),
+        });
         if (pcClosed.length > 0) {
           console.log(`[align] PingCode 反向关单: ${pcClosed.join(" / ")}`);
         }
