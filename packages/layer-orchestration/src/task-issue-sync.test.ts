@@ -945,6 +945,23 @@ describe("plan-gate 顺序（飞书先行）— 先执行者闸门，后回填�
     expect(log.some((l) => l.includes("【待确认仓库】"))).toBe(false);
   });
 
+  it("描述执行者 + 标题 [org/repo#N] + 历史【待确认仓库】→ 摘牌进入执行，不再要求确认仓库", async () => {
+    const log: string[] = [];
+    const r = await taskIssueSyncProvider.execute(
+      { mode: "scan", tasklistGuid: "tl-pg-desc-repo-tag" },
+      planGateCtx(
+        { summary: "【待确认仓库】[AIGility/x#7] 修白屏", description: "执行者：张三" },
+        log,
+      ),
+    );
+    if (!r.ok) throw new Error("execute failed");
+    expect(r.value.response).toContain("摘除【待确认仓库】标签");
+    expect(r.value.response).toContain("核对通过");
+    expect(r.value.response).not.toContain("尚未确认归属");
+    expect(log.some((l) => l === 'patch:"[AIGility/x#7] 修白屏"')).toBe(true);
+    expect(log.some((l) => l.includes("【待确认仓库】"))).toBe(false);
+  });
+
   it("执行者+归属齐备（[org/repo] 前缀）→ 从标题解析仓库回填建工单", async () => {
     const log: string[] = [];
     const r = await taskIssueSyncProvider.execute(

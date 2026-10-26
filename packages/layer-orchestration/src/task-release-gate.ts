@@ -6,7 +6,7 @@
  *   · 项目、执行人为结构性检查（登记表 projectRef、描述"执行者："标记，不靠 LLM）；
  *   · 2W2H 由 LLM 只判"是否交代清楚"，不判内容对错；旧版「现状/过程方法/目标」按语义映射兼容；
  *   · 五项全齐 → 自动放行 approve(via=auto, by=system)；
- *   · 缺结构要素 → 对应标签留 P（【待确认仓库】/【待安排执行者】，复用既有约定）；
+ *   · 缺结构要素 → 先执行人后仓库的两段式标签留 P（【待安排执行者】/【待确认仓库】互斥）；
  *   · 缺 LLM 要素 → 【缺X】逐项列出，人补描述 +「确认 #N」→ approve(via=manual, by=复核人)；
  *   · LLM 判不准(unsure) → 【待复核】人工一票。
  *
@@ -157,17 +157,7 @@ export async function evaluateReleaseGate(
   const soft: string[] = [];
   const elements: Record<string, ElementVerdict> = {};
 
-  // ① 结构性：项目（归属）
-  if (nodeEnabled(doc, "project_check")) {
-    if (!record.projectRef) {
-      missing.push("项目");
-      tags.push(TAG_BY_MISSING["项目"]!);
-      messages.push(`尚未确认归属：群里回复${ELEMENT_HOWTO.project("编号")}，或直接在标题加 [org/repo] 前缀。`);
-    }
-    elements["项目"] = record.projectRef ? "ok" : "missing";
-  }
-
-  // ② 结构性：执行人（2026-10-20 收敛：agent 唯一认定=标题【agent】前缀；人名 =
+  // ① 结构性：执行人（2026-10-20 收敛：agent 唯一认定=标题【agent】前缀；人名 =
   // 台账 assignee_member_id 或描述「执行者：人名」标记；「执行者：agent」值不算已安排）
   if (nodeEnabled(doc, "executor_check")) {
     const bareTitle = (record.title ?? "").replace(/^【(待安排执行者|待确认仓库)】/, "");
@@ -179,11 +169,23 @@ export async function evaluateReleaseGate(
     const descHuman = descMark && !/^agent/i.test(descMark) ? descMark : undefined;
     const okExec = isAgent || !!record.assignee_member_id || !!descHuman;
     elements["执行人"] = okExec ? "ok" : "missing";
-    if (!okExec) {
-      missing.push("执行人");
-      tags.push(TAG_BY_MISSING["执行人"]!);
-      messages.push(`尚未安排执行者：群里回复${ELEMENT_HOWTO.executorHuman("编号")}；让编码代理做就写${ELEMENT_HOWTO.executorAgent("编号")}。`);
-    }
+  }
+
+  // ② 结构性：项目（归属）
+  if (nodeEnabled(doc, "project_check")) {
+    elements["项目"] = record.projectRef ? "ok" : "missing";
+  }
+
+  // 两段式闸门（2026-10-25 用户拍板：先确认执行人，再确认仓库），两个闸门标签互斥：
+  // 缺执行人时只回【待安排执行者】；执行人补齐后下一轮才回【待确认仓库】。
+  if (elements["执行人"] === "missing") {
+    missing.push("执行人");
+    tags.push(TAG_BY_MISSING["执行人"]!);
+    messages.push(`尚未安排执行者：群里回复${ELEMENT_HOWTO.executorHuman("编号")}；让编码代理做就写${ELEMENT_HOWTO.executorAgent("编号")}。`);
+  } else if (elements["项目"] === "missing") {
+    missing.push("项目");
+    tags.push(TAG_BY_MISSING["项目"]!);
+    messages.push(`尚未确认归属：群里回复${ELEMENT_HOWTO.project("编号")}，或直接在标题加 [org/repo] 前缀。`);
   }
 
   // 结构性已缺 → 不烧 LLM，直接回标签（补齐后下一轮重跑）

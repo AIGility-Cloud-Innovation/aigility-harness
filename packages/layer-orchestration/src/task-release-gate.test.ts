@@ -55,6 +55,18 @@ describe("结构性检查（不烧 LLM）", () => {
     expect(d.action).toBe("tag-missing");
     expect(d.tags).toContain("【待安排执行者】");
   });
+
+  it("项目和执行人都缺 → 两段式优先只回【待安排执行者】，不出现【待确认仓库】", async () => {
+    const d = await evaluateReleaseGate(
+      baseRecord({ projectRef: undefined, description: "Why/What/How/How much 都写了，但没写执行者" }),
+      doc,
+      allOk,
+    );
+    expect(d.action).toBe("tag-missing");
+    expect(d.missing).toEqual(["执行人"]);
+    expect(d.tags).toEqual(["【待安排执行者】"]);
+    expect(d.messages.join("\n")).not.toContain("尚未确认归属");
+  });
 });
 
 describe("LLM 2W2H 判定", () => {

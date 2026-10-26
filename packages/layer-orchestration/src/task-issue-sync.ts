@@ -1704,10 +1704,17 @@ export async function runPlanGate(
     // = 执行人明确，仓库缺失也不打【待确认仓库】（真人任务不需要等仓库确认）。
     // 只有「执行人靠描述/agent 认定、且标题与描述都推断不出仓库」才需要确认仓库。
     const hasHumanAssignee = Boolean(assigneeFromTask(t));
-    // 真人负责人已定 = 仓库由执行人自定（2026-10-25）：历史轮次的【待确认仓库】不再适用，
-    // 一并摘除，避免带标卡进入 D 后被 dispatch-scan 当闸门卡静默跳过。
+    const repoInDescription = (t.description ?? "").match(/([A-Za-z][\w.-]*\/[\w.-]+)(?:\.git)?/)?.[1];
+    const inferredRepoFromDescription =
+      repoInDescription && knownOrgRepos?.includes(repoInDescription) ? repoInDescription : undefined;
+    const repoKnownForBackfill = Boolean(repoFromPlannedSummary(summary) ?? inferredRepoFromDescription);
+    // 执行人已定且仓库可推断（标题 [org/repo#N] 或描述登记仓库）= 两段式闸门已满足。
+    // 真人负责人即使仓库未知也无需确认仓库（由执行人自定）；其余执行人必须仓库可推断，
+    // 历史轮次的【待确认仓库】才摘除，避免带标卡进入 D 后被 dispatch-scan 当闸门卡静默跳过。
+    const executorDecided = humanExecutor !== undefined || agentDecided;
+    const repoGateObsolete = hasHumanAssignee || (executorDecided && repoKnownForBackfill);
     if (
-      hasHumanAssignee &&
+      repoGateObsolete &&
       (summary.includes("【待确认仓库】") || summary.includes("【待确认归属】"))
     ) {
       const cleaned = stripRepoTagNormalized(stripExecutorTagNormalized(summary));
@@ -1719,13 +1726,13 @@ export async function runPlanGate(
           identity: "user",
           body: { update_fields: ["summary"], task: { summary: cleaned } },
         }).catch(() => undefined);
-        reports.push(`🏷️ 「${cleaned.slice(0, 40)}」已有真人执行人，摘除【待确认仓库】标签。`);
+        reports.push(
+          hasHumanAssignee
+            ? `🏷️ 「${cleaned.slice(0, 40)}」已有真人执行人，摘除【待确认仓库】标签。`
+            : `🏷️ 「${cleaned.slice(0, 40)}」已有执行人且仓库已明确，摘除【待确认仓库】标签。`,
+        );
       }
     }
-    const repoInDescription = (t.description ?? "").match(/([A-Za-z][\w.-]*\/[\w.-]+)(?:\.git)?/)?.[1];
-    const inferredRepoFromDescription =
-      repoInDescription && knownOrgRepos?.includes(repoInDescription) ? repoInDescription : undefined;
-    const repoKnownForBackfill = Boolean(repoFromPlannedSummary(summary) ?? inferredRepoFromDescription);
 
     // ⓪-a 先行任务回填工单（归属+执行者齐备才建）：没有 #N 的 P 任务，标题带
     // [org/repo] 前缀（归属已确认）→ 从标题解析仓库自动建 Gitea 工单并同步回写 #N；
