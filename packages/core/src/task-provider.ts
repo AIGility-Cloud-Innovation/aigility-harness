@@ -33,6 +33,7 @@ import { randomUUID } from "node:crypto";
  *   完成决策后回到 running 同上下文续跑）
  */
 export type UnifiedStatus =
+  | "candidate"
   | "planned"
   | "ready"
   | "dispatched"
@@ -54,6 +55,7 @@ export type UnifiedStatus =
  *  为决策重入队（超时按默认项继续，重新认领）。卡片/提醒按 needs-input
  *  呈「A 待修复」同组（见 worker-team）。 */
 export const TASK_STATUS_TRANSITIONS: Record<UnifiedStatus, UnifiedStatus[]> = {
+  candidate: ["planned", "suspended", "cancelled"],
   planned: ["ready", "review", "suspended", "cancelled"],
   ready: ["dispatched", "review", "planned", "suspended", "cancelled"],
   dispatched: ["running", "review", "ready", "suspended", "cancelled"],

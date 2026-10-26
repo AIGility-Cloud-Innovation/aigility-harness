@@ -1915,12 +1915,11 @@ export async function runPlanGate(
           continue;
         }
         const rec = reg.adopt({
-          // 2026-10-20 拍板：标题保留原始前缀（含 [org/repo#N] 工单引用）——
-          // PR 收尾器 closeIssueLine 依赖标题里的 #N 生成 Closes 关键字（合并自动关单）；
-          // 展示侧 cleanTitle/slugifyBranch 自会剥壳，台账/PR 引用链不丢工单号。
+          // 2026-10-26 拍板：新收集任务 → candidate（24h 审核窗口），
+          // 群里「确认 R编号」→ candidate → planned（走闸门）→ ready
           title: summary,
           ...(t.description ? { description: t.description } : {}),
-          status: "planned",
+          status: "candidate",
           origin: { provider: FEISHU_TASK_PROVIDER, guid },
           projectRef: agentRepo,
         });
@@ -2112,7 +2111,7 @@ export async function runDispatchScan(
       const rec = planGateRegistry.adopt({
         title: bareSummary,
         ...(t.description ? { description: t.description } : {}),
-        status: "planned",
+        status: "candidate",
         origin: { provider: FEISHU_TASK_PROVIDER, guid: taskGuid },
         projectRef: agentRepo,
       });
