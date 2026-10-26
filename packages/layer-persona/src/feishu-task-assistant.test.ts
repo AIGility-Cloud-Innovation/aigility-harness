@@ -795,6 +795,20 @@ describe("parseTaskIntent — assign 安排执行者", () => {
     });
   });
 
+  it("闸门提示的「执行者 #N @人名」形式（2026-10-25 两段式）", async () => {
+    const { parseTaskIntent } = await import("./feishu-task-assistant.js");
+    expect(parseTaskIntent("执行者 #12 @张三")).toEqual({
+      kind: "assign",
+      ref: "12",
+      executor: "张三",
+    });
+    expect(parseTaskIntent("执行者 徐彬程")).toEqual({
+      kind: "assign",
+      ref: "",
+      executor: "徐彬程",
+    });
+  });
+
   it("简写形式（不带 @、不带「执行者」）", async () => {
     const { parseTaskIntent } = await import("./feishu-task-assistant.js");
     expect(parseTaskIntent("安排 7 李四")).toEqual({ kind: "assign", ref: "7", executor: "李四" });

@@ -861,15 +861,23 @@ export function stripPendingExecutorTag(summary: string): string {
 export const GATE_TAG_REPO = "待确认仓库";
 /** 历史别名（2026-10-23 前的旧名，存量卡与旧代码写入残留） */
 export const GATE_TAG_REPO_LEGACY = "待确认归属";
-const GATE_TAG_EXEC = "待安排执行者";
+export const GATE_TAG_EXEC = "待安排执行者";
+const ALL_GATE_TAGS = [GATE_TAG_REPO, GATE_TAG_REPO_LEGACY, GATE_TAG_EXEC] as const;
+
+/** 从前缀标签链中摘掉所有闸门标签，保留其余业务标签（如【重要】）原样。 */
+function withoutGateTags(chainText: string): string {
+  return ALL_GATE_TAGS.reduce((acc, tag) => acc.split(`【${tag}】`).join(""), chainText);
+}
 
 /**
  * 标题闸门标签链归一化：把前缀【…】链内的闸门标签收敛为规范形。
  * 修复 2026-10-23 严重缺陷「P 任务被连续叠加【待确认归属/仓库】」：
  * 旧实现只剥链首（/^【待确认仓库】/），遇到旧名【待确认归属】开头或多标签链
  * 剥不到 → 每拍在链首再叠一个新标签（现网 ×7 连环即此）。
- * 规则：链内所有闸门标签（新旧名+执行者）各收敛至多 1 个、按固定次序排列
- * （仓库→执行者），正文原样保留；链外（正文内）出现的同名文本不动。
+ * 2026-10-25 用户拍板：闸门改为「先执行人、后仓库」两段式，两个标签互斥。
+ * 规则：链内所有闸门标签（新旧名+执行者）收敛至多 1 个；同时存在时保留
+ * 【待安排执行者】（执行人闸门在前，缺执行人的任务优先被识别），正文原样保留；
+ * 链外（正文内）出现的同名文本不动。
  */
 export function normalizeGateTags(summary: string): string {
   const m = summary.match(/^((?:【[^】]*】)*)([\s\S]*)$/);
@@ -878,8 +886,10 @@ export function normalizeGateTags(summary: string): string {
   const body = m[2] ?? "";
   const hasRepo = chainText.includes(`【${GATE_TAG_REPO}】`) || chainText.includes(`【${GATE_TAG_REPO_LEGACY}】`);
   const hasExec = chainText.includes(`【${GATE_TAG_EXEC}】`);
+  // 互斥：执行者标签优先（缺执行人是更前置的闸门），绝不同时挂两个标签；其余业务标签保留。
   const next =
-    (hasRepo ? `【${GATE_TAG_REPO}】` : "") + (hasExec ? `【${GATE_TAG_EXEC}】` : "");
+    (hasExec ? `【${GATE_TAG_EXEC}】` : hasRepo ? `【${GATE_TAG_REPO}】` : "") +
+    withoutGateTags(chainText);
   if (chainText === next) return summary;
   return next + body;
 }
@@ -891,7 +901,19 @@ export function stripExecutorTagNormalized(summary: string): string {
   const chainText = m[1] ?? "";
   const body = m[2] ?? "";
   const hasRepo = chainText.includes(`【${GATE_TAG_REPO}】`) || chainText.includes(`【${GATE_TAG_REPO_LEGACY}】`);
-  const next = hasRepo ? `【${GATE_TAG_REPO}】` : "";
+  const next = (hasRepo ? `【${GATE_TAG_REPO}】` : "") + withoutGateTags(chainText);
+  if (chainText === next) return summary;
+  return next + body;
+}
+
+/** 摘除仓库闸门标签 + 其余标签归一化（真人负责人已定时用：仓库由执行人自定，不再等确认）。 */
+export function stripRepoTagNormalized(summary: string): string {
+  const m = summary.match(/^((?:【[^】]*】)*)([\s\S]*)$/);
+  if (!m) return summary;
+  const chainText = m[1] ?? "";
+  const body = m[2] ?? "";
+  const hasExec = chainText.includes(`【${GATE_TAG_EXEC}】`);
+  const next = (hasExec ? `【${GATE_TAG_EXEC}】` : "") + withoutGateTags(chainText);
   if (chainText === next) return summary;
   return next + body;
 }
@@ -1644,7 +1666,9 @@ export async function runPlanGate(
       .replace(/^\[[^\]#]+\/[^\]#]+(?:#\d+)?\]\s*/, "");
     const agentDecided = /^【agent】/.test(bareSummary);
     if (!humanExecutor && !agentDecided) {
-      const tagged = `【待安排执行者】${summary.replace(/^【待安排执行者】/, "")}`;
+      // 2026-10-25 两段式闸门第一段：缺执行人 → 只挂【待安排执行者】（与仓库标签互斥，
+      // 历史轮次留下的【待确认仓库】一并摘除），先让群里有明确的人可安排。
+      const tagged = normalizeGateTags(`【${GATE_TAG_EXEC}】${summary}`);
       if (tagged !== summary) {
         await callFeishuApi(ctx, {
           method: "PATCH",
@@ -1655,7 +1679,7 @@ export async function runPlanGate(
           body: { update_fields: ["summary"], task: { summary: tagged } },
         }).catch(() => undefined);
       }
-      reports.push(`👤 「${summary.slice(0, 40)}」尚未安排执行者，留 P。群里回复「安排执行者 ${issueNo !== undefined ? `#${issueNo}` : "编号"} @姓名」后自动进入执行。`);
+      reports.push(`👤 「${summary.slice(0, 40)}」尚未安排执行者，留 P。群里回复「执行者 ${issueNo !== undefined ? `#${issueNo}` : "编号"} @人名」后自动进入执行。`);
       continue;
     }
     // ⓪-前置摘牌（2026-10-23 用户拍板：负责人已有人名的任务不再挂【待安排执行者】）：
@@ -1675,18 +1699,51 @@ export async function runPlanGate(
       }
     }
 
+    // 两段式闸门第二段的前置判定（2026-10-25 用户拍板：先确认执行人，再确认仓库）：
+    // 执行人已明确时仓库由执行人自己定，不再等负责人指定；负责人（assignee）已是真人
+    // = 执行人明确，仓库缺失也不打【待确认仓库】（真人任务不需要等仓库确认）。
+    // 只有「执行人靠描述/agent 认定、且标题与描述都推断不出仓库」才需要确认仓库。
+    const hasHumanAssignee = Boolean(assigneeFromTask(t));
+    // 真人负责人已定 = 仓库由执行人自定（2026-10-25）：历史轮次的【待确认仓库】不再适用，
+    // 一并摘除，避免带标卡进入 D 后被 dispatch-scan 当闸门卡静默跳过。
+    if (
+      hasHumanAssignee &&
+      (summary.includes("【待确认仓库】") || summary.includes("【待确认归属】"))
+    ) {
+      const cleaned = stripRepoTagNormalized(stripExecutorTagNormalized(summary));
+      if (cleaned !== summary) {
+        await callFeishuApi(ctx, {
+          method: "PATCH",
+          path: `/open-apis/task/v2/tasks/${guid}`,
+          query: { user_id_type: "open_id" },
+          identity: "user",
+          body: { update_fields: ["summary"], task: { summary: cleaned } },
+        }).catch(() => undefined);
+        reports.push(`🏷️ 「${cleaned.slice(0, 40)}」已有真人执行人，摘除【待确认仓库】标签。`);
+      }
+    }
+    const repoInDescription = (t.description ?? "").match(/([A-Za-z][\w.-]*\/[\w.-]+)(?:\.git)?/)?.[1];
+    const inferredRepoFromDescription =
+      repoInDescription && knownOrgRepos?.includes(repoInDescription) ? repoInDescription : undefined;
+    const repoKnownForBackfill = Boolean(repoFromPlannedSummary(summary) ?? inferredRepoFromDescription);
+
     // ⓪-a 先行任务回填工单（归属+执行者齐备才建）：没有 #N 的 P 任务，标题带
     // [org/repo] 前缀（归属已确认）→ 从标题解析仓库自动建 Gitea 工单并同步回写 #N；
-    // 缺前缀 = 归属未确认 → 打【待确认仓库】留 P，等群里「任务归属」确认。
+    // 缺前缀且无法从描述推断 = 归属未确认 → 打【待确认仓库】留 P，等群里「任务归属」确认。
+    // 真人负责人（assignee 有值）不受仓库闸门拦截：无仓库直接进入目标核对，任务留给人处理。
     // agent 任务（标题【agent】前缀认定，2026-10-20 拍板收敛：描述不再参与识别；免工单模式，产出=开启的 PR）
     // 跳过回填，落到下方 ready 分支走台账放行。
-    if (issueNo === undefined && !summary.includes("【待补充】") && !agentDecided) {
+    if (
+      issueNo === undefined &&
+      !summary.includes("【待补充】") &&
+      !agentDecided &&
+      (!hasHumanAssignee || repoKnownForBackfill)
+    ) {
       const prefix = summary.match(/^\[([^\]]+)\]/);
       if (!prefix) {
         // 归属自动补齐（2026-10-22 用户拍板：信息不全仅此项机器推断，执行人仍必问人）——
         // 描述里出现登记过的 org/仓库全名 → 直接写进标题前缀，不再等群里回复。
-        const repoHit = (t.description ?? "").match(/([A-Za-z][\w.-]*\/[\w.-]+)(?:\.git)?/);
-        const inferred = repoHit?.[1] && knownOrgRepos?.includes(repoHit[1]) ? repoHit[1] : undefined;
+        const inferred = inferredRepoFromDescription;
         if (inferred) {
           const newSummary = `[${inferred}] ${summary.replace(/^(?:【[^】]*】\s*)*/, "")}`;
           await callFeishuApi(ctx, {
@@ -1699,7 +1756,7 @@ export async function runPlanGate(
           reports.push(`🏷️ 「${summary.slice(0, 40)}」归属按描述自动判定为 ${inferred}（下一拍回填工单）。如不对请改标题。`);
           continue;
         }
-        const tagged = normalizeGateTags(`【${GATE_TAG_REPO}】${summary}`);
+        const tagged = normalizeGateTags(`【${GATE_TAG_REPO}】${stripExecutorTagNormalized(summary)}`);
         if (tagged !== summary) {
           await callFeishuApi(ctx, {
             method: "PATCH",
@@ -1716,7 +1773,7 @@ export async function runPlanGate(
       // 解析不出仓库不建单，留 P 提示确认归属（与归属确认同一交互）。
       const parsedRepo = repoFromPlannedSummary(summary);
       if (!parsedRepo) {
-        const tagged = normalizeGateTags(`【${GATE_TAG_REPO}】${summary}`);
+        const tagged = normalizeGateTags(`【${GATE_TAG_REPO}】${stripExecutorTagNormalized(summary)}`);
         if (tagged !== summary) {
           await callFeishuApi(ctx, {
             method: "PATCH",
@@ -1730,7 +1787,10 @@ export async function runPlanGate(
         continue;
       }
       const repo = parsedRepo;
-      const cleanTitle = summary.replace(/^【[^】]+】/, "").replace(/^\[[^\]]+\]\s*/, "").trim();
+      const cleanTitle = summary
+        .replace(/^(?:【[^】]*】\s*)+/, "")
+        .replace(/^\[[^\]]+\]\s*/, "")
+        .trim();
       // 工单描述带飞书任务链接 + 飞书负责人 → 工单指派人（2026-10-13 用户需求）：
       // 双向互链闭环（此前只有「工单链接→飞书描述」单向）；负责人经名册 open_id → gitea_username。
       const feishuTaskUrl = t.url ?? `https://www.feishu.cn/task/${guid}`;

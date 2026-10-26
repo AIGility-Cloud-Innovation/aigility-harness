@@ -11,6 +11,7 @@ import {
   stripPendingExecutorTag,
   normalizeGateTags,
   stripExecutorTagNormalized,
+  stripRepoTagNormalized,
   GATE_TAG_REPO,
   buildDispatchPrompt,
   dispatchDelayMs,
@@ -38,12 +39,17 @@ describe("normalizeGateTags / stripExecutorTagNormalized（2026-10-23 连环叠�
     const s = "【待确认仓库】优化简历评估系统";
     expect(normalizeGateTags(`【${GATE_TAG_REPO}】${s}`)).toBe(s);
   });
-  it("仓库+执行者双标签固定次序（仓库在前）", () => {
-    expect(normalizeGateTags("【待安排执行者】【待确认归属】对接宇乐数")).toBe("【待确认仓库】【待安排执行者】对接宇乐数");
+  it("两标签互斥：同时出现时只保留【待安排执行者】（执行人闸门在前）", () => {
+    expect(normalizeGateTags("【待安排执行者】【待确认归属】对接宇乐数")).toBe("【待安排执行者】对接宇乐数");
+    expect(normalizeGateTags("【待确认仓库】【待安排执行者】对接宇乐数")).toBe("【待安排执行者】对接宇乐数");
   });
   it("正文里的同名文本不动", () => {
     const s = "讨论【待确认归属】规则的会议";
     expect(normalizeGateTags(s)).toBe(s);
+  });
+  it("业务标签保留：闸门标签摘除/收敛时不动【重要】等其余前缀", () => {
+    expect(normalizeGateTags("【重要】【待确认仓库】修 bug")).toBe("【待确认仓库】【重要】修 bug");
+    expect(normalizeGateTags("【重要】修 bug")).toBe("【重要】修 bug");
   });
   it("摘牌：执行人已定 → 执行者标签摘除、仓库标签保留转新名", () => {
     expect(stripExecutorTagNormalized("【待确认归属】【待安排执行者】催办海鑫网站开发进度")).toBe(
@@ -52,6 +58,10 @@ describe("normalizeGateTags / stripExecutorTagNormalized（2026-10-23 连环叠�
   });
   it("摘牌：无仓库标签 → 纯正文", () => {
     expect(stripExecutorTagNormalized("【待安排执行者】修 bug")).toBe("修 bug");
+  });
+  it("真人负责人摘仓库牌：仓库标签（含旧名）摘除、执行者标签归一化保留", () => {
+    expect(stripRepoTagNormalized("【待确认仓库】修 bug")).toBe("修 bug");
+    expect(stripRepoTagNormalized("【待确认归属】【待安排执行者】修 bug")).toBe("【待安排执行者】修 bug");
   });
 });
 
@@ -821,7 +831,10 @@ describe("安排执行者（飞书先行）— 按澄清编号定位", () => {
 
 describe("plan-gate 顺序（飞书先行）— 先执行者闸门，后回填建单", () => {
   /** 构造 P 分组只有一条任务的 scan mock；记录关键调用 */
-  function planGateCtx(task: { summary: string; description?: string }, log: string[]) {
+  function planGateCtx(
+    task: { summary: string; description?: string; members?: Array<{ id?: string; role?: string; type?: string }> },
+    log: string[],
+  ) {
     return mockCtx((id, req) => {
       const path = String((req as { path?: string }).path);
       const method = String((req as { method?: string }).method);
@@ -837,7 +850,7 @@ describe("plan-gate 顺序（飞书先行）— 先执行者闸门，后回填�
         return { ok: true, value: { code: 0, data: { items: [{ guid: "s-p", name: "P 计划中" }, { guid: "s-d", name: "D 执行中" }, { guid: "s-c", name: "C 待测试" }, { guid: "s-a", name: "A 待修复" }] } } };
       }
       if (path === `/open-apis/task/v2/sections/s-p/tasks` && method === "GET") {
-        return { ok: true, value: { code: 0, data: { items: [{ guid: "tg-p", summary: task.summary, description: task.description }] } } };
+        return { ok: true, value: { code: 0, data: { items: [{ guid: "tg-p", summary: task.summary, description: task.description, members: task.members ?? [] }] } } };
       }
       if (path.startsWith("/open-apis/task/v2/tasks/tg-p") && method === "PATCH") {
         log.push(`patch:${JSON.stringify((req as { body?: { task?: { summary?: string } } }).body?.task?.summary)}`);
@@ -851,7 +864,7 @@ describe("plan-gate 顺序（飞书先行）— 先执行者闸门，后回填�
     });
   }
 
-  it("缺执行者 → 打【待安排执行者】，不建工单（归属齐备也不建）", async () => {
+  it("仅缺执行人（仓库已齐备）→ 只打【待安排执行者】，提示「执行者 #N @人名」，不建工单", async () => {
     const log: string[] = [];
     const r = await taskIssueSyncProvider.execute(
       { mode: "scan", tasklistGuid: "tl-pg1" },
@@ -859,11 +872,14 @@ describe("plan-gate 顺序（飞书先行）— 先执行者闸门，后回填�
     );
     if (!r.ok) throw new Error("execute failed");
     expect(r.value.response).toContain("尚未安排执行者");
+    expect(r.value.response).toContain("执行者 编号 @人名");
+    expect(r.value.response).not.toContain("任务归属");
     expect(log.some((l) => l.startsWith("create-issue"))).toBe(false);
     expect(log.some((l) => l.includes("【待安排执行者】"))).toBe(true);
+    expect(log.some((l) => l.includes("【待确认仓库】"))).toBe(false);
   });
 
-  it("有执行者但缺 [repo] 前缀 → 打【待确认仓库】，不建工单", async () => {
+  it("仅缺仓库（执行人已明确）→ 只打【待确认仓库】，提示「任务归属 编号 @仓库」，不建工单", async () => {
     const log: string[] = [];
     const r = await taskIssueSyncProvider.execute(
       { mode: "scan", tasklistGuid: "tl-pg2" },
@@ -871,7 +887,62 @@ describe("plan-gate 顺序（飞书先行）— 先执行者闸门，后回填�
     );
     if (!r.ok) throw new Error("execute failed");
     expect(r.value.response).toContain("尚未确认归属");
+    expect(r.value.response).toContain("任务归属 编号 @仓库");
+    expect(r.value.response).not.toContain("尚未安排执行者");
     expect(log.some((l) => l.startsWith("create-issue"))).toBe(false);
+    expect(log.some((l) => l.includes("【待确认仓库】"))).toBe(true);
+    expect(log.some((l) => l.includes("【待安排执行者】"))).toBe(false);
+  });
+
+  it("两者都缺 → 优先执行人闸门：只打【待安排执行者】，不出现【待确认仓库】", async () => {
+    const log: string[] = [];
+    const r = await taskIssueSyncProvider.execute(
+      { mode: "scan", tasklistGuid: "tl-pg-both" },
+      planGateCtx({ summary: "修白屏" }, log),
+    );
+    if (!r.ok) throw new Error("execute failed");
+    expect(r.value.response).toContain("尚未安排执行者");
+    expect(r.value.response).toContain("执行者 编号 @人名");
+    expect(r.value.response).not.toContain("任务归属");
+    expect(log.some((l) => l.startsWith("create-issue"))).toBe(false);
+    expect(log.some((l) => l.includes("【待安排执行者】"))).toBe(true);
+    expect(log.some((l) => l.includes("【待确认仓库】"))).toBe(false);
+  });
+
+  it("真人负责人 + 历史【待确认仓库】标签 → 摘牌后进入目标核对，不再要求确认仓库", async () => {
+    const log: string[] = [];
+    const r = await taskIssueSyncProvider.execute(
+      { mode: "scan", tasklistGuid: "tl-pg-assignee-tag" },
+      planGateCtx(
+        {
+          summary: "【待确认仓库】修白屏",
+          members: [{ id: "ou_zhangsan", role: "assignee", type: "user" }],
+        },
+        log,
+      ),
+    );
+    if (!r.ok) throw new Error("execute failed");
+    expect(r.value.response).toContain("摘除【待确认仓库】标签");
+    expect(r.value.response).toContain("核对通过");
+    expect(log.some((l) => l === 'patch:"修白屏"')).toBe(true);
+    expect(log.some((l) => l.startsWith("create-issue"))).toBe(false);
+  });
+
+  it("真人负责人（assignee 有值）且无仓库 → 不再要求确认仓库，直接进入目标核对", async () => {
+    const log: string[] = [];
+    const r = await taskIssueSyncProvider.execute(
+      { mode: "scan", tasklistGuid: "tl-pg-assignee" },
+      planGateCtx(
+        { summary: "修白屏", members: [{ id: "ou_zhangsan", role: "assignee", type: "user" }] },
+        log,
+      ),
+    );
+    if (!r.ok) throw new Error("execute failed");
+    expect(r.value.response).not.toContain("尚未确认归属");
+    expect(r.value.response).not.toContain("【待确认仓库】");
+    expect(r.value.response).toContain("核对通过");
+    expect(log.some((l) => l.startsWith("create-issue"))).toBe(false);
+    expect(log.some((l) => l.includes("【待确认仓库】"))).toBe(false);
   });
 
   it("执行者+归属齐备（[org/repo] 前缀）→ 从标题解析仓库回填建工单", async () => {

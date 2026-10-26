@@ -245,7 +245,7 @@ export function parseTaskIntent(input: string): TaskIntent {
   // ── Gitea 工单（先剥离 @仓库 片段再匹配触发词） ──
   // 注意：安排执行者的 @姓名 必须在剥离前用原始文本匹配，
   // 否则 extractRepoSpec 会把 @张三/@wang-wu 当 @仓库 片段吃掉
-  const am = text.match(/^(?:安排执行者|指派执行者|安排|指派)\s*[:：]?\s*#?(\d+)\s+@?([\p{Script=Han}\w·\-]{1,32})\s*$/u);
+  const am = text.match(/^(?:安排执行者|指派执行者|安排|指派|执行者)\s*[:：]?\s*#?(\d+)\s+@?([\p{Script=Han}\w·\-]{1,32})\s*$/u);
   if (am) return { kind: "assign", ref: am[1], executor: am[2] };
 
   // ── 澄清归属（原始文本匹配，@仓库/项目简称 不能被 extractRepoSpec 提前吃掉） ──
@@ -292,7 +292,7 @@ export function parseTaskIntent(input: string): TaskIntent {
           items.push({ action: "confirm", ref: c[1] });
           continue;
         }
-        const e = line.match(/^(?:安排执行者|指派执行者|安排|指派)\s*[:：]?\s*#?(\d+)\s+@?([\p{Script=Han}\w·\-]{1,32})\s*$/u);
+        const e = line.match(/^(?:安排执行者|指派执行者|安排|指派|执行者)\s*[:：]?\s*#?(\d+)\s+@?([\p{Script=Han}\w·\-]{1,32})\s*$/u);
         if (e) {
           items.push({ action: "assign-executor", ref: e[1], executor: e[2] });
           continue;
@@ -309,7 +309,7 @@ export function parseTaskIntent(input: string): TaskIntent {
   // 反查不到会反问而不是落帮助文本。
   {
     // 无编号单指令（整串锚定）
-    const amN = text.match(/^(?:安排执行者|指派执行者|安排|指派)\s*[:：]?\s*@?([\p{Script=Han}\w·\-]{1,32})$/u);
+    const amN = text.match(/^(?:安排执行者|指派执行者|安排|指派|执行者)\s*[:：]?\s*@?([\p{Script=Han}\w·\-]{1,32})$/u);
     if (amN) return { kind: "assign", ref: "", executor: amN[1] };
     const paN = text.match(/^(?:任务归属|归属任务)\s*[:：]?\s*@?([\p{Script=Han}\w·\-/]{1,80})$/u);
     if (paN) return { kind: "pending-assign", ref: "", repo: paN[1] };
@@ -318,7 +318,7 @@ export function parseTaskIntent(input: string): TaskIntent {
 
     // 一行多指令：按核验指令关键词切分，逐段按单指令解析；全部命中才按批处理
     const chunks = text
-      .split(/(?=任务归属|归属任务|安排执行者|指派执行者|跳过任务|任务跳过|确认(?!派发)|没问题)/)
+      .split(/(?=任务归属|归属任务|安排执行者|指派执行者|跳过任务|任务跳过|确认(?!派发)|没问题|(?<![安指]排)执行者)/)
       .map((c) => c.trim())
       .filter(Boolean);
     if (chunks.length >= 2) {
@@ -334,8 +334,8 @@ export function parseTaskIntent(input: string): TaskIntent {
           );
           continue;
         }
-        const e = chunk.match(/^(?:安排执行者|指派执行者|安排|指派)\s*[:：]?\s*#?(\d+)\s+@?([\p{Script=Han}\w·\-]{1,32})$/u)
-          ?? chunk.match(/^(?:安排执行者|指派执行者|安排|指派)\s*[:：]?\s*@?([\p{Script=Han}\w·\-]{1,32})$/u);
+        const e = chunk.match(/^(?:安排执行者|指派执行者|安排|指派|执行者)\s*[:：]?\s*#?(\d+)\s+@?([\p{Script=Han}\w·\-]{1,32})$/u)
+          ?? chunk.match(/^(?:安排执行者|指派执行者|安排|指派|执行者)\s*[:：]?\s*@?([\p{Script=Han}\w·\-]{1,32})$/u);
         if (e) {
           items.push(
             e.length === 3
@@ -495,12 +495,12 @@ const HELP_TEXT = `我是「项目小助理」，负责协调你的飞书任务�
 
 💬 反馈：<想说的> —— 记进你的长期记忆，作为以后安排任务的参考
 
-👤 执行者安排 —— 「安排执行者 #工单号 @姓名」
+👤 执行者安排 —— 「执行者 #工单号 @姓名」（也认「安排执行者 #工单号 @姓名」）
 安排好执行者的任务才会进入执行队列（P → D）
 
 🧾 归属澄清 —— 自动汇总拿不准仓库归属时，会在群里列编号请本群确认
 • 任务归属 <编号> 仓库/项目简称 —— 确认归属（简称如 太忆/nx/电信平台）
-• 安排执行者 <编号> 姓名 —— 记录执行人（别名如 hongbin/宏斌）
+• 执行者 <编号> 姓名 —— 记录执行人（别名如 hongbin/宏斌；也认「安排执行者」）
 • 确认 <编号> —— 认可摘要的判断（项目+执行人齐备即记录）
 • 跳过任务 <编号> —— 丢弃该条，不建单
 以上指令可多行合并在一条消息里逐条发送
@@ -853,9 +853,9 @@ export const feishuTaskAssistantProvider: Provider<
       }
       const rawText = request.user_input ?? "";
       // 近乎命中（明显想说核验指令但格式没对上）→ 针对性短提示，绝不甩全文帮助
-      if (/^(?:安排执行者|指派执行者|任务归属|归属任务|跳过任务|确认\s*#?\d)/.test(rawText.trim())) {
+      if (/^(?:安排执行者|指派执行者|执行者|任务归属|归属任务|跳过任务|确认\s*#?\d)/.test(rawText.trim())) {
         response =
-          "指令没认出来。核验格式：确认 <#编号> ｜ 任务归属 <#编号> 项目简称 ｜ 安排执行者 <#编号> 姓名。 " +
+          "指令没认出来。核验格式：确认 <#编号> ｜ 任务归属 <#编号> 项目简称 ｜ 执行者 <#编号> 姓名。 " +
           "引用单条摘要回复时编号可省略；多条指令可分行或直接连写。";
       } else {
         // 正则未命中（含显式问「帮助」，均落 help 意图）：LLM 自然语言兜底
