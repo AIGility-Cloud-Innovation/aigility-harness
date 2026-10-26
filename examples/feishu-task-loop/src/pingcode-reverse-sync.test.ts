@@ -44,6 +44,8 @@ describe("syncPingcodeClosures", () => {
     ok: true,
     value: { status: 200, data: { merged: req.path?.endsWith("/pulls/7") === true } },
   });
+  /** 未合并 mock：PR 存在但 merged=false（问询用例语义） */
+  const unmergedGiteaCall = async () => ({ ok: true, value: { status: 200, data: { merged: false } } });
   it("PC 关闭且PR已合并 → 台账 done + 飞书标完成", async () => {
     setupMap([{ feishu_guid: "g1", pingcode: "TYY-101" }]);
     mockPc("关闭");
@@ -73,7 +75,7 @@ describe("syncPingcodeClosures", () => {
     mockPc("已发布");
     const calls: string[] = [];
     const reg = {
-      list: () => [{ uid: "u1", status: "running", links: { "feishu-task": { guid: "g1" } } }],
+      list: () => [{ uid: "u1", status: "running", note: "交付 https://git.aigility.cloud/org/repo/pulls/7", links: { "feishu-task": { guid: "g1" } } }],
       transition: (uid: string, to: string, from?: string) => {
         calls.push(from ? `${from}→${to}` : to);
         return { ok: to === "review" || from === "review" }; // 直达 done 失败，review/done(review) 成
@@ -103,7 +105,7 @@ describe("syncPingcodeClosures", () => {
     const transitions: string[] = [];
     const notified: string[] = [];
     const reg = fakeRegistry("dispatched", (to) => { transitions.push(to); return { ok: true }; });
-    const options = { giteaCall: mergedGiteaCall, notify: async (text: string) => { notified.push(text); } };
+    const options = { giteaCall: unmergedGiteaCall, notify: async (text: string) => { notified.push(text); } };
     const changes = await syncPingcodeClosures(reg, dir, okCall, options);
     expect(changes).toEqual(["TYY-101 已关闭但无交付PR → 已问询"]);
     expect(notified).toEqual([expect.stringContaining("确认关单 TYY-101")]);
