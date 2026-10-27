@@ -12,8 +12,8 @@ describe("DshInterop — HarnessInterop 契约符合性", () => {
     expect(interop.family).toBe("dsh");
     const v = interop.versions();
     expect(v.family).toBe("dsh");
-    expect(v.suite).toBe("0.2.0-rc.2");
-    expect(v.kernel).toBe("4.0.4");
+    expect(v.suite).toBe("0.2.1-rc.4");
+    expect(v.kernel).toBe("4.0.5");
     expect(v.aligned).toBe(true);
   });
 
@@ -94,9 +94,9 @@ describe("dsh-interop — 与内核共存", () => {
 
   it("dshSuiteVersions(): 套件精确锁定且 cordis 单实例", () => {
     const v = dshSuiteVersions();
-    expect(v.dsh).toBe("0.2.0-rc.2");
-    expect(v.dshBase).toBe("0.2.0-rc.2");
-    expect(v.cordis).toBe("4.0.4");
+    expect(v.dsh).toBe("0.2.1-rc.4");
+    expect(v.dshBase).toBe("0.2.1-rc.4");
+    expect(v.cordis).toBe("4.0.5");
     expect(v.cordisAligned).toBe(true);
   });
 });
