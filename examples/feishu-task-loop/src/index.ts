@@ -75,6 +75,7 @@ import { wireLlmNodes } from "@aigility-harness/appbase/llm-node-store";
 import { syncGiteaCompletions } from "./completion-sync.js";
 import { runPingcodeStatusSync } from "./pingcode-status-sync-adapter.js";
 import { syncPingcodeClosures } from "./pingcode-reverse-sync.js";
+import { syncPingcodeIntake } from "./pingcode-intake-sync.js";
 import { backfillIssueLinks } from "./issue-link-backfill.js";
 import { syncAssignees } from "./assignee-sync.js";
 import { remindPendingTasks } from "./review-reminder.js";
@@ -342,6 +343,17 @@ async function main(): Promise<void> {
         }
       } catch (e) {
         console.error(`[align] PingCode 反向关单异常: ${String((e as Error)?.message ?? e).slice(0, 120)}`);
+      }
+      // ①.558 PingCode 入单对齐（2026-10-25 拍板）：P 组新卡 → 自动建单/关联 + 落映射
+      //     （TiMEM-AI/TiMEM-Space→TAI · TiMEM-AI 其他→TYY · AIGility 不做同步）。
+      //     必须先于正向 ①.56：新建卡默认态即「打开」=P 映射态，同拍即被状态联动接管。
+      try {
+        const intake = await syncPingcodeIntake(getSharedRegistry(), REPO_ROOT);
+        if (intake.created.length > 0 || intake.linked.length > 0) {
+          console.log(`[align] PingCode 入单: ${[...intake.created, ...intake.linked].join(" / ")}`);
+        }
+      } catch (e) {
+        console.error(`[align] PingCode 入单异常: ${String((e as Error)?.message ?? e).slice(0, 120)}`);
       }
       // ①.56 PingCode 状态联动（2026-10-23 用户拍板「2要做」）：飞书分组/完成 → PC 卡状态
       //     （P→打开 · D→进行中 · C→已提测 · done→关闭；签名防重，未配凭据静默跳过）

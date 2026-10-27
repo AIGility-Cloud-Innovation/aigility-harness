@@ -10,8 +10,9 @@
  *   飞书挂起 → 不动（PC 无对应态）
  *
  * 机制（照 completion-sync 每拍前置模式）：
- *   · 数据源：config/feishu-pingcode-sync.map.json（guid↔工单号，建卡时落）；
- *     pr-finisher 交付建新卡时追加（PINGCODE_SYNC_MAP 可覆写路径）。
+ *   · 数据源：config/feishu-pingcode-sync.map.json（guid↔工单号，①.558 入单对齐/手工关联时落；
+ *     pr-finisher 交付建的「已修复」缺陷卡刻意不入表——缺陷卡自管生命周期，入表会被
+ *     本联动按 C 待测试→「已提测」打，与「已修复」流转冲突）。
  *   · 防重：last-signature + 工单 id 缓存存 config/feishu-pingcode-sync.state.json，
  *     签名不变零 API 写；首拍逐卡检索一次工单 id 后复用。
  *   · 旁路：未配凭据/映射文件缺失/单条失败全部静默跳过，不阻塞对齐器。
