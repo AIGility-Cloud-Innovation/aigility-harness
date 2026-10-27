@@ -24,8 +24,10 @@ import {
   feishuFirstEnabled,
   taskPipelineProvider,
   setNotifySend,
+  digestOriginGuid,
 } from "./task-pipeline.js";
 import type { SeamContext } from "@aigility-harness/core";
+import { TaskRegistry } from "./task-registry.js";
 
 describe("normalizeTitle / jaccard", () => {
   it("归一化去标点压空白", () => {
@@ -477,5 +479,39 @@ describe("taskPipelineProvider — 数据面工作流", () => {
     r.value!.stop();
     expect(sent.length).toBe(0);
     expect(ctx.calls.some((c) => c.id === "@cognitive/llm-inference")).toBe(false);
+  });
+});
+
+describe("摘要条目台账句柄（稳定指纹，防重启撞历史记录）", () => {
+  it("digestOriginGuid：同批同题幂等；跨批次/跨结论/跨群不同", () => {
+    const a = digestOriginGuid("oc_x", ["m1", "m2"], "修复登录页白屏");
+    expect(digestOriginGuid("oc_x", ["m1", "m2"], "修复登录页白屏")).toBe(a);
+    expect(digestOriginGuid("oc_x", ["m1", "m3"], "修复登录页白屏")).not.toBe(a);
+    expect(digestOriginGuid("oc_x", ["m1", "m2"], "实现业务本体构建")).not.toBe(a);
+    expect(digestOriginGuid("oc_y", ["m1", "m2"], "修复登录页白屏")).not.toBe(a);
+    // 句柄不再含进程内自增序号（形如 oc_x#1）
+    expect(a).toMatch(/^oc_x#[0-9a-f]{16}$/);
+  });
+
+  it("digest-only 播报把条目收编进台账时用指纹句柄（不是 chatId#序号）", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "tp-"));
+    const file = join(dir, "chat-briefing.yaml");
+    writeFileSync(file, DIGEST_ONLY_YAML, "utf-8");
+    const reg = new TaskRegistry();
+    collectMessage({ messageId: "m_g1", chatId: "oc_src", senderId: "ou_u", text: "登录页白屏了，修一下", ts: Date.now() });
+    const ctx = stubCtx();
+    const r = await taskPipelineProvider.execute(
+      { repos: ["TiMEM-AI/TiMEM-Space"], notifyChatId: "oc_robot", workflowFile: file, registry: reg },
+      ctx,
+    );
+    expect(r.ok).toBe(true);
+    await settle();
+    r.value!.stop();
+
+    const recs = reg.list();
+    expect(recs).toHaveLength(1);
+    expect(recs[0].origin.provider).toBe("chat-digest");
+    expect(recs[0].origin.guid).toBe(digestOriginGuid("oc_src", ["m_g1"], "修复登录页白屏"));
+    expect(recs[0].origin.guid).toMatch(/^oc_src#[0-9a-f]{16}$/);
   });
 });

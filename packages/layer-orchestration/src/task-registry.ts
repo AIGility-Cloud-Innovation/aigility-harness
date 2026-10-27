@@ -12,12 +12,39 @@
  * 转移在 TASK_STATUS_TRANSITIONS 表内时才流转；重复/并发转移返回 err。
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname } from "node:path";
 import { err, ok, TASK_STATUS_TRANSITIONS, newTaskUid } from "@aigility-harness/core";
 import type { Result, TaskRecord, UnifiedStatus, ExternalHandle, CollectTaskInput } from "@aigility-harness/core";
 
 /** 收编入参（uid/时间戳由本表生成）；与契约 CollectTaskInput 同形 */
 export type AdoptTaskInput = CollectTaskInput;
+
+/** adopt 选项（不传 = 历史行为：命中即合并，先入册者为准） */
+export interface AdoptOptions {
+  /**
+   * 拒绝陈旧合并（2026-10-27）：句柄命中终态记录（done/cancelled）且标题不同时，
+   * 不再并入旧记录，改为另建一条（origin.guid 追加内容指纹后缀，重复执行幂等）。
+   * 用于句柄由易变序号合成的来源（如群聊归纳 chat-digest 的 `${chatId}#${no}`），
+   * 防止重启后新条目静默并入历史记录：内容丢失、短码指向旧任务、确认放行 CAS 失败。
+   */
+  rejectStaleMerge?: boolean;
+  /** 命中陈旧记录时的回调（调用方打告警/审计用） */
+  onStaleMerge?: (info: { stale: TaskRecord; incoming: AdoptTaskInput }) => void;
+}
+
+/** 标题比对键：小写、去标点符号、去空白（中文标题的空格只是排版，不算内容差异） */
+function titleKey(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[\p{P}\p{S}]+/gu, "")
+    .replace(/\s+/g, "");
+}
+
+/** 内容指纹（8 hex）：同一内容重复收编落到同一后缀，保证幂等 */
+function contentFingerprint(input: AdoptTaskInput): string {
+  return createHash("sha1").update(`${input.title}\u0000${input.description ?? ""}`).digest("hex").slice(0, 8);
+}
 
 export interface TaskListFilter {
   status?: UnifiedStatus[];
@@ -45,7 +72,8 @@ export class TaskRegistry {
    * 先入册者的 title/projectRef/status 为准（首次收编生效），后到源只补句柄。
    * 这是 collect provider 与登记表的唯一入口。
    */
-  adopt(input: AdoptTaskInput): TaskRecord {
+  adopt(input: AdoptTaskInput, opts?: AdoptOptions): TaskRecord {
+    let origin = input;
     const mergeInto = (record: TaskRecord): TaskRecord => {
       let changed = false;
       const put = (provider: string, handle: ExternalHandle) => {
@@ -55,8 +83,8 @@ export class TaskRegistry {
           changed = true;
         }
       };
-      put(input.origin.provider, { guid: input.origin.guid, ...(input.origin.url ? { url: input.origin.url } : {}) });
-      for (const [provider, handle] of Object.entries(input.related ?? {})) put(provider, handle);
+      put(origin.origin.provider, { guid: origin.origin.guid, ...(origin.origin.url ? { url: origin.origin.url } : {}) });
+      for (const [provider, handle] of Object.entries(origin.related ?? {})) put(provider, handle);
       if (changed) {
         record.updatedAt = Date.now();
         this.markDirty();
@@ -64,11 +92,25 @@ export class TaskRegistry {
       return record;
     };
 
-    let existing = this.findByExternal(input.origin.provider, input.origin.guid);
+    let existing = this.findByExternal(origin.origin.provider, origin.origin.guid);
     if (!existing) {
-      for (const [provider, handle] of Object.entries(input.related ?? {})) {
+      for (const [provider, handle] of Object.entries(origin.related ?? {})) {
         existing = this.findByExternal(provider, handle.guid);
         if (existing) break;
+      }
+    }
+    // 陈旧合并护栏：终态记录 + 标题不同 = 句柄被复用（不是同一任务的更新）。
+    // 改用内容指纹后缀另建，同一内容重复收编仍幂等命中同一条。
+    if (existing && opts?.rejectStaleMerge) {
+      const terminal = existing.status === "done" || existing.status === "cancelled";
+      if (terminal && titleKey(existing.title) !== titleKey(origin.title)) {
+        const stale = existing;
+        opts.onStaleMerge?.({ stale, incoming: origin });
+        origin = {
+          ...origin,
+          origin: { ...origin.origin, guid: `${origin.origin.guid}~${contentFingerprint(origin)}` },
+        };
+        existing = this.findByExternal(origin.origin.provider, origin.origin.guid);
       }
     }
     if (existing) return mergeInto(existing);
@@ -76,11 +118,11 @@ export class TaskRegistry {
     const now = Date.now();
     const record: TaskRecord = {
       uid: newTaskUid(),
-      title: input.title,
-      description: input.description,
-      status: input.status ?? "planned",
-      origin: { ...input.origin },
-      projectRef: input.projectRef,
+      title: origin.title,
+      description: origin.description,
+      status: origin.status ?? "planned",
+      origin: { ...origin.origin },
+      projectRef: origin.projectRef,
       links: {},
       createdAt: now,
       updatedAt: now,

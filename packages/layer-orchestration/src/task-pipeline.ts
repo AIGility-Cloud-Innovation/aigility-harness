@@ -43,6 +43,7 @@ import type {
   CapabilityRef,
 } from "@aigility-harness/core";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname } from "node:path";
 import { YamlWorkflow, parseWorkflowYaml, loadWorkflowFile } from "./workflow-driver.js";
 import type { TaskRegistry } from "./task-registry.js";
@@ -208,6 +209,20 @@ export function normalizeTitle(s: string): string {
     .replace(/[\p{P}\p{S}]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/**
+ * 摘要条目的台账句柄（2026-10-27）：批次消息号 + 标题指纹。
+ * 不使用 `chatId#<进程内自增序号>`——序号随重启归零，会让新条目按句柄并进
+ * 历史记录（内容静默丢失、播报短码指向旧任务、确认放行 CAS 失败）。
+ * 同一批消息重复判定 → 同一句柄（幂等）；不同批次/不同结论 → 不同句柄。
+ */
+export function digestOriginGuid(chatId: string, messageIds: string[] | undefined, title: string): string {
+  const key = createHash("sha1")
+    .update(`${(messageIds ?? []).join(",")}\u0000${normalizeTitle(title).replace(/\s+/g, "")}`)
+    .digest("hex")
+    .slice(0, 16);
+  return `${chatId}#${key}`;
 }
 
 /** 词集 Jaccard 相似度；中文无空格分词，统一用字符二元组（含中英混合）；任一为空返回 0 */
@@ -674,6 +689,8 @@ export interface JudgedChat {
   candidates: CandidateTask[];
   /** 判定输入的原始消息文本（[1..n] 同序），建单正文/摘要回填用 */
   texts: string[];
+  /** 判定输入的原始消息号（与 texts 同序）：摘要条目的台账句柄用它做稳定指纹 */
+  messageIds?: string[];
   /** 来源类型（group/p2p），播报措辞区分用 */
   chatType?: string;
   /** 候选池是否确定（群有映射）；私聊/并集池 = false，归属展示按低置信处理 */
@@ -685,6 +702,8 @@ export interface ScopedCandidate {
   chatId: string;
   pool: string[];
   texts: string[];
+  /** 批次消息号（与 texts 同序；摘要条目句柄指纹用） */
+  messageIds?: string[];
   candidate: CandidateTask;
   /** 候选池是否确定（群有映射）；私聊/并集池 = false */
   poolDefinite?: boolean;
@@ -958,6 +977,7 @@ export const taskPipelineProvider: Provider<TaskPipelineRequest, TaskPipelineRes
               pool,
               candidates: parseCandidateTasks(llm.value.text).filter((c) => c.confident !== false),
               texts,
+              messageIds: msgs.map((m) => m.messageId),
               chatType: msgs[0]?.chatType,
               poolDefinite: Boolean(chatRepoMap[chatId]),
             });
@@ -1016,7 +1036,7 @@ export const taskPipelineProvider: Provider<TaskPipelineRequest, TaskPipelineRes
 
         dedupe_candidates: async (s: PipelineState): Promise<Partial<PipelineState>> => {
           const scoped: ScopedCandidate[] = (s.judged ?? []).flatMap((j) =>
-            j.candidates.map((c) => ({ chatId: j.chatId, pool: j.pool, texts: j.texts, candidate: c, poolDefinite: j.poolDefinite })),
+            j.candidates.map((c) => ({ chatId: j.chatId, pool: j.pool, texts: j.texts, messageIds: j.messageIds, candidate: c, poolDefinite: j.poolDefinite })),
           );
           if (scoped.length === 0) return { scoped };
           // 查重基准：台账活跃条目（永久落盘，重启免疫——修复内存 24h 窗口跨重启重复入库）
@@ -1253,12 +1273,23 @@ export const taskPipelineProvider: Provider<TaskPipelineRequest, TaskPipelineRes
             const codeOfIdx = new Map<number, string>();
             if (reg) {
               for (const [i, x] of items.entries()) {
-                const rec = reg.adopt({
-                  title: x.candidate.title,
-                  description: (x.texts ?? []).join("\n"),
-                  origin: { provider: "chat-digest", guid: `${chatId}#${registered[i]?.no ?? i}` },
-                  projectRef: x.candidate.repo ?? undefined,
-                });
+                const rec = reg.adopt(
+                  {
+                    title: x.candidate.title,
+                    description: (x.texts ?? []).join("\n"),
+                    // 稳定句柄：批次消息号 + 标题指纹（不能用 registered[i].no——重启归零会撞历史记录）
+                    origin: { provider: "chat-digest", guid: digestOriginGuid(chatId, x.messageIds, x.candidate.title) },
+                    projectRef: x.candidate.repo ?? undefined,
+                  },
+                  {
+                    // 陈旧合并护栏：万一还撞上终态旧记录（历史脏数据/旧句柄），另建并告警
+                    rejectStaleMerge: true,
+                    onStaleMerge: ({ stale }) =>
+                      console.warn(
+                        `[task-pipeline] 摘要句柄撞上陈旧记录 ${stale.uid}（${stale.status}「${stale.title.slice(0, 20)}」）→ 另建新条目`,
+                      ),
+                  },
+                );
                 const code =
                   Object.entries(reviewCodes).find(([, u]) => u === rec.uid)?.[0] ??
                   nextReviewCode(reviewCodes);

@@ -238,3 +238,55 @@ describe("TaskRegistry update 复核补齐", () => {
     expect(reg.update("tsk_missing", { title: "y" }).ok).toBe(false);
   });
 });
+
+describe("TaskRegistry 陈旧合并护栏（rejectStaleMerge）", () => {
+  it("句柄命中终态记录且标题不同 → 另建新条目，旧记录原样保留", () => {
+    const reg = new TaskRegistry();
+    const old = reg.adopt({ title: "修复登录页白屏", origin: { provider: "chat-digest", guid: "oc_1#1" } });
+    expect(reg.transition(old.uid, "cancelled").ok).toBe(true);
+    const staleSeen: string[] = [];
+    const fresh = reg.adopt(
+      { title: "实现业务本体构建", origin: { provider: "chat-digest", guid: "oc_1#1" } },
+      { rejectStaleMerge: true, onStaleMerge: ({ stale }) => staleSeen.push(stale.uid) },
+    );
+    expect(fresh.uid).not.toBe(old.uid);
+    expect(staleSeen).toEqual([old.uid]);
+    expect(reg.list()).toHaveLength(2);
+    expect(reg.get(old.uid)?.status).toBe("cancelled");
+    expect(reg.get(old.uid)?.title).toBe("修复登录页白屏");
+    expect(fresh.title).toBe("实现业务本体构建");
+    expect(fresh.origin.guid).toMatch(/^oc_1#1~[0-9a-f]{8}$/);
+  });
+
+  it("同一内容重复收编幂等（第二次仍命中新建的那条，不再另建）", () => {
+    const reg = new TaskRegistry();
+    const old = reg.adopt({ title: "修复登录页白屏", origin: { provider: "chat-digest", guid: "oc_2#1" } });
+    reg.transition(old.uid, "cancelled");
+    const input = { title: "实现业务本体构建", origin: { provider: "chat-digest", guid: "oc_2#1" } };
+    const a = reg.adopt(input, { rejectStaleMerge: true });
+    const b = reg.adopt(input, { rejectStaleMerge: true });
+    expect(b.uid).toBe(a.uid);
+    expect(reg.list()).toHaveLength(2);
+  });
+
+  it("终态但标题相同 → 视为同一任务，仍然合并（不误判为陈旧）", () => {
+    const reg = new TaskRegistry();
+    const old = reg.adopt({ title: "修复登录页白屏", origin: { provider: "chat-digest", guid: "oc_3#1" } });
+    reg.transition(old.uid, "cancelled");
+    const same = reg.adopt(
+      { title: "修复登录页 白屏", origin: { provider: "chat-digest", guid: "oc_3#1" } },
+      { rejectStaleMerge: true },
+    );
+    expect(same.uid).toBe(old.uid);
+    expect(reg.list()).toHaveLength(1);
+  });
+
+  it("不传选项 → 保持历史行为（命中即合并）", () => {
+    const reg = new TaskRegistry();
+    const old = reg.adopt({ title: "修复登录页白屏", origin: { provider: "chat-digest", guid: "oc_4#1" } });
+    reg.transition(old.uid, "cancelled");
+    const merged = reg.adopt({ title: "实现业务本体构建", origin: { provider: "chat-digest", guid: "oc_4#1" } });
+    expect(merged.uid).toBe(old.uid);
+    expect(reg.list()).toHaveLength(1);
+  });
+});
