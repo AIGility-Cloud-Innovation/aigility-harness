@@ -342,25 +342,81 @@ export async function filterIgnored(files: string[], cwd: string): Promise<strin
  * 这里在**收尾时**探测（此刻已在 agent 分支上，③ 必须避开）。
  */
 export async function detectBaseBranch(cwd: string): Promise<string> {
+  const { branch } = await detectBaseBranchWithTrace(cwd);
+  return branch;
+}
+
+/**
+ * detectBaseBranch 的带证据版本——同时返回探测级联轨迹，供失败归因使用（2026-10-27）。
+ *
+ * 背景：「交付前基线对齐失败」时障碍分析员只拿到 `Not a valid object name` 这一句，
+ * 无法判断到底是"仓库权限"还是"收尾器探测逻辑取错引用"，于是按规则误归到「权限范围」。
+ * 这里把**每一级探测了什么、成没成**如实记下来，由 buildBaselineEvidence 拼成证据文本。
+ */
+export async function detectBaseBranchWithTrace(cwd: string): Promise<{ branch: string; trace: string }> {
+  const steps: string[] = [];
   const explicit = (process.env["WORKER_TEAM_BASE_BRANCH"] ?? "").trim();
-  if (explicit) return explicit;
+  if (explicit) return { branch: explicit, trace: `① env WORKER_TEAM_BASE_BRANCH=${explicit}（显式指定，命中）` };
+  steps.push("① env WORKER_TEAM_BASE_BRANCH 未设置");
   try {
     const { stdout } = await git(["symbolic-ref", "refs/remotes/origin/HEAD"], { cwd });
     const m = stdout.trim().match(/^refs\/remotes\/origin\/(.+)$/);
-    if (m?.[1]) return m[1];
+    if (m?.[1]) {
+      steps.push(`② origin/HEAD 存在 → ${m[1]}`);
+      return { branch: m[1], trace: steps.join("\n") };
+    }
+    steps.push("② origin/HEAD 为空 → 继续下探");
   } catch {
-    // 未设置 origin/HEAD 时继续下探
+    steps.push("② origin/HEAD 未设置（私有仓常见：clone 后无符号引用）→ 继续下探");
   }
   // ③ 目标仓库真实存在的远程主分支（排除 agent/* ——分支名即产物，远端必然不存在）
   for (const candidate of ["main", "master", "dev"]) {
     try {
       await git(["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${candidate}`], { cwd });
-      return candidate;
+      steps.push(`③ refs/remotes/origin/${candidate} 真实存在（命中）`);
+      return { branch: candidate, trace: steps.join("\n") };
     } catch {
-      // 该候选不存在，试下一个
+      steps.push(`③ refs/remotes/origin/${candidate} 不存在`);
     }
   }
-  return "main";
+  steps.push("③ 三级候选均不存在 → 兜底 main");
+  return { branch: "main", trace: steps.join("\n") };
+}
+
+/**
+ * 收尾失败诊断证据（2026-10-27 P0）——供障碍分析员归因使用的行级现场。
+ *
+ * 只在基线对齐失败路径调用：拼出「探测级联 + 实际执行的 git 命令 + 关键的
+ * 引用存在性事实 + 未提交改动计数」，让归因有据可依而不是靠猜。
+ */
+export async function buildBaselineEvidence(cwd: string): Promise<string> {
+  const lines: string[] = [];
+  const [trace, headRef, hasOriginMain, hasOriginHead, statusOut] = await Promise.all([
+    detectBaseBranchWithTrace(cwd).then((r) => r.trace).catch(() => "（探测失败）"),
+    git(["symbolic-ref", "--short", "HEAD"], { cwd }).then((r) => r.stdout.trim()).catch(() => ""),
+    git(["rev-parse", "--verify", "--quiet", "refs/remotes/origin/main"], { cwd }).then(() => true).catch(() => false),
+    git(["symbolic-ref", "refs/remotes/origin/HEAD"], { cwd }).then((r) => r.stdout.trim() || "(空)").catch(() => "(未设置)"),
+    git(["-c", "core.quotePath=false", "status", "--porcelain"], { cwd }).then((r) => r.stdout.trim()).catch(() => ""),
+  ]);
+  lines.push(`· 收尾器当前分支（本地）：${headRef || "(detached)"}`);
+  lines.push(`· 收尾器基线探测级联：\n${trace}`);
+  lines.push(`· origin/HEAD：${hasOriginHead}｜refs/remotes/origin/main：${hasOriginMain ? "存在" : "不存在"}`);
+  if (headRef) {
+    const refExists = await git(["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${headRef}`], { cwd })
+      .then(() => true).catch(() => false);
+    if (!refExists) {
+      lines.push(
+        `· ⚠️ 关键事实：当前分支 ${headRef} 的远程引用 refs/remotes/origin/${headRef} **不存在**` +
+        `（该分支为工人本地新建、尚未 push）→ 任何基于它的 merge-base/rebase 必然报 Not a valid object name；` +
+        `这是**收尾器基线选取缺陷**，不是仓库权限问题，也不是网络/remote 配置问题。`,
+      );
+    } else {
+      lines.push(`· 当前分支 ${headRef} 的远程引用存在`);
+    }
+  }
+  const changeCount = statusOut.split("\n").filter(Boolean).length;
+  lines.push(`· 工作区未提交改动文件数：${changeCount}`);
+  return lines.join("\n");
 }
 
 // ── 收尾器 ───────────────────────────────────────────────────────
@@ -584,8 +640,14 @@ export function createPrFinisher(opts: PrFinisherOptions): NonNullable<WorkerTea
       // 4.5 交付前基线对齐（整改②）：落后即变基，冲突拒交转人工——不带陈旧基线开 PR
       const rb = await rebaseAheadIfNeeded(cwd, base, deliveryRemote);
       if (!rb.ok) {
-        await notifyFail(opts, task, rb.detail, "");
-        return { ok: false, detail: rb.detail };
+        // 诊断证据随失败一起交出（2026-10-27 P0）：归因链路（obstacle-analyst）读
+        // failure.evidence 才能定位根因，否则只能按规则把 git 报错一律归为「权限范围」。
+        // 证据同时附着在 detail 尾部——worker-team 只用 detail 组错误串，
+        // 装配层（obstacle-wiring）再从错误串里把它取出来喂给归因模型。
+        const evidence = await buildBaselineEvidence(cwd).catch(() => "");
+        const detail = evidence ? `${rb.detail}\n【诊断证据】\n${evidence}` : rb.detail;
+        await notifyFail(opts, task, rb.detail, "", evidence || undefined);
+        return { ok: false, detail, ...(evidence ? { evidence } : {}) };
       }
 
       // 5. push（交付远端可配，默认 origin）
@@ -631,9 +693,10 @@ export function createPrFinisher(opts: PrFinisherOptions): NonNullable<WorkerTea
   };
 }
 
-async function notifyFail(opts: PrFinisherOptions, task: TaskRecord, reason: string, keep: string): Promise<void> {
+async function notifyFail(opts: PrFinisherOptions, task: TaskRecord, reason: string, keep: string, evidence?: string): Promise<void> {
   try {
-    await opts.notify?.(`⚠️ agent 任务交付失败\n「${cleanTitle(task.title ?? task.uid)}」（${task.uid}）\n原因：${reason}${keep ? `\n${keep}` : ""}`);
+    const ev = evidence ? `\n🔍 诊断证据：\n${evidence}` : "";
+    await opts.notify?.(`⚠️ agent 任务交付失败\n「${cleanTitle(task.title ?? task.uid)}」（${task.uid}）\n原因：${reason}${keep ? `\n${keep}` : ""}${ev}`);
   } catch (e) {
     console.error(`[pr-finisher] 失败通知出错: ${String((e as Error)?.message ?? e)}`);
   }

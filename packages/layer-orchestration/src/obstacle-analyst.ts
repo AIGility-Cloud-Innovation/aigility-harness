@@ -22,7 +22,7 @@ import type { TaskRegistry } from "./task-registry.js";
 /** 障碍类别枚举（提示词约束 + 解析兜底） */
 export const OBSTACLE_CATEGORIES = [
   "环境依赖", "模型网关", "凭证认证", "代码缺陷", "任务描述不清",
-  "超时资源", "外部服务", "权限范围", "其他",
+  "超时资源", "外部服务", "权限范围", "工具链缺陷", "其他",
 ] as const;
 export type ObstacleCategory = (typeof OBSTACLE_CATEGORIES)[number];
 
@@ -44,6 +44,16 @@ export interface ObstacleFailure {
   member: string;
   /** 失败原文（worker-team 结果错误串） */
   error: string;
+  /**
+   * 原始诊断证据（可选）——失败链路的行级日志，供归因定位根因。
+   *
+   * 2026-10-27 复盘：只喂「下游症状 + 一句结论」时，模型无法定位根因，只能按
+   * 「仓库/分支/权限→权限范围」规则把 git 类报错一律归到权限范围，并给出
+   * 「检查 remote url / git fetch --all」这类**偏离处方**。补上原始证据后
+   * （如 detectBaseBranch 的探测级联、实际执行的 git 命令原文、"工作区无新改动"
+   * 只是务实输出而工人已落盘），模型才有据可依。生产者见 pr-finisher.buildBaselineEvidence。
+   */
+  evidence?: string;
 }
 
 export interface ObstacleLlmRequest {
@@ -91,13 +101,22 @@ export function buildObstacleMessages(input: {
         "你是任务执行障碍分析员。分析一次 agent 任务失败的关键障碍因素与解决方法。\n" +
         "只输出纯 JSON（无 markdown 代码块）：\n" +
         '{"category":"' + OBSTACLE_CATEGORIES.join('"|"') + '",' +
-        '"key_factors":["一句话一个因素",…],"resolution":"可执行的解决步骤",' +
+        '"key_factors":["一句话一个因素"],"resolution":"可执行的解决步骤",' +
         '"prevention":"预防建议（可空）","suggested_executor":"agent|人工|运维",' +
         '"confidence":"high|medium|low"}\n' +
         "判定指引：超时/限流/配额→超时资源；模型名不存在/网关 4xx/断流→模型网关；401/403 凭证→凭证认证；" +
         "依赖缺失/构建环境→环境依赖；任务目标含糊致工人跑偏→任务描述不清；上游 API/第三方→外部服务；" +
-        "仓库/分支/权限→权限范围；工人产出本身有缺陷→代码缺陷。suggested_executor：修复动作可由 agent" +
-        "独立完成选 agent；需人做判断/拍板选 人工；动服务器/密钥/网络选 运维。",
+        "工人产出本身有缺陷→代码缺陷；**任务框架自身代码/命令在既定流程中执行失败**（例：收尾器跑 " +
+        "git merge-base 报 Not a valid object name、脚本自身逻辑取错引用、框架内路径拼接错）→ **工具链缺陷**；" +
+        "仅当明确是仓库访问权限不足、账号无权读写、被拒绝授权时才判 权限范围——" +
+        "**git 命令报任何错都不等于权限范围**，先看下方原始诊断证据再定性。\n" +
+        "硬约束：① 只依据「原始诊断证据」写关键因素，证据里没有的因素不要编；" +
+        "证据不足时把 confidence 置 low 或 medium 并在 key_factors 里直说「缺 X 证据」。" +
+        "② **不得给出偏离处方**——不要建议「手动创建/修正远程引用」「改 remote url」「本地手动建分支」，" +
+        "这些会破坏收尾流程；只给「改哪里的代码/配置 + 改完怎么验证」这类正面动作。" +
+        "③ confidence 判据：有原始证据逐行佐证 → high；只有结论无证据、靠规则推断 → medium；" +
+        "证据缺失只能猜 → low。**不要一律填 high**。\n" +
+        "suggested_executor：修复动作可由 agent 独立完成选 agent；需人做判断/拍板选 人工；动服务器/密钥/网络选 运维。",
     },
     {
       role: "user",
@@ -108,9 +127,54 @@ export function buildObstacleMessages(input: {
         `执行工人：${failure.member}\n` +
         `失败原文：${failure.error.slice(0, 800)}\n` +
         `台账失败备注：${sanitizeForReviewGate((task.note ?? "").slice(0, 300))}\n` +
+        (failure.evidence
+          ? `原始诊断证据（失败链路行级日志，定性以此为准）：\n${sanitizeForReviewGate(failure.evidence).slice(0, 1600)}\n`
+          : "") +
         (siblings.length ? `同仓近期其他失败（模式识别用）：\n${siblings.join("\n")}` : ""),
     },
   ];
+}
+
+/**
+ * 字符串或字符串数组归一为单段落文本。
+ *
+ * 2026-10-27 实测：本地 Ollama（qwen3.5）的 resolution/prevention 返回的是 **JSON 数组**
+ * 而非字符串，旧实现 `String(raw["resolution"])` 会把数组糊成
+ * `"检查…,确认…,若分支…"`（逗号连成一句，落卡可读性差）。这里统一为分号连接的列表文本。
+ */
+function asText(v: unknown): string {
+  if (Array.isArray(v)) {
+    return v.map((x) => String(x ?? "").trim()).filter(Boolean).join("；");
+  }
+  return String(v ?? "").trim();
+}
+
+/**
+ * 偏离处方过滤（审核门前置）：AI 归因里常出现「手动创建/修正远程引用」「改 remote url」
+ * 「本地手动建分支」这类**会破坏收尾流程**的建议——实际事故里它们被原样写进修复卡等人照做。
+ * 命中即从文本中剔除，避免误导人工执行。
+ */
+const DEVIANT_PRESCRIPTION_PATTERNS: RegExp[] = [
+  // 「手动创建/新建/修正/添加…引用」：<任意非分隔字符> 引 用
+  /手动[^，。；\n]{0,16}引用[^，。；\n]{0,16}/g,
+  // 同义但无「手动」二字（如「修正代码中引用的分支名称」不在剔除范围——那是正面动作）
+  /(手动|自行|人工)[^，。；\n]{0,12}(创建|新建|补上|添加)[^，。；\n]{0,12}(remote|远程|git\s*引用|refs?\/)/gi,
+  // 改/检查 remote url
+  /(修改|更改|检查|确认|核对)[^，。；\n]{0,12}remote\s*url[^，。；\n]{0,24}/gi,
+  /(修改|更改)[^，。；\n]{0,12}(git\s*)?remote[^，。；\n]{0,24}/gi,
+  // 手动创建分支 / 手动推送分支
+  /手动[^，。；\n]{0,10}分支[^，。；\n]{0,24}/g,
+  /git\s+update-ref[^，。；\n]{0,40}/gi,
+];
+
+export function stripDeviantPrescriptions(text: string): string {
+  let out = text ?? "";
+  for (const re of DEVIANT_PRESCRIPTION_PATTERNS) out = out.replace(re, "");
+  // 清理残留的分隔符与空白（剔除后可能留下空条目）
+  return out
+    .split("；").map((s) => s.trim()).filter(Boolean).join("；")
+    .replace(/^[，、；\s]+|[，、；\s]+$/g, "")
+    .trim();
 }
 
 /** 解析 LLM 归因输出（容忍前后缀噪声；字段非法时逐项兜底） */
@@ -124,14 +188,15 @@ export function parseObstacleAnalysis(text: string): ObstacleAnalysis | null {
     const factors = Array.isArray(raw["key_factors"])
       ? (raw["key_factors"] as unknown[]).map(String).filter(Boolean).slice(0, 3)
       : [];
-    const resolution = String(raw["resolution"] ?? "").trim();
+    const resolution = stripDeviantPrescriptions(asText(raw["resolution"]));
     if (factors.length === 0 || !resolution) return null;
     const se = String(raw["suggested_executor"] ?? "人工");
+    const prevention = stripDeviantPrescriptions(asText(raw["prevention"]));
     return {
       category,
       key_factors: factors,
       resolution,
-      ...(String(raw["prevention"] ?? "").trim() ? { prevention: String(raw["prevention"]).trim().slice(0, 200) } : {}),
+      ...(prevention ? { prevention: prevention.slice(0, 200) } : {}),
       suggested_executor: se === "agent" || se === "运维" ? se : "人工",
       confidence: ["high", "medium", "low"].includes(String(raw["confidence"])) ? (String(raw["confidence"]) as ObstacleAnalysis["confidence"]) : "medium",
     };

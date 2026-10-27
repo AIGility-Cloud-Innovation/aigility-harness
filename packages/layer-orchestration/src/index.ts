@@ -212,6 +212,7 @@ export { createWorkerTeam, startWorkerTeamLoop, LIGHT_ROSTER, makeCallWorker, ma
 export {
   slugifyBranch, cleanTitle, parsePorcelain, diffPaths, titleOfRepo, isWrongRepoDelivery,
   buildCommitMessage, buildPrBody, listChangedFiles, detectBaseBranch, createPrFinisher,
+  detectBaseBranchWithTrace, buildBaselineEvidence,
 } from "./pr-finisher.js";
 export type { PrFinisherOptions } from "./pr-finisher.js";
 export {

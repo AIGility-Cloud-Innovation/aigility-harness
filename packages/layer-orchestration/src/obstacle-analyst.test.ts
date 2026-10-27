@@ -6,7 +6,8 @@ import { describe, it, expect } from "vitest";
 import { TaskRegistry } from "./task-registry.js";
 import {
   extractFailureMember, sanitizeForReviewGate, parseObstacleAnalysis, fallbackObstacleAnalysis,
-  buildObstacleMessages, composeFollowUp, runObstacleAnalyst,
+  buildObstacleMessages, composeFollowUp, runObstacleAnalyst, stripDeviantPrescriptions,
+  OBSTACLE_CATEGORIES,
   type ObstacleLlm, type ObstacleAnalysis,
 } from "./obstacle-analyst.js";
 
@@ -190,6 +191,102 @@ describe("buildObstacleMessages", () => {
     expect(msgs[1].content).toContain("执行方:agent"); // 已净化
     expect(msgs[1].content).toContain("同类失败");
     expect(msgs[1].content).not.toMatch(/执行者[:：]/);
+  });
+
+  // 2026-10-27 P0：证据必须进提示词，否则归因只能按规则猜（实测误归「权限范围」）
+  it("诊断证据注入现场材料", () => {
+    const msgs = buildObstacleMessages({
+      task: { uid: "tsk_a", title: "t", description: "d", projectRef: "o/r", note: "n" },
+      failure: {
+        member: "codex",
+        error: "[codex] 收尾失败 → 交付前基线对齐失败",
+        evidence: "· 收尾器当前分支（本地）：agent/t102044\n· ⚠️ 关键事实：refs/remotes/origin/agent/t102044 **不存在**",
+      },
+    });
+    expect(msgs[1].content).toContain("原始诊断证据");
+    expect(msgs[1].content).toContain("refs/remotes/origin/agent/t102044 **不存在**");
+  });
+
+  it("无证据时不出现证据段（保持旧行为）", () => {
+    const msgs = buildObstacleMessages({
+      task: { uid: "tsk_a", title: "t", description: "d", projectRef: "o/r", note: "n" },
+      failure: { member: "codex", error: "boom" },
+    });
+    expect(msgs[1].content).not.toContain("原始诊断证据");
+  });
+
+  // 2026-10-27 P1：「仓库/分支/权限→权限范围」的旧规则把 git 报错一律误投权限范围
+  it("系统提示词含工具链缺陷类且禁止 git 报错一律归权限范围", () => {
+    const sys = buildObstacleMessages({
+      task: { uid: "tsk_a", title: "t", description: "d", projectRef: "o/r", note: "n" },
+      failure: { member: "codex", error: "boom" },
+    })[0].content;
+    expect(sys).toContain("工具链缺陷");
+    expect(sys).toContain("git 命令报任何错都不等于权限范围");
+    expect(sys).toContain("不得给出偏离处方");
+    expect(sys).toContain("不要一律填 high");
+  });
+
+  it("OBSTACLE_CATEGORIES 含工具链缺陷、提示词枚举同步", () => {
+    expect(OBSTACLE_CATEGORIES).toContain("工具链缺陷");
+    const sys = buildObstacleMessages({
+      task: { uid: "tsk_a", title: "t", description: "d", projectRef: null, note: "" },
+      failure: { member: "codex", error: "boom" },
+    })[0].content;
+    expect(sys).toContain("工具链缺陷");
+  });
+});
+
+// 2026-10-27 P1：偏离处方过滤（实测事故里「手动创建远程引用」被原样写进修复卡）
+describe("stripDeviantPrescriptions", () => {
+  it("剔除手动创建/修正远程引用类处方", () => {
+    const out = stripDeviantPrescriptions(
+      "验证 refs/remotes/origin/<branch> 是否存在，若不存在则手动创建指向正确 commit 的引用；修正代码中引用的分支名称",
+    );
+    expect(out).not.toContain("手动创建");
+    expect(out).toContain("修正代码中引用的分支名称"); // 正面动作保留
+  });
+
+  it("剔除改 remote url / 手动建分支类处方", () => {
+    const out = stripDeviantPrescriptions("检查 Gitea 仓库的 origin 配置，确认 remote url 正确且网络可达；手动创建该分支后重试");
+    expect(out).not.toMatch(/remote\s*url/);
+    expect(out).not.toContain("手动创建该分支");
+  });
+
+  it("正常处方不受影响", () => {
+    const s = "修 pr-finisher.ts 的 detectBaseBranch，把第三级回落改为探测 origin/main，并补回归测试";
+    expect(stripDeviantPrescriptions(s)).toBe(s);
+  });
+});
+
+describe("parseObstacleAnalysis", () => {
+  // 2026-10-27 实测：本地 Ollama 的 resolution/prevention 返回 JSON 数组而非字符串，
+  // 旧 String() 会糊成 "a,b,c"。归一为分号连接。
+  it("resolution/prevention 为数组时归一为分号文本", () => {
+    const a = parseObstacleAnalysis(JSON.stringify({
+      category: "工具链缺陷",
+      key_factors: ["收尾器基线取错引用"],
+      resolution: ["改 detectBaseBranch 第三级", "补回归测试"],
+      prevention: ["收尾期探测避开 agent/*"],
+      suggested_executor: "agent",
+      confidence: "high",
+    }));
+    expect(a).not.toBeNull();
+    expect(a!.resolution).toBe("改 detectBaseBranch 第三级；补回归测试");
+    expect(a!.prevention).toBe("收尾期探测避开 agent/*");
+    expect(a!.category).toBe("工具链缺陷");
+  });
+
+  it("解析时即过滤偏离处方", () => {
+    const a = parseObstacleAnalysis(JSON.stringify({
+      category: "权限范围",
+      key_factors: ["引用不存在"],
+      resolution: "手动创建指向正确 commit 的引用；改 detectBaseBranch 探测顺序",
+      suggested_executor: "运维",
+      confidence: "medium",
+    }));
+    expect(a!.resolution).not.toContain("手动创建");
+    expect(a!.resolution).toContain("改 detectBaseBranch 探测顺序");
   });
 });
 

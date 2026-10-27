@@ -188,6 +188,56 @@ describe("detectBaseBranch", () => {
       else process.env["WORKER_TEAM_BASE_BRANCH"] = saved;
     }
   });
+
+  // 2026-10-27 P0：探测级联轨迹——归因要看到「每一级探测了什么、成没成」才能定位根因
+  it("探测级联记录每级结果（缺失 origin/HEAD 时如实记，不猜）", async () => {
+    const { detectBaseBranchWithTrace } = await import("./pr-finisher.js");
+    const saved = process.env["WORKER_TEAM_BASE_BRANCH"];
+    delete process.env["WORKER_TEAM_BASE_BRANCH"];
+    try {
+      const { branch, trace } = await detectBaseBranchWithTrace("/nonexistent-pr-finisher-test");
+      expect(branch).toBe("main");
+      expect(trace).toContain("WORKER_TEAM_BASE_BRANCH 未设置");
+      expect(trace).toContain("origin/HEAD");
+      expect(trace).toContain("refs/remotes/origin/main");
+    } finally {
+      if (saved !== undefined) process.env["WORKER_TEAM_BASE_BRANCH"] = saved;
+    }
+  });
+
+  // 2026-10-27 P0：证据必须点破「agent 分支远端不存在 = 收尾器基线选取缺陷，
+  // 不是权限/网络问题」——这正是旧归因误判的根因
+  it("诊断证据点破 agent 分支无远程引用，且明确不是权限/网络问题", async () => {
+    const { execSync } = await import("node:child_process");
+    const { buildBaselineEvidence } = await import("./pr-finisher.js");
+    const base = mkdtempSync(join(tmpdir(), "baseline-evidence-"));
+    const bare = join(base, "origin.git");
+    const repo = join(base, "repo");
+    execSync(`git init --bare "${bare}"`, { stdio: "ignore" });
+    execSync(`git init -b main "${repo}"`, { stdio: "ignore" });
+    execSync(
+      `git -C "${repo}" config user.email t@t && git -C "${repo}" config user.name t && ` +
+        `git -C "${repo}" remote add origin "${bare}"`,
+      { stdio: "ignore" },
+    );
+    execSync(`git -C "${repo}" commit -m init --allow-empty --no-verify`, { stdio: "ignore" });
+    execSync(`git -C "${repo}" push -u origin main`, { stdio: "ignore" });
+    try { execSync(`git -C "${repo}" symbolic-ref --delete refs/remotes/origin/HEAD`, { stdio: "ignore" }); } catch { /* 未设置 */ }
+    execSync(`git -C "${repo}" checkout -b agent/t102044-t102128-cce8fe`, { stdio: "ignore" });
+
+    const saved = process.env["WORKER_TEAM_BASE_BRANCH"];
+    delete process.env["WORKER_TEAM_BASE_BRANCH"];
+    try {
+      const ev = await buildBaselineEvidence(repo);
+      expect(ev).toContain("agent/t102044-t102128-cce8fe");       // 记下当前分支
+      expect(ev).toContain("**不存在**");                          // 点破关键事实
+      expect(ev).toContain("收尾器基线选取缺陷");                   // 正确归因方向
+      expect(ev).toContain("不是仓库权限问题");                     // 明确排除误判方向
+      expect(ev).toContain("未提交改动文件数");                     // 附带「工人是否落盘」事实
+    } finally {
+      if (saved !== undefined) process.env["WORKER_TEAM_BASE_BRANCH"] = saved;
+    }
+  });
 });
 
 describe("createPrFinisher", () => {

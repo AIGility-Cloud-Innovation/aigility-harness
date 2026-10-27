@@ -129,6 +129,21 @@ async function callGatewayLlm(ctx: CtxLike, req: { messages: Array<{ role: strin
 }
 
 /**
+ * 从失败结果里抽诊断证据（2026-10-27 P0）。
+ *
+ * 收尾器失败时把证据串放在 detail 尾部的 `【诊断证据】` 段，或由结果对象直接带
+ * `evidence` 字段。此处**刻意不引包**（装配层类型宽松），用极小的文本约定匹配，
+ * 两种形态都认，取不到就返回 undefined（归因退回旧行为，绝不因此报错）。
+ */
+function extractFailureEvidence(value?: string): string | undefined {
+  const s = value ?? "";
+  if (!s) return undefined;
+  const m = s.match(/【诊断证据】\s*([\s\S]+)$/);
+  if (m?.[1]) return m[1].trim().slice(0, 1600);
+  return undefined;
+}
+
+/**
  * 生成 onResult 处理器（startWorkerTeamLoop 注入）。失败触发，成功静默；
  * 全链路异常只记日志——障碍分析员绝不拖垮工人循环。
  */
@@ -149,7 +164,10 @@ export function makeObstacleAnalystOnResult(opts: {
         console.error(`[obstacle-analyst] 失败任务不在台账（${uid}），跳过归因`);
         return;
       }
-      const failure = { member: extractFailureMember(result.error ?? ""), error: result.error ?? "" };
+      // 诊断证据（2026-10-27 P0）：收尾器失败时随结果带回失败链路的行级现场。
+      // 归因模型靠它定位根因；缺了它只能按规则把 git 报错一律归为「权限范围」（实测事故）。
+      const evidence = extractFailureEvidence(result.value);
+      const failure = { member: extractFailureMember(result.error ?? ""), error: result.error ?? "", ...(evidence ? { evidence } : {}) };
       // 同仓近期失败史（同类模式识别输入；失败态里排除本任务）
       const siblings = registry
         .list({ status: ["failed"] })
