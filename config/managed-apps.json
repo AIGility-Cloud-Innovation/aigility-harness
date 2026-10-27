@@ -7,7 +7,8 @@
       "args": ["src/index.ts"],
       "log": "examples/feishu-task-loop/task-loop.log",
       "lockFile": "/tmp/aigility-feishu-task-loop.lock",
-      "enabled": true
+      "enabled": false,
+      "_note": "保活所有权归 systemd（aigility-feishu-task-loop.service，Restart=always）。平台不得再拉起同一实例，否则两套保活机制互抢 flock 会造成无限重启风暴（2026-10-27 实测 140+ 次）。平台对本服务只做配置与观测，禁自 spawn。"
     }
   ]
 }
