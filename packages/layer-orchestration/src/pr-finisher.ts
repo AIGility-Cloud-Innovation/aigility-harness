@@ -322,13 +322,49 @@ export async function filterIgnored(files: string[], cwd: string): Promise<strin
 }
 
 /**
- * 默认基线分支：env 显式 → origin/HEAD → 目标仓库实际 HEAD → 兜底 main。
+ * 默认基线分支：env 显式 → origin/HEAD → 目标仓库主分支 → 兜底 main。
  *
  * 2026-10-15 事故修正：旧实现 origin/HEAD 探测失败即硬编码回退 "main"，
  * 而服务当时跑在 feat/persona-three-tier（领先 origin/main 48 提交）→ 工人
- * 拿到旧快照、把已有文件当新增提交。现补齐中间两级，使基线与实际运行分支一致。
- * 与 worktree-manager.resolveBaseBranch 同源（保持口径一致）。
+ * 拿到旧快照、把已有文件当新增提交。当时补的中间一级是「当前分支」。
+ *
+ * 2026-10-26 事故再修正：③「当前分支」这一级对 **agent 分支是陷阱**——
+ * 收尾器在 agent 分支上跑（分支名即产物），而该分支**本地刚生成、尚未 push**，
+ * 远端必然不存在 `refs/remotes/origin/agent/<...>`，于是
+ *   merge-base HEAD refs/remotes/origin/agent/t102044-t102128-cce8fe
+ * → 致命错误「Not a valid object name」→ 整轮成果判「交付前基线对齐失败」。
+ * 实测复现：cce8fe worktree 上该命令 exit=128，而 merge-base HEAD origin/main 正常。
+ *
+ * 故③改为「按候选顺序探测真实存在的远程基线」，agent/* 分支一律不作为基线
+ * （其名字是产物、不是基线），只认 origin/main、origin/master、origin/dev。
+ * 顺序：main 优先（收尾 PR 的 base 惯例），再 master/dev 兜底。
+ * 与 worktree-manager 的差异：那里在**派发前**探测（分支尚未创建，③ 安全），
+ * 这里在**收尾时**探测（此刻已在 agent 分支上，③ 必须避开）。
  */
+export async function detectBaseBranch(cwd: string): Promise<string> {
+  const explicit = (process.env["WORKER_TEAM_BASE_BRANCH"] ?? "").trim();
+  if (explicit) return explicit;
+  try {
+    const { stdout } = await git(["symbolic-ref", "refs/remotes/origin/HEAD"], { cwd });
+    const m = stdout.trim().match(/^refs\/remotes\/origin\/(.+)$/);
+    if (m?.[1]) return m[1];
+  } catch {
+    // 未设置 origin/HEAD 时继续下探
+  }
+  // ③ 目标仓库真实存在的远程主分支（排除 agent/* ——分支名即产物，远端必然不存在）
+  for (const candidate of ["main", "master", "dev"]) {
+    try {
+      await git(["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${candidate}`], { cwd });
+      return candidate;
+    } catch {
+      // 该候选不存在，试下一个
+    }
+  }
+  return "main";
+}
+
+// ── 收尾器 ───────────────────────────────────────────────────────
+
 /**
  * 交付前基线对齐：特性分支落后 <remote>/<base> 时变基；有冲突则中止变基并拒交（转人工）。
  * 背景：timem_frontend 曾以落后 134 提交的分支直开 PR（mergeable=False），根因即收尾器无对齐步骤。
@@ -361,28 +397,6 @@ export async function rebaseAheadIfNeeded(
     return { ok: false, detail: `交付前基线对齐失败：${msg.slice(0, 160)}` };
   }
 }
-
-export async function detectBaseBranch(cwd: string): Promise<string> {
-  const explicit = (process.env["WORKER_TEAM_BASE_BRANCH"] ?? "").trim();
-  if (explicit) return explicit;
-  try {
-    const { stdout } = await git(["symbolic-ref", "refs/remotes/origin/HEAD"], { cwd });
-    const m = stdout.trim().match(/^refs\/remotes\/origin\/(.+)$/);
-    if (m?.[1]) return m[1];
-  } catch {
-    // 未设置 origin/HEAD 时继续下探
-  }
-  try {
-    const { stdout } = await git(["symbolic-ref", "--short", "HEAD"], { cwd });
-    const cur = stdout.trim();
-    if (cur && cur !== "HEAD") return cur;
-  } catch {
-    // detached HEAD / 非 git 目录
-  }
-  return "main";
-}
-
-// ── 收尾器 ───────────────────────────────────────────────────────
 
 export interface PrFinisherOptions {
   /** SeamContext（@action/gitea-api 调用用）；测试可注入假 giteaCall */

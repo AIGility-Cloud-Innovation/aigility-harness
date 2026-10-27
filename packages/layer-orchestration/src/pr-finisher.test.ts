@@ -142,6 +142,52 @@ describe("detectBaseBranch", () => {
     // 用一个必然失败的 cwd（不存在目录）——execFile 抛错被 catch 后回退 main
     await expect(detectBaseBranch("/nonexistent-pr-finisher-test")).resolves.toBe("main");
   });
+
+  // 2026-10-26 事故回归：收尾时 cwd 在 agent 分支上，旧实现回退「当前分支」
+  // → merge-base refs/remotes/origin/agent/<...>「Not a valid object name」整轮判失败。
+  it("origin/HEAD 缺失 + 当前分支为 agent/* → 不返回 agent 分支，回退真实存在的 origin/main", async () => {
+    const { execSync } = await import("node:child_process");
+    const base = mkdtempSync(join(tmpdir(), "detect-base-agent-"));
+    const bare = join(base, "origin.git");
+    const repo = join(base, "repo");
+    execSync(`git init --bare "${bare}"`, { stdio: "ignore" });
+    execSync(`git init -b main "${repo}"`, { stdio: "ignore" });
+    execSync(
+      `git -C "${repo}" config user.email t@t && git -C "${repo}" config user.name t && ` +
+        `git -C "${repo}" remote add origin "${bare}"`,
+      { stdio: "ignore" },
+    );
+    execSync(`git -C "${repo}" commit -m init --allow-empty --no-verify`, { stdio: "ignore" });
+    execSync(`git -C "${repo}" push -u origin main`, { stdio: "ignore" });
+    // 删掉 origin/HEAD，复现事故当天状态
+    try { execSync(`git -C "${repo}" symbolic-ref --delete refs/remotes/origin/HEAD`, { stdio: "ignore" }); } catch { /* 未设置 */ }
+    // 切到 agent 分支（本地生成、未 push → 远端无此引用）
+    execSync(`git -C "${repo}" checkout -b agent/t102044-t102128-cce8fe`, { stdio: "ignore" });
+
+    const saved = process.env["WORKER_TEAM_BASE_BRANCH"];
+    delete process.env["WORKER_TEAM_BASE_BRANCH"];
+    try {
+      const got = await detectBaseBranch(repo);
+      expect(got).toBe("main");
+      // 旧实现会返回 agent/t102044-t102128-cce8fe → 该引用远端不存在 → merge-base 必炸
+      expect(got).not.toContain("agent/");
+      // 新基线可用：merge-base 不再抛错
+      execSync(`git -C "${repo}" merge-base HEAD refs/remotes/origin/${got}`, { stdio: "ignore" });
+    } finally {
+      if (saved !== undefined) process.env["WORKER_TEAM_BASE_BRANCH"] = saved;
+    }
+  });
+
+  it("env WORKER_TEAM_BASE_BRANCH 显式优先（覆盖探测）", async () => {
+    const saved = process.env["WORKER_TEAM_BASE_BRANCH"];
+    process.env["WORKER_TEAM_BASE_BRANCH"] = "release/2026";
+    try {
+      await expect(detectBaseBranch("/nonexistent-pr-finisher-test")).resolves.toBe("release/2026");
+    } finally {
+      if (saved === undefined) delete process.env["WORKER_TEAM_BASE_BRANCH"];
+      else process.env["WORKER_TEAM_BASE_BRANCH"] = saved;
+    }
+  });
 });
 
 describe("createPrFinisher", () => {
