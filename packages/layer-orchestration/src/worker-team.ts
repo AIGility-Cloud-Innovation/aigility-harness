@@ -43,6 +43,38 @@ import { existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
+/**
+ * 失败 note 组装（2026-10-27）：保护尾部的【诊断证据】段不被 300 字上限切掉。
+ *
+ * 背景：pr-finisher 基线失败时把诊断证据附在 detail 尾部，而 worker-team 写 note
+ * 时 `detail.slice(0, 300)` 会把整段证据切掉（实测 tsk_b8c08dd7：note 195 字、
+ * 无证据段）→ 障碍分析员拿不到现场，归因退回"靠规则猜"。
+ * 策略：无证据段时维持原截断语义；有证据段时给症状段留 SYMPTOM_BUDGET 字，其余给证据。
+ */
+export function composeFailureNote(memberId: string, detail: string): string {
+  const prefix = `[worker-team/${memberId}] 交付失败：`;
+  const MARK = "【诊断证据】";
+  const idx = detail.indexOf(MARK);
+  if (idx < 0) return `${prefix}${detail.slice(0, 300)}`;
+  const SYMPTOM_BUDGET = 120;
+  const rawSymptom = detail.slice(0, idx).trim();
+  const evidence = detail.slice(idx).trim();
+  // 症状段压缩：超预算时保留「首行 + 含致命错误的那行」——
+  // 「Not a valid object name / fatal / 致命」这类行才是定性关键，不能整段砍掉。
+  let symptom = rawSymptom.slice(0, SYMPTOM_BUDGET);
+  if (rawSymptom.length > SYMPTOM_BUDGET) {
+    const fatalLine = rawSymptom
+      .split("\n")
+      .find((l) => /fatal|致命|Not a valid object name|Command failed/i.test(l) && !symptom.includes(l.trim()));
+    if (fatalLine) {
+      const head = rawSymptom.split("\n")[0].slice(0, 40);
+      symptom = `${head} … ${fatalLine.trim()}`.slice(0, SYMPTOM_BUDGET);
+    }
+  }
+  const room = Math.max(0, 300 - prefix.length - symptom.length - 1);
+  return `${prefix}${symptom}\n${evidence.slice(0, room)}`;
+}
+
 /** 决策续跑的工作区解析：worktree 存在则用 worktree，否则回退主仓库根 */
 function resolveDecisionCwd(repoRoot: string | undefined, uid: string): string | undefined {
   if (!repoRoot) return undefined;
@@ -570,7 +602,10 @@ export class WorkerTeam {
 
     // ── 收尾失败：failed 终态留现场（不换人重跑）──
     this.o.registry.transition(task.uid, "failed", "running");
-    this.o.registry.get(task.uid)!.note = `[worker-team/${member.id}] 交付失败：${fin.detail.slice(0, 300)}`;
+    // 诊断证据保护（2026-10-27）：detail 可能携带尾部【诊断证据】段（pr-finisher 基线失败），
+    // 而 note 有 300 字上限——直接 slice 会把证据整段切掉，归因退回"靠猜"。
+    // 故：无证据时维持原截断；有证据时压缩症状段、优先保证据完整。
+    this.o.registry.get(task.uid)!.note = composeFailureNote(member.id, fin.detail);
     this.dispatched.delete(task.uid);
     return err(`[${member.id}] 收尾失败 → ${fin.detail}`);
   }

@@ -11,7 +11,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TaskRegistry } from "./task-registry.js";
-import { WorkerTeam, pickWorker, inferTaskTags, decisionBroadcast } from "./worker-team.js";
+import { WorkerTeam, pickWorker, inferTaskTags, decisionBroadcast, composeFailureNote } from "./worker-team.js";
 import { DECISION_FILE, writeDecision } from "./agent-decision.js";
 import { listChangedFiles } from "./pr-finisher.js";
 import type { WorkerMember } from "./worker-team.js";
@@ -36,6 +36,32 @@ function seedTask(reg: TaskRegistry, over: Partial<TaskRecord> = {}): TaskRecord
   reg.approve(rec.uid, { via: "auto", by: "system" }); // planned → ready
   return reg.get(rec.uid)!;
 }
+
+// 2026-10-27 实测事故：note 的 300 字上限把尾部【诊断证据】整段切掉
+// （tsk_b8c08dd7 note=195 字、无证据段）→ 归因拿不到现场。证据必须活下来。
+describe("composeFailureNote 证据保护", () => {
+  const symptom = "交付前基线对齐失败：Command failed: git -c core.quotePath=false merge-base HEAD refs/remotes/origin/agent/agent-bug-pdc-b6d91b\n致命错误：Not a valid object name refs/remotes/origin/agent/agent-bug-pdc-b6d91b";
+  const evidence = "【诊断证据】\n· 收尾器当前分支（本地）：agent/agent-bug-pdc-b6d91b\n· ⚠️ 关键事实：当前分支的远程引用 **不存在** → 这是收尾器基线选取缺陷，不是仓库权限问题。\n· 工作区未提交改动文件数：3";
+
+  it("带证据段时证据不被截断（旧实现整段丢失）", () => {
+    const note = composeFailureNote("codex", `${symptom}\n${evidence}`);
+    expect(note).toContain("【诊断证据】");
+    expect(note).toContain("**不存在**");
+    expect(note).toContain("收尾器基线选取缺陷");
+    expect(note.length).toBeLessThanOrEqual(300);
+  });
+
+  it("无证据段时维持原 300 字截断语义", () => {
+    const long = "x".repeat(500);
+    const note = composeFailureNote("codex", long);
+    expect(note).toBe(`[worker-team/codex] 交付失败：${"x".repeat(300)}`);
+  });
+
+  it("症状段被压缩但不丢关键错误行", () => {
+    const note = composeFailureNote("codex", `${symptom}\n${evidence}`);
+    expect(note).toContain("Not a valid object name");
+  });
+});
 
 describe("pickWorker 分派路由", () => {
   it("description 带 [worker:claude] → 显式指定优先", () => {

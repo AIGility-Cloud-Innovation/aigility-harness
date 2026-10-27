@@ -206,7 +206,7 @@ export type { ObstacleAnalysis, ObstacleFailure, ObstacleLlm } from "./obstacle-
 export type { AdoptTaskInput, TaskListFilter } from "./task-registry.js";
 
 // ── 工人小组（worker-team：接单/分派/派发/回流，D4 编排域） ──────
-export { WorkerTeam, pickWorker, workerTeamService, workerTeamProvider } from "./worker-team.js";
+export { WorkerTeam, pickWorker, workerTeamService, workerTeamProvider, composeFailureNote } from "./worker-team.js";
 export type { WorkerMember, DispatchInput, WorkerTeamOptions, FinishInfo } from "./worker-team.js";
 export { createWorkerTeam, startWorkerTeamLoop, LIGHT_ROSTER, makeCallWorker, makeResolveCwd } from "./worker-team-boot.js";
 export {
