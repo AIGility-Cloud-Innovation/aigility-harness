@@ -2508,7 +2508,30 @@ function handlePendingConfirm(ref: string, sessionChatId?: string, rootId?: stri
     );
   }
   takePendingCandidate(item.chatId, no);
-  return `✅ #${no}「${item.title}」已核验：项目 ${repo} · 执行人 ${executor}（现阶段仅记录，不建任务/工单）。`;
+  // 台账推进（2026-10-27 补断链）：P 组扫描 adopt 时建的是 candidate（24h 审核窗口，
+  // 见 task-issue-sync.ts 的 adopt({status:"candidate"})），而 P 组放行循环只处理 planned
+  // （准入闸门 'if (!["planned"].includes(rec.status))' → continue），
+  // candidate→planned 的推进此前**只写在注释里、代码从未实现** → 新卡永久死锁在 candidate，
+  // 永不放行、永不进 D。此处按用户 2026-10-27 拍板（Q1 保留 candidate 闸门）补上该步。
+  // best-effort：台账问题不应让「确认」动作本身失败（候选池已消费）。
+  const promoteNote = promoteLedgerAfterConfirm(item.feishuTaskGuid);
+  return `✅ #${no}「${item.title}」已核验：项目 ${repo} · 执行人 ${executor}${promoteNote}。`;
+}
+
+/**
+ * 「确认 R编号」后把对应台账记录 candidate → planned（断链补齐，2026-10-27）。
+ * 找不到记录（非飞书先行模式/未建台账）时静默跳过——候选池确认仍算成功。
+ * 返回追加到回执的说明片段（空串=无需提示）。
+ */
+function promoteLedgerAfterConfirm(feishuTaskGuid?: string): string {
+  const reg = planGateRegistry;
+  if (!reg || !feishuTaskGuid) return "（未关联台账，仅记录）";
+  const rec = reg.findByExternal(FEISHU_TASK_PROVIDER, feishuTaskGuid);
+  if (!rec) return "（未关联台账，仅记录）";
+  if (rec.status === "planned") return "（台账已在 planned）";
+  if (rec.status !== "candidate") return `（台账已是「${rec.status}」，未改动）`;
+  const r = reg.transition(rec.uid, "planned", "candidate");
+  return r.ok ? "；台账已推进 candidate → planned，待放行" : `；台账推进失败（${r.error}）`;
 }
 
 /**

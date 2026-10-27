@@ -19,6 +19,9 @@ import {
   autoDispatchEnabled,
   runPlanGate,
 } from "./task-issue-sync.js";
+import { TaskRegistry } from "./task-registry.js";
+import { FEISHU_TASK_PROVIDER } from "./feishu-task-provider.js";
+import { TASK_STATUS_TRANSITIONS } from "@aigility-harness/core";
 import type { SeamContext } from "@aigility-harness/core";
 
 describe("SECTION_NAMES 状态分组", () => {
@@ -207,6 +210,43 @@ describe("派发确认/取消意图路由", () => {
     );
     if (!r.ok) throw new Error("execute failed");
     expect(r.value.response).toContain("用法");
+  });
+});
+
+// ── 「确认 R编号」台账推进断链补修（2026-10-27）───────────────────────────
+// 缺陷：P 组扫描 adopt({status:"candidate"})（24h 审核窗口）建出 candidate，
+// 而 P 组放行循环准入闸门只认 planned（'if (!["planned"].includes(rec.status))' → continue），
+// candidate→planned 的推进此前只在注释里描述、代码从未实现 → 新卡永久死锁：
+// 既不被放行、也进不了 D（D 组 approve 走 CAS 要求 planned，candidate 必然失败）。
+// 修复：handlePendingConfirm（确认 R编号）核验通过后，除消费候选池外，把
+// 关联台账记录（按 feishuTaskGuid 定位）candidate → planned，best-effort 不影响确认结果。
+describe("确认 R 编号 → 台账推进 candidate→planned（断链补修）", () => {
+  it("状态机允许 candidate → planned（推进步的合法前提）", () => {
+    const allowed = TASK_STATUS_TRANSITIONS.candidate;
+    expect(allowed).toContain("planned");
+  });
+
+  it("candidate → ready 非法：证明必须先经 planned（D 组直派 candidate 会 CAS 失败）", () => {
+    expect(TASK_STATUS_TRANSITIONS.candidate).not.toContain("ready");
+    expect(TASK_STATUS_TRANSITIONS.planned).toContain("ready");
+  });
+
+  it("transition(candidate→planned) 成功后 approve 才能放行（闭环验证）", () => {
+    const reg = new TaskRegistry();
+    const rec = reg.adopt({
+      title: "【agent】[org/repo] 验证任务",
+      status: "candidate",
+      origin: { provider: FEISHU_TASK_PROVIDER, guid: "g-chain" },
+      projectRef: "org/repo",
+    });
+    // 死锁态：candidate 直接 approve 必失败（CAS 期望 planned）
+    expect(reg.approve(rec.uid, { via: "auto" }).ok).toBe(false);
+    // 补断链：推进到 planned
+    expect(reg.transition(rec.uid, "planned", "candidate").ok).toBe(true);
+    // 现在放行成功
+    const approved = reg.approve(rec.uid, { via: "auto" });
+    expect(approved.ok).toBe(true);
+    expect(reg.get(rec.uid)?.status).toBe("ready");
   });
 });
 
