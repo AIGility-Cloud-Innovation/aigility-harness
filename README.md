@@ -449,6 +449,39 @@ pnpm --filter wecom-coder start
 
 ---
 
+### 服务保活（task-loop 守护）
+
+飞书任务流水线由 systemd 托管，日常检查使用：
+
+```bash
+systemctl --user status aigility-feishu-task-loop.service
+```
+
+保活遵循**所有权唯一化**原则：`aigility-feishu-task-loop.service` 是唯一保活者；平台 `managed-apps.json` 中对应的 `feishu-task-loop` 已置为 `enabled: false`，只保留观测能力，不再拉起同一实例。详见 [docs/服务保活设计-所有权唯一化.md](docs/服务保活设计-所有权唯一化.md)。
+
+systemd 配置包含启动限流：`StartLimitIntervalSec=300`、`StartLimitBurst=5`。也就是 5 分钟内连续失败 5 次后停止自动重启，进入 `failed` 状态等待人工处理，避免无限重启风暴；单元定义与生效方式见 [docs/systemd启动限流配置-可直接粘贴.md](docs/systemd启动限流配置-可直接粘贴.md)。
+
+标准输出与错误追加写入 `/tmp/aigility-feishu-task-loop.log`。常用排障命令：
+
+```bash
+# 查看重启计数和限流配置
+systemctl --user show aigility-feishu-task-loop.service \
+  -p NRestarts -p StartLimitIntervalUSec -p StartLimitBurst
+
+# 查看日志末尾
+tail -n 100 /tmp/aigility-feishu-task-loop.log
+
+# 确认单例锁文件与持有进程；服务停止后残留锁可删除
+ls -l /tmp/aigility-feishu-task-loop.lock
+cat /tmp/aigility-feishu-task-loop.lock
+
+# 人工确认故障后，清除失败状态并交还 systemd
+systemctl --user reset-failed aigility-feishu-task-loop.service
+systemctl --user start aigility-feishu-task-loop.service
+```
+
+> 排障时不要用 `tsx` 手动长期启动该流水线；人工实例会持有单例锁，导致 systemd 无法接管。异常时先停止人工实例，再由 systemd 拉起。
+
 ## 八、py-bridge：跨语言插件桥接
 
 > **包定位**：`@aigility-harness/py-bridge` 是独立包（不在 layer-infrastructure 内），只依赖 core。
