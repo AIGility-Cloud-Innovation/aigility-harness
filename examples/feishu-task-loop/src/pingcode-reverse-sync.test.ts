@@ -1,6 +1,11 @@
-/** pingcode-reverse-sync 单测：交付PR闸门、无PR问询防重与人工确认补关。 */
+/** pingcode-reverse-sync 单测：交付PR闸门、无PR问询防重与人工确认补关、PC描述取证与即时确认。 */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { syncPingcodeClosures } from "./pingcode-reverse-sync.js";
+import {
+  syncPingcodeClosures,
+  sanitizeCommandText,
+  recordClosureConfirmation,
+  appendPrToFeishuDescription,
+} from "./pingcode-reverse-sync.js";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -130,5 +135,89 @@ describe("syncPingcodeClosures", () => {
     expect(changes).toEqual(["TYY-101 PC已关闭 → 台账done+飞书已完成"]);
     expect(transitions).toEqual(["done"]);
     expect(notified).toEqual([]);
+  });
+
+  // ── 2026-10-27：PC 描述取证 + 确认双通道（零宽字符实录修复）──────────────
+  it("sanitizeCommandText 剥零宽/不可见字符", () => {
+    expect(sanitizeCommandText("确认关单 TYY-132\u200d")).toBe("确认关单 TYY-132");
+    expect(sanitizeCommandText(" 确认关单\u2060 TYY-130\ufeff ")).toBe("确认关单 TYY-130");
+  });
+  it("带零宽字符的确认消息也能消费（U+200D 尾随实录）", async () => {
+    setupMap([{ feishu_guid: "g1", pingcode: "TYY-101" }]);
+    mockPc("关闭");
+    writeFileSync(join(dir, "map.state.json"), JSON.stringify({ "g1:pc-closed-no-pr": "pc-closed-no-pr" }));
+    const reg = fakeRegistry("dispatched");
+    const changes = await syncPingcodeClosures(reg, dir, okCall, {
+      giteaCall: unmergedGiteaCall,
+      receivedMessages: ["确认关单 TYY-101\u200d"],
+    });
+    expect(changes).toEqual(["TYY-101 PC已关闭 → 台账done+飞书已完成"]);
+  });
+  it("台账无PR但PC描述有已合并PR → 取证放行并回写飞书描述与台账note", async () => {
+    setupMap([{ feishu_guid: "g1", pingcode: "TYY-101" }]);
+    (fetch as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/auth/token")) return new Response(JSON.stringify({ access_token: "t" }), { status: 200 });
+      if (u.endsWith("/projects")) return new Response(JSON.stringify({ values: [{ id: "p1", identifier: "TYY" }] }), { status: 200 });
+      if (u.includes("/workitems?")) return new Response(JSON.stringify({ values: [{ id: "w1", whole_identifier: "TYY-101" }] }), { status: 200 });
+      return new Response(JSON.stringify({ state: { name: "关闭" }, description: "交付见 https://git.aigility.cloud/org/repo/pulls/9" }), { status: 200 });
+    });
+    const noteUpdates: string[] = [];
+    const reg = {
+      list: () => [{ uid: "u1", status: "review", note: "已完成", links: { "feishu-task": { guid: "g1" } } }],
+      transition: () => ({ ok: true }),
+      update: (_uid: string, patch: { note?: string }) => { noteUpdates.push(patch.note ?? ""); return { ok: true }; },
+    };
+    const gitea = async (req: { path?: string }) => ({ ok: true, value: { status: 200, data: { merged: req.path?.endsWith("/pulls/9") === true } } });
+    const feishuCalls: Array<Record<string, unknown>> = [];
+    const feishuCall = async (req: Record<string, unknown>) => {
+      feishuCalls.push(req);
+      return { ok: true, value: { code: 0, data: { task: { description: "现有描述" } } } };
+    };
+    const changes = await syncPingcodeClosures(reg, dir, feishuCall, { giteaCall: gitea });
+    expect(changes[0]).toContain("取证自 PC 描述");
+    const descPatch = feishuCalls.find((r) => (r.body as { update_fields?: string[] })?.update_fields?.[0] === "description");
+    expect((descPatch?.body as { task?: { description?: string } })?.task?.description).toContain("交付 PR：https://git.aigility.cloud/org/repo/pulls/9");
+    expect(noteUpdates[0]).toContain("pulls/9");
+  });
+  it("PC 描述有 PR 但均未合并 → 问询提示", async () => {
+    setupMap([{ feishu_guid: "g1", pingcode: "TYY-101" }]);
+    (fetch as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/auth/token")) return new Response(JSON.stringify({ access_token: "t" }), { status: 200 });
+      if (u.endsWith("/projects")) return new Response(JSON.stringify({ values: [{ id: "p1", identifier: "TYY" }] }), { status: 200 });
+      if (u.includes("/workitems?")) return new Response(JSON.stringify({ values: [{ id: "w1", whole_identifier: "TYY-101" }] }), { status: 200 });
+      return new Response(JSON.stringify({ state: { name: "关闭" }, description: "未合并 https://git.aigility.cloud/org/repo/pulls/9" }), { status: 200 });
+    });
+    const notified: string[] = [];
+    const reg = fakeRegistry("dispatched");
+    const changes = await syncPingcodeClosures(reg, dir, okCall, {
+      giteaCall: unmergedGiteaCall,
+      notify: async (text: string) => { notified.push(text); },
+    });
+    expect(changes).toEqual(["TYY-101 已关闭但无交付PR → 已问询"]);
+    expect(notified[0]).toContain("均未合并");
+  });
+  it("recordClosureConfirmation 即时落标记 → 下拍无消息也补关，并清理标记", async () => {
+    setupMap([{ feishu_guid: "g1", pingcode: "TYY-101" }]);
+    mockPc("关闭");
+    writeFileSync(join(dir, "map.state.json"), JSON.stringify({ "g1:pc-closed-no-pr": "pc-closed-no-pr" }));
+    expect(recordClosureConfirmation(dir, "TYY-101").ok).toBe(true);
+    expect(recordClosureConfirmation(dir, "TYY-404").ok).toBe(false);
+    const reg = fakeRegistry("dispatched");
+    const changes = await syncPingcodeClosures(reg, dir, okCall, { giteaCall: unmergedGiteaCall });
+    expect(changes).toEqual(["TYY-101 PC已关闭 → 台账done+飞书已完成"]);
+    const sigs = JSON.parse(readFileSync(join(dir, "map.state.json"), "utf-8"));
+    expect(sigs["g1:pc-confirm"]).toBeUndefined();
+  });
+  it("appendPrToFeishuDescription 幂等：描述已含链接不再 PATCH", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const call = async (req: Record<string, unknown>) => {
+      calls.push(req);
+      return { ok: true, value: { code: 0, data: { task: { description: "x\n交付 PR：https://git.aigility.cloud/o/r/pulls/9" } } } };
+    };
+    const ok = await appendPrToFeishuDescription(call, "g1", ["https://git.aigility.cloud/o/r/pulls/9"]);
+    expect(ok).toBe(true);
+    expect(calls.some((r) => r.method === "PATCH")).toBe(false);
   });
 });

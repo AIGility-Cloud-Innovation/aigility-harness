@@ -57,6 +57,7 @@ import type { TaskRecord } from "@aigility-harness/core";
 import type { ReleaseDoc } from "@aigility-harness/layer-orchestration";
 import { resolveProjectRefAsync } from "./repo-resolver.js";
 import { buildPendingIssuesReport } from "./pending-issues.js";
+import { CONFIRM_COMMAND_PATTERN, sanitizeCommandText, recordClosureConfirmation } from "./pingcode-reverse-sync.js";
 
 // ── 会话/登记表（与 scripts/review-session.ts 共用同一份文件） ──────
 
@@ -664,6 +665,16 @@ export async function handleReviewMessage(
     return r.ok && r.value?.code === 0 ? r.value?.data : { code: r.value?.code, msg: r.value?.msg, error: r.error };
   };
   tickNotify(notifyWindowMs(loadReleaseDoc(RELEASE_YAML).doc));
+
+  // 确认关单（2026-10-27 缺陷修复）：即时落确认标记，下一拍 ①.555 自动完成——
+  // 不等对齐拍收消息缓冲（默认 30min），也不会落进「报短码」兜底。
+  const confirmReq = sanitizeCommandText(text).match(CONFIRM_COMMAND_PATTERN);
+  if (confirmReq) {
+    const r = recordClosureConfirmation(REPO_ROOT_DIR, confirmReq[1]);
+    return r.ok
+      ? `收到，「${confirmReq[1]}」关单确认已记录，下一拍自动完成台账关单与飞书标完成。`
+      : `「${confirmReq[1]}」不在同步映射表里（${r.error ?? "未知原因"}），这张卡不用确认。`;
+  }
 
   // 绑定身份（两步确认 + 本人绑定优先）：「绑定身份 X」→「确认绑定 X」
   const bindReq = text.match(/^(?:绑定身份|身份绑定)\s*[:：]?\s*(\S{1,32})$/);

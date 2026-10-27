@@ -3,11 +3,19 @@
  * （2026-10-23 用户拍板「反向的pc到飞书关闭任务是要做的」）。
  *
  * 交付事实校验：PR 合并是完成联动的闸门。映射卡 PC 终态先查台账 note 的
- * PR 链接与 Gitea merged 状态；有已合并 PR 才完成联动。无 PR 时只问询一次，
- * 显式回复「确认关单 <PC编号>」后，下一拍才按人工确认补关。
+ * PR 链接与 Gitea merged 状态；有已合并 PR 才完成联动。台账没 PR 时去 PC 卡
+ * 描述取证（2026-10-27 拍板：真人交付常把 PR 只贴在 PC 描述里；评论接口本实例
+ * 404 不可用）——描述里有已合并 PR 同样放行，并把链接回写台账 note 与飞书任务
+ * 描述（幂等）。两处都没有才问询一次，显式回复「确认关单 <PC编号>」后补关：
  *   · 台账非 done：合法路径转 done（直达或经 review 两跳，与 completion-sync 同姿势）
  *   · 飞书任务 PATCH completed_at 标完成（review-aware.ts:764 同形态）
  *   · 台账找不到/已 done：跳过（找不到=游离卡，不猜；已 done=闭环完成）
+ *
+ * 确认双通道（2026-10-27 缺陷修复）：receivedMessages 只随对齐拍（默认 30min）
+ * 消费，且飞书消息常带零宽字符让 ^$ 锚失配——confirm 会迟到甚至永远不中。故
+ *   ① 匹配前剥零宽字符（sanitizeCommandText）；
+ *   ② 指令链路（review-aware）收到「确认关单」即时调 recordClosureConfirmation
+ *     落 state 文件（`${guid}:pc-confirm`），对齐拍直接消费，不等消息缓冲。
  *
  * 与正向联动（pingcode-status-sync.ts）不打架：
  *   正向只在飞书变化时写 PC；PC「关闭」后正向快照 completed=true → 期望态=关闭
@@ -31,6 +39,8 @@ export interface ReverseSyncRegistry {
     origin?: { provider: string; guid?: string };
   }>;
   transition(uid: string, to: string, from?: string): { ok: boolean };
+  /** 台账字段更新（可选；有则 PC 描述取证的 PR 会回写 note 留证） */
+  update?(uid: string, patch: { note?: string }): unknown;
 }
 
 type Call = (req: Record<string, unknown>) => Promise<{
@@ -50,6 +60,12 @@ type NotificationSink = (text: string) => Promise<void> | void;
 export const PR_URL_PATTERN = /https:\/\/git\.aigility\.cloud\/[^\s（)）]+\/pulls\/\d+/;
 export const CONFIRM_COMMAND_PATTERN = /^确认关单\s*[:：]?\s*([A-Za-z][A-Za-z0-9]*-\d+)\s*$/u;
 const PENDING_SIGNATURE = "pc-closed-no-pr";
+const CONFIRM_MARK_SUFFIX = ":pc-confirm";
+
+/** 剥飞书消息里的零宽/不可见字符再匹配（\s 不含 U+200B–200F/U+2060，尾随即失配）。 */
+export function sanitizeCommandText(raw: string): string {
+  return String(raw).replace(/[\u200b-\u200f\u2060\ufeff]/g, "").trim();
+}
 
 function giteaPrRequest(prUrl: string): Record<string, unknown> | undefined {
   const m = prUrl.match(/\/([^/]+)\/([^/]+)\/pulls\/(\d+)$/);
@@ -90,6 +106,76 @@ export async function completeFeishuTask(call: Call, taskGuid: string): Promise<
     return r.ok && (r.value?.code === undefined || r.value.code === 0);
   } catch {
     return false;
+  }
+}
+
+/** 飞书任务描述尾部追加 PR 链接（幂等：描述已含同链接则跳过；issue-link-backfill 同形态）。 */
+export async function appendPrToFeishuDescription(
+  call: Call,
+  taskGuid: string,
+  prUrls: string[],
+): Promise<boolean> {
+  try {
+    const cur = await call({
+      method: "GET",
+      path: `/open-apis/task/v2/tasks/${taskGuid}`,
+      query: { user_id_type: "open_id" },
+      identity: "user",
+    });
+    const desc = (cur.value?.data as { task?: { description?: string } } | undefined)?.task?.description ?? "";
+    const fresh = prUrls.filter((u) => !desc.includes(u));
+    if (fresh.length === 0) return true;
+    const next = desc ? `${desc}\n交付 PR：${fresh.join(" ")}` : `交付 PR：${fresh.join(" ")}`;
+    const r = await call({
+      method: "PATCH",
+      path: `/open-apis/task/v2/tasks/${taskGuid}`,
+      query: { user_id_type: "open_id" },
+      identity: "user",
+      body: { update_fields: ["description"], task: { description: next } },
+    });
+    return r.ok && (r.value?.code === undefined || r.value.code === 0);
+  } catch {
+    return false;
+  }
+}
+
+/** 即时确认（review-aware 指令链路调用）：state 文件落 `${guid}:pc-confirm`，对齐拍直接消费。 */
+export function recordClosureConfirmation(
+  repoRoot: string,
+  pingcodeId: string,
+): { ok: boolean; error?: string } {
+  const mapPath = process.env.PINGCODE_SYNC_MAP
+    ? resolve(process.env.PINGCODE_SYNC_MAP)
+    : resolve(repoRoot, "config/feishu-pingcode-sync.map.json");
+  let entries: MapEntry[];
+  try {
+    entries = JSON.parse(readFileSync(mapPath, "utf-8")) as MapEntry[];
+  } catch {
+    return { ok: false, error: "同步映射表不可读" };
+  }
+  const hit = entries.find((e) => e.pingcode === pingcodeId.toUpperCase());
+  if (!hit) return { ok: false, error: "映射表里没有这张卡" };
+  const statePath = mapPath.replace(/\.json$/, ".state.json");
+  let sigs: Record<string, string> = {};
+  try {
+    sigs = JSON.parse(readFileSync(statePath, "utf-8")) as Record<string, string>;
+  } catch { /* 首拍无状态文件 */ }
+  sigs[`${hit.feishu_guid}${CONFIRM_MARK_SUFFIX}`] = "confirmed";
+  try {
+    writeFileSync(statePath, JSON.stringify(sigs, null, 1));
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String((e as Error)?.message ?? e) };
+  }
+}
+
+/** PC 卡描述全文（失败返空串——取证是增益路径，不阻塞闸门）。 */
+async function pcDescription(workitemId: string, PH: Record<string, string>): Promise<string> {
+  try {
+    const r = (await (await fetch(`${OPEN}/pjm/workitems/${workitemId}`, { headers: PH })).json()) as { description?: string };
+    return r.description ?? "";
+  } catch {
+    return "";
   }
 }
 
@@ -140,9 +226,13 @@ export async function syncPingcodeClosures(
 
   const confirmed = new Set<string>();
   for (const raw of options.receivedMessages ?? []) {
-    const m = String(raw).trim().match(CONFIRM_COMMAND_PATTERN);
+    const m = sanitizeCommandText(raw).match(CONFIRM_COMMAND_PATTERN);
     const hit = m ? entries.find((e) => e.pingcode === m[1]) : undefined;
     if (m && hit) confirmed.add(hit.feishu_guid);
+  }
+  // 即时确认通道（review-aware 指令落 state 文件）：不等消息缓冲随对齐拍来
+  for (const [k, v] of Object.entries(sigs)) {
+    if (v === "confirmed" && k.endsWith(CONFIRM_MARK_SUFFIX)) confirmed.add(k.slice(0, -CONFIRM_MARK_SUFFIX.length));
   }
 
   const metaCache = new Map<string, { projectId: string; ok: boolean }>();
@@ -177,11 +267,28 @@ export async function syncPingcodeClosures(
         .list()
         .find((t) => t.links?.["feishu-task"]?.guid === e.feishu_guid || (t.origin?.provider === "feishu-task" && t.origin?.guid === e.feishu_guid));
       if (!rec) continue; // 双检（预筛后状态可能已变）
-      const merged = options.giteaCall ? await hasMergedDeliveryPr(rec, options.giteaCall) : false;
+      // 交付事实三层：① 台账 note 的 PR → ② PC 卡描述取证的 PR（真人交付常只贴 PC 描述）→ ③ 人工确认
+      let merged = options.giteaCall ? await hasMergedDeliveryPr(rec, options.giteaCall) : false;
+      let evidencePrs: string[] = [];
+      if (!merged) {
+        const desc = await pcDescription(workitemId, PH);
+        evidencePrs = [...new Set(desc.match(new RegExp(PR_URL_PATTERN.source, "g")) ?? [])];
+        for (const url of evidencePrs) {
+          const req = giteaPrRequest(url);
+          if (!req || !options.giteaCall) break;
+          try {
+            if (isMergedPr((await options.giteaCall(req)).value)) {
+              merged = true;
+              break;
+            }
+          } catch { /* 单条取证失败继续下一条 */ }
+        }
+      }
       if (!merged && !confirmed.has(e.feishu_guid)) {
         const askKey = `${e.feishu_guid}:${PENDING_SIGNATURE}`;
         if (sigs[askKey] !== PENDING_SIGNATURE) {
-          const text = `PC 卡 ${e.pingcode} 被关闭但无交付记录，若为归并作废请回复「确认关单 ${e.pingcode}」。`;
+          const hint = evidencePrs.length > 0 ? "（描述里有 PR 但均未合并）" : "";
+          const text = `PC 卡 ${e.pingcode} 被关闭但无交付记录${hint}，若为归并作废请回复「确认关单 ${e.pingcode}」。`;
           try {
             await options.notify?.(text);
             sigs[askKey] = PENDING_SIGNATURE;
@@ -199,7 +306,19 @@ export async function syncPingcodeClosures(
       if (!okDone) continue;
       // 飞书标完成
       const done = await completeFeishuTask(feishuCall, e.feishu_guid);
-      changes.push(`${e.pingcode} PC已${closedNow} → 台账done${done ? "+飞书已完成" : "（飞书标完成失败,下拍重试）"}`);
+      const via = evidencePrs.length > 0 ? "（PR 取证自 PC 描述）" : "";
+      changes.push(`${e.pingcode} PC已${closedNow} → 台账done${via}${done ? "+飞书已完成" : "（飞书标完成失败,下拍重试）"}`);
+      // PR 链接回写（2026-10-27 拍板）：台账 note 留证据 + 飞书描述同步——失败均不阻塞已落地的关单
+      if (evidencePrs.length > 0) {
+        try {
+          if (rec.note && !evidencePrs.every((u) => rec.note?.includes(u))) {
+            registry.update?.(rec.uid, { note: `${rec.note}\n交付 PR（取证自 PC 描述）：${evidencePrs.join(" ")}` });
+          }
+        } catch { /* note 回写失败不影响 */ }
+        const linked = await appendPrToFeishuDescription(feishuCall, e.feishu_guid, evidencePrs);
+        if (!linked) console.warn(`[pingcode-reverse] ${e.pingcode} PR 回写飞书描述失败（关单已落地，链接留在 PC 描述）`);
+      }
+      delete sigs[`${e.feishu_guid}${CONFIRM_MARK_SUFFIX}`]; // 确认已消费
       try {
         writeFileSync(statePath, JSON.stringify(sigs, null, 1));
       } catch { /* 状态写失败不影响 */ }
