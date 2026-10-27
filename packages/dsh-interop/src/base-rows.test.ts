@@ -17,10 +17,10 @@ describe("dshBaseRows — 官方 dsh-base 行清单解析", () => {
     expect(byId.get("tool-web")?.name).toBe("@deepseek-ai/dsh-tool-web");
   });
 
-  it("静态禁用 boolean 与 0.2.0 profileContext 条件禁用并存", () => {
+  it("静态禁用 boolean 与 profileContext 条件禁用并存", () => {
     // 0.2.0 起 hmr 从静态 disabled:true 改为 !!js "!ctx.get('profileContext')" 条件禁用
+    // 0.2.1-rc.4 起 skill-badge 行已从官方基座移除，只剩 hmr 的条件禁用与 timer 的默认启用
     expect(isJsExpr(byId.get("hmr")?.disabled)).toBe(true);
-    expect(byId.get("skill-badge")?.disabled).toBe(true);
     expect(byId.get("timer")?.disabled).toBeUndefined();
   });
 
