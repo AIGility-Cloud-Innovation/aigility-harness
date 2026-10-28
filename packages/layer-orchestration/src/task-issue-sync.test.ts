@@ -20,7 +20,7 @@ import {
   runPlanGate,
 } from "./task-issue-sync.js";
 import { TaskRegistry } from "./task-registry.js";
-import { FEISHU_TASK_PROVIDER } from "./feishu-task-provider.js";
+import { FEISHU_TASK_PROVIDER_ID } from "./feishu-task-provider.js";
 import { TASK_STATUS_TRANSITIONS } from "@aigility-harness/core";
 import type { SeamContext } from "@aigility-harness/core";
 
@@ -236,7 +236,7 @@ describe("确认 R 编号 → 台账推进 candidate→planned（断链补修）
     const rec = reg.adopt({
       title: "【agent】[org/repo] 验证任务",
       status: "candidate",
-      origin: { provider: FEISHU_TASK_PROVIDER, guid: "g-chain" },
+      origin: { provider: FEISHU_TASK_PROVIDER_ID, guid: "g-chain" },
       projectRef: "org/repo",
     });
     // 死锁态：candidate 直接 approve 必失败（CAS 期望 planned）
@@ -1087,5 +1087,51 @@ describe("resolveChatName 群名解析", () => {
     expect(calls).toBe(1); // 缓存生效
     expect(await resolveChatName(ctx, "*")).toBe("未知");
     expect(calls).toBe(1);
+  });
+});
+
+// 2026-10-28 实测事故（tsk_58cd3997）：卡片先以无前缀标题入册（adopt 定型 projectRef=空），
+// 之后补上 [org/repo] 再挪 D 放行——放行判定读当前标题通过，台账却永远没有仓库，
+// 派发得到 cwd=undefined → 「任务无 cwd」交付失败。放行时必须把仓库回填进台账。
+describe("D 组放行回填仓库（2026-10-28 事故 tsk_58cd3997）", () => {
+  it("首入册无 projectRef、放行标题带 [org/repo] → 回填并置 ready", async () => {
+    const { runDispatchScan, setPlanGateRegistry } = await import("./task-issue-sync.js");
+    const reg = new TaskRegistry(undefined);
+    const seeded = reg.adopt({
+      title: "timem console新建峰谷策略，只能选配豁免企业组织 ID",
+      status: "planned",
+      origin: { provider: FEISHU_TASK_PROVIDER_ID, guid: "tg-peak" },
+    } as never);
+    expect(seeded.projectRef).toBeUndefined();
+    setPlanGateRegistry(reg);
+
+    const ctx = mockCtx((id, req) => {
+      const path = String((req as { path?: string }).path);
+      const method = String((req as { method?: string }).method);
+      if (id.includes("feishu")) {
+        if (path.endsWith("/sections") && method === "GET") {
+          return { ok: true, value: { code: 0, data: { items: [
+            { guid: "s-p", name: "P 计划中" }, { guid: "s-d", name: "D 执行中" },
+            { guid: "s-c", name: "C 待测试" }, { guid: "s-a", name: "A 待修复" },
+          ] } } };
+        }
+        if (path === "/open-apis/task/v2/sections/s-d/tasks" && method === "GET") {
+          return { ok: true, value: { code: 0, data: { items: [
+            { guid: "tg-peak", summary: "【agent】[TiMEM-AI/timem_console_frontend] 峰谷策略支持生效企业组织 ID" },
+          ] } } };
+        }
+        if (path.includes("/tasks/tg-peak") && method === "GET") {
+          return { ok: true, value: { code: 0, data: { task: { description: "" } } } };
+        }
+        return { ok: true, value: { code: 0, data: {} } };
+      }
+      return { ok: true, value: { status: 200, data: [] } };
+    });
+
+    const reports = await runDispatchScan(ctx, { tasklistGuid: "tl-backfill" });
+    expect(reports.join("\n")).toContain("agent 任务完备（D 组放行）");
+    const rec = reg.get(seeded.uid)!;
+    expect(rec.projectRef).toBe("TiMEM-AI/timem_console_frontend");
+    expect(rec.status).toBe("ready");
   });
 });

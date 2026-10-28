@@ -2127,6 +2127,13 @@ export async function runDispatchScan(
       if (t.description && rec.description !== t.description) {
         planGateRegistry.update(rec.uid, { description: t.description });
       }
+      // 仓库回填（2026-10-28 修复）：adopt 首入册定型、只补链不回填 projectRef，
+      // 若卡片先以无前缀标题入册、之后补上 [org/repo] 再放行，台账永远没有仓库 →
+      // 派发 cwd=undefined →「任务无 cwd」交付失败（tsk_58cd3997 实证）。
+      // 放行判定读的是当前标题，台账必须以同一来源回填，二者不得分叉。
+      if (rec.projectRef !== agentRepo) {
+        planGateRegistry.update(rec.uid, { projectRef: agentRepo });
+      }
       // 台账终态卡不该留在 D：done→C 待测试（与 PR 交付回写一致）；cancelled/failed→P 复核
       if ((rec.status ?? "") === "done") {
         const checkGuid = (sections as { check?: string }).check;
