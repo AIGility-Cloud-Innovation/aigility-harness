@@ -1134,4 +1134,47 @@ describe("D 组放行回填仓库（2026-10-28 事故 tsk_58cd3997）", () => {
     expect(rec.projectRef).toBe("TiMEM-AI/timem_console_frontend");
     expect(rec.status).toBe("ready");
   });
+
+  // 2026-10-28 实测：needs-input 打的 ❓ 标在决策重入队后仍挂在标题上，
+  // D 组扫描的 ^【agent】 与 [org/repo] 解析均因前缀失配 → 已决策过的卡被
+  // 「信息不全（缺工单号且未标 agent）」误判挪回 P。剥 ❓ 后应正常放行。
+  it("❓ 等决策标残留 → 剥前缀后仍按 agent 完备放行", async () => {
+    const { runDispatchScan, setPlanGateRegistry } = await import("./task-issue-sync.js");
+    const reg = new TaskRegistry(undefined);
+    const seeded = reg.adopt({
+      title: "【agent】[TiMEM-AI/timem_console_frontend] 峰谷策略支持生效企业组织 ID",
+      status: "planned",
+      projectRef: "TiMEM-AI/timem_console_frontend",
+      origin: { provider: FEISHU_TASK_PROVIDER_ID, guid: "tg-qmark" },
+    } as never);
+    setPlanGateRegistry(reg);
+
+    const ctx = mockCtx((id, req) => {
+      const path = String((req as { path?: string }).path);
+      const method = String((req as { method?: string }).method);
+      if (id.includes("feishu")) {
+        if (path.endsWith("/sections") && method === "GET") {
+          return { ok: true, value: { code: 0, data: { items: [
+            { guid: "s-p", name: "P 计划中" }, { guid: "s-d", name: "D 执行中" },
+            { guid: "s-c", name: "C 待测试" }, { guid: "s-a", name: "A 待修复" },
+          ] } } };
+        }
+        if (path === "/open-apis/task/v2/sections/s-d/tasks" && method === "GET") {
+          return { ok: true, value: { code: 0, data: { items: [
+            { guid: "tg-qmark", summary: "❓【agent】[TiMEM-AI/timem_console_frontend] 峰谷策略支持生效企业组织 ID" },
+          ] } } };
+        }
+        if (path.includes("/tasks/tg-qmark") && method === "GET") {
+          return { ok: true, value: { code: 0, data: { task: { description: "" } } } };
+        }
+        return { ok: true, value: { code: 0, data: {} } };
+      }
+      return { ok: true, value: { status: 200, data: [] } };
+    });
+
+    const reports = await runDispatchScan(ctx, { tasklistGuid: "tl-qmark" });
+    expect(reports.join("\n")).toContain("agent 任务完备（D 组放行）");
+    expect(reports.join("\n")).not.toContain("信息不全");
+    expect(reg.get(seeded.uid)!.status).toBe("ready");
+  });
 });

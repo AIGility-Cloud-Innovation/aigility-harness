@@ -2096,10 +2096,16 @@ export async function runDispatchScan(
         reports.push(`👤 「${summary.slice(0, 40)}」执行人任务留 D 自行处理（负责人=执行人）。`);
         continue;
       }
-      const bareSummary = summary.replace(/^【[^】]+】\s*/, "");
+      // ❓ 等决策标（needs-input 打上、决策后重入队时此处先摘）必须先剥掉，
+      // 否则 ^【agent】 与 [org/repo] 解析双双失配 → 已决策过的 agent 卡被
+      // 「信息不全」闸门误判打回 P（2026-10-28 实测：峰谷策略卡决策一次后被拦）。
+      // 注意：下方已有局部函数 cleanSummary()，此变量勿同名。
+      const deTagged = summary.replace(/^❓\s*/, "");
+      const bareSummary = deTagged.replace(/^【[^】]+】\s*/, "");
       // agent 判定只看标题【agent】前缀（2026-10-20 拍板：描述「执行者：」不再参与识别）
-      const isAgent = /^【agent】/.test(summary) || /^【agent】/.test(bareSummary);
-      const agentRepo = repoFromPlannedSummary(summary) ?? repoFromPlannedSummary(bareSummary);
+      // 于 deTagged（已剥 ❓）上判定；原 summary 含 ❓ 时 ^【agent】 恒 false。
+      const isAgent = /^【agent】/.test(deTagged) || /^【agent】/.test(bareSummary);
+      const agentRepo = repoFromPlannedSummary(deTagged) ?? repoFromPlannedSummary(bareSummary);
       const planGuid = sections.plan;
       if (!isAgent || !agentRepo || !planGuid || !planGateRegistry || !taskGuid) {
         // 信息不全（无工单号；agent 卡缺仓库前缀/登记表未接）→ 挪回 P 补全 + 通知
