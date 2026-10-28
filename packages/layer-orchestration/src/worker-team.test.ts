@@ -513,3 +513,65 @@ describe("决策暂停机制（.agent-decision.json → needs-input → 群回�
     expect(reg.get(t.uid)!.note).toContain("决策超时");
   });
 });
+
+// 2026-10-28 实测事故（tsk_58cd3997）：projectRef 缺失时 dispatch 仍 claim 并 callWorker，
+// cwd=undefined → codex 落到默认目录空跑 9m25s → 收尾器报「任务无 cwd」，白烧一次 worker。
+describe("仓库未定位不派发（fail-fast）", () => {
+  it("注入了 resolveCwd 但解析不到 → 不调工人、台账回 planned、note 写明缺仓库", async () => {
+    const reg = makeRegistry();
+    const t = seedTask(reg, { title: "无仓库任务" });
+    let called = 0;
+    const team = new WorkerTeam(
+      {
+        registry: reg,
+        resolveCwd: () => undefined,
+        callWorker: async () => {
+          called += 1;
+          return { ok: true, text: "不该被调用" };
+        },
+      },
+      ROSTER,
+    );
+    const r = await team.dispatch(reg.get(t.uid)!);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain("仓库未定位");
+    expect(called).toBe(0);
+    const rec = reg.get(t.uid)!;
+    expect(rec.status).toBe("planned");
+    expect(rec.note).toContain("仓库未定位");
+    expect(rec.assigned).toBeUndefined(); // 未 claim，不留领取声明
+  });
+
+  it("projectRef 写了但本机没这个仓（resolver 返回 undefined）→ 同样拦下", async () => {
+    const reg = makeRegistry();
+    const t = seedTask(reg, { title: "仓库未克隆", projectRef: "TiMEM-AI/timem_console_frontend" });
+    let called = 0;
+    const team = new WorkerTeam(
+      {
+        registry: reg,
+        resolveCwd: () => undefined,
+        callWorker: async () => {
+          called += 1;
+          return { ok: true, text: "不该被调用" };
+        },
+      },
+      ROSTER,
+    );
+    const r = await team.dispatch(reg.get(t.uid)!);
+    expect(r.ok).toBe(false);
+    expect(called).toBe(0);
+    expect(reg.get(t.uid)!.note).toContain("TiMEM-AI/timem_console_frontend");
+  });
+
+  it("未注入 resolveCwd（单测/旧装配）→ 维持旧行为，不拦", async () => {
+    const reg = makeRegistry();
+    const t = seedTask(reg, { title: "无解析器" });
+    const team = new WorkerTeam(
+      { registry: reg, callWorker: async () => ({ ok: true, text: "完成" }) },
+      ROSTER,
+    );
+    const r = await team.dispatch(reg.get(t.uid)!);
+    expect(r.ok).toBe(true);
+    expect(reg.get(t.uid)!.status).toBe("done");
+  });
+});

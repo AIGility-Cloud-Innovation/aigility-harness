@@ -383,6 +383,19 @@ export class WorkerTeam {
     if (!member) return err("名册中无可用成员（或显式指定的成员不存在）");
 
     const repoRoot = task.projectRef ? this.o.resolveCwd?.(task.projectRef) : undefined;
+    // 仓库未定位不派发（2026-10-28 事故 tsk_58cd3997）：宿主注入 resolveCwd 即表示按仓库
+    // 派发，解析不到时旧行为是 cwd=undefined 照样 claim，工人 CLI 落到自身默认目录空跑
+    // （实测 9m25s），收尾器再以「任务无 cwd」+「改动未落盘」失败——白烧一次 worker
+    // 且把「没定位到仓库」误报成「没改动」。此处 fail-fast：台账退回 planned 写明缺仓库，
+    // 由闸门/人补 [org/repo] 前缀后重新放行。
+    if (this.o.resolveCwd && !repoRoot) {
+      const from = this.o.registry.get(task.uid)?.status;
+      if (from) this.o.registry.transition(task.uid, "planned", from);
+      this.o.registry.update(task.uid, {
+        note: `未派发：仓库未定位（projectRef=${task.projectRef ?? "缺失"}），请补 [org/repo] 前缀或确认仓库已克隆`,
+      });
+      return err(`仓库未定位（projectRef=${task.projectRef ?? "缺失"}），已退回待计划，不派发`);
+    }
     // worktree 隔离（2026-10-13 事故修复）：有 prepare 钩子且解析到仓库根时，
     // 先建/复用「任务专属 worktree」，把 cwd 换成 worktree 路径再派发；
     // 失败则放弃派发（绝不退回主仓库——那正是两次 stash 冲突事故的来源）。
